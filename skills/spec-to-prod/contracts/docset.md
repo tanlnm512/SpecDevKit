@@ -1,0 +1,115 @@
+# The doc-set contract (inputs, outputs, ownership)
+
+The canonical statement of what a spec dir IS. SKILL.md summarizes; this
+file arbitrates. The agent-facing subset (what sub-agents must obey) is
+canonical in `agents/_shared-protocol.md`; this file is the
+orchestrator-facing complement.
+
+## Files (outputs under `specs/<name>/`)
+
+| File | Writer (exclusive) | Node (ready when) | Class |
+|------|--------------------|-------------------|-------|
+| spec.md | orchestrator + user | `spec` — always (the entry node) | **Contract** — WHAT & WHY, US/AC, FR-### |
+| plan.md | planner | `plan` — spec + survey done | **Contract** — milestones, deps, parallelization map |
+| tech-spec.md | tech | `tech` — spec + survey done AND research resolved (either form) | **Contract** — architecture, diagram, impact, D-###s |
+| task.md | task-breaker writes; **orchestrator** owns statuses | `tasks` — plan + tech + survey done | **Contract** — the ONLY status holder |
+| test.md | qa | `qa` — spec + survey done (never reads plan/tech — parallel-safe) | **Contract** — TC-### traced to FRs |
+| survey.md | surveyor | `survey` — spec done | Evidence — code-state ground truth, stays for provenance |
+| research.md | researcher (or the orchestrator when the gate resolves skip) | `research` — research-gate resolved `run` | Evidence — external refs; the canonical skip marker below when the gate resolves skip |
+
+The "Node (ready when)" column names each file's producing node and its
+readiness condition — the same node names and conditions `scripts/graph.py`
+computes and SKILL.md's workflow-graph table states. A node is *done* when
+its file is on disk, filled, and passes its own check (survey additionally
+requires `check.py --survey-only` green; verify runs the full `check.py`).
+
+## The researcher-skip marker (canonical form)
+
+The research-gate's skip decision is recorded by writing research.md with
+exactly one canonical marker line — byte-exact, em dash (U+2014):
+
+    not applicable — no open questions at Stage 0
+
+This file is the canonical home of that string. Every other occurrence —
+SKILL.md, `scripts/specstate.py` + `scripts/graph.py`, templates, fixture
+specs — must match it byte-for-byte; no variant spelling or dash is
+allowed. `graph.py` reports the gate `gate:undetermined` until research.md
+exists in one of its two resolved forms: this marker (a deliberate skip —
+the analysis wave becomes a solo surveyor) or real researched content (the
+gate resolved `run`).
+
+Shared repo-level files: `specs/INDEX.md` (scaffold registers, status
+updates repoint) and `specs/CONSTITUTION.md` (written WITH the user on
+first scaffold; gates the before-audit — `check.py --constitution` checks
+presence/fill-level standalone, and the full check folds it in, FAIL once
+a second spec exists).
+
+Derived, non-contract files (never status, never hand-edited, not part of
+the 7-file set above): `checklist.md` (orchestrator, `check.py --checklist`
+— a regenerate-only FR/AC summary for readers who won't parse task.md),
+`notes/T###.md` (implementer, fix round 2+ only, own task ID only — a
+scratch note carried into the next re-brief), and the `spawns/` directory
+(`graph.py --emit-spawns` / `--run` — one self-contained spawn payload per
+frontier agent node under `spawns/wave-<N>/<role>.md`). check.py never reads any
+of these; none is status; `spawns/` in
+particular is derived-only and regenerate-only — safe to delete at any
+time, byte-identically rebuilt by the next `--emit-spawns` from doc state
+alone. All of them can be deleted and regenerated/re-written without
+losing any status, since task.md alone holds that.
+
+## Traceability & IDs
+
+- Chain `FR → T → TC` must be greppable; `scripts/check.py` enforces it.
+- IDs (US/FR/AC/T/TC/D) are assigned once, never renumbered. Later scope
+  appends use the next free IDs (`check.py --next-ids`); dropped items are
+  struck through with the D-### that killed them, never deleted.
+- A task citing no FR is scope creep — fix the spec, not the task.
+
+## Status lifecycle
+
+- spec.md `Status:` — `draft` → `approved` (the approve gate — explicit user
+  sign-off, a HUMAN gate never auto-satisfied by any script) →
+  `active` (first task spawned) → `done` (all ticked, TCs green, check.py
+  green — the tick-commit node's done signal; then `scripts/archive.sh`
+  performs the archive node's action: the dir moves to
+  `specs/archive/<date>-<name>/` and INDEX is repointed). The graph reads
+  these statuses as the approve / execute / tick-commit nodes' done signals.
+- task.md entry states — `- [ ]` todo · `(in-progress)` claimed (bookkeeping
+  only) · `- [x]` done + proof note · `~~struck~~` dropped (D-###). Ticks
+  happen exactly once per plan: at the closing audit, all together, one
+  commit.
+- `Before-audit: passed @ <sha>` lives in task.md's header (`passed @ -`
+  where no git sha exists — the accepted non-git recording form; the git
+  gates themselves degrade to explicit `SKIPPED (not a git repo)` notes).
+  Resume, the closing audit, and graph.py's before-audit node read that
+  line (see `gates/before-audit.md`).
+
+## Spawn-payload contract (every spawn, every role)
+
+1. `skill_dir: <resolved absolute path>` (never hardcoded anywhere).
+2. Spec dir path + the payload items the brief's "Input payload" names
+   (task entries verbatim, FR list, research questions — spawns are fresh,
+   no context carries over).
+3. For code tasks: acceptance-test commands + specs/CONSTITUTION.md
+   pointer, always.
+4. The return contract: the agent writes its artifact to disk and returns
+   only its brief's `digest:` line-shape — decisions come from digest
+   fields, never from piped file content. A harness offering mechanical
+   schema validation (e.g. omp's task `outputSchema`) may enforce this
+   shape structurally; the fields themselves stay exactly what the brief
+   defines — the schema is enforcement, never a redefinition of them.
+
+`graph.py --emit-spawns` builds this payload mechanically from doc state —
+header (spec_dir / repo / resolved `skill_dir`), the filled input payload,
+the frontmatter-stripped brief body byte-verbatim, then
+`_shared-protocol.md` verbatim (the reviewer is the one exempt role). Prefer
+its output as-is, or use it as the reference recipe for a hand-built one.
+
+**Parser-exact formats**: payload extraction reads doc shapes mechanically —
+task entries verbatim and TC acceptance commands out of `**Pass condition**:`
+lines — so source formats are pinned per role in the briefs' *Parser-exact
+formats* notes (task-breaker: bare `T###` IDs with `(in-progress)` after the
+ID, three-column burndown; qa: the pass-condition line shape and per-TC
+trace lines). Authors drifting from those shapes don't fail at authoring
+time; the verify/closing nodes misread the docs and pay a repair wave —
+brief the owning agent with its note, not a paraphrase.

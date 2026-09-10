@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spec-to-Prod Workflow Graph</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1100px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Flowchart · Diagram Design</p>
+    <h1>Spec-to-Prod Workflow Graph</h1>
+
+    <svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="s2c-overview-title s2c-overview-desc">
+      <title id="s2c-overview-title">Spec-to-Prod Workflow Graph</title>
+      <desc id="s2c-overview-desc">Flowchart of the dynamic state graph: doc state under specs/&lt;name&gt;/ drives a frontier computation — ready nodes run as one wave, then recompute — through the analysis wave (survey parallel research), the authoring wave (plan, tech, qa), task breakdown, mechanical verification, a before-audit, human approval, implementer waves with capped fix rounds, a closing audit, one tick-and-commit, and archive. Solid arrows are data edges, dotted arrows are conditional or loop edges.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ===== Arrows (drawn first, behind nodes) ===== -->
+
+      <!-- Row 1 chain: spec/clarify -> analysis wave -> authoring wave -> tasks/verify -> before-audit -->
+      <line x1="184" y1="76" x2="224" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="368" y1="76" x2="408" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="552" y1="76" x2="592" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="736" y1="76" x2="776" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Vertical: before-audit -> approve -->
+      <line x1="848" y1="112" x2="848" y2="160" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Row 2 chain (right to left): approve -> execute -> closing-audit -> tick-commit -> archive -->
+      <line x1="772" y1="212" x2="736" y2="212" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="592" y1="212" x2="552" y2="212" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="408" y1="212" x2="368" y2="212" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="224" y1="212" x2="184" y2="212" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+
+      <!-- Loop edge: converge — verify/survey staleness feeds back into the analysis wave -->
+      <path d="M664,112 L664,140 L296,140 L296,116"
+            fill="none" stroke="#eb6c36" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#arrow-accent)"/>
+      <rect x="336" y="128" width="288" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="480" y="137" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">converge: staleness → re-survey → appended tasks</text>
+
+      <!-- Loop edge: fix rounds — execute re-runs a task, capped at 5 -->
+      <path d="M712,248 C712,278 688,278 664,278 C640,278 616,278 616,254"
+            fill="none" stroke="#eb6c36" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#arrow-accent)"/>
+      <rect x="556" y="284" width="216" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="664" y="293" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">fix rounds ≤5/task · re-brief on gaps</text>
+
+      <!-- ===== Nodes ===== -->
+
+      <!-- 1. spec + clarify -->
+      <rect x="40" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="112" y="66" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">spec · clarify</text>
+      <text x="112" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">scaffold→draft WITH user</text>
+      <text x="112" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">markers hold the frontier</text>
+
+      <!-- 2. Analysis wave -->
+      <rect x="224" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="296" y="66" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">survey ∥ research</text>
+      <text x="296" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">wave 1 · one message</text>
+      <text x="296" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">research-gate: run ∥ skip</text>
+
+      <!-- 3. Authoring wave -->
+      <rect x="408" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="480" y="66" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">plan ∥ tech ∥ qa</text>
+      <text x="480" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">wave 2 · one message</text>
+      <text x="480" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">qa blind to plan/tech</text>
+
+      <!-- 4. Tasks -> verify -->
+      <rect x="592" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="664" y="66" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">tasks → verify</text>
+      <text x="664" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">task.md → check.py</text>
+      <text x="664" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">wave 3 · verify = green</text>
+
+      <!-- 5. Before-audit -->
+      <rect x="776" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="848" y="66" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">before-audit</text>
+      <text x="848" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">6 gates · once</text>
+      <text x="848" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">frontier-eligible</text>
+
+      <!-- 6. Approve (diamond, HUMAN gate) -->
+      <polygon points="848,160 924,212 848,264 772,212" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="848" y="204" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">approve</text>
+      <text x="848" y="218" fill="#eb6c36" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle">HUMAN GATE</text>
+      <text x="848" y="231" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">Status: approved</text>
+
+      <!-- 7. Execute -->
+      <rect x="592" y="176" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="664" y="202" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">execute</text>
+      <text x="664" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">waves of implementers</text>
+      <text x="664" y="234" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">wave 4+ · per-task frontier</text>
+
+      <!-- 8. Closing audit -->
+      <rect x="408" y="176" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="480" y="202" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">closing-audit</text>
+      <text x="480" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">5 checks · once</text>
+      <text x="480" y="234" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">all tasks done (0 todo)</text>
+
+      <!-- 9. Tick-commit -->
+      <rect x="224" y="176" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="296" y="202" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">tick-commit</text>
+      <text x="296" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">one tick + one commit</text>
+      <text x="296" y="234" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">rulings report + ack</text>
+
+      <!-- 10. Archive (coral focal — the successful outcome) -->
+      <rect x="40" y="184" width="144" height="56" rx="28" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="112" y="208" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">archive</text>
+      <text x="112" y="224" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">specs/archive/ · dated</text>
+
+      <!-- ===== Legend ===== -->
+      <line x1="40" y1="310" x2="920" y2="310" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="326" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND · SHAPE CARRIES TYPE</text>
+
+      <rect x="40" y="338" width="24" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="72" y="348" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Node — solid arrow: data edge, ready when all inputs are done</text>
+
+      <line x1="420" y1="344" x2="448" y2="344" stroke="#eb6c36" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#arrow-accent)"/>
+      <text x="456" y="348" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Conditional / loop edge (gate, fix rounds, converge)</text>
+
+      <polygon points="726,337 738,344 726,351 714,344" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="746" y="348" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Judgment — HUMAN gates never auto-satisfied</text>
+    </svg>
+
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted); margin-top: 1rem; line-height: 1.6;">
+      This is the model, not a live state. <strong style="color:#2d3142; font-weight:600;">scripts/graph.py</strong> derives every node's state and the ready frontier from doc state alone — run <code>python3 scripts/graph.py specs/&lt;name&gt;</code> for the live picture (<code>--mermaid</code> renders it from state, <code>--state-json</code> for machines, <code>--explain &lt;node&gt;</code> for reasons), and <code>--run</code> to continue the workflow: it pauses <code>AWAITING HUMAN</code> at the five human gates — clarify, an undetermined research-gate, approve, the closing-audit judgment, and tick-commit — which are never auto-satisfied, and at before-audit, the orchestrator's six-gate judgment, which pauses the same way. Mermaid source: <code>diagrams/spec-to-prod-workflow.mmd</code> · audit-gate detail: <code>spec-to-prod-workflow-audits.html</code>.
+    </p>
+  </div>
+</body>
+</html>

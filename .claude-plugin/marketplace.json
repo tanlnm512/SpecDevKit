@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "spec-dev-kit",
+  "owner": {
+    "name": "Stanley",
+    "email": "minhtan512@gmail.com"
+  },
+  "metadata": {
+    "description": "Spec-driven multi-agent development skills."
+  },
+  "plugins": [
+    {
+      "name": "spec-to-prod",
+      "description": "Language-agnostic multi-agent pipeline for spec-driven development: orchestrates role sub-agents in parallel waves to produce grounded contract files under specs/<name>/ \u2014 spec.md, plan.md, task.md (the status holder), tech-spec.md, test.md \u2014 plus survey.md and research.md as evidence, all verified by scripts/check.py.",
+      "author": {
+        "name": "Stanley",
+        "email": "minhtan512@gmail.com"
+      },
+      "source": "./skills/spec-to-prod",
+      "license": "MIT",
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-to-prod"
+    }
+  ]
+}

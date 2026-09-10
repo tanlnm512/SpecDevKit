@@ -1,0 +1,1399 @@
+"""Tests for scripts/graph.py — the frontier engine.
+
+graph.py derives the workflow state from doc state alone (architecture §2):
+16 nodes, each done/READY/blocked/gate:undetermined/SKIPPED with a reason,
+a frontier wave of the READY nodes, loop-edge statuses, task counts, and a
+git-availability line that degrades to `SKIPPED (not a git repo)` in this
+deliberately non-git workspace. Fixtures are built exactly the way the
+validation contract prescribes: scaffold.sh + minimal writes, and mutated
+copies of examples/mini-spec (never the original). --state-json is the
+authoritative oracle, so node-state assertions read the same dict the CLI
+serializes; report/exit-code/JSON-shape assertions go through the real CLI
+subprocess. Executor modes (--emit-spawns/--run) live in their own feature.
+"""
+
+import hashlib
+import importlib.util
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+SKILL = Path(__file__).resolve().parents[1]
+SCRIPTS = SKILL / "scripts"
+GRAPH = SCRIPTS / "graph.py"
+SCAFFOLD = SCRIPTS / "scaffold.sh"
+FIXTURE = SKILL / "examples" / "mini-spec" / "specs" / "mini-spec"
+FIXTURE_REPO = SKILL / "examples" / "mini-spec" / "repo"
+
+_spec = importlib.util.spec_from_file_location("graph", GRAPH)
+graph = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(graph)
+
+
+def write(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def scaffold(tmp: Path, name: str = "demo") -> Path:
+    r = subprocess.run(["bash", str(SCAFFOLD), name, str(tmp)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return tmp / "specs" / name
+
+
+def copy_fixture(tmp: Path, name: str = "demo") -> Path:
+    """A mutated-copy fixture: mini-spec docset + the repo it cites, so the
+    survey's file:symbol:line evidence stays real under the tmp repo root."""
+    (tmp / "specs").mkdir(parents=True, exist_ok=True)
+    dst = tmp / "specs" / name
+    shutil.copytree(FIXTURE, dst)
+    shutil.copytree(FIXTURE_REPO, tmp / "repo")
+    return dst
+
+
+def spec_only(tmp: Path, name: str = "demo") -> Path:
+    """GRAPH-001's fixture: a filled spec.md and nothing else."""
+    d = scaffold(tmp, name)
+    write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
+    for f in ("survey.md", "research.md", "plan.md", "tech-spec.md",
+              "task.md", "test.md"):
+        (d / f).unlink()
+    return d
+
+
+def set_status(spec_dir: Path, word: str) -> None:
+    p = spec_dir / "spec.md"
+    write(p, p.read_text(encoding="utf-8").replace(
+        "**Status**: draft", f"**Status**: {word}"))
+
+
+APPROVED_TASKS = """# Tasks: demo
+
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+Status reflects code state per [survey.md](survey.md), not intent.
+**Before-audit**: passed @ -
+
+## Burndown
+| Phase | Total | Done |
+|-------|-------|------|
+| 1     | 3     | 0    |
+| **Σ** | 3     | 0    |
+
+## Phase 1: land the feature (FR-001, FR-002)
+- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)
+- [ ] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)
+- [ ] T003 (fix 5/5) rescue the stalled refactor (FR-002)
+
+## Conventions
+- `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
+- Every task cites its FR-###; tasks with no FR are scope creep
+"""
+
+TICKED_T1_TASKS = APPROVED_TASKS.replace(
+    "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
+    "- [x] T001 [P] implement multiply in `repo/calc.py` (FR-001)\n"
+    "      done 2026-09-08 — python3 -m pytest repo/test_calc.py green",
+).replace("| 1     | 3     | 0    |", "| 1     | 3     | 1    |").replace(
+    "| **Σ** | 3     | 0    |", "| **Σ** | 3     | 1    |")
+
+STRUCK_DEP_TASKS = """# Tasks: demo
+
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+Status reflects code state per [survey.md](survey.md), not intent.
+**Before-audit**: passed @ -
+
+## Burndown
+| Phase | Total | Done |
+|-------|-------|------|
+| 1     | 3     | 0    |
+| **Σ** | 3     | 0    |
+
+## Phase 1: land the feature (FR-001, FR-002)
+- [ ] ~~T001~~ [P] implement multiply in `repo/calc.py` (FR-001) — dropped
+- [ ] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)
+- [ ] T003 (after T099) rescue the stalled refactor (FR-002)
+
+## Conventions
+- `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
+- Every task cites its FR-###; tasks with no FR are scope creep
+"""
+
+DONE_TASKS = """# Tasks: demo
+
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+Status reflects code state per [survey.md](survey.md), not intent.
+**Before-audit**: passed @ -
+
+## Burndown
+| Phase | Total | Done |
+|-------|-------|------|
+| 1     | 2     | 2    |
+| **Σ** | 2     | 2    |
+
+## Phase 1: multiply lands (FR-001, FR-002)
+- [x] T001 [P] implement multiply in `repo/calc.py` (FR-001, FR-002)
+      done 2026-09-08 — python3 -m pytest repo/test_calc.py green
+- [x] T002 [P] add multiply tests to `repo/test_calc.py` (FR-001, FR-002)
+      done 2026-09-08 — python3 -m pytest repo/test_calc.py green
+
+## Conventions
+- `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
+"""
+
+GREEN_TC = 'python3 -c "print(\'proof ok\')"'
+
+
+def done_fixture(tmp: Path) -> Path:
+    """All tasks ticked, Status: done, before-audit recorded, and TC pass
+    conditions swapped to always-green commands so the closing audit's DoD
+    scorecard (audit.py dod) passes mechanically in the non-git tmp repo."""
+    d = copy_fixture(tmp)
+    set_status(d, "done")
+    write(d / "task.md", DONE_TASKS)
+    test = (FIXTURE / "test.md").read_text(encoding="utf-8")
+    test = test.replace(
+        "`cd repo && python3 -m pytest test_calc.py -k multiply` exits 0",
+        f"`{GREEN_TC}` exits 0")
+    test = test.replace(
+        "`cd repo && python3 -m pytest test_calc.py -k zero` exits 0",
+        f"`{GREEN_TC}` exits 0")
+    write(d / "test.md", test)
+    return d
+
+
+def compute(spec_dir, repo=None):
+    return graph.compute_state(Path(spec_dir), repo)
+
+
+def run_cli(*args):
+    return subprocess.run(
+        [sys.executable, str(GRAPH), *[str(a) for a in args]],
+        capture_output=True, text=True, timeout=300)
+
+
+def frontier_of(state):
+    return state["frontier"]
+
+
+def dir_checksum(root: Path) -> str:
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            h.update(str(p.relative_to(root)).encode())
+            h.update(p.read_bytes())
+    return h.hexdigest()
+
+
+class Graph001EmptyScaffoldTests(unittest.TestCase):
+    """GRAPH-001: filled spec.md only — survey READY, gate undetermined,
+    everything downstream blocked, frontier = [survey]."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph001-"))
+        cls.spec_dir = spec_only(cls._tmp)
+        cls.state = compute(cls.spec_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_frontier_is_survey_only(self):
+        self.assertEqual(frontier_of(self.state), ["survey"])
+
+    def test_node_states_match_the_contract(self):
+        n = self.state["nodes"]
+        self.assertEqual(n["spec"]["state"], "done")
+        self.assertEqual(n["clarify"]["state"], "done")
+        self.assertEqual(n["research-gate"]["state"], "gate:undetermined")
+        self.assertEqual(n["research"]["state"], "blocked")
+        self.assertEqual(n["survey"]["state"], "READY")
+        for name in ("plan", "tech", "qa", "tasks", "verify", "before-audit",
+                     "approve", "execute"):
+            self.assertEqual(n[name]["state"], "blocked", name)
+
+    def test_blocked_reasons_name_the_unmet_predecessor(self):
+        n = self.state["nodes"]
+        self.assertIn("survey", n["plan"]["reason"])
+        self.assertIn("survey", n["qa"]["reason"])
+        self.assertIn("survey", n["tech"]["reason"])
+        # tech alone also demands the research resolution (§2.1).
+        self.assertIn("research", n["tech"]["reason"])
+        self.assertIn("plan", n["tasks"]["reason"])
+        self.assertIn("verify", n["before-audit"]["reason"])
+        self.assertIn("before-audit", n["approve"]["reason"])
+
+    def test_default_report_and_gate_pause(self):
+        r = run_cli(self.spec_dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("gate:undetermined", r.stdout)
+        self.assertIn("survey", r.stdout)
+        self.assertEqual(frontier_of(compute(self.spec_dir)), ["survey"])
+
+
+class Graph002SurveyWaveTests(unittest.TestCase):
+    """GRAPH-002: a valid survey flips survey done; plan ∥ qa go READY while
+    tech stays blocked on the undetermined gate; real research unblocks tech."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph002-"))
+        cls.spec_dir = scaffold(cls._tmp)
+        write(cls.spec_dir / "spec.md",
+              (FIXTURE / "spec.md").read_text(encoding="utf-8"))
+        write(cls.spec_dir / "survey.md",
+              (FIXTURE / "survey.md").read_text(encoding="utf-8"))
+        cls.before = compute(cls.spec_dir)
+        write(cls.spec_dir / "research.md",
+              "## Research: demo\n\n### Q1 how to name the operation\n"
+              "- **source**: https://example.com/naming — claim: plain names\n"
+              "  relevance: direct · confidence: high\n")
+        cls.after = compute(cls.spec_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_survey_done_plan_qa_ready_tech_blocked(self):
+        n = self.before["nodes"]
+        self.assertEqual(n["survey"]["state"], "done")
+        self.assertEqual(n["plan"]["state"], "READY")
+        self.assertEqual(n["qa"]["state"], "READY")
+        self.assertEqual(n["tech"]["state"], "blocked")
+        self.assertIn("research", n["tech"]["reason"])
+        self.assertEqual(sorted(frontier_of(self.before)), ["plan", "qa"])
+
+    def test_real_research_unblocks_tech(self):
+        n = self.after["nodes"]
+        self.assertEqual(n["research"]["state"], "done")
+        self.assertEqual(n["research-gate"]["state"], "done")
+        self.assertIn("run", n["research-gate"]["reason"])
+        self.assertEqual(n["tech"]["state"], "READY")
+        self.assertEqual(sorted(frontier_of(self.after)),
+                         ["plan", "qa", "tech"])
+
+
+class Graph003SkipMarkerTests(unittest.TestCase):
+    """GRAPH-003: the canonical em-dash skip marker resolves the gate as
+    skip — research reads SKIPPED (not blocked), tech goes READY."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph003-"))
+        cls.spec_dir = scaffold(cls._tmp)
+        write(cls.spec_dir / "spec.md",
+              (FIXTURE / "spec.md").read_text(encoding="utf-8"))
+        write(cls.spec_dir / "survey.md",
+              (FIXTURE / "survey.md").read_text(encoding="utf-8"))
+        write(cls.spec_dir / "research.md",
+              "# Research: demo\n\nnot applicable — no open questions at Stage 0\n")
+        cls.state = compute(cls.spec_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_research_is_skipped_not_blocked(self):
+        n = self.state["nodes"]
+        self.assertEqual(n["research"]["state"], "SKIPPED")
+        self.assertEqual(n["research-gate"]["state"], "done")
+        self.assertIn("skip", n["research-gate"]["reason"])
+        self.assertEqual(n["tech"]["state"], "READY")
+        self.assertEqual(sorted(frontier_of(self.state)),
+                         ["plan", "qa", "tech"])
+
+
+class Graph004ExecuteFrontierTests(unittest.TestCase):
+    """GRAPH-004: per-task readiness — deps chain (T002 after T001), fix-cap
+    (T003 at 5/5) surfaced for adjudication, ticking T1 unblocks T2."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph004-"))
+        cls.spec_dir = copy_fixture(cls._tmp)
+        set_status(cls.spec_dir, "approved")
+        write(cls.spec_dir / "task.md", APPROVED_TASKS)
+        cls.state = compute(cls.spec_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def tasks(self, state):
+        return {t["id"]: t for t in state["nodes"]["execute"]["tasks"]}
+
+    def test_execute_ready_with_per_task_frontier(self):
+        n = self.state["nodes"]
+        self.assertEqual(n["approve"]["state"], "done")
+        self.assertEqual(n["execute"]["state"], "READY")
+        self.assertEqual(frontier_of(self.state), ["execute"])
+
+    def test_runnable_blocked_and_cap_states(self):
+        t = self.tasks(self.state)
+        self.assertEqual(t["T001"]["state"], "runnable")
+        self.assertEqual(t["T002"]["state"], "blocked")
+        self.assertIn("T001", t["T002"]["reason"])
+        self.assertEqual(t["T003"]["state"], "at-fix-cap")
+        self.assertIn("5/5", t["T003"]["reason"])
+
+    def test_cap_task_is_not_runnable_and_counted(self):
+        self.assertEqual(self.state["counts"]["at-fix-cap"], 1)
+        self.assertEqual(self.state["counts"]["todo"], 3)
+
+    def test_ticking_t1_unblocks_t2(self):
+        write(self.spec_dir / "task.md", TICKED_T1_TASKS)
+        state = compute(self.spec_dir)
+        t = self.tasks(state)
+        self.assertEqual(t["T002"]["state"], "runnable")
+        self.assertEqual(t["T001"]["state"], "ticked")
+        self.assertEqual(state["counts"]["ticked"], 1)
+        self.assertEqual(state["counts"]["todo"], 2)
+
+
+class StruckDepFrontierTests(unittest.TestCase):
+    """Scrutiny round-1 finding 1: the canonical dropped form
+    `- [ ] ~~T###~~ …` parses id=None, but a struck dep still counts as
+    satisfied (architecture §2.1) — a dependent of a struck task is
+    runnable, and only a dep matching no entry at all reads 'not defined'."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graphstruck-"))
+        cls.spec_dir = copy_fixture(cls._tmp)
+        set_status(cls.spec_dir, "approved")
+        write(cls.spec_dir / "task.md", STRUCK_DEP_TASKS)
+        cls.state = compute(cls.spec_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_dependent_of_struck_task_is_runnable(self):
+        ts = self.state["nodes"]["execute"]["tasks"]
+        struck = [t for t in ts if t["state"] == "struck"]
+        self.assertEqual(len(struck), 1)
+        # The parser pins the root cause: the struck entry carries id=None.
+        self.assertIsNone(struck[0]["id"])
+        by_id = {t["id"]: t for t in ts if t["id"]}
+        self.assertEqual(by_id["T002"]["state"], "runnable")
+        self.assertIn("deps satisfied", by_id["T002"]["reason"])
+
+    def test_undefined_dep_keeps_distinct_reason(self):
+        ts = self.state["nodes"]["execute"]["tasks"]
+        by_id = {t["id"]: t for t in ts if t["id"]}
+        self.assertEqual(by_id["T003"]["state"], "blocked")
+        self.assertIn("dependency not defined in task.md: T099",
+                      by_id["T003"]["reason"])
+
+    def test_struck_counted_and_execute_ready(self):
+        self.assertEqual(self.state["counts"]["struck"], 1)
+        self.assertEqual(frontier_of(self.state), ["execute"])
+
+
+class Graph005LifecycleTests(unittest.TestCase):
+    """GRAPH-005: draft → approve is the frontier's human gate; approved →
+    execute eligible; done (with a dod-passing docset) → tick-commit done and
+    archive ready. The lifecycle Status shows in report and JSON throughout."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph005-"))
+        cls.draft = copy_fixture(cls._tmp / "a")
+        write(cls.draft / "task.md", APPROVED_TASKS.replace(
+            "**Before-audit**: passed @ -",
+            "**Before-audit**: passed @ -"))  # recorded while still draft
+        cls.draft_state = compute(cls.draft)
+        cls.approved = copy_fixture(cls._tmp / "b")
+        set_status(cls.approved, "approved")
+        write(cls.approved / "task.md", APPROVED_TASKS)
+        cls.approved_state = compute(cls.approved)
+        cls.done_dir = done_fixture(cls._tmp / "c")
+        cls.done_state = compute(cls.done_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_draft_hold_at_approve(self):
+        n = self.draft_state["nodes"]
+        self.assertEqual(self.draft_state["status"], "draft")
+        self.assertEqual(n["before-audit"]["state"], "done")
+        self.assertEqual(n["approve"]["state"], "READY")
+        self.assertIn("approve", frontier_of(self.draft_state))
+        self.assertEqual(n["execute"]["state"], "blocked")
+        self.assertIn("approve", n["execute"]["reason"])
+
+    def test_approved_unblocks_execute(self):
+        n = self.approved_state["nodes"]
+        self.assertEqual(self.approved_state["status"], "approved")
+        self.assertEqual(n["approve"]["state"], "done")
+        self.assertEqual(n["execute"]["state"], "READY")
+        self.assertIn("execute", frontier_of(self.approved_state))
+
+    def test_done_runs_the_table_to_archive_ready(self):
+        n = self.done_state["nodes"]
+        self.assertEqual(self.done_state["status"], "done")
+        self.assertEqual(n["execute"]["state"], "done")
+        self.assertEqual(n["closing-audit"]["state"], "done")
+        self.assertEqual(n["tick-commit"]["state"], "done")
+        self.assertEqual(n["archive"]["state"], "READY")
+        self.assertEqual(frontier_of(self.done_state), ["archive"])
+
+    def test_status_line_in_reports(self):
+        for state, word in ((self.draft_state, "draft"),
+                            (self.approved_state, "approved"),
+                            (self.done_state, "done")):
+            self.assertEqual(state["status"], word)
+        r = run_cli(self._tmp / "c" / "specs" / "demo", "--state-json")
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(json.loads(r.stdout)["status"], "done")
+
+
+class Graph006ClarifyHoldTests(unittest.TestCase):
+    """GRAPH-006: an open NEEDS CLARIFICATION marker holds the whole frontier
+    at clarify; removing the marker restores the GRAPH-001 state."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="graph006-"))
+        self.spec_dir = spec_only(self._tmp)
+        spec = (FIXTURE / "spec.md").read_text(encoding="utf-8")
+        write(self.spec_dir / "spec.md",
+              spec + "\nNEEDS CLARIFICATION: how should X behave?\n")
+        self.held = compute(self.spec_dir)
+        write(self.spec_dir / "spec.md", spec)
+        self.cleared = compute(self.spec_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_frontier_holds_at_clarify(self):
+        n = self.held["nodes"]
+        self.assertEqual(n["spec"]["state"], "blocked")
+        self.assertIn("NEEDS CLARIFICATION", n["spec"]["reason"])
+        self.assertEqual(n["clarify"]["state"], "READY")
+        self.assertEqual(frontier_of(self.held), ["clarify"])
+        self.assertEqual(n["survey"]["state"], "blocked")
+
+    def test_no_agent_node_scheduled_while_open(self):
+        for name in ("survey", "plan", "tech", "qa", "tasks"):
+            self.assertEqual(self.held["nodes"][name]["state"], "blocked", name)
+
+    def test_resolving_returns_to_graph001(self):
+        n = self.cleared["nodes"]
+        self.assertEqual(n["spec"]["state"], "done")
+        self.assertEqual(n["clarify"]["state"], "done")
+        self.assertEqual(frontier_of(self.cleared), ["survey"])
+
+
+class Graph007StateJsonShapeTests(unittest.TestCase):
+    """GRAPH-007: --state-json is valid JSON with the machine-readable keys
+    later asserts consume — on empty, mid-pipeline, and approved states."""
+
+    def test_valid_json_with_required_keys(self):
+        tmp = Path(tempfile.mkdtemp(prefix="graph007-"))
+        try:
+            fixtures = [spec_only(tmp / "a"),
+                        copy_fixture(tmp / "b")]
+            approved = copy_fixture(tmp / "c")
+            set_status(approved, "approved")
+            write(approved / "task.md", APPROVED_TASKS)
+            fixtures.append(approved)
+            for d in fixtures:
+                r = subprocess.run(
+                    [sys.executable, str(GRAPH), str(d), "--state-json"],
+                    capture_output=True, text=True, timeout=300)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                piped = subprocess.run(
+                    [sys.executable, "-m", "json.tool"],
+                    input=r.stdout, capture_output=True, text=True)
+                self.assertEqual(piped.returncode, 0, piped.stderr)
+                s = json.loads(r.stdout)
+                for key in ("nodes", "edges", "frontier", "loops", "counts",
+                            "git", "status"):
+                    self.assertIn(key, s, f"{d}: missing {key}")
+                for name, node in s["nodes"].items():
+                    self.assertIn(node["state"],
+                                  ("done", "READY", "blocked",
+                                   "gate:undetermined", "SKIPPED"), name)
+                    self.assertTrue(node["reason"], name)
+                self.assertEqual(
+                    sorted(s["counts"]),
+                    ["at-fix-cap", "claimed", "struck", "ticked", "todo"])
+                self.assertIn("available", s["git"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class Graph008MermaidTests(unittest.TestCase):
+    """GRAPH-008: --mermaid renders the live state graph — state classes,
+    dotted conditional/loop edges, and output that differs per fixture."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph008-"))
+        cls.empty = spec_only(cls._tmp / "a")
+        cls.approved = copy_fixture(cls._tmp / "b")
+        set_status(cls.approved, "approved")
+        write(cls.approved / "task.md", APPROVED_TASKS)
+        cls.empty_out = run_cli(cls.empty, "--mermaid").stdout
+        cls.approved_out = run_cli(cls.approved, "--mermaid").stdout
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_mermaid_directive_and_state_classes(self):
+        for out in (self.empty_out, self.approved_out):
+            first = out.lstrip().splitlines()[0]
+            self.assertRegex(first, r"^(flowchart|graph|stateDiagram-v2)\b")
+            self.assertIn("classDef", out)
+            self.assertIn("-.->", out)
+            self.assertIn("-->", out)
+
+    def test_output_is_live_not_static(self):
+        self.assertNotEqual(self.empty_out, self.approved_out)
+
+
+class Graph009ExitCodeTests(unittest.TestCase):
+    """GRAPH-009: 0 any readable spec-dir; 1 unreadable (message, not a
+    traceback); 2 usage errors."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph009-"))
+        cls.spec_dir = spec_only(cls._tmp)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_readable_dir_exits_zero(self):
+        self.assertEqual(run_cli(self.spec_dir).returncode, 0)
+
+    def test_missing_dir_exits_one_with_message(self):
+        r = run_cli(self._tmp / "nope")
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(r.stderr.strip())
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_file_not_dir_exits_one(self):
+        r = run_cli(self.spec_dir / "spec.md")
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_usage_errors_exit_two(self):
+        self.assertEqual(subprocess.run(
+            [sys.executable, str(GRAPH)], capture_output=True).returncode, 2)
+        self.assertEqual(run_cli(self.spec_dir, "--bogus").returncode, 2)
+        self.assertEqual(run_cli(self.spec_dir, "--explain").returncode, 2)
+
+
+class Graph010NonGitTests(unittest.TestCase):
+    """GRAPH-010: git-derived signals degrade loudly — a visible
+    `SKIPPED (not a git repo)` line in the report and an explicit git field."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph010-"))
+        cls.spec_dir = copy_fixture(cls._tmp)
+        cls.report = run_cli(cls.spec_dir).stdout
+        cls.state = compute(cls.spec_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_report_carries_the_git_line(self):
+        self.assertIn("git: SKIPPED (not a git repo)", self.report)
+
+    def test_json_git_field_encodes_unavailability(self):
+        self.assertFalse(self.state["git"]["available"])
+        self.assertIsNone(self.state["git"]["head"])
+
+    def test_converge_loop_reports_skip(self):
+        self.assertIn("SKIPPED", self.state["loops"]["converge"])
+        self.assertIn("not a git repo", self.state["loops"]["converge"])
+
+
+class Graph011ExplainTests(unittest.TestCase):
+    """GRAPH-011: --explain matches the JSON reason; execute explains the
+    per-task frontier; unknown nodes exit 2 listing the valid names."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph011-"))
+        cls.spec_dir = spec_only(cls._tmp / "a")
+        cls.approved = copy_fixture(cls._tmp / "b")
+        set_status(cls.approved, "approved")
+        write(cls.approved / "task.md", APPROVED_TASKS)
+        cls.state = compute(cls.spec_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_explain_survey_matches_json_reason(self):
+        r = run_cli(self.spec_dir, "--explain", "survey")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(self.state["nodes"]["survey"]["reason"], r.stdout)
+
+    def test_explain_tech_names_the_research_requirement(self):
+        r = run_cli(self.spec_dir, "--explain", "tech")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("research", r.stdout)
+
+    def test_explain_execute_lists_per_task_readiness(self):
+        r = run_cli(self.approved, "--explain", "execute")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("T001", r.stdout)
+        self.assertIn("T002", r.stdout)
+        self.assertIn("T003", r.stdout)
+        self.assertIn("runnable", r.stdout)
+
+    def test_unknown_node_exits_two_with_valid_names(self):
+        r = run_cli(self.spec_dir, "--explain", "bogus")
+        self.assertEqual(r.returncode, 2)
+        for name in ("spec", "survey", "execute", "archive"):
+            self.assertIn(name, r.stdout + r.stderr)
+
+
+class Graph012VerifyAndBeforeAuditTests(unittest.TestCase):
+    """GRAPH-012: verify reflects check.py (blocked on red, done on green);
+    before-audit parses `passed @ <sha>` and the non-git `passed @ -` form."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="graph012-"))
+        self.spec_dir = copy_fixture(self._tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_green_fixture_verifies_done(self):
+        self.assertEqual(compute(self.spec_dir)["nodes"]["verify"]["state"],
+                         "done")
+
+    def test_broken_docset_blocks_verify_with_reason(self):
+        task = (self.spec_dir / "task.md").read_text(encoding="utf-8")
+        broken = task.replace(
+            "## Conventions",
+            "- [ ] T009 (after T999) broken dependency (FR-001)\n\n"
+            "## Conventions")
+        write(self.spec_dir / "task.md", broken)
+        n = compute(self.spec_dir)["nodes"]
+        self.assertEqual(n["verify"]["state"], "blocked")
+        self.assertIn("check.py", n["verify"]["reason"])
+
+    def test_fixing_the_defect_restores_verify_done(self):
+        self.test_broken_docset_blocks_verify_with_reason()  # build red state
+        write(self.spec_dir / "task.md",
+              (FIXTURE / "task.md").read_text(encoding="utf-8"))
+        self.assertEqual(compute(self.spec_dir)["nodes"]["verify"]["state"],
+                         "done")
+
+    def test_before_audit_forms(self):
+        task_path = self.spec_dir / "task.md"
+        original = task_path.read_text(encoding="utf-8")
+        self.assertEqual(compute(self.spec_dir)["nodes"]["before-audit"]["state"],
+                         "READY")  # fixture records pending
+        for line in ("**Before-audit**: passed @ 3fa9c21",
+                     "Before-audit: passed @ -"):
+            write(task_path, original.replace(
+                "**Before-audit**: pending — the orchestrator writes "
+                "`passed @ <sha>` here", line))
+            self.assertEqual(
+                compute(self.spec_dir)["nodes"]["before-audit"]["state"],
+                "done", line)
+
+
+class Graph013FixtureIntegrationTests(unittest.TestCase):
+    """GRAPH-013: graph.py on the real mini-spec fixture — exit 0, coherent
+    state, and byte-identical directory checksums before/after (no mutation)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.before = dir_checksum(FIXTURE)
+        r = subprocess.run(
+            [sys.executable, str(SCRIPTS / "graph.py"), str(FIXTURE),
+             "--state-json"], capture_output=True, text=True, timeout=300)
+        cls.rc = r.returncode
+        cls.stdout = r.stdout
+        cls.after = dir_checksum(FIXTURE)
+
+    def test_exit_zero_valid_json_no_mutation(self):
+        self.assertEqual(self.rc, 0)
+        s = json.loads(self.stdout)
+        self.assertEqual(self.before, self.after, "fixture was mutated")
+
+    def test_coherent_state_for_the_check_green_fixture(self):
+        n = json.loads(self.stdout)["nodes"]
+        self.assertEqual(n["spec"]["state"], "done")
+        self.assertEqual(n["research"]["state"], "SKIPPED")
+        self.assertEqual(n["survey"]["state"], "done")
+        for name in ("plan", "tech", "qa", "tasks", "verify"):
+            self.assertEqual(n[name]["state"], "done", name)
+        self.assertEqual(n["before-audit"]["state"], "READY")
+        self.assertEqual(n["execute"]["state"], "blocked")
+        self.assertEqual(json.loads(self.stdout)["frontier"], ["before-audit"])
+
+
+class Graph014EndStateTests(unittest.TestCase):
+    """GRAPH-014: a done docset reports archive-ready workflow-complete with
+    exit 0; a zero-file dir reports spec pending/blocked, exit 0, no crash."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph014-"))
+        cls.done_dir = done_fixture(cls._tmp / "a")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_done_spec_is_archive_ready_and_exit_zero(self):
+        r = run_cli(self.done_dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("archive", r.stdout)
+        self.assertEqual(frontier_of(compute(self.done_dir)), ["archive"])
+        self.assertNotIn("AWAITING HUMAN", r.stdout)
+
+    def test_run_on_done_spec_completes_without_pause_or_spawn(self):
+        r = run_cli(self.done_dir, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("workflow complete", r.stdout)
+        self.assertNotIn("AWAITING HUMAN", r.stdout)
+        self.assertFalse((self.done_dir / "spawns").exists(),
+                         "no spawn past the end of the workflow")
+
+    def test_zero_file_dir_is_pending_not_a_crash(self):
+        empty = self._tmp / "b" / "specs" / "void"
+        empty.mkdir(parents=True)
+        r = run_cli(empty)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(compute(empty)["nodes"]["spec"]["state"], "blocked")
+
+
+# ---------------------------------------------------------------------------
+# Executor modes (--emit-spawns / --run) — EXEC-001..010. Payloads are built
+# from doc state alone (brief bodies + _shared-protocol.md + filled input
+# payload) into specs/<name>/spawns/wave-<N>/; --run loops waves with the
+# configured runner and pauses AWAITING HUMAN at every judgment node without
+# ever mutating doc state. The default runner is `print` (echo only).
+# ---------------------------------------------------------------------------
+
+def doc_hashes(spec_dir: Path) -> dict:
+    """Content hashes of the doc files directly in the spec dir — the doc
+    state whose invariance the executor guarantees (spawns/ excluded)."""
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(spec_dir.glob("*.md"))}
+
+
+def wave2_fixture(tmp: Path, name: str = "demo") -> Path:
+    """The GRAPH-002 after-state: spec + valid survey + real research →
+    plan ∥ tech ∥ qa all READY (the stage-2 wave, wave 2)."""
+    d = scaffold(tmp, name)
+    write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
+    write(d / "survey.md", (FIXTURE / "survey.md").read_text(encoding="utf-8"))
+    write(d / "research.md",
+          "## Research: demo\n\n### Q1 how to name the operation\n"
+          "- **source**: https://example.com/naming — claim: plain names\n"
+          "  relevance: direct · confidence: high\n")
+    return d
+
+
+def approved_fixture(tmp: Path, name: str = "demo") -> Path:
+    """Approved + before-audit recorded + three crafted tasks: execute is
+    the whole frontier (T001 runnable, T002 dep-chained, T003 at cap)."""
+    d = copy_fixture(tmp, name)
+    set_status(d, "approved")
+    write(d / "task.md", APPROVED_TASKS)
+    return d
+
+
+TICKED_ALL_TASKS = """# Tasks: demo
+
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+Status reflects code state per [survey.md](survey.md), not intent.
+**Before-audit**: passed @ -
+
+## Burndown
+| Phase | Total | Done |
+|-------|-------|------|
+| 1     | 3     | 3    |
+| **Σ** | 3     | 3    |
+
+## Phase 1: land the feature (FR-001, FR-002)
+- [x] T001 [P] implement multiply in `repo/calc.py` (FR-001)
+      done 2026-09-08 — proof: python3 -m pytest repo/test_calc.py green
+- [x] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)
+      done 2026-09-08 — proof: python3 -m pytest repo/test_calc.py green
+- [x] T003 (fix 5/5) rescue the stalled refactor (FR-002)
+      done 2026-09-08 — proof: python3 -m pytest repo/test_calc.py green
+
+## Conventions
+- `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
+"""
+
+
+def closing_fixture(tmp: Path, name: str = "demo", dod_green: bool = False,
+                    status: str = "approved") -> Path:
+    """All tasks ticked + before-audit recorded: the closing-audit /
+    tick-commit stretch. dod_green swaps TC pass conditions to always-green
+    commands so audit.py dod passes mechanically; dod_red (default) keeps
+    the fixture's real pytest TCs, which fail against the unimplemented
+    repo, leaving the closing audit blocked on judgment."""
+    d = copy_fixture(tmp, name)
+    set_status(d, status)
+    write(d / "task.md", TICKED_ALL_TASKS)
+    if dod_green:
+        test = (FIXTURE / "test.md").read_text(encoding="utf-8")
+        test = test.replace(
+            "`cd repo && python3 -m pytest test_calc.py -k multiply` exits 0",
+            f"`{GREEN_TC}` exits 0")
+        test = test.replace(
+            "`cd repo && python3 -m pytest test_calc.py -k zero` exits 0",
+            f"`{GREEN_TC}` exits 0")
+        write(d / "test.md", test)
+    return d
+
+
+class Exec001EmitSpawnsTests(unittest.TestCase):
+    """EXEC-001: --emit-spawns writes one self-contained payload per
+    frontier agent node under spawns/wave-<N>/ — brief body (frontmatter
+    stripped) contiguous + byte-verbatim, _shared-protocol.md verbatim,
+    filled input payload naming spec dir + FR list, resolved skill_dir."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="exec001-"))
+        cls.spec_dir = wave2_fixture(cls._tmp)
+        cls.r = run_cli(cls.spec_dir, "--emit-spawns")
+        cls.wave = cls.spec_dir / "spawns" / "wave-2"
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_one_payload_per_frontier_agent_in_wave_2(self):
+        self.assertEqual(self.r.returncode, 0, self.r.stderr)
+        self.assertEqual(sorted(p.name for p in self.wave.glob("*.md")),
+                         ["planner.md", "qa.md", "tech.md"])
+        self.assertIn("wave-2", self.r.stdout)
+
+    def test_brief_body_is_contiguous_verbatim_frontmatter_stripped(self):
+        for name, brief in (("planner.md", "spec-planner.md"),
+                            ("tech.md", "spec-tech.md"),
+                            ("qa.md", "spec-qa.md")):
+            raw = (SKILL / "agents" / brief).read_text(encoding="utf-8")
+            body = graph.strip_frontmatter(raw)
+            payload = (self.wave / name).read_text(encoding="utf-8")
+            self.assertIn(body, payload, name)
+            self.assertNotIn("disallowedTools", payload, name)
+
+    def test_shared_protocol_verbatim_for_every_role(self):
+        protocol = (SKILL / "agents" / "_shared-protocol.md").read_text(
+            encoding="utf-8")
+        for name in ("planner.md", "tech.md", "qa.md"):
+            payload = (self.wave / name).read_text(encoding="utf-8")
+            self.assertIn(protocol, payload, name)
+
+    def test_wave_dir_override(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec001b-"))
+        try:
+            d = wave2_fixture(tmp)
+            out = tmp / "custom-wave"
+            r = run_cli(d, "--emit-spawns", "--wave-dir", str(out))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(sorted(p.name for p in out.glob("*.md")),
+                             ["planner.md", "qa.md", "tech.md"])
+            self.assertFalse((d / "spawns").exists())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_input_payload_names_spec_dir_frs_and_skill_dir(self):
+        payload = (self.wave / "planner.md").read_text(encoding="utf-8")
+        self.assertIn(str(self.spec_dir), payload)
+        self.assertIn("**FR-001**", payload)
+        self.assertIn(str(SKILL), payload)
+
+
+class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
+    """EXEC-002: spawns/ is a derived, regenerate-only artifact — check.py's
+    output and exit are identical with and without it, and re-emitting after
+    deletion regenerates byte-identical payloads."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec002-"))
+        self.spec_dir = wave2_fixture(self._tmp)
+        run_cli(self.spec_dir, "--emit-spawns")
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def check_run(self):
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / "check.py"), str(self.spec_dir)],
+            capture_output=True, text=True, timeout=300)
+
+    def test_check_output_identical_with_and_without_spawns(self):
+        with_spawns = self.check_run()
+        shutil.rmtree(self.spec_dir / "spawns")
+        without = self.check_run()
+        self.assertEqual(with_spawns.returncode, without.returncode)
+        self.assertEqual(with_spawns.stdout, without.stdout)
+
+    def test_reemit_regenerates_identical_payloads(self):
+        before = {p.name: p.read_bytes()
+                  for p in (self.spec_dir / "spawns").rglob("*.md")}
+        shutil.rmtree(self.spec_dir / "spawns")
+        r = run_cli(self.spec_dir, "--emit-spawns")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = {p.name: p.read_bytes()
+                 for p in (self.spec_dir / "spawns").rglob("*.md")}
+        self.assertEqual(before, after)
+
+    def test_task_md_never_mentions_spawns(self):
+        self.assertNotIn(
+            "spawns",
+            (self.spec_dir / "task.md").read_text(encoding="utf-8"))
+
+
+class Exec003DryRunTests(unittest.TestCase):
+    """EXEC-003: --run --dry-run prints the full wave plan (frontier, payload
+    paths, runner invocations) and changes nothing but the payload files."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="exec003-"))
+        cls.spec_dir = approved_fixture(cls._tmp)
+        cls.before = doc_hashes(cls.spec_dir)
+        cls.r = run_cli(cls.spec_dir, "--run", "--dry-run")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_exit_zero_with_full_plan(self):
+        self.assertEqual(self.r.returncode, 0, self.r.stderr)
+        self.assertIn("wave 4", self.r.stdout)
+        self.assertIn("implementer.md", self.r.stdout)
+        self.assertIn("print", self.r.stdout)
+
+    def test_doc_state_unchanged_modulo_spawns(self):
+        self.assertEqual(self.before, doc_hashes(self.spec_dir))
+
+    def test_payloads_written_no_gate_no_agent_execution(self):
+        self.assertTrue((self.spec_dir / "spawns" / "wave-4"
+                         / "implementer.md").exists())
+        self.assertNotIn("AWAITING HUMAN", self.r.stdout)
+        self.assertIn("no doc-state change", self.r.stdout)
+
+
+class Exec004GatePauseTests(unittest.TestCase):
+    """EXEC-004: --run pauses AWAITING HUMAN on judgment nodes — an
+    undetermined research-gate stops before any wave; a draft-spec approve
+    gate stops without ever writing Status."""
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_undetermined_gate_pauses_before_any_spawn(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec004a-"))
+        d = spec_only(self._tmp)
+        r = run_cli(d, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("AWAITING HUMAN: research-gate", r.stdout)
+        self.assertFalse((d / "spawns").exists(), "no wave for a gate")
+
+    def test_approve_gate_pauses_and_never_writes_status(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec004b-"))
+        d = copy_fixture(self._tmp)  # draft; before-audit recorded below
+        write(d / "task.md", APPROVED_TASKS)
+        before = doc_hashes(d)
+        r = run_cli(d, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("AWAITING HUMAN: approve", r.stdout)
+        self.assertEqual(before, doc_hashes(d))
+
+
+class Exec005GateHashInvarianceTests(unittest.TestCase):
+    """EXEC-005: at every human gate --run stops with AWAITING HUMAN and
+    mutates no doc state — no Status writes, no ticks, no marker removals."""
+
+    def run_gate(self, spec_dir):
+        before = doc_hashes(spec_dir)
+        r = run_cli(spec_dir, "--run")
+        return r, before, doc_hashes(spec_dir)
+
+    def test_clarify_gate_holds_and_never_edits_spec(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec005a-"))
+        try:
+            d = spec_only(tmp)
+            spec = (FIXTURE / "spec.md").read_text(encoding="utf-8")
+            write(d / "spec.md",
+                  spec + "\nNEEDS CLARIFICATION: how should X behave?\n")
+            r, before, after = self.run_gate(d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("AWAITING HUMAN: clarify", r.stdout)
+            self.assertEqual(before, after)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closing_audit_gate_on_dod_red(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec005b-"))
+        try:
+            d = closing_fixture(tmp, dod_green=False)
+            r, before, after = self.run_gate(d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("AWAITING HUMAN: closing-audit", r.stdout)
+            self.assertEqual(before, after)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_tick_commit_gate_when_dod_green_but_unticknoted(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec005c-"))
+        try:
+            d = closing_fixture(tmp, dod_green=True, status="approved")
+            r, before, after = self.run_gate(d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+            self.assertEqual(before, after)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_before_audit_stop_is_a_pause_too(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec005d-"))
+        try:
+            d = copy_fixture(tmp)  # verify done, Before-audit pending
+            r, before, after = self.run_gate(d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("AWAITING HUMAN: before-audit", r.stdout)
+            self.assertEqual(before, after)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_no_gate_fixture_ever_gets_ticked_by_run(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec005e-"))
+        try:
+            d = approved_fixture(tmp)
+            r, before, after = self.run_gate(d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(before, after)
+            self.assertNotIn("- [x] T0",
+                             (d / "task.md").read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class Exec006RunnerTemplateTests(unittest.TestCase):
+    """EXEC-006: --runner placeholders are substituted verbatim with real
+    paths; no unsubstituted {...} token survives in the echoed lines."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="exec006-"))
+        cls.spec_dir = wave2_fixture(cls._tmp)
+        cls.r = run_cli(
+            cls.spec_dir, "--run", "--dry-run", "--runner",
+            "agentx spawn --prompt {prompt_file} --as {role} "
+            "--cwd {spec_dir} --skill {skill_dir}")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def runner_lines(self):
+        return [ln for ln in self.r.stdout.splitlines() if "agentx" in ln]
+
+    def test_three_substituted_invocations(self):
+        self.assertEqual(self.r.returncode, 0, self.r.stderr)
+        self.assertEqual(len(self.runner_lines()), 3)
+
+    def test_no_residual_placeholders(self):
+        for ln in self.runner_lines():
+            self.assertNotIn("{", ln, ln)
+
+    def test_each_placeholder_gets_a_real_value(self):
+        lines = self.runner_lines()
+        for role, payload in (("planner", "planner.md"), ("tech", "tech.md"),
+                              ("qa", "qa.md")):
+            ln = next(l for l in lines if f"--as {role}" in l)
+            self.assertIn(str(self.spec_dir / "spawns" / "wave-2" / payload), ln)
+            self.assertIn(f"--cwd {self.spec_dir}", ln)
+            self.assertIn(f"--skill {SKILL}", ln)
+
+
+class Exec007MaxWavesTests(unittest.TestCase):
+    """EXEC-007: --max-waves bounds the loop — exactly one wave with the
+    bound at 1 (print runner: doc state untouched); a runner that really
+    writes artifacts advances the frontier and the bound still holds."""
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_bound_of_one_with_print_runner_changes_nothing(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec007a-"))
+        d = wave2_fixture(self._tmp)
+        before = doc_hashes(d)
+        r = run_cli(d, "--run", "--max-waves", "1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("== wave"), 1)
+        self.assertIn("max-waves", r.stdout)
+        self.assertEqual(before, doc_hashes(d),
+                         "the print runner never advances doc state")
+
+    def progress_runner(self, spec_dir: Path) -> str:
+        map_py = ("import shutil,sys;r,s=sys.argv[1],sys.argv[2];"
+                  "m={'planner':'plan.md','tech':'tech-spec.md',"
+                  "'qa':'test.md','task-breaker':'task.md'};"
+                  "shutil.copy(s+'-seed-'+r+'.md', s+'/'+m[r])")
+        return f'python3 -c "{map_py}" {{role}} {{spec_dir}}'
+
+    def seed(self, spec_dir: Path, role: str, text: str) -> None:
+        write(Path(f"{spec_dir}-seed-{role}.md"), text)
+
+    def test_real_runner_progresses_and_bound_holds_at_one(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec007b-"))
+        d = wave2_fixture(self._tmp)
+        self.seed(d, "planner",
+                  "# Plan: demo\n\n## Milestone 1: multiply lands\n"
+                  "All FR-001 and FR-002 work lands here; checkpoint: pytest "
+                  "green.\n\n## Parallelization map\n- planner area: "
+                  "`repo/calc.py` disjoint from `repo/test_calc.py`\n")
+        self.seed(d, "tech",
+                  "# Tech spec: demo\n\n## Approach\nA plain function in the "
+                  "arithmetic module (FR-001).\n\n### D-001: plain function\n"
+                  "Context: small module. Decision: plain function. "
+                  "Consequences: none.\n")
+        self.seed(d, "qa",
+                  "# Test cases: demo\n\n## TC-001 — multiply\n"
+                  "- **Traces to**: FR-001\n"
+                  "- **Pass condition**: `python3 -c 'print(42)'` exits 0\n")
+        task_before = (d / "task.md").read_bytes()
+        r = run_cli(d, "--run", "--max-waves", "1",
+                    "--runner", self.progress_runner(d))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("== wave"), 1)
+        self.assertIn("max-waves", r.stdout)
+        self.assertTrue((d / "plan.md").exists(), "runner really ran")
+        self.assertTrue((d / "tech-spec.md").exists())
+        self.assertTrue((d / "test.md").exists())
+        self.assertEqual((d / "task.md").read_bytes(), task_before,
+                         "wave 2 never ran (no task-breaker seed)")
+
+    def test_max_waves_two_proceeds_one_wave_further(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec007c-"))
+        d = wave2_fixture(self._tmp)
+        self.seed(d, "planner",
+                  "# Plan: demo\n\n## Milestone 1: multiply lands\n"
+                  "All FR-001 and FR-002 work lands here; checkpoint: pytest "
+                  "green.\n\n## Parallelization map\n- planner area: "
+                  "`repo/calc.py` disjoint from `repo/test_calc.py`\n")
+        self.seed(d, "tech",
+                  "# Tech spec: demo\n\n## Approach\nA plain function in the "
+                  "arithmetic module (FR-001).\n\n### D-001: plain function\n"
+                  "Context: small module. Decision: plain function. "
+                  "Consequences: none.\n")
+        self.seed(d, "qa",
+                  "# Test cases: demo\n\n## TC-001 — multiply\n"
+                  "- **Traces to**: FR-001\n"
+                  "- **Pass condition**: `python3 -c 'print(42)'` exits 0\n")
+        task_seed = (
+            "# Tasks: demo\n\n**Before-audit**: pending\n\n"
+            "## Burndown\n| Phase | Total | Done |\n|-------|-------|"
+            "------|\n| 1     | 1     | 0    |\n| **Σ** | 1     | 0    |"
+            "\n\n## Phase 1: multiply (FR-001)\n"
+            "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
+        self.seed(d, "task-breaker", task_seed)
+        r = run_cli(d, "--run", "--max-waves", "2",
+                    "--runner", self.progress_runner(d))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("== wave"), 2)
+        self.assertIn("max-waves", r.stdout)
+        self.assertEqual((d / "task.md").read_text(encoding="utf-8"),
+                         task_seed, "wave 2 ran the task-breaker payload")
+
+
+class Exec008VerifyInRunTests(unittest.TestCase):
+    """EXEC-008: the mechanical verify node runs check.py directly inside
+    --run (output/exit in the run log); a red check never advances."""
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_green_verify_logs_check_exit_zero(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec008a-"))
+        d = copy_fixture(self._tmp)
+        r = run_cli(d, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("check.py", r.stdout)
+        self.assertIn("exit 0", r.stdout)
+        self.assertIn("AWAITING HUMAN: before-audit", r.stdout)
+
+    def test_red_verify_surfaces_failure_and_holds(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec008b-"))
+        d = copy_fixture(self._tmp)
+        task = (d / "task.md").read_text(encoding="utf-8")
+        write(d / "task.md", task.replace(
+            "## Conventions",
+            "- [ ] T009 (after T999) broken dependency (FR-001)\n\n"
+            "## Conventions"))
+        before = doc_hashes(d)
+        r = run_cli(d, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("exit 1", r.stdout)
+        self.assertIn("FAIL", r.stdout)
+        self.assertNotIn("AWAITING HUMAN: before-audit", r.stdout)
+        self.assertEqual(before, doc_hashes(d))
+
+
+class Exec009PayloadBuildingTests(unittest.TestCase):
+    """EXEC-009: implementer payloads carry the task entry byte-verbatim plus
+    the TC acceptance commands; the researcher payload carries the spec's
+    research questions (prepared at the undetermined gate for the run
+    decision — the gate itself is still a pause, never auto-spawned)."""
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_implementer_payload_entry_and_acceptance_commands(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec009a-"))
+        d = approved_fixture(self._tmp)
+        r = run_cli(d, "--emit-spawns")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        wave = d / "spawns" / "wave-4"
+        payload = (wave / "implementer.md").read_text(encoding="utf-8")
+        self.assertIn("- [ ] T001 [P] implement multiply in `repo/calc.py` "
+                      "(FR-001)", payload)
+        self.assertIn(
+            "cd repo && python3 -m pytest test_calc.py -k multiply", payload)
+        self.assertFalse((wave / "implementer-T002.md").exists(),
+                         "dep-chained task is not runnable")
+        self.assertFalse((wave / "implementer-T003.md").exists(),
+                         "at-fix-cap task is never auto-scheduled")
+
+    def test_researcher_payload_carries_research_questions(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec009b-"))
+        d = spec_only(self._tmp)
+        spec = (FIXTURE / "spec.md").read_text(encoding="utf-8")
+        write(d / "spec.md", spec +
+              "\n## Open questions\n"
+              "- Which integer overflow convention should multiply follow?\n"
+              "- Should the operation accept bool operands (int subclass)?\n")
+        r = run_cli(d, "--emit-spawns")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = (d / "spawns" / "wave-1" / "researcher.md").read_text(
+            encoding="utf-8")
+        self.assertIn("Which integer overflow convention should multiply "
+                      "follow?", payload)
+        self.assertIn("Should the operation accept bool operands", payload)
+        self.assertIn("**FR-001**", payload)
+
+
+class Exec010CrossModeNamingTests(unittest.TestCase):
+    """EXEC-010: --emit-spawns and --run --dry-run use identical payload
+    paths under the same spawns/wave-<N>/ directory for the same state."""
+
+    def test_identical_wave_paths_across_modes(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec010-"))
+        try:
+            d1 = wave2_fixture(tmp / "a")
+            run_cli(d1, "--emit-spawns")
+            emitted = sorted(str(p.relative_to(d1))
+                             for p in (d1 / "spawns").rglob("*.md"))
+            d2 = wave2_fixture(tmp / "b")
+            r = run_cli(d2, "--run", "--dry-run")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            planned = sorted(str(p.relative_to(d2))
+                             for p in (d2 / "spawns").rglob("*.md"))
+            self.assertEqual(emitted, planned)
+            for rel in planned:
+                self.assertIn(rel, r.stdout.replace("\\", "/"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class RunWaveDirTests(unittest.TestCase):
+    """Scrutiny round-1 finding 2: --wave-dir is honored by --run too —
+    payloads land in DIR instead of the default spawns/wave-<N>/, the same
+    override semantics --emit-spawns --wave-dir already has, and the
+    runner sees the overridden path."""
+
+    def run_wave(self, tmp: Path) -> tuple[Path, Path, subprocess.CompletedProcess]:
+        d = wave2_fixture(tmp)
+        out = tmp / "custom-wave"
+        r = run_cli(d, "--run", "--max-waves", "1", "--wave-dir", str(out))
+        return d, out, r
+
+    def test_run_writes_payloads_into_wave_dir(self):
+        tmp = Path(tempfile.mkdtemp(prefix="execrundir-"))
+        try:
+            d, out, r = self.run_wave(tmp)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(sorted(p.name for p in out.glob("*.md")),
+                             ["planner.md", "qa.md", "tech.md"])
+            self.assertFalse((d / "spawns").exists(),
+                             "--wave-dir must override the default location")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_runner_sees_the_overridden_payload_path(self):
+        tmp = Path(tempfile.mkdtemp(prefix="execrundir2-"))
+        try:
+            _d, out, r = self.run_wave(tmp)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn(str(out / "planner.md"),
+                          r.stdout.replace("\\", "/"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class ExecutorCliValidationTests(unittest.TestCase):
+    """Executor flags are bound to their mode: runner/dry-run/max-waves
+    require --run; --emit-spawns and --run are separate modes; the wave
+    bound must be positive. Violations are usage errors (exit 2)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="execcli-"))
+        cls.spec_dir = spec_only(cls._tmp)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_runner_requires_run(self):
+        self.assertEqual(
+            run_cli(self.spec_dir, "--runner", "echo {prompt_file}").returncode,
+            2)
+
+    def test_dry_run_requires_run(self):
+        self.assertEqual(run_cli(self.spec_dir, "--dry-run").returncode, 2)
+
+    def test_emit_and_run_are_distinct_modes(self):
+        self.assertEqual(
+            run_cli(self.spec_dir, "--emit-spawns", "--run").returncode, 2)
+
+    def test_max_waves_must_be_positive(self):
+        self.assertEqual(
+            run_cli(self.spec_dir, "--run", "--max-waves", "0").returncode, 2)
+
+    def test_wave_dir_requires_emit_or_run(self):
+        self.assertEqual(
+            run_cli(self.spec_dir, "--wave-dir", "somewhere").returncode, 2)
+
+    def test_strip_frontmatter(self):
+        raw = (SKILL / "agents" / "spec-reviewer.md").read_text(
+            encoding="utf-8")
+        body = graph.strip_frontmatter(raw)
+        self.assertTrue(body.lstrip().startswith("# Reviewer agent"))
+        self.assertNotIn("readonly: true", body)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

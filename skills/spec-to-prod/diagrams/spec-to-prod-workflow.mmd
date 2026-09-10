@@ -1,0 +1,59 @@
+flowchart TD
+    %% spec-to-prod workflow graph — the model scripts/graph.py derives from
+    %% doc state alone. Solid = data edge (ready exactly when all inputs are
+    %% done). Dotted = conditional/loop edge. This is the model, not a live
+    %% state: per-node states and the current frontier come from
+    %% `python3 scripts/graph.py SPECS_DIR [--mermaid|--state-json]`.
+
+    Spec["spec<br/>scaffold → draft spec.md WITH the user<br/>(human intent, never generated)"]
+    Clarify["clarify<br/>grilling loop: batch the frontier of the<br/>draft's gaps into one round, recompute<br/>from the answers, repeat until empty"]
+
+    subgraph W1["wave 1 · analysis — one message"]
+        Survey["survey<br/>surveyor → survey.md<br/>(self-checks --survey-only)"]
+        Research["research<br/>researcher → research.md<br/>(or skip: not-applicable marker)"]
+    end
+
+    Gate{{"research-gate<br/>orchestrator judgment:<br/>≥1 real open technical question?<br/>never auto-decided"}}
+
+    subgraph W2["wave 2 · authoring — one message"]
+        Plan["plan<br/>planner → plan.md"]
+        Tech["tech<br/>tech → tech-spec.md"]
+        QA["qa<br/>qa → test.md<br/>(blind to plan/tech)"]
+    end
+
+    Tasks["tasks<br/>task-breaker → task.md<br/>(the only status holder)"]
+    Verify["verify<br/>mechanical: check.py on the spec dir,<br/>exit 0 = done"]
+    BA["before-audit<br/>six gates, once — runs when the<br/>execution frontier first becomes eligible<br/>(git gates SKIPPED-noted in non-git repos)"]
+    Approve["approve<br/>HUMAN GATE<br/>spec.md Status: approved<br/>(never auto-satisfied)"]
+    Exec["execute<br/>per-task frontier: deps ticked/struck,<br/>files disjoint from wave-mates,<br/>below the fix-round cap"]
+    CA["closing-audit<br/>once, all tasks implemented:<br/>scope · clean · proofs · regression ·<br/>DoD scorecard (audit.py dod)"]
+    Tick["tick-commit<br/>one tick + one commit for the whole plan<br/>(commit SKIPPED-noted in non-git repos)"]
+    Archive["archive<br/>specs/archive/ · dated · INDEX repointed"]
+
+    Spec --> Survey
+    Survey --> Plan
+    Survey --> Tech
+    Survey --> QA
+    Plan --> Tasks
+    Tech --> Tasks
+    Survey --> Tasks
+    Survey --> Verify
+    Plan --> Verify
+    Tech --> Verify
+    QA --> Verify
+    Tasks --> Verify
+    Verify --> BA
+    BA --> Approve
+    BA --> Exec
+    Approve --> Exec
+    Exec --> CA
+    CA --> Tick
+    Tick --> Archive
+
+    Spec -.->|clarify loop| Clarify
+    Clarify -.->|markers resolved| Spec
+    Spec -.->|judgment| Gate
+    Gate -.->|run| Research
+    Gate -.->|resolved either way| Tech
+    Exec -.->|fix rounds, cap 5 per task| Exec
+    Survey -.->|converge: survey staleness<br/>→ re-survey → audit.py converge<br/>→ appended tasks| Tasks
