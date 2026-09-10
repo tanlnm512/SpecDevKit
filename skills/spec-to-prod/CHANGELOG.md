@@ -3,6 +3,22 @@
 Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
+## 2.2.0 — 2026-09-10
+
+Two small fixes paired in one commit. (1) `audit.py archived` — the
+OpenSpec `validate --archived` gate adopted natively: every dir under
+specs/archive/ must hold a task.md with no unticked, unstruck entry
+(ticked or struck both close; pure doc-state, no git, no SKIPPED path),
+exit 1 naming the open entries — cheap enough for a pre-push hook, and
+it makes "archived incomplete" mechanically visible instead of
+lurking in the as-built record. Four new ArchivedModeTests. (2) The
+one standing test failure is fixed:
+test_real_workspace_probe_is_non_git asserted the in-repo fixture was
+outside any git repo — a premise that broke the day SpecDevKit got its
+first commit; the probe now uses a temp dir (a genuinely non-git
+workspace), and the suite is 40/40 for the first time since the repo
+went git.
+
 ## 2.1.0 — 2026-09-10
 
 Three more harnesses supported — opencode, Factory Droid, and

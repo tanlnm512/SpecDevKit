@@ -52,6 +52,58 @@ def run_audit(*argv):
     return code, buf.getvalue()
 
 
+class ArchivedModeTests(unittest.TestCase):
+    """audit.py archived — the OpenSpec-style archive gate: every dir
+    under specs/archive/ holds a fully-closed task.md (ticked or struck);
+    no unticked entry survives into the as-built record."""
+
+    @staticmethod
+    def archive(tmp, name, entries):
+        d = Path(tmp) / "specs" / "archive" / name
+        d.mkdir(parents=True)
+        (d / "task.md").write_text(
+            "# Tasks\n\n## Phase 1\n\n" + "\n".join(entries) + "\n")
+        return d
+
+    def run_archived(self, tmp):
+        return run_audit("archived", "--repo", str(tmp))
+
+    def test_fully_closed_archive_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.archive(tmp, "2026-01-01-alpha", [
+                "- [x] T001 add parser (FR-001)",
+                "- [ ] ~~T005~~ dropped (D-003)",  # struck counts as closed
+            ])
+            code, out = self.run_archived(tmp)
+            self.assertEqual(code, 0)
+            self.assertIn("PASS  2026-01-01-alpha", out)
+            self.assertIn("fully closed", out)
+
+    def test_open_entry_fails_and_names_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.archive(tmp, "2026-02-02-beta", [
+                "- [x] T001 add parser (FR-001)",
+                "- [ ] T002 wire the CLI (FR-001)",
+            ])
+            code, out = self.run_archived(tmp)
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL  2026-02-02-beta", out)
+            self.assertIn("T002", out)
+
+    def test_missing_task_md_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "specs" / "archive" / "2026-03-03-gamma").mkdir(parents=True)
+            code, out = self.run_archived(tmp)
+            self.assertEqual(code, 1)
+            self.assertIn("no task.md", out)
+
+    def test_no_archive_yet_is_green(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, out = self.run_archived(tmp)
+            self.assertEqual(code, 0)
+            self.assertIn("no archive yet", out)
+
+
 def fake_run(git_rc=128, git_stderr="fatal: not a git repository",
              check_stdout=None):
     """subprocess.run stand-in mediating every call audit.py makes: git

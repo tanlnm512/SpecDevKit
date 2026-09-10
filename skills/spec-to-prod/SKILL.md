@@ -13,7 +13,7 @@ description: >-
   task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>.
 metadata:
   owner: platform-core
-  version: "2.1.0"
+  version: "2.2.0"
 ---
 
 # Spec-to-Prod (spec-driven development)

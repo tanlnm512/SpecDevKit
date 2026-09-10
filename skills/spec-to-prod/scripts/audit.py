@@ -7,10 +7,11 @@ Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py proofs   <spec-dir> [--repo <path>] [--run]
        audit.py dod      <spec-dir> [--repo <path>] [--base <rev>]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
+       audit.py archived [--repo <path>]
        audit.py -h | --help        (prints this text, exit 0)
 
 (--repo defaults to the spec dir's grandparent: specs/<name>/ -> repo
-root; clean, which takes no spec dir, defaults to .)
+root; clean and archived, which take no spec dir, default to .)
 
 scope  — every file changed vs base (default: working tree vs HEAD, plus
          untracked files) is grep'd against the spec dir's task.md,
@@ -46,9 +47,16 @@ converge — diffs specs/<name>/survey.md against its last committed
          the drift going unnoticed. Items unchanged or newly improved are
          not listed.
 
+archived — the archive gate (OpenSpec validate --archived semantics):
+         every dir under specs/archive/ must hold a task.md with no
+         unticked, unstruck entry — an open box in the archive means a
+         plan was archived incomplete, and the as-built record lies.
+         Pure doc-state (no git, no SKIPPED path); runs anywhere, cheap
+         enough for a pre-push or pre-archive hook.
+
 Exit:  0 = report produced (scope/clean/converge always; proofs without
-       --run) · proofs --run / dod: 0 = every mechanical gate green,
-       1 = any FAILED or errored · 2 = usage error.
+       --run) · proofs --run / dod / archived: 0 = every mechanical
+       gate green, 1 = any FAILED or errored · 2 = usage error.
 
 Non-git repos: git-derived output degrades explicitly, never silently —
 scope/clean print `SKIPPED (not a git repo)` instead of a false all-clear
@@ -446,12 +454,46 @@ def mode_converge(spec_dir: Path, repo: Path, base: str | None) -> int:
     return 0
 
 
+def mode_archived(repo: Path) -> int:
+    """Every archived plan must be fully closed — task.md holds no
+    unticked, unstruck entry (ticked `[x]` or struck `~~T###~~` both
+    count as closed; the tick-commit node's contract, checked after the
+    fact). The archive is the as-built record: an open box there means
+    a plan was archived incomplete."""
+    archive_root = repo / "specs" / "archive"
+    if not archive_root.is_dir():
+        print(f"archived: {archive_root} — no archive yet, nothing to verify")
+        return 0
+    bad = 0
+    for d in sorted(p for p in archive_root.iterdir() if p.is_dir()):
+        task_md = d / "task.md"
+        if not task_md.exists():
+            bad += 1
+            print(f"  FAIL  {d.name}: no task.md — an archive without its plan")
+            continue
+        entries = task_entries(task_md.read_text(encoding="utf-8", errors="replace"))
+        open_ids = [e.id or e.first_line.strip() for e in entries
+                    if not e.done and not e.struck]
+        if open_ids:
+            bad += len(open_ids)
+            noun = "entry" if len(open_ids) == 1 else "entries"
+            print(f"  FAIL  {d.name}: open {noun} — {', '.join(open_ids)}")
+        else:
+            noun = "entry" if len(entries) == 1 else "entries"
+            print(f"  PASS  {d.name}: {len(entries)} {noun} closed (ticked or struck)")
+    if bad:
+        print(f"archived: {bad} problem(s) — a plan was archived incomplete")
+        return 1
+    print("archived: every archived plan fully closed")
+    return 0
+
+
 def parse_args(argv: list[str]):
     if not argv:
         print(__doc__)
         return None
     mode = argv[0]
-    if mode not in ("scope", "clean", "proofs", "dod", "converge"):
+    if mode not in ("scope", "clean", "proofs", "dod", "converge", "archived"):
         print(__doc__)
         return None
     repo = None
@@ -479,7 +521,7 @@ def parse_args(argv: list[str]):
     if mode in ("scope", "proofs", "dod", "converge") and len(rest) != 1:
         print(__doc__)
         return None
-    if mode == "clean" and rest:
+    if mode in ("clean", "archived") and rest:
         print(__doc__)
         return None
     return mode, (rest[0] if rest else None), repo, base, run
@@ -502,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
     if spec_dir is not None and not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory")
         return 1
-    if mode == "clean":
+    if mode in ("clean", "archived"):
         repo = Path(repo_arg) if repo_arg else Path(".")
     else:
         repo = Path(repo_arg) if repo_arg else spec_dir.parent.parent
@@ -510,6 +552,8 @@ def main(argv: list[str] | None = None) -> int:
         return mode_scope(spec_dir, repo, base)
     if mode == "clean":
         return mode_clean(repo, base)
+    if mode == "archived":
+        return mode_archived(repo)
     if mode == "dod":
         return mode_dod(spec_dir, repo, base)
     if mode == "converge":

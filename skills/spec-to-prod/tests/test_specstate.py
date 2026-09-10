@@ -340,9 +340,13 @@ class GitHelperTests(unittest.TestCase):
             self.assertIsNone(specstate.head_sha(Path("/some/repo")))
 
     def test_real_workspace_probe_is_non_git(self):
-        # The sanctioned rc-128 probe: the workspace is genuinely non-git.
-        self.assertFalse(specstate.git_available(FIXTURE))
-        self.assertIsNone(specstate.head_sha(FIXTURE))
+        # The sanctioned rc-128 probe: a workspace that is genuinely
+        # non-git. A temp dir outside any repo — the in-repo fixture can
+        # no longer serve (SpecDevKit itself is a git repo, so the probe
+        # resolves the parent .git and the old premise stopped holding).
+        with tempfile.TemporaryDirectory() as td:
+            self.assertFalse(specstate.git_available(Path(td)))
+            self.assertIsNone(specstate.head_sha(Path(td)))
 
 
 class ModuleShapeTests(unittest.TestCase):
