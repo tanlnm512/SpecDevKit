@@ -13,8 +13,10 @@ which is the sanctioned test bed.
 import contextlib
 import importlib.util
 import io
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -220,13 +222,24 @@ class CheckStalenessTests(unittest.TestCase):
 
 
 class CliDegradedTests(unittest.TestCase):
-    """Black-box runs on the real non-git workspace — the sanctioned test
-    bed; no mocks. GITDEG-001/002/003/004's literal contract surface."""
+    """Black-box runs on a real non-git workspace — a temp-dir copy of
+    the fixture (SpecDevKit itself went git, so the in-repo fixture can
+    no longer serve as the non-git bed); no mocks. GITDEG-001/002/003/
+    004's literal contract surface."""
 
     def cli(self, script, *args):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        # The whole fixture workspace (specs/ + the repo/ evidence tree
+        # its survey citations resolve against), one level down so the
+        # spec dir's grandparent is this non-git root.
+        shutil.copytree(FIXTURE.parent.parent, root / "work")
+        spec = root / "work" / "specs" / "mini-spec"
+        argv = [str(spec) if a.startswith("examples/") else a for a in args]
         return subprocess.run(
-            [sys.executable, str(SKILL / "scripts" / script), *args],
-            capture_output=True, text=True, cwd=SKILL, timeout=60,
+            [sys.executable, str(SKILL / "scripts" / script), *argv],
+            capture_output=True, text=True, cwd=root, timeout=60,
         )
 
     def test_scope_cli_skipped_in_real_non_git_root(self):
