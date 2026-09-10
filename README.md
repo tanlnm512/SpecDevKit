@@ -10,7 +10,7 @@ set per feature under `specs/<name>/` — `spec.md`, `plan.md`, `task.md`
 
 This repo — published on GitHub as **SpecDevKit**
 (`tanlnm512/SpecDevKit`) — is a **skillset**, not a single-skill package:
-lives at `skills/<name>/`, and one shared, harness-neutral install
+every skill lives at `skills/<name>/`, and one shared, harness-neutral install
 pipeline (`tools/sync.sh`) installs every skill it finds there to every
 supported coding-agent harness in one pass. `spec-to-prod` is the first
 resident skill; § Adding a skill to this repo below is the contract a
