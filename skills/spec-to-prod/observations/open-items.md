@@ -3,9 +3,11 @@
 Living list — move an item to `decisions/` when it's resolved with a
 decision, or strike it when resolved outright.
 
-1. **Never run live.** The full pipeline has never executed end-to-end on
-   a real repo (as of 2026-09-08). `evals/cases.md` is the prepared eval
-   session; running E1–E2 is the single highest-value next step.
+1. **Not yet run on a production repo.** Live end-to-end orchestration
+   WAS validated in the 1.7.0 mission (two full pipeline runs in a
+   scratch repo, 2026-09-09 — see the evals/cases.md header); the
+   residual gap is one full run against a real, working repo.
+   `evals/cases.md` E1–E2 remain the standing scenarios for it.
 2. ~~**INSTALL.md deleted** (user, 2026-08-25). Restore-or-repoint
    pending — `tools/sync.sh` now mechanizes install, so a short INSTALL
    pointing at it may be enough.~~ Resolved 2026-09-10: root `README.md`'s

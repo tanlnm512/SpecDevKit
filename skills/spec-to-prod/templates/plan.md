@@ -28,4 +28,4 @@
 - Risk: <...> → mitigation: <...>
 
 ## Delivery
-<Branch/PR/commit cadence. Default: one commit per task, code + docs together.>
+<Branch/PR/commit cadence. Default: the single end-of-plan commit — code + docs together, never per task (ADR-001, tick-commit node).>
