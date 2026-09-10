@@ -178,10 +178,13 @@ that copies out:
   committed, regenerate-only byte-verbatim copy of the skill's briefs:
   `agy plugin install` copies the repo wholesale, so the personas ship
   in-tree; sync.sh regenerates and verifies them every run.
-- **Command router** — a skill's `commands/<name>.md` (only if it ships
-  one, installed from `skills/<name>/commands/<name>.md`) →
-  `~/.agents/commands/`, `~/.claude/commands/`, `~/.zcode/commands/`
-  (omp needs none — `/skill:<name>` auto-registers).
+- **Commands** — a skill's `commands/<name>.md` router (only if it
+  ships one) plus each skill's allowlisted bare names via
+  `extra_commands()` (ADR-013 — the six lifecycle wrappers for
+  spec-to-prod) → `~/.agents/commands/`, `~/.claude/commands/`,
+  `~/.zcode/commands/` (omp needs none — `/skill:<name>`
+  auto-registers); a foreign file at a destination is refused, not
+  clobbered (per-root provenance ledger).
 
 ## Usage
 
