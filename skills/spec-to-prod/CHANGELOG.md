@@ -3,6 +3,79 @@
 Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
+## 2.1.0 — 2026-09-10
+
+Three more harnesses supported — opencode, Factory Droid, and
+Antigravity — bringing the matrix to six (ADR-015). opencode and droid
+both scan `~/.agents/skills/**` as a compatibility root sync.sh already
+populates, so their skill discovery works with zero new roots; their
+gap was agent defs: new `tools/agent-defs.py` (shared, skill-agnostic,
+same parse-and-derive contract as omp-defs.py) regenerates the eight
+role briefs as opencode subagents (`~/.config/opencode/agents/` —
+filename-named, mode: subagent, a permission map derived from each
+brief's own `tools:` list, task always deny) and as Factory droids
+(`~/.factory/droids/` — Task-tool subagent_types, `model: inherit`
+always so a wrongly guessed model ID can never become a
+DroidValidator load error, tools mapped to Factory IDs with read-only
+sets collapsed to the `read-only` category). Both roots are OPTIONAL:
+sync installs them only when the harness's own config home already
+exists — it never fabricates a harness directory; install the harness,
+re-run sync. Antigravity consumes the repo itself as a plugin: root
+`plugin.json` (marker + name), `skills/` as-is, and a new committed
+repo-root `agents/` of byte-verbatim role personas that
+`agy plugin install` ships (sync.sh regenerates and verifies them each
+run); `agy plugin validate` passes with 1 skill + 8 agents processed.
+`skill-dir.sh` learns the agy plugin roots (workspace
+`.agents/plugins/spec-dev-kit/` and `~/.gemini/config/plugins/
+spec-dev-kit/`) so an agy session resolves its live in-plugin skill
+dir. New `tools/tests/test_agent_defs.py` (10 tests: permission
+derivation, tool-ID mapping, read-only collapse, byte-verbatim
+personas, stale-removal scoping, name rejection).
+
+## 2.0.0 — 2026-09-10
+
+Skill renamed spec-to-prod → spec-to-prod — directory, router command
+(`/spec-to-prod` → `/spec-to-prod`), plugin manifests (regenerated:
+plugin name and marketplace entry now spec-to-prod), README, agent
+briefs, scripts (skill-dir.sh resolution paths, sync.sh allowlist case,
+omp/plugin tool references and their tests), diagram files, and every
+cross-reference; historical entries below keep the old name. The
+pipeline, docs contract, and agents (`spec-*` role names were never
+tied to the skill name) are unchanged — pure rename, VERSION 2.0.0
+because every command and plugin name moves. The rename also pins the
+name's promise (ADR-014): "prod" = production-READY — the flow ends at
+a verified single commit; push/deploy/publish stay standing human/CI
+gates (the rulings rule already stop-and-asks each), and the graph has
+deliberately no release node. Deployed installs: sync.sh installs
+forward only — the old-name skill dirs and router command in the four
+skill roots and three command roots are removed by hand during this
+release's deploy.
+
+## 1.13.0 — 2026-09-10
+
+Lifecycle command surface adopted from addyosmani/agent-skills — six thin
+command files (`commands/{spec,plan,build,test,review,ship}.md`) expose
+the DEFINE→PLAN→BUILD→VERIFY→REVIEW→SHIP development lifecycle, each
+delegating into the workflow graph at a node: /spec = the spec node +
+clarify loop (scaffold's entry), /plan = waves from current doc state
+through verify + before-audit to the approve gate, /build = the execute
+node (implement waves), and /test + /review + /ship = the ONE closing
+audit in three portions (proof + regression · scope diff + cleanliness +
+DoD scorecard · tick-commit + rulings ack + Status done). The router's
+own verb space is deliberately untouched — `plan`/`tech`/`qa` keep
+their single-agent repair meanings, `review` keeps meaning the docs
+reviewer — so the same words never silently change meaning across the
+two surfaces (ADR-013); per-task commits and per-task verification from
+the source surface are explicitly NOT adopted (two audits, one commit
+stands). `tools/sync.sh` installs commands through an explicit per-skill
+allowlist (`extra_commands()`): the skill-named router unconditionally,
+the six bare names opt-in — never a blind glob — and a destination
+holding a foreign file (exists, differs from the master, not a prior
+recorded deploy — per-root provenance ledger) is refused loudly instead
+of clobbered;
+SKILL.md gains § Lifecycle commands and the closing audit names its
+three lifecycle entry points.
+
 ## 1.12.0 — 2026-09-10
 
 Plugin packaging for GitHub distribution — the repo becomes a Claude

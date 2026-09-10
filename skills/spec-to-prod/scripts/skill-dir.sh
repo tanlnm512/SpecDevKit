@@ -23,5 +23,13 @@ for root in "$HOME/.omp/agent" "$HOME/.claude" "$HOME/.zcode" "$HOME/.agents"; d
     exit 0
   fi
 done
-echo "ERROR: no spec-to-prod skill dir (checked ./.omp, ./.claude, ./.zcode, ./.agents, then the same order under \$HOME with ~/.omp/agent for .omp)" >&2
+# Antigravity (agy) sessions: the live copy is inside the agy plugin
+# install (workspace .agents/plugins/ or ~/.gemini/config/plugins/).
+for root in .agents/plugins/spec-dev-kit "$HOME/.gemini/config/plugins/spec-dev-kit"; do
+  if [ -d "$root/skills/spec-to-prod" ]; then
+    cd "$root/skills/spec-to-prod" && pwd
+    exit 0
+  fi
+done
+echo "ERROR: no spec-to-prod skill dir (checked ./.omp, ./.claude, ./.zcode, ./.agents, then the same order under \$HOME with ~/.omp/agent for .omp, then the agy plugin roots)" >&2
 exit 1
