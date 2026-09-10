@@ -52,6 +52,51 @@ def run_audit(*argv):
     return code, buf.getvalue()
 
 
+class CommentSuspectTests(unittest.TestCase):
+    """clean's comment guardrails: essay comments (≥120-char comment
+    lines) and comment walls (≥8 consecutive) are suspects; short
+    constraint comments, URLs, and markdown headings are not."""
+
+    @staticmethod
+    def findings(lines, path="src/app.py"):
+        with unittest.mock.patch.object(
+                audit, "added_lines",
+                return_value=iter((path, i, t) for i, t in enumerate(lines, 1))):
+            return audit.clean_findings(Path("/repo"), None)
+
+    def test_short_comment_is_not_a_suspect(self):
+        self.assertEqual(
+            self.findings(["# retry: the API is eventually consistent"]), [])
+
+    def test_essay_comment_flagged(self):
+        kinds = [k for _, _, k, _ in self.findings(["# " + "x" * 130])]
+        self.assertIn("essay comment", kinds)
+
+    def test_long_comment_with_url_not_flagged(self):
+        kinds = [k for _, _, k, _ in
+                 self.findings(["# see https://example.com/" + "a" * 130])]
+        self.assertNotIn("essay comment", kinds)
+
+    def test_comment_wall_at_threshold(self):
+        kinds = [k for _, _, k, _ in
+                 self.findings([f"# note {i}" for i in range(8)])]
+        self.assertEqual(kinds.count("comment wall"), 1)
+
+    def test_seven_lines_no_wall(self):
+        kinds = [k for _, _, k, _ in
+                 self.findings([f"# note {i}" for i in range(7)])]
+        self.assertNotIn("comment wall", kinds)
+
+    def test_code_line_resets_the_wall(self):
+        lines = ["# a", "# b", "# c", "x = 1", "# d", "# e", "# f", "# g"]
+        kinds = [k for _, _, k, _ in self.findings(lines)]
+        self.assertNotIn("comment wall", kinds)
+
+    def test_markdown_headings_ignored(self):
+        lines = [f"# heading {i}" for i in range(10)]
+        self.assertEqual(self.findings(lines, path="README.md"), [])
+
+
 class ArchivedModeTests(unittest.TestCase):
     """audit.py archived — the OpenSpec-style archive gate: every dir
     under specs/archive/ holds a fully-closed task.md (ticked or struck);

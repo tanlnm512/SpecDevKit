@@ -93,6 +93,11 @@ are all-or-nothing — there is no path scoping)**:
    a near-match bent to fit is worse than a small duplicate. Prefer the
    standard library and already-installed dependencies over new ones —
    a new dependency for a few clear lines is a deviation to report.
+   The third copy of any logic is a bug: when the task's files already
+   hold a sibling of what you're writing, extract to the shared home
+   (the module/type where both consumers live) and update both callers
+   — extraction crossing the task's file scope is a deviation to
+   report, not to improvise.
 4. **Breaking changes**: an in-repo-only interface changes atomically —
    every caller updated in this task, old shape deleted; a public or
    external-facing interface gets the new shape alongside and the old
@@ -138,6 +143,9 @@ are all-or-nothing — there is no path scoping)**:
 - Comments/docs: short, constraint-only, general-purpose — no decisions,
   no history, no task/PR references; decisions live in tech-spec D-###,
   never in code
+- Duplication: reuse-before-write (Method 3), and the third copy of any
+  logic is a bug — extract to the shared home inside the task's scope,
+  or report the cross-scope extraction as a deviation
 - No log or debug statement survives your work (spec-mandated logging
   excepted) — you don't get a second pass to clean it up
 - NEVER commit, push, or tick task.md yourself — you return a digest and a

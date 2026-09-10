@@ -3,6 +3,23 @@
 Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
+## 2.3.0 — 2026-09-10
+
+Comment and duplication guardrails gain mechanical teeth. The prose
+rules already bound implementers (short constraint-only comments, no
+decision-log or history narrative — that's tech-spec D-### territory,
+docstrings state the contract not the change); new this release:
+`audit.py clean` flags **essay comments** (a single comment line ≥120
+chars, URLs exempt) and **comment walls** (≥8 consecutive comment
+lines, markdown excluded — '#' there is a heading) as adjudication
+suspects alongside debug prints/markers/commented-out calls, so the
+closing audit's hygiene gate sees what was prose-only. The implementer
+brief gains the extract-on-third-use rule (the third copy of any logic
+is a bug — extract to the shared home inside the task's scope; crossing
+scope is a deviation to report) with a matching guardrail, and
+SKILL.md's anti-patterns list names the whole class (#13). Seven new
+CommentSuspectTests (38 total in the audit suite).
+
 ## 2.2.0 — 2026-09-10
 
 Two small fixes paired in one commit. (1) `audit.py archived` — the

@@ -13,7 +13,7 @@ description: >-
   task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>.
 metadata:
   owner: platform-core
-  version: "2.2.0"
+  version: "2.3.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -859,3 +859,9 @@ rules — that file, not this one, is what sub-agents actually read.
     *Before-audit once, when the execution frontier first becomes eligible;
     closing audit once after every task in task.md is implemented —
     nowhere else.*
+13. Essay or decision-log comments, and copy-pasted logic, landing in the
+    diff → comments state constraints, decisions live in tech-spec
+    D-###s, and shared logic lives in one shared home. *Implementer brief
+    § Method 2–3; `audit.py clean` flags essay comments (≥120-char
+    comment lines) and comment walls (≥8 consecutive) as adjudication
+    suspects.*

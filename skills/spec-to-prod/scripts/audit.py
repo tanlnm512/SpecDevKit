@@ -18,11 +18,13 @@ scope  — every file changed vs base (default: working tree vs HEAD, plus
          tech-spec.md and plan.md. A changed path no doc mentions (full
          path, then bare filename) is listed as UNMENTIONED — a scope-creep
          candidate for the orchestrator to adjudicate, not a verdict:
-         renames and generated files can be legitimate.
 clean  — the diff's ADDED lines (plus untracked files' contents) scanned
-         for debug prints, TODO/FIXME/XXX/HACK markers, and commented-out
-         calls. Heuristic suspects for the orchestrator to adjudicate;
-         spec-mandated logging is a ruling, not a finding.
+         for debug prints, TODO/FIXME/XXX/HACK markers, commented-out
+         calls, essay comments (one comment line ≥120 chars), and
+         comment walls (≥8 consecutive comment lines) — comments should
+         state constraints, not narrate. Heuristic suspects for the
+         orchestrator to adjudicate; spec-mandated logging is a ruling,
+         not a finding.
 proofs — each TC's Pass condition in test.md is classified auto (a
          runnable command) or manual (human observation) and listed; with
          --run, auto commands execute (cwd = repo root, 120s timeout
@@ -94,6 +96,11 @@ MARKER = re.compile(r"\b(TODO|FIXME|XXX|HACK)\b")
 # A commented function call — `# foo(...)` / `// foo(...)` — the classic
 # commented-out-code shape. Coarse on purpose; WARN-tier only.
 COMMENTED_CALL = re.compile(r"^\s*(#|//)\s*[A-Za-z_][\w.]*\(")
+# A comment line in any line-comment dialect (#, //, --). Markdown is
+# excluded downstream: '#' there is a heading, not a comment.
+COMMENT_LINE = re.compile(r"^\s*(#(?!!)|//|--)")
+ESSAY_MIN = 120  # chars: a comment paragraph, not a constraint
+WALL_MIN = 8     # consecutive comment lines: prose where a doc belongs
 
 RUNNERS = {
     "npm", "pnpm", "yarn", "pytest", "python", "python3", "cargo", "go",
@@ -214,15 +221,29 @@ def mode_scope(spec_dir: Path, repo: Path, base: str | None) -> int:
 def clean_findings(repo: Path, base: str | None) -> list[tuple[str, int | None, str, str]]:
     """(path, lineno, kind, text) suspects — shared by clean and dod."""
     finds: list[tuple[str, int | None, str, str]] = []
+    wall_run = 0
+    wall_path: str | None = None
     for path, ln, text in added_lines(repo, base):
         if path.startswith("specs/"):
             continue  # the docs are the intent, not the debris surface
+        is_comment = (not path.endswith(".md")) and bool(COMMENT_LINE.match(text))
+        if is_comment:
+            if wall_path != path:
+                wall_path, wall_run = path, 0
+            wall_run += 1
+            if wall_run == WALL_MIN:
+                finds.append((path, ln, "comment wall",
+                              f"{WALL_MIN}+ consecutive comment lines"))
+        else:
+            wall_run = 0
         if DEBUG.search(text):
             finds.append((path, ln, "debug print", text.strip()))
         elif MARKER.search(text):
             finds.append((path, ln, "marker", text.strip()))
         elif COMMENTED_CALL.match(text):
             finds.append((path, ln, "commented-out call", text.strip()))
+        elif is_comment and len(text.strip()) >= ESSAY_MIN and "http" not in text:
+            finds.append((path, ln, "essay comment", text.strip()[:100]))
     return finds
 
 
@@ -236,7 +257,8 @@ def mode_clean(repo: Path, base: str | None) -> int:
         loc = f"{path}:{ln}" if ln else path
         print(f"  SUSPECT  {loc}  [{kind}]  {text[:100]}")
     if not finds:
-        print("  no debug prints, markers, or commented-out calls in added lines")
+        print("  no debug prints, markers, commented-out calls, essay "
+              "comments, or comment walls in added lines")
     return 0
 
 
