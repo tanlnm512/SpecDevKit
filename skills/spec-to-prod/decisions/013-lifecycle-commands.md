@@ -29,3 +29,9 @@ a prior recorded deploy of ours (per-root provenance ledger — foreign
 file → loud failure, manual resolution; a ledger, not git history,
 because deploys routinely run from uncommitted trees),
 rename-or-namespace decision recorded here.
+
+**Amended (2.5.1)**: the allowlist moved out of tools/sync.sh into the
+skill itself — `commands/extra.txt`, one line of space-separated bare
+names. Same governance (an explicit, reviewed file inside the skill
+dir; never a glob; the per-root provenance ledger and foreign-file
+refusal unchanged), minus a repo-shared tool that knew a skill's name.

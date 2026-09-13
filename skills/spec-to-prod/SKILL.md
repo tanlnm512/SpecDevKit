@@ -13,7 +13,7 @@ description: >-
   task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>.
 metadata:
   owner: platform-core
-  version: "2.4.0"
+  version: "2.5.1"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -604,7 +604,8 @@ recorded ruling.
     dozen entries has gutted as-built records (entry bodies and
     checkpoint comments must survive byte-identical into the archive).
 12. **Rulings report**: surface every D-### (decision, why, cost if
-    wrong) in the closing summary and get the user's ack — DoD gate 10. A
+    wrong) in the closing summary and get the user's ack — DoD gates 9–10 (rulings
+    surfaced, then sign-off). A
     ruling that dies inside tech-spec.md was a decision made in secret.
     The report also names every irreversible or state-mutating change the
     plan shipped (migrations, backfills, anything hard to roll back) so

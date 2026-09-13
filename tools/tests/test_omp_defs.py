@@ -46,6 +46,29 @@ def fm_lines(name: str) -> list:
     return FRONTMATTER.match(text).group(1).splitlines()
 
 
+def scratch_skill(root: Path, name: str, roles: list) -> Path:
+    """A synthetic skill whose role set changes between test phases."""
+    agents = root / name / "agents"
+    if agents.is_dir():
+        for f in agents.glob("*.md"):
+            f.unlink()
+    else:
+        agents.mkdir(parents=True)
+    for r in roles:
+        (agents / f"{r}.md").write_text(
+            f"---\nname: {r}\ndescription: does a thing\n"
+            "model: inherit\ntools: Read, Grep\n---\nbody\n")
+    return root / name
+
+
+def run_gen(skill: Path, out: Path) -> str:
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        omp_defs.main(["--skill-dir", str(skill), "--out", str(out)])
+    return buf.getvalue()
+
+
 class ModelTierTests(unittest.TestCase):
     def test_tiered_set_matches_decisions_012_and_016(self):
         """decisions/012 + 016: a real `model:` value other than
@@ -129,21 +152,79 @@ class ToolMappingTests(unittest.TestCase):
             self.assertEqual(tools_line, f"tools: {want}", name)
 
 
-class RolePrefixTests(unittest.TestCase):
-    """Stale-cleanup scoping — a shared --out dir (e.g.
-    ~/.omp/agent/agents) can hold other skills' own generated files;
-    cleanup must never guess ownership of a file this run didn't
-    produce."""
+class ManifestProvenanceTests(unittest.TestCase):
+    """Stale-cleanup ownership proof: deletion requires the skill's own
+    manifest naming the file with a matching content hash. A foreign
+    file in a shared --out dir — even one named like this skill's roles
+    — is never touched (the old basename-prefix heuristic is gone, and
+    with it the ability to delete a hand-made `spec-foo.md`)."""
 
-    def test_spec_to_code_roles_share_the_spec_prefix(self):
-        names = [f"{n}.md" for n in _ROLE_FIELDS]
-        self.assertEqual(omp_defs.role_prefix(names), "spec-")
+    def test_first_run_removes_nothing_and_establishes_manifest(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            skill = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            output = run_gen(skill, out)
+            self.assertIn("stale-check skipped", output)
+            self.assertTrue(
+                omp_defs.manifest_path_for(out, skill).is_file())
+            manifest = omp_defs.manifest_path_for(out, skill).read_text()
+            self.assertIn(" alpha.md", manifest)
+            self.assertIn(" beta.md", manifest)
 
-    def test_no_shared_separator_prefix_returns_empty(self):
-        self.assertEqual(omp_defs.role_prefix(["alpha.md", "beta.md"]), "")
+    def test_role_dropped_from_source_is_removed(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            skill = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            run_gen(skill, out)
+            scratch_skill(Path(td), "skill-a", ["alpha"])  # beta is gone
+            output = run_gen(skill, out)
+            self.assertIn("omp def removed beta.md", output)
+            self.assertFalse((out / "beta.md").exists())
+            self.assertTrue((out / "alpha.md").exists())
 
-    def test_empty_input_returns_empty(self):
-        self.assertEqual(omp_defs.role_prefix([]), "")
+    def test_foreign_same_prefix_file_never_touched(self):
+        """A hand-made file sharing the skill's role prefix is foreign —
+        the manifest is the only ownership record that counts."""
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            skill = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            run_gen(skill, out)
+            foreign = out / "beta-clone.md"
+            foreign.write_text("---\nname: beta-clone\n---\nhand-made\n")
+            output = run_gen(skill, out)
+            self.assertTrue(foreign.exists())
+            self.assertNotIn("removed beta-clone.md", output)
+
+    def test_edited_generated_file_is_kept_with_loud_note(self):
+        """A generated file edited since generation is no longer provably
+        ours — kept, loudly, not silently deleted."""
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            skill = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            run_gen(skill, out)
+            (out / "beta.md").write_text(
+                "---\nname: beta\n---\nhand-edited body\n")
+            scratch_skill(Path(td), "skill-a", ["alpha"])
+            output = run_gen(skill, out)
+            self.assertIn("omp def kept beta.md", output)
+            self.assertIn("changed since generation", output)
+            self.assertTrue((out / "beta.md").exists())
+
+    def test_manifest_is_per_skill_in_shared_out(self):
+        """Two skills sharing one --out dir each track their own files;
+        one skill's stale cleanup never deletes the other's roles."""
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            a = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            b = scratch_skill(Path(td), "skill-b", ["gamma"])
+            run_gen(a, out)
+            run_gen(b, out)
+            scratch_skill(Path(td), "skill-a", ["alpha"])
+            run_gen(a, out)
+            self.assertFalse((out / "beta.md").exists())
+            self.assertTrue((out / "gamma.md").exists())
+            self.assertTrue(
+                omp_defs.manifest_path_for(out, b).is_file())
 
 
 class GenerationEndToEndTests(unittest.TestCase):
@@ -158,13 +239,16 @@ class GenerationEndToEndTests(unittest.TestCase):
                              if not p.name.startswith("_"))
             self.assertEqual(produced, source)
 
-    def test_stale_output_role_is_removed(self):
+    def test_foreign_stale_file_is_never_removed_on_first_run(self):
+        """First run into a root with no manifest: nothing is deletable,
+        so even a role-named file this tool never made survives."""
         with tempfile.TemporaryDirectory() as td:
             out = Path(td)
             stale = out / "spec-nonexistent-role.md"
             stale.write_text("---\nname: spec-nonexistent-role\n---\nbody\n")
-            omp_defs.main(["--skill-dir", str(SPEC_TO_CODE), "--out", str(out)])
-            self.assertFalse(stale.exists())
+            output = run_gen(SPEC_TO_CODE, out)
+            self.assertTrue(stale.exists())
+            self.assertIn("stale-check skipped", output)
 
     def test_stale_removal_never_touches_another_skills_files(self):
         """A shared --out dir may already hold a second skill's own

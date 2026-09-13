@@ -54,7 +54,10 @@ frontier agent node under `spawns/wave-<N>/<role>.md`, plus optionally
 one repair payload for a named non-frontier agent node via
 `--emit-spawns --repair <node>` — the single-agent repair-run
 instrument; a stale-baseline `--repair survey` carries the DELTA
-RE-SURVEY block). check.py never reads any
+RE-SURVEY block), and `specs/context/` (the surveyor, on a repo's first
+spec — a per-project living view of code structure and stack:
+`structure.md` + `tech.md`; it lives outside any one spec dir and is
+refreshed by a later converge re-survey). check.py never reads any
 of these; none is status; `spawns/` in
 particular is derived-only and regenerate-only — safe to delete at any
 time, byte-identically rebuilt by the next `--emit-spawns` from doc state

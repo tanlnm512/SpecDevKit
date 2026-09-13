@@ -20,6 +20,9 @@ gates and prints the scorecard; the closing audit owns the verdict.
 
 Gates 2, 3, 8, 9, 10 are judgment/human gates — the scorecard lists
 them MANUAL; satisfying and recording them is the orchestrator's job.
+Gate 8 applies only when a reviewer was spawned (SKILL.md: the reviewer
+is optional for small specs); without one, the report records
+`reviewer not spawned — N/A` rather than a vacuous green.
 
 ## Rules that keep the metrics honest
 

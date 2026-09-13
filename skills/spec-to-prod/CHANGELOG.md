@@ -4,6 +4,40 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.5.1 — 2026-09-13
+
+Install-safety and consistency hardening from the validation pass
+(architecture / functionality / value audit). (1) Foreign-file refusal
+now covers every install root, not just command roots: skills trees
+(`~/.agents|/.claude|/.zcode/skills/<name>/`, `~/.omp/agent/skills/<name>/`)
+and `~/.claude/agents/` keep a per-root provenance ledger
+(`.spec-dev-kit-deployed`, hidden, inert) — a destination file absent
+from the master is auto-deleted only when its hash sits in the ledger
+(a stale deploy of ours) and refused loudly otherwise; `rsync
+--delete`'s silent sweep is gone, and `verify_tree` excludes the
+ledger. (2) omp-defs.py's stale cleanup proves ownership before
+deleting: each skill writes a `.spec-dev-kit-omp-defs-<skill>` manifest
+of the files it generated; only manifest-listed, hash-matching files
+are removed — a foreign `spec-*.md` in the shared `~/.omp/agent/agents`
+root is never touched, and a generated file edited since generation is
+kept with a loud note (the prefix heuristic is gone). (3) The bare-name
+allowlist moved out of sync.sh into the skill itself —
+`commands/extra.txt`, one line of space-separated bare names —
+replacing the hardcoded `extra_commands()` case table (ADR-013
+amended). (4) New `tools/tests/test_manifests.py` locks VERSION ==
+SKILL.md frontmatter version == plugin.json version per skill, and
+`tools/tests/test_sync.py` runs sync.sh end-to-end on a repo copy with
+a fake HOME (fresh install, idempotence, foreign refusal, stale-own
+cleanup, absent-harness skips, version-drift detection) — the
+installer's safety behavior is no longer untested. (5) Doc fixes from
+the validation: `specs/context/` added to docset.md's derived inventory
+(it is a surveyor output), ADR-010's node arithmetic corrected (16 = 6
+single-agent nodes + execute + 9 orchestrator/mechanical), SKILL.md's
+closing step cites DoD gates 9–10 (rulings + sign-off), and dod.md gate
+8 records `reviewer not spawned — N/A` for specs that skipped the
+reviewer.
+
+
 ## 2.5.0 — 2026-09-13
 
 Session-hardening from a 12-task, 13-decision execution (indexing-exact-rate).

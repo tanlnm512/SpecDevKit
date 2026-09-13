@@ -41,15 +41,20 @@ Frontmatter derivation (from each source file's own Claude-style block):
 Stale-output scoping: regenerating one skill's defs must never delete
 another skill's files in a shared --out dir (~/.omp/agent/agents is
 exactly that — omp agent unpacks and hand-added defs share it with every
-synced skill). Stale removal is scoped to the common basename prefix
-across this skill's own source role files (e.g. "spec-" for spec-to-prod);
-if the source roles share no such prefix, stale removal is skipped
-(never guess at ownership of a file this run didn't produce).
+synced skill). Ownership is proven, not guessed: each skill writes a
+per-skill manifest (.spec-dev-kit-omp-defs-<skill>, name -> sha256 of
+what it generated) next to its output, and stale removal deletes only
+manifest-listed files whose content still matches that hash. A foreign
+file — even one named like this skill's roles — is never touched, and a
+generated file edited since generation is kept with a loud note. A
+missing manifest (first run into a fresh root) skips stale removal
+entirely: nothing is deleted that this tool cannot prove it made.
 
 Run by tools/sync.sh; standalone:
 
     tools/omp-defs.py --skill-dir skills/spec-to-prod --out ~/.omp/agent/agents
 """
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -119,21 +124,32 @@ def render(name: str, desc: str, fields: dict, body: str) -> str:
     return "---\n" + "\n".join(fm) + "\n---\n" + body
 
 
-def role_prefix(basenames: list) -> str:
-    """Common basename prefix across a skill's own role files — the
-    namespace stale-cleanup is scoped to. Returns "" (skip cleanup) if
-    the roles share no separator-terminated prefix, rather than risk
-    deleting a file this run cannot prove it owns."""
-    if not basenames:
-        return ""
-    prefix = basenames[0]
-    for b in basenames[1:]:
-        n = 0
-        while n < len(prefix) and n < len(b) and prefix[n] == b[n]:
-            n += 1
-        prefix = prefix[:n]
-    cut = max(prefix.rfind("-"), prefix.rfind("_"))
-    return prefix[:cut + 1] if cut > 0 else ""
+def file_sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def manifest_path_for(out: Path, skill_dir: Path) -> Path:
+    """The skill's own provenance manifest inside the shared --out dir —
+    a hidden, non-.md file, inert to every harness that scans the dir."""
+    return out / f".spec-dev-kit-omp-defs-{skill_dir.name}"
+
+
+def read_manifest(path: Path) -> dict:
+    """name -> sha of what a previous run generated here, or {} when no
+    manifest exists (first run — stale removal is skipped, never guessed)."""
+    if not path.is_file():
+        return {}
+    recorded = {}
+    for line in path.read_text().splitlines():
+        sha, _, name = line.partition(" ")
+        if sha and name:
+            recorded[name] = sha
+    return recorded
+
+
+def write_manifest(path: Path, out: Path, names: set) -> None:
+    lines = sorted(f"{file_sha(out / n)} {n}" for n in names)
+    path.write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
 def main(argv=None) -> int:
@@ -157,15 +173,23 @@ def main(argv=None) -> int:
         (out / source.name).write_text(render(name, desc, fields, body))
         keep.add(source.name)
         print(f"omp def {name}")
-    prefix = role_prefix([p.name for p in sources])
-    if prefix:
-        for stale in sorted(out.glob(f"{prefix}*.md")):
-            if stale.name not in keep:
-                stale.unlink()
-                print(f"omp def removed {stale.name}")
-    elif sources:
-        print(f"omp def stale-check skipped — {agents} role files share no "
-              f"common prefix to scope it by")
+    mpath = manifest_path_for(out, skill_dir)
+    prev = read_manifest(mpath)
+    for name in sorted(prev.keys() - keep):
+        stale = out / name
+        if not stale.is_file():
+            continue
+        if file_sha(stale) != prev[name]:
+            print(f"omp def kept {name} — changed since generation; "
+                  f"remove manually if stale")
+            continue
+        stale.unlink()
+        print(f"omp def removed {name}")
+    if not prev and keep:
+        print(f"omp def stale-check skipped — no provenance manifest in "
+              f"{out} (first run establishes it; delete renamed roles' "
+              f"old files manually this once)")
+    write_manifest(mpath, out, keep)
     return 0
 
 

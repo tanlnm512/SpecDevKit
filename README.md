@@ -179,8 +179,8 @@ that copies out:
   `agy plugin install` copies the repo wholesale, so the personas ship
   in-tree; sync.sh regenerates and verifies them every run.
 - **Commands** — a skill's `commands/<name>.md` router (only if it
-  ships one) plus each skill's allowlisted bare names via
-  `extra_commands()` (ADR-013 — the six lifecycle wrappers for
+  ships one) plus each skill's bare names opted into via its own
+  `commands/extra.txt` (ADR-013 — the six lifecycle wrappers for
   spec-to-prod) → `~/.agents/commands/`, `~/.claude/commands/`,
   `~/.zcode/commands/` (omp needs none — `/skill:<name>`
   auto-registers); a foreign file at a destination is refused, not
@@ -287,10 +287,10 @@ walking `skills/*/`, never by a hardcoded name:
    (`/<name> <verb> …`) if the skill benefits from one — lives inside
    the skill dir so it stays a self-contained plugin root.
    Bare-named lifecycle-style wrappers (`/spec`, `/plan`, …) are an
-   explicit per-skill opt-in — the `extra_commands()` allowlist in
-   `tools/sync.sh` (ADR-013) — because generic names land flat in
-   shared global command roots; the skill-named router needs no
-   allowlist entry.
+   explicit per-skill opt-in — a `commands/extra.txt` file in the
+   skill (one line of space-separated bare names; ADR-013) — because
+   generic names land flat in shared global command roots; the
+   skill-named router needs no entry.
 4. `skills/<name>/tests/` — expected for anything with its own scripts;
    each skill owns and runs its own suite
    (`skills/spec-to-prod/tests/run.sh` is the existing example). Changes

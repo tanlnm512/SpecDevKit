@@ -11,13 +11,13 @@
 #                                 — omp sessions load this copy)
 #   skills/<name>/commands/<name>.md -> ~/.agents/commands/,
 #                              ~/.claude/commands/, ~/.zcode/commands/
-#                              — plus any allowlisted bare names from
-#                              extra_commands() below (generic names in
-#                              shared roots are an explicit per-skill
-#                              opt-in, never a glob; a foreign file at
-#                              a destination is refused, not clobbered;
-#                              omp needs none — /skill:<name>
-#                              auto-registers)
+#                              — plus the bare names the skill opts into
+#                              via its own commands/extra.txt (generic
+#                              names in shared roots are an explicit
+#                              per-skill opt-in, never a glob; a foreign
+#                              file at any destination is refused, not
+#                              clobbered; omp needs none —
+#                              /skill:<name> auto-registers)
 #   skills/<name>/agents/*.md -> ~/.claude/agents/ (as-is; the harness
 #                                 reads Claude-style frontmatter directly)
 #                              -> ~/.omp/agent/agents/ (regenerated with
@@ -80,15 +80,15 @@ OPENCODE_AGENTS_ROOT="$HOME/.config/opencode/agents"
 DROID_AGENTS_ROOT="$HOME/.factory/droids"
 
 # Bare-named commands a skill ships beyond its collision-proof
-# <name>.md router (bash 3.2-safe: a case, not an associative array).
-# Generic names (spec.md, plan.md, ...) land flat in shared global
-# command roots, so they are opt-in per skill here — never picked up by
-# a glob — and a second skill wanting the same bare name is a
-# rename-or-namespace decision (ADR-013).
+# <name>.md router: an explicit `commands/extra.txt` in the skill (one
+# line, space-separated bare names — a reviewed file inside the skill
+# dir, never a glob; ADR-013). Generic names (spec.md, plan.md, ...)
+# land flat in shared global command roots, so the opt-in lives with
+# the skill that pays for it, and a second skill wanting the same bare
+# name is a rename-or-namespace decision.
 extra_commands() {  # <skill-name> -> bare names on stdout
-  case "$1" in
-    spec-to-prod) echo "spec plan build test review ship" ;;  # lifecycle surface
-  esac
+  local f="$PKG_ROOT/skills/$1/commands/extra.txt"
+  if [ -f "$f" ]; then cat "$f"; fi
 }
 
 # Provenance ledger: every command root keeps the sha256 of each file
@@ -114,23 +114,70 @@ ledger_record() {  # <ledger-file> <command-name> <master-file>
   mv "$1.tmp" "$1"
 }
 
+sha() {  # <file> -> sha256 on stdout
+  shasum -a 256 < "$1" | cut -d' ' -f1
+}
+
+LEDGER_NAME=".spec-dev-kit-deployed"
+
+# Skills-tree provenance — the command roots' refuse-don't-clobber
+# rule, applied to a whole installed directory. A dest file the master
+# no longer ships is either stale-own (its hash sits in the tree's
+# ledger — a previous deploy of ours; deleted) or foreign (not in the
+# ledger; REFUSED loudly, the tree is left untouched). Returns 1 when
+# anything foreign was found.
+sweep_tree() {  # <master-dir> <dest-dir> <ledger>
+  local master="$1" dest="$2" ledger="$3" rel bad=0
+  [ -d "$dest" ] || return 0
+  while IFS= read -r rel; do
+    rel="${rel#./}"; [ -n "$rel" ] || continue
+    if [ -f "$master/$rel" ]; then continue; fi
+    if [ -f "$ledger" ] && awk -v h="$(sha "$dest/$rel")" -v n="$rel" \
+        '$1 == h && $2 == n {found = 1} END {exit found ? 0 : 1}' "$ledger"; then
+      rm "$dest/$rel"
+      echo "clean $dest/$rel (stale deploy)"
+    else
+      echo "REFUSE $dest/$rel — foreign file (not shipped by the skill, not a prior deploy); resolve manually"
+      bad=1
+    fi
+  done < <(cd "$dest" && find . -type f ! -name '.DS_Store' \
+      ! -path '*/__pycache__/*' ! -name "$LEDGER_NAME*")
+  return "$bad"
+}
+
+# Rebuild a tree's ledger from what is now installed — the deployed
+# tree itself is the truth, so this is a full rewrite, not a merge.
+record_tree() {  # <dest-dir>
+  local d="$1" tmp="$d/$LEDGER_NAME.tmp"
+  : > "$tmp"
+  while IFS= read -r rel; do
+    rel="${rel#./}"; [ -n "$rel" ] || continue
+    printf '%s %s\n' "$(sha "$d/$rel")" "$rel" >> "$tmp"
+  done < <(cd "$d" && find . -type f ! -name '.DS_Store' \
+      ! -path '*/__pycache__/*' ! -name "$LEDGER_NAME*" | sort)
+  mv "$tmp" "$d/$LEDGER_NAME"
+}
+
 SKILLS=()
 for d in "$PKG_ROOT"/skills/*/; do
   [ -f "${d}SKILL.md" ] || continue
   SKILLS+=("$(basename "$d")")
 done
 
-install_skill_tree() {  # <skill-dir> <dest-root>
-  mkdir -p "$2"
-  rsync -a --delete --exclude '.DS_Store' --exclude '__pycache__/' \
-    "$1/" "$2/$(basename "$1")/"
+install_skill_tree() {  # <skill-dir> <dest-root> — refuses on foreign files
+  local dest="$2/$(basename "$1")"
+  sweep_tree "$1" "$dest" "$dest/$LEDGER_NAME" || return 1
+  mkdir -p "$dest"
+  rsync -a --exclude '.DS_Store' --exclude '__pycache__/' \
+    --exclude "$LEDGER_NAME*" "$1/" "$dest/"
+  record_tree "$dest"
 }
 
 for name in "${SKILLS[@]}"; do
   skill_dir="$PKG_ROOT/skills/$name"
 
   for root in "${SKILLS_ROOTS[@]}"; do
-    install_skill_tree "$skill_dir" "$root"
+    install_skill_tree "$skill_dir" "$root" || fail=1
   done
 
   if [ -d "$skill_dir/commands" ]; then
@@ -157,10 +204,18 @@ for name in "${SKILLS[@]}"; do
 
   if [ -d "$skill_dir/agents" ]; then
     mkdir -p "$CLAUDE_AGENTS_ROOT"
+    agents_ledger="$CLAUDE_AGENTS_ROOT/$LEDGER_NAME"
     for f in "$skill_dir"/agents/*.md; do
       base="$(basename "$f")"
       [[ "$base" == _* ]] && continue
-      cp "$f" "$CLAUDE_AGENTS_ROOT/$base"
+      dest="$CLAUDE_AGENTS_ROOT/$base"
+      if [ -e "$dest" ] && ! cmp -s "$f" "$dest" \
+         && ! ledger_entry_matches "$agents_ledger" "$base" "$dest"; then
+        echo "REFUSE $dest — foreign file (differs from master, not a prior deploy); resolve manually"
+        fail=1; continue
+      fi
+      cp "$f" "$dest"
+      ledger_record "$agents_ledger" "$base" "$f"
     done
     mkdir -p "$OMP_AGENTS_ROOT"
     python3 "$PKG_ROOT/tools/omp-defs.py" --skill-dir "$skill_dir" --out "$OMP_AGENTS_ROOT"
@@ -194,8 +249,8 @@ done
 
 verify_tree() {  # <master> <copy> <label>
   local master="$1" copy="$2" label="$3" m c
-  m="$(cd "$master" && find . -type f ! -name .DS_Store ! -path '*/__pycache__/*' -exec shasum -a 256 {} + | sort -k2)"
-  c="$(cd "$copy" && find . -type f ! -name .DS_Store ! -path '*/__pycache__/*' -exec shasum -a 256 {} + | sort -k2)"
+  m="$(cd "$master" && find . -type f ! -name .DS_Store ! -path '*/__pycache__/*' ! -name '.spec-dev-kit-deployed*' -exec shasum -a 256 {} + | sort -k2)"
+  c="$(cd "$copy" && find . -type f ! -name .DS_Store ! -path '*/__pycache__/*' ! -name '.spec-dev-kit-deployed*' -exec shasum -a 256 {} + | sort -k2)"
   if [[ "$m" == "$c" ]]; then
     echo "OK  $label — identical ($(printf '%s\n' "$m" | wc -l | tr -d ' ') files)"
   else

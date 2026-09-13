@@ -15,10 +15,11 @@ actually invalidates.
 **Decision**: scheduling is a dynamic state graph over the doc set, and
 the stage ladder is demoted to one non-normative orientation note (the
 "typical topological order" a fresh spec's waves usually land in). The
-graph: sixteen nodes — the eight role agents plus orchestrator/mechanical
-nodes (spec, clarify, research-gate, verify, before-audit, approve,
-execute, closing-audit, tick-commit, archive) — each with one mechanical
-done-signal read from doc state alone. A node is *ready* exactly when all
+graph: sixteen nodes — six single-agent nodes (research, survey,
+plan, tech, qa, tasks), the execute node's implementer waves, and nine
+orchestrator/mechanical nodes (spec, clarify, research-gate, verify,
+before-audit, approve, closing-audit, tick-commit, archive) — each with
+one mechanical done-signal read from doc state alone. A node is *ready* exactly when all
 of its inputs are done; the **frontier** is every ready-not-done node;
 execution is: run the ready frontier as one wave, recompute, repeat.
 Conditional and loop edges are first-class, not exceptions: the researcher
