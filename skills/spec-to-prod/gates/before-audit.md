@@ -26,6 +26,13 @@ either, so the auto-trigger pauses it the same way.
    implementing" command plus the project's test command, both green
    before any task spawns. Any failure the closing audit finds later is
    then attributable to this plan's implementation, not pre-existing rot.
+   A red baseline that PRE-DATES the plan (pre-existing failures on the
+   base commit, e.g. environment-dependent tests) is not this plan's rot
+   either: fix it as a separate baseline-repair commit before execute
+   (test-only, its own conventional message, recorded in the Before-audit
+   line), or park each failure with a D-### naming it known-red. Never
+   start execute on an unexplained red baseline — every later failure
+   becomes unattributable.
 3. **Clean tree** — `git status --porcelain` shows nothing uncommitted.
    In a non-git repo this gate degrades to an explicit
    `SKIPPED (not a git repo)` note — a skipped note, never a silent pass.

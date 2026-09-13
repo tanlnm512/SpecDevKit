@@ -69,7 +69,10 @@ are all-or-nothing — there is no path scoping)**:
    pastes them; a live run proved agents correct the orchestrator's own
    mistakes when tests are in the prompt) — for your own use while
    implementing; the orchestrator's closing audit re-runs them across the
-   whole plan regardless
+   whole plan regardless. Run the acceptance set AFTER your final file
+   write — the digest must describe the final tree, not an intermediate
+   one; a digest that predates your last edit misleads the orchestrator's
+   verification
 5. On a fix round (2+): the prior `specs/<name>/notes/T###.md`, if any, and
    the failure evidence that triggered this round — verbatim, not summarized
 

@@ -4,6 +4,33 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.5.0 — 2026-09-13
+
+Session-hardening from a 12-task, 13-decision execution (indexing-exact-rate).
+(1) New `scripts/tick.py`: the closing tick is mechanical — ticks `- [ ] T###`
+to `- [x]`, inserts one `done <date> — <proof>` line, strips the
+`(in-progress)` claim, and defers burndown arithmetic to `check.py
+--fix-burndown`; validates atomically (unknown/duplicate/re-tick refused,
+nothing written) and re-parses to prove only the intended state changed.
+Hand-editing a dozen entries gutted an as-built record this session (entry
+bodies and checkpoint comments must survive byte-identical into the archive).
+SKILL.md step 11 now points here. (2) Verdicts carry evidence: check.py's
+placeholder/vague WARNs and graph.py's unfilled-template reasons print
+`token@line` (fenced-block content scanned — the recurring hiding spot);
+the D-label WARN names the expected Context/Decision/Consequences shape.
+(3) audit.py proofs reports TIMEOUT as its own verdict with a remediation
+hint instead of a bare FAIL, and `clean` tolerates an ignored spec-dir
+positional. (4) Brief rules: tech must sweep the test tree for
+default-flip assertion shapes (flag / exact-count / exact-traffic /
+behavior) — "kwarg-less call sites stay green" under-enumerated three
+times this session; qa bounds every auto TC well under the proofs 120s cap;
+implementers run acceptance after the final file write. (5) SKILL.md: the
+research-gate skip marker is now given byte-exact (a prefixed form reads
+as "ran"); Execution step 5 states the D-### label contract, the
+literal-path rule, and the superseded-number sibling-grep; before-audit
+gate 2 names the pre-existing-red-baseline path (baseline-repair commit
+or D-### known-red — never start execute on unexplained red).
+
 ## 2.4.0 — 2026-09-13
 
 Cost work, two halves. (1) D-016 extends the cheap tier to the two

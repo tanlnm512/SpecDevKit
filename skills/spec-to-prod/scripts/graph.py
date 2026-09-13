@@ -222,10 +222,24 @@ def is_unfilled(text: str) -> bool:
     bar (unfilled-placeholder shapes, HTML comments and code spans excluded,
     plus the templates' `YYYY-MM-DD` date glue). An unfilled template must
     never read as an authored, done file."""
-    if "YYYY-MM-DD" in text:
-        return True
-    stripped = HTML_COMMENT.sub("", CODE_SPAN.sub("", text))
-    return bool(PLACEHOLDER.search(stripped))
+    return bool(unfilled_hits(text))
+
+
+def unfilled_hits(text: str, cap: int = 5) -> str:
+    """The evidence behind is_unfilled: `token@line` entries for every
+    placeholder-shaped token (or literal YYYY-MM-DD) outside code spans and
+    HTML comments. Fenced-block content IS scanned — matches hiding there
+    are the recurring false-'unfilled' failure. Empty string = filled."""
+    hits: list[str] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        s = HTML_COMMENT.sub(" ", CODE_SPAN.sub(" ", line))
+        if "YYYY-MM-DD" in s:
+            hits.append(f"YYYY-MM-DD@{lineno}")
+        for m in PLACEHOLDER.finditer(s):
+            hits.append(f"{m.group(0)}@{lineno}")
+    if len(hits) <= cap:
+        return ", ".join(hits)
+    return ", ".join(hits[:cap]) + f"… (+{len(hits) - cap} more)"
 
 
 def doc_filled(text: str | None) -> bool:
@@ -978,7 +992,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     elif is_unfilled(spec_text):
         nodes["spec"] = {"state": BLOCKED, "reason":
                          "spec.md is still the unfilled template — fill it "
-                         "with the user"}
+                         f"with the user (residue: {unfilled_hits(spec_text) or 'none'})"}
     elif markers:
         nodes["spec"] = {"state": BLOCKED, "reason":
                          f"{markers} open NEEDS CLARIFICATION marker(s) in "
@@ -1044,7 +1058,8 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     elif not filled["survey.md"]:
         nodes["survey"] = {"state": READY, "reason":
                            "survey.md is still the unfilled template — the "
-                           "surveyor rewrites it from the spec's FR list"}
+                           "surveyor rewrites it from the spec's FR list "
+                           f"(residue: {unfilled_hits(docs['survey.md']) or 'none'})"}
     else:
         rc = run_check(spec_dir, repo_override, ["--survey-only"])
         if rc == 0:
@@ -1077,7 +1092,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
         elif not filled[filename]:
             nodes[node] = {"state": READY, "reason":
                            f"{filename} is still the unfilled template — "
-                           "rewrite it"}
+                           f"rewrite it (residue: {unfilled_hits(docs[filename]) or 'none'})"}
         else:
             nodes[node] = {"state": DONE,
                            "reason": f"{filename} present and filled"}

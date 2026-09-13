@@ -722,7 +722,7 @@ def main(argv: list[str] | None = None) -> int:
             if f"**{label}**" not in blk
         ]
         if missing:
-            warns.append(f"{d}: missing {'/'.join(missing)} label(s) — stub decision?")
+            warns.append(f"{d}: missing {'/'.join(missing)} label(s) — stub decision? (every D-### opens with - **Context** / **Decision** / **Consequences** labels, and names literal file paths when it touches files)")
     for tc in sorted(tcs):
         if not re.search(r"FR-\d{3}", tc_blocks.get(tc, "")):
             fails.append(f"traceability: {tc} traces to no FR")
@@ -863,19 +863,22 @@ def main(argv: list[str] | None = None) -> int:
     # pattern): real content like `<schema>_staging` lives inside
     # backticks and must not be flagged.
     for f in CONTRACT_FILES:
-        n = 0
-        v = 0
-        for line in texts[f].splitlines():
+        phit: list[str] = []
+        vhit: list[str] = []
+        for lineno, line in enumerate(texts[f].splitlines(), start=1):
             s = HTML_COMMENT.sub(" ", CODE_SPAN.sub(" ", line))
-            if PLACEHOLDER.search(s) or "YYYY-MM-DD" in s:
-                n += 1
+            m = PLACEHOLDER.search(s)
+            if m or "YYYY-MM-DD" in s:
+                tok = m.group(0) if m else "YYYY-MM-DD"
+                phit.append(f"{tok}@{lineno}")
             if VAGUE.search(s):
-                v += 1
-        if n:
-            warns.append(f"{f}: {n} line(s) with unfilled placeholder(s) (<name>…, YYYY-MM-DD)")
-        if v:
+                vhit.append(f"@{lineno}")
+        if phit:
+            detail = ", ".join(phit[:5]) + ("…" if len(phit) > 5 else "")
+            warns.append(f"{f}: {len(phit)} line(s) with unfilled placeholder(s) (<name>…, YYYY-MM-DD): {detail}")
+        if vhit:
             warns.append(
-                f"{f}: {v} vague plan phrase(s) (TBD, handle edge cases, as appropriate…)"
+                f"{f}: {len(vhit)} vague plan phrase(s) (TBD, handle edge cases, as appropriate…): {', '.join(vhit[:5])}{'…' if len(vhit) > 5 else ''}"
             )
 
     # 7. citation reality (heuristic): backtick spans in tech-spec.md that

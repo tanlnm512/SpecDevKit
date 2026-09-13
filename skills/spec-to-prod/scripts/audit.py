@@ -3,7 +3,7 @@
 SKILL.md's closing audit — scope diff, cleanliness sweep, TC proofs.
 
 Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
-       audit.py clean    [--repo <path>] [--base <rev>]
+       audit.py clean    [<spec-dir>] [--repo <path>] [--base <rev>]
        audit.py proofs   <spec-dir> [--repo <path>] [--run]
        audit.py dod      <spec-dir> [--repo <path>] [--base <rev>]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
@@ -11,7 +11,8 @@ Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py -h | --help        (prints this text, exit 0)
 
 (--repo defaults to the spec dir's grandparent: specs/<name>/ -> repo
-root; clean and archived, which take no spec dir, default to .)
+root; clean, whose optional spec-dir positional is accepted and ignored,
+defaults to ., as does archived, which takes no positional)
 
 scope  — every file changed vs base (default: working tree vs HEAD, plus
          untracked files) is grep'd against the spec dir's task.md,
@@ -303,7 +304,7 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool) -> dict:
         cmds = re.findall(r"`([^`]+)`", chunk)
         cmd = cmds[0].strip() if cmds else ""
         (auto if cmd and looks_runnable(cmd) else manual).append((tc, cmd or "(observation only)"))
-    data = {"auto": auto, "manual": manual, "ok": {}, "errors": [], "failed": 0}
+    data = {"auto": auto, "manual": manual, "ok": {}, "errors": [], "failed": 0, "timeouts": set()}
     if not run:
         return data
     for tc, cmd in auto:
@@ -315,7 +316,10 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool) -> dict:
             ok = r.returncode == 0
             summary = (r.stdout.strip().splitlines() or [""])[-1]
         except subprocess.TimeoutExpired:
-            ok, summary = False, "(timeout after 120s)"
+            ok, summary = False, ("(timeout after 120s — runtime cap, not a "
+                                  "correctness verdict: bound the corpus or "
+                                  "record a D-### standing verify)")
+            data["timeouts"].add(tc)
         except OSError as e:
             data["errors"].append((tc, cmd, str(e)))
             data["failed"] += 1
@@ -341,7 +345,8 @@ def mode_proofs(spec_dir: Path, repo: Path, run: bool) -> int:
     for tc, cmd in auto:
         if tc in d["ok"]:
             ok, summary = d["ok"][tc]
-            print(f"  {'PASS' if ok else 'FAIL'}  {tc}  {cmd}  ->  {summary}")
+            verdict = "TIMEOUT" if (not ok and tc in d["timeouts"]) else ("PASS" if ok else "FAIL")
+            print(f"  {verdict:<7}  {tc}  {cmd}  ->  {summary}")
         else:
             print(f"  ERROR   {tc}  {cmd}  ({errs[tc]})")
     return 1 if d["failed"] else 0
@@ -543,7 +548,13 @@ def parse_args(argv: list[str]):
     if mode in ("scope", "proofs", "dod", "converge") and len(rest) != 1:
         print(__doc__)
         return None
-    if mode in ("clean", "archived") and rest:
+    if mode == "archived" and rest:
+        print(__doc__)
+        return None
+    if mode == "clean" and len(rest) > 1:
+        # One optional spec-dir positional is accepted and ignored — the
+        # other audit subcommands all take it, and uniform invocation
+        # should not be a usage error.
         print(__doc__)
         return None
     return mode, (rest[0] if rest else None), repo, base, run

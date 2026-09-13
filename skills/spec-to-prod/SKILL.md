@@ -133,8 +133,11 @@ choices:
   researcher joins the analysis wave alongside the surveyor.
 - **Zero real open questions** (the approach is already obvious — most
   bugfixes, most single-known-pattern internal changes): resolve as
-  **skip**: write `research.md: not applicable — no open questions at
-  Stage 0` in place of the template yourself, so every frontier
+   **skip**: write research.md containing the line `not applicable — no
+   open questions at Stage 0` — exactly that bare line (the detector
+   matches the stripped line byte-exact, em dash included; a prefixed
+   `research.md:` form reads as real content and the gate resolves "run")
+   — in place of the template yourself, so every frontier
   computation can tell "skipped on purpose" apart from "forgotten." The
   analysis wave becomes a solo surveyor spawn.
 
@@ -532,7 +535,14 @@ task.md has:
    D-### to tech-spec.md immediately (don't wait for the closing audit) —
    append only, never rewrite an existing decision, and never touch
    test.md. A digest that claims a TC is wrong is a signal to re-brief qa
-   afterward, not license to edit test.md now.
+   afterward, not license to edit test.md now. Every D-### opens with
+   `- **Context**: / **Decision**: / **Consequences**:` labels (check.py
+   warns on any other shape) and, WHERE it touches files, names them by
+   literal path — the scope gate greps paths, not descriptions. WHERE a
+   D-### supersedes a number or target other docs quote (targets in
+   plan.md, thresholds in test.md), grep the sibling docs for the old
+   value and reconcile in the same pass — wording drift there is exactly
+   what the reviewer exists to catch, and cheaper to prevent.
 6. Move to the next batch the same way — no ticks, no commits, no audit at
    a phase boundary — until every task in task.md, across every phase,
    has been implemented.
@@ -588,7 +598,11 @@ recorded ruling.
     <spec-dir>` prints the scorecard) → tick every task `- [x]` with its
     done-note (proof command), recompute burndown, **one commit for the
     entire plan's implementation** (code + docs together, `check.py
-    --fix-burndown` for the arithmetic).
+    --fix-burndown` for the arithmetic). Use `scripts/tick.py <spec-dir>
+    --note 'T### :: <proof>'` per task — it applies the ticks, inserts
+    the done-lines, and fixes the burndown mechanically; hand-editing a
+    dozen entries has gutted as-built records (entry bodies and
+    checkpoint comments must survive byte-identical into the archive).
 12. **Rulings report**: surface every D-### (decision, why, cost if
     wrong) in the closing summary and get the user's ack — DoD gate 10. A
     ruling that dies inside tech-spec.md was a decision made in secret.
