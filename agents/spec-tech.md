@@ -49,7 +49,15 @@ tool is what makes it true rather than merely stated.
    the repo has one (impact analysis, call-graph, caller lookup) to map the
    blast radius of the symbols the spec touches. Record it in § Impact
    analysis: what breaks, who depends on it, precise+fuzzy resolution
-   caveat for common names.
+   caveat for common names. WHERE any decision flips a default (flag,
+   keyword, return shape), the impact table MUST also sweep the test tree
+   for that API and classify the assertions it finds: flag pins (assert
+   the old default), exact-count pins (assert row/call counts the flip
+   changes), exact-traffic pins (assert what gets sent/called, in count or
+   content), and behavior pins (unaffected). Enumerate every test in the
+   first three classes by file and name — "kwarg-less call sites stay
+   green" is not a sweep; count- and traffic-shape pins break on flips
+   the flag list never sees.
 3. Choose the solution against the research options; write rejected
    alternatives with one-line whys (each alternative must trace to a
    research.md finding or a survey constraint — not taste).

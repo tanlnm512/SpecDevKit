@@ -77,6 +77,15 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
   **Traces to**: FR-001` — naming an FR-###. check.py FAILs a TC whose
   section never mentions an FR-### and WARNs stories no TC mentions;
   standing regression guards trace to their FR too.
+- **Every auto TC's pass-condition command must finish in well under two
+  minutes** — the closing audit's proofs runner caps each TC at 120 s and
+  reports TIMEOUT as a failure. Size the corpus to the contract, not the
+  production tree: a bounded workspace (seconds) pins the same observable
+  as an at-scale run (minutes). WHERE the real contract only shows at
+  scale, keep the bounded TC for the audit and name the at-scale command
+  as the standing verify in the TC's Then or the tech-spec — the runtime
+  cap is a harness fact, and a TC that can only ever TIME OUT is a
+  false red.
 - **unittest `-k` selection words are case-sensitive and match method
   names**: `-k baseline` selects zero tests when the class is
   `BaselineArithmeticTests` (unittest exits 5). In pass conditions prefer
