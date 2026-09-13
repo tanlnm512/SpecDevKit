@@ -13,7 +13,7 @@ description: >-
   task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>.
 metadata:
   owner: platform-core
-  version: "2.3.0"
+  version: "2.4.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -172,6 +172,12 @@ never a silent false result). Modes:
   research), 2 = plan ∥ tech ∥ qa, 3 = tasks, 4+ = execute batches.
   `spawns/` is a derived, regenerate-only artifact dir — safe to delete,
   never read by check.py, never status.
+- **`--repair NODE`** — with `--emit-spawns`: also emit one agent node's
+  payload when it is not in the frontier — the single-agent repair-run
+  instrument (§ Run modes' table). `--repair survey` on a stale baseline
+  carries the `DELTA RE-SURVEY` block (§ **Converge**): the converge
+  re-survey merged, not rebuilt. Never part of `--run` — a repair run is
+  orchestrator-driven by definition.
 - **`--run`** — the auto-trigger loop: compute the frontier; **pause with
   `AWAITING HUMAN: <node>: <what is needed>`** at every judgment node;
   run the mechanical verify node (check.py) directly; emit payloads for
@@ -295,6 +301,13 @@ instantiation of that generic prose, not a new set of rules.
   role, so § Independent spawns' "no peer-to-peer messaging" holds
   structurally under omp, the same shape as the reviewer's read-only
   guarantee.
+- **Role tiering rides the generated defs.** Four of the eight roles run
+  omp's `@smol` cheap tier — surveyor, researcher, task-breaker,
+  implementer (D-012 + D-016) — derived mechanically from each brief's
+  own `model:` frontmatter by `tools/omp-defs.py`; reviewer, planner,
+  tech, and qa inherit the session model. The implementer's cheap tier
+  is what its fix-round ladder's "capability tier up" (rounds 4–5)
+  escalates *from*: the step-3 fallback spawn on a default-model agent.
 - **Recompute the frontier in-process, not one subprocess per call.**
   `graph.py`/`check.py`/`audit.py` (over `specstate.py`) are plain
   stdlib-only modules — `check.py`/`audit.py`'s `main(argv=None)` accepts
@@ -445,7 +458,20 @@ that node's agent (same brief, same payload rules — plus: the current docs are
 
 **Converge** — the mechanical answer to "the codebase drifted past the
 spec after merge/rebase." Re-run the surveyor in place (single-agent
-repair run, above) against current HEAD, then run `scripts/audit.py
+repair run, above) against current HEAD — **delta-scoped**: emit the
+payload with `scripts/graph.py <spec-dir> --emit-spawns --repair survey`
+and it carries a `DELTA RE-SURVEY` block (the code files git says
+changed since the survey's baseline commit — the specs tree excluded,
+since a docs-only commit can't invalidate a code citation; a citation in
+an unchanged file
+cannot have moved), so the surveyor merges into the existing survey.md
+instead of rebuilding — re-grepping only items whose evidence cites a
+changed file, keeping untouched items byte-identical, refreshing the
+Baseline header — instead of paying a second full survey. (First
+surveys, fresh baselines, and non-git repos get the plain full-survey
+payload; a git that cannot scope the delta degrades to an explicit
+"re-survey in full" line, never a silent empty delta.) Then run
+`scripts/audit.py
 converge <spec-dir> --repo <path>` (`--repo` defaults to the spec dir's
 grandparent) — it diffs the freshly-written
 survey.md against its last committed version and prints each item id
@@ -579,12 +605,14 @@ mid-execution, or a closing-audit failure traced to one task): capped at
 5 per task. Rounds 1–3 re-brief the **same** implementer with the failure
 evidence verbatim — it still holds the task's context (on harnesses that
 cannot resume an agent, spawn fresh carrying the task entry, its last
-digest, and the findings). Rounds 4–5 go to a **fresh** implementer, a
-capability tier up where the harness allows model choice — a loop that
-survives three re-briefs usually means the implementer cannot see its own
-problem. Round 3 failing is also the signal to suspect the plan, not the
-implementer: re-brief tech for that area's approach before spending
-rounds 4–5. At the cap, adjudicate — the finding is wrong (park it with a
+digest, and the findings). Rounds 4–5 go to a **fresh** implementer one
+capability tier up: the `spec-implementer` def itself runs the cheap
+model tier (D-016), so the tier-up is the § Spawn mechanics step 3
+fallback — the same brief body + shared protocol spawned on a generic
+default-model agent — a loop that survives three re-briefs usually means
+the implementer cannot see its own problem. Round 3 failing is also the
+signal to suspect the plan, not the implementer: re-brief tech for that
+area's approach before spending rounds 4–5. At the cap, adjudicate — the finding is wrong (park it with a
 D-### ruling), real but isolated (defer it with a D-###), or load-bearing
 (the tech-spec is wrong: re-brief tech, then re-plan the affected tasks).
 Between rounds, re-verify scoped — that task's acceptance commands and
@@ -750,8 +778,9 @@ never from memory — by computing the frontier:
    still yours to make — a `not applicable` research.md means the gate
    was deliberately resolved skip (solo analysis wave), not unfinished.
 4. A survey-staleness warning means the evidence baseline moved — re-run
-   surveyor before trusting any status, then diff old vs new with
-   `audit.py converge <spec-dir> --repo <path>` (§ Run modes'
+   surveyor before trusting any status (delta-scoped: `--emit-spawns
+   --repair survey` emits the DELTA RE-SURVEY payload), then diff old vs
+   new with `audit.py converge <spec-dir> --repo <path>` (§ Run modes'
    **Converge**) rather than trusting the overwrite silently.
 5. An interrupted implementation leaves `(in-progress)` tasks with code
    already on disk but **unticked and uncommitted** — this mode has no

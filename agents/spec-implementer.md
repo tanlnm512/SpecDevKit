@@ -8,7 +8,7 @@ description: >-
   Writes code and tests only — never any file under specs/ — and never commits: it returns a
   digest and a suggested commit line for the orchestrator. Spawn only from the spec-to-prod
   orchestrator, one task per spawn.
-model: inherit
+model: sonnet
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill
 disallowedTools:
   - Agent

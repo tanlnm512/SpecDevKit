@@ -30,12 +30,12 @@ Frontmatter derivation (from each source file's own Claude-style block):
   the source brief's own signal that this role is a deliberate
   cost-downgrade from the flagship default — ported to omp's built-in
   `@smol` role alias (models.md "Role aliases and settings"), the one
-  documented cheap/fast tier every install gets with zero config. This
-  is a direct port of decisions/012 made data-driven: it reproduces that
-  decision's exact output (only spec-surveyor/spec-researcher tiered)
-  because those are the only two source briefs whose `model:` isn't
-  `inherit` — a new skill's own tiering choices carry over the same way,
-  with no edit to this file. `@`-prefixed values must be quoted in YAML.
+  documented cheap/fast tier every install gets with zero config.
+  D-012 made this data-driven and D-016 extended the tiered set: the
+  four source briefs whose `model:` isn't `inherit` are spec-surveyor,
+  spec-researcher, spec-task-breaker, and spec-implementer — a new
+  skill's own tiering choices carry over the same way, with no edit to
+  this file. `@`-prefixed values must be quoted in YAML.
 - effort: `effort: low` -> `thinking-level: low`; absent -> omitted.
 
 Stale-output scoping: regenerating one skill's defs must never delete

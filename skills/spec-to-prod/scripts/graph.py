@@ -30,15 +30,20 @@ Modes:
   --explain NODE why that node is in its state right now — the same reason the
                  JSON carries, plus the node's ready/done conditions; for
                  execute, the per-task frontier.
-  --emit-spawns  write one self-contained spawn payload per frontier agent
-                 node to specs/<name>/spawns/wave-<N>/<role>.md (or
+  --emit-spawns  write one self-contained spawn payload per frontier
+                 agent node to specs/<name>/spawns/wave-<N>/<role>.md (or
                  --wave-dir): frontmatter-stripped brief body byte-verbatim +
                  `_shared-protocol.md` verbatim (the reviewer is the exempt
                  role) + the input payload filled from doc state (spec dir,
                  FR list, task entry verbatim + TC acceptance commands,
                  research questions) + the resolved skill_dir. spawns/ is
                  derived and regenerate-only: safe to delete, never read by
-                 check.py, never status.
+                 check.py, never status. --repair NODE additionally emits
+                 one agent node's payload even when it is not in the
+                 frontier — the single-agent repair-run instrument; the
+                 surveyor's repair payload carries a DELTA RE-SURVEY block
+                 (files changed since the survey's stale baseline) so a
+                 converge re-survey merges instead of rebuilding.
   --run          the auto-trigger loop: compute the frontier; pause
                  `AWAITING HUMAN: <node>` at every judgment node (clarify,
                  an undetermined research-gate, before-audit, approve, the
@@ -98,6 +103,11 @@ DOC_FILES = ["spec.md", "survey.md", "research.md", "plan.md",
 # Fix-round cap: `(fix n/5)` — the cap lives in the task.md annotation, so a
 # task at cap is surfaced for adjudication, never auto-retried past it.
 FIX_CAP = 5
+
+# Payload cap for the DELTA RE-SURVEY file list: a mass refactor's delta
+# is the whole repo — the payload says so instead of listing thousands of
+# paths the surveyor would re-read one grep at a time anyway.
+DELTA_FILE_CAP = 200
 
 # Lifecycle words that mean the approval gate is behind us (approve's done
 # condition is "Status: approved (or later)").
@@ -472,6 +482,75 @@ def _indent(text: str, pad: str = "   ") -> str:
     return "\n".join(pad + ln for ln in text.splitlines())
 
 
+def _specs_rel_prefix(repo: Path, spec_dir: Path) -> str | None:
+    """`specs/`-rooted prefix for delta filtering: the repo-relative dir
+    holding spec_dir (`specs/`), with a trailing slash — or None when
+    spec_dir sits outside the repo (nothing to filter)."""
+    try:
+        rel = spec_dir.parent.resolve().relative_to(repo.resolve())
+    except ValueError:
+        return None
+    rel = str(rel)
+    if rel in (".", ""):
+        return None
+    return rel + "/"
+
+
+def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
+                        spec_dir: Path) -> list[str]:
+    """The DELTA RE-SURVEY block for a stale survey baseline (the
+    converge loop's cost fix): the files git says changed since the
+    survey's baseline commit, so the surveyor MERGES into the existing
+    survey.md instead of rebuilding — a citation in an unchanged file
+    cannot have moved. The specs tree itself is excluded: a docs-only
+    commit (task ticks, survey.md's own refresh) can't invalidate a code
+    citation, and a delta that lists it would force the exact re-survey
+    this block exists to save. Fresh/absent baseline, or a git that
+    cannot scope the delta, yields either nothing or an explicit degrade
+    line — never a silent empty-delta verdict read as 'nothing to
+    re-check'."""
+    if not base or not specstate.git_available(repo):
+        return []
+    head = specstate.head_sha(repo)
+    if not head or base[1] == head:
+        return []
+    raw = specstate.diff_paths(repo, base[1], head)
+    if raw is None:
+        return [f"- delta: unavailable (git diff {base[1]}..{head} "
+                "failed) — re-survey in full and merge into the "
+                "existing survey.md yourself"]
+    specs_prefix = _specs_rel_prefix(repo, spec_dir)
+    paths = [p for p in raw
+             if not (specs_prefix and p.startswith(specs_prefix))]
+    if not paths:
+        return [f"- DELTA RE-SURVEY: baseline {base[1]} != HEAD {head} "
+                "but no code files changed "
+                + ("(the diff touches only the specs tree) "
+                   if raw else "(no files changed) ")
+                + "— refresh the survey's Baseline "
+                f"header to HEAD {head} and re-run the self-check; no "
+                "item needs re-grepping"]
+    shown = paths[:DELTA_FILE_CAP]
+    more = len(paths) - len(shown)
+    out = [
+        f"- DELTA RE-SURVEY: baseline {base[1]} != HEAD {head} — merge "
+        "into the existing survey.md, do NOT rebuild it:",
+        "  - re-grep ONLY items whose evidence cites a changed file "
+        "below (a citation in an unchanged file cannot have moved);",
+        "  - re-run the re-checked items' verify commands;",
+        "  - keep every untouched item byte-identical; refresh the "
+        f"Baseline header to HEAD {head};",
+        "  - the --survey-only self-check stays full-strength over the "
+        "merged file.",
+        f"  Files changed since the baseline ({len(paths)}):",
+    ]
+    out += [f"     {p}" for p in shown]
+    if more:
+        out.append(f"     … +{more} more (payload cap {DELTA_FILE_CAP}) "
+                   "— the delta is effectively the whole repo")
+    return out
+
+
 def input_payload_for(node: str, spec_dir: Path, repo: Path,
                       entry: specstate.TaskEntry | None) -> str:
     """The filled input payload (SKILL.md § Spawn mechanics step 3): the
@@ -495,9 +574,10 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             f"- repo root: {repo}",
             "- baseline: " + (f"{base[0]} @ {base[1]}" if base
                               else "none recorded yet (first survey)"),
-            "- The spec's proposed items (FR list, verbatim):",
-            *fr_lines,
         ]
+        lines += _survey_delta_lines(base, repo, spec_dir)
+        lines += ["- The spec's proposed items (FR list, verbatim):",
+                  *fr_lines]
         return "\n".join(lines)
 
     if node == "research":
@@ -648,13 +728,25 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
 
 
 def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
-                        wave_dir: Path | None) -> list[tuple[Path, str, str]]:
-    """Write the wave's payloads; returns (path, role, node) per file."""
+                        wave_dir: Path | None,
+                        repair: str | None = None
+                        ) -> list[tuple[Path, str, str]]:
+    """Write the wave's payloads; returns (path, role, node) per file.
+    `repair` names one agent node to emit even when it is not in the
+    frontier (--emit-spawns --repair NODE, the single-agent repair-run
+    instrument — e.g. a stale-survey converge re-survey, whose payload
+    carries the DELTA RE-SURVEY block); already-frontier nodes are not
+    duplicated."""
     wave = wave_number(state)
     target = Path(wave_dir) if wave_dir else (
         spec_dir / "spawns" / f"wave-{wave}")
     written: list[tuple[Path, str, str]] = []
-    for item in frontier_payloads(state, spec_dir, repo):
+    items = frontier_payloads(state, spec_dir, repo)
+    if repair and repair not in {i["node"] for i in items}:
+        role, brief = AGENT_BRIEFS[repair]
+        items.append({"node": repair, "role": role, "brief": brief,
+                      "filename": f"{role}.md", "entry": None})
+    for item in items:
         text = build_payload(item, spec_dir, repo, wave)
         if text is None:
             print(f"   payload: SKIPPED (brief not found: "
@@ -826,22 +918,31 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
 
 
 def emit_spawns(spec_dir: Path, repo_override: str | None,
-                wave_dir: str | None) -> int:
-    """--emit-spawns: write this wave's payloads and list them."""
+                wave_dir: str | None, repair: str | None = None) -> int:
+    """--emit-spawns: write this wave's payloads and list them. With
+    --repair NODE, the named agent node's payload is emitted even when
+    done/not in the frontier (single-agent repair run)."""
     state = compute_state(spec_dir, repo_override)
     items = frontier_payloads(state, spec_dir,
                               resolved_repo(spec_dir, repo_override))
-    if not items:
+    if not items and not repair:
         print("no agent payloads to emit — the frontier holds no agent "
               f"node (frontier: {', '.join(state['frontier']) or 'empty'})")
         return 0
     target = Path(wave_dir) if wave_dir else None
     written = write_wave_payloads(state, spec_dir,
                                   resolved_repo(spec_dir, repo_override),
-                                  target)
+                                  target, repair)
+    if repair:
+        note = (f" (repair: {repair} emitted for a single-agent run — "
+                "not a frontier node)"
+                if repair not in {i["node"] for i in items} else
+                f" (repair: {repair} already in the frontier)")
+    else:
+        note = ""
     print(f"emitted {len(written)} payload(s) for wave "
-          f"{wave_number(state)} — spawns/ is derived: delete freely, "
-          "check.py never reads it")
+          f"{wave_number(state)}{note} — spawns/ is derived: delete "
+          "freely, check.py never reads it")
     return 0
 
 
@@ -1154,7 +1255,8 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
             converge = f"fresh — survey baseline {base[1]} == HEAD {head}"
         else:
             converge = (f"stale — survey baseline {base[1]} != HEAD {head} — "
-                        "re-run the survey, then audit.py converge, and "
+                        "re-run the survey delta-scoped (--emit-spawns "
+                        "--repair survey), then audit.py converge, and "
                         "append tasks")
     elif not git_ok:
         converge = ("SKIPPED (not a git repo) — no HEAD to diff the survey "
@@ -1293,6 +1395,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="write one self-contained spawn payload per frontier "
                         "agent node under <spec-dir>/spawns/wave-<N>/"
                         "<role>.md (derived artifact; safe to delete)")
+    p.add_argument("--repair", metavar="NODE",
+                   help="with --emit-spawns: also emit this agent node's "
+                        "payload when it is not in the frontier — the "
+                        "single-agent repair-run instrument (a stale-"
+                        "survey converge re-survey: --repair survey "
+                        "emits a DELTA-scoped surveyor payload)")
     p.add_argument("--wave-dir", metavar="DIR",
                    help="with --emit-spawns or --run: write this wave's "
                         "payloads into DIR instead of "
@@ -1321,6 +1429,14 @@ def main(argv: list[str] | None = None) -> int:
         p.error("--runner/--dry-run/--max-waves require --run")
     if args.emit_spawns and args.run:
         p.error("--emit-spawns and --run are separate modes")
+    if args.repair and not args.emit_spawns:
+        p.error("--repair requires --emit-spawns (repair is a "
+                "single-agent emit, never part of --run)")
+    if args.repair is not None and (
+            args.repair not in AGENT_BRIEFS or args.repair == "execute"):
+        p.error(f"--repair: {args.repair!r} is not a repairable agent "
+                "node — valid: "
+                + ", ".join(n for n in AGENT_BRIEFS if n != "execute"))
     if args.max_waves is not None and args.max_waves < 1:
         p.error("--max-waves must be >= 1")
     if args.wave_dir and not (args.emit_spawns or args.run):
@@ -1335,12 +1451,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.emit_spawns:
-        return emit_spawns(spec_dir, args.repo, args.wave_dir)
+        return emit_spawns(spec_dir, args.repo, args.wave_dir, args.repair)
     if args.run:
         return run_loop(spec_dir, args.repo, args.runner or PRINT_RUNNER,
                         args.dry_run, args.max_waves, args.wave_dir)
 
     state = compute_state(spec_dir, args.repo)
+
     if args.explain is not None:
         print(render_explain(state, args.explain))
     elif args.state_json:

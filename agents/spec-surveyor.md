@@ -35,7 +35,10 @@ is authoritative.
 
 ## Input payload (orchestrator embeds)
 1. The spec's proposed items (FR list or raw goals, verbatim)
-2. The spec dir path; repo root; baseline version/commit
+2. The spec dir path; repo root; baseline version/commit — and, when the
+   payload carries a `DELTA RE-SURVEY` block, that block (the files git
+   says changed since the survey's baseline commit, plus the current
+   HEAD)
 
 ## Method
 1. For each item: grep/read (`rg`) the codebase for it. Prefer a
@@ -54,15 +57,26 @@ is authoritative.
    its area (`## area: <name>`) so a later spec touching one area reads
    only that section instead of the whole file — optional for a small repo,
    worth doing once `tech.md` stops fitting on one screen.
-3. Produce per item the exact survey shape (evidence / status / verify / gap)
+3. **Delta re-survey** (only when the payload carries a `DELTA
+   RE-SURVEY` block): the existing survey.md is your starting point,
+   not a blank template — merge, do not rebuild. Re-grep ONLY the items
+   whose evidence cites a changed file from the block (a citation in an
+   unchanged file cannot have moved), re-run those items' verify
+   commands, and re-paste their evidence verbatim; keep every untouched
+   item byte-identical; refresh the Baseline header to the block's HEAD
+   sha. A changed file that invalidates a load-bearing symbol in
+   Supporting evidence gets re-pasted the same way. The self-check below
+   stays full-strength over the merged file — it re-verifies every
+   citation, delta or not.
+4. Produce per item the exact survey shape (evidence / status / verify / gap)
    from the survey template — no prose, no recommendations.
-4. **Run every verify command** and record pass/fail. A cited test must exist
+5. **Run every verify command** and record pass/fail. A cited test must exist
    and pass; otherwise status is not DONE.
-5. Re-count any number a prior doc set claims (tables, indexes, file counts,
+6. Re-count any number a prior doc set claims (tables, indexes, file counts,
    consumer lists) — an old number is a claim, not evidence.
-6. Collect supporting evidence for the load-bearing symbols (machinery,
+7. Collect supporting evidence for the load-bearing symbols (machinery,
    couplings, consumer inventory) that tech will cite.
-7. **Self-check before you stop**: run
+8. **Self-check before you stop**: run
    `python3 <skill_dir>/scripts/check.py <spec-dir> --repo <repo-root> --survey-only`
    (works with only survey.md on disk — it does not need the other four
    contract files to exist yet). Every FAIL names a citation you wrote that

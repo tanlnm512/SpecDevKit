@@ -298,3 +298,24 @@ def head_sha(repo: Path | str) -> str | None:
     if r.returncode != 0:
         return None
     return r.stdout.strip().lower() or None
+
+
+def diff_paths(repo: Path | str, base: str, head: str) -> list[str] | None:
+    """Paths changed between two commits (`base..head`), sorted — the
+    delta scope for a stale-baseline re-survey (graph.py's DELTA
+    RE-SURVEY payload). None when git cannot answer (no repository,
+    unknown sha, git unavailable): callers degrade to a full re-survey,
+    never to an empty-delta verdict. Committed range only, matching the
+    converge staleness comparison (baseline sha vs HEAD); uncommitted
+    work is the audits' business (audit.py changed_paths), not the
+    survey's."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--name-only", base, head],
+            capture_output=True, text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return sorted({l.strip() for l in r.stdout.splitlines() if l.strip()})

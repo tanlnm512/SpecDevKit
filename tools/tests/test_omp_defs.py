@@ -47,20 +47,23 @@ def fm_lines(name: str) -> list:
 
 
 class ModelTierTests(unittest.TestCase):
-    def test_only_surveyor_and_researcher_are_tiered(self):
-        """decisions/012: a real `model:` value other than `inherit` in
-        the Claude-side frontmatter IS the tiering signal — read from
-        the shipped files, not a hand-maintained name list."""
+    def test_tiered_set_matches_decisions_012_and_016(self):
+        """decisions/012 + 016: a real `model:` value other than
+        `inherit` in the Claude-side frontmatter IS the tiering signal
+        — read from the shipped files, not a hand-maintained name list."""
         tiered = {n for n, f in _ROLE_FIELDS.items()
                   if f.get("model") and f["model"] != "inherit"}
-        self.assertEqual(tiered, {"spec-surveyor", "spec-researcher"})
+        self.assertEqual(tiered, {"spec-surveyor", "spec-researcher",
+                                  "spec-task-breaker",
+                                  "spec-implementer"})
 
-    def test_reviewer_and_implementer_never_tiered(self):
-        """Safety-critical roles: reviewer's adversarial judgment and
-        implementer's code correctness must not run cheaper without an
-        explicit, reviewed decision (decisions/012)."""
+    def test_reviewer_never_tiered(self):
+        """The one safety-critical role left above the cheap tier:
+        reviewer's adversarial judgment is its own deliverable with no
+        mechanical backstop — it must not run cheaper without an
+        explicit, reviewed decision (decisions/012; 016 lifted the
+        implementer half of this lock)."""
         self.assertEqual(_ROLE_FIELDS["spec-reviewer"]["model"], "inherit")
-        self.assertEqual(_ROLE_FIELDS["spec-implementer"]["model"], "inherit")
 
     def test_model_alias_is_quoted(self):
         """`@`-prefixed values are not valid unquoted YAML plain scalars
@@ -71,22 +74,28 @@ class ModelTierTests(unittest.TestCase):
         self.assertEqual(model_line, 'model: "@smol"')
 
     def test_non_tiered_roles_have_no_model_line(self):
-        for name in ("spec-implementer", "spec-reviewer", "spec-planner",
-                     "spec-tech", "spec-qa", "spec-task-breaker"):
+        for name in ("spec-reviewer", "spec-planner", "spec-tech",
+                     "spec-qa"):
             self.assertFalse(
                 any(l.startswith("model:") for l in fm_lines(name)), name)
 
     def test_thinking_level_unaffected_by_model_tier(self):
-        """spec-surveyor gets both; spec-researcher gets model only (its
-        Claude-side def has no `effort: low`); spec-task-breaker keeps
-        thinking-level without a model override (its Claude-side def
-        says `model: inherit`, `effort: low`)."""
+        """spec-surveyor and spec-task-breaker get both (cheap model +
+        low effort); spec-researcher gets model only (its Claude-side
+        def has no `effort: low`); spec-implementer gets the model
+        override with no thinking-level cap (D-016 tiers the model, not
+        the reasoning-depth setting it never had)."""
         self.assertIn("thinking-level: low", fm_lines("spec-surveyor"))
         self.assertFalse(any(l.startswith("thinking-level:")
                               for l in fm_lines("spec-researcher")))
         self.assertIn("thinking-level: low", fm_lines("spec-task-breaker"))
-        self.assertFalse(any(l.startswith("model:")
-                              for l in fm_lines("spec-task-breaker")))
+        self.assertTrue(any(l.startswith("model:")
+                            for l in fm_lines("spec-task-breaker")))
+        self.assertTrue(any(l.startswith("model:")
+                            for l in fm_lines("spec-implementer")))
+        self.assertFalse(any(l.startswith("thinking-level:")
+                              for l in fm_lines("spec-implementer")))
+
 
 
 class ToolMappingTests(unittest.TestCase):

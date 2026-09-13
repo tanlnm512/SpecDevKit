@@ -6,7 +6,7 @@ description: >-
   [P] by default with justified serial chains, statuses set only from survey.md evidence, and a
   burndown table whose arithmetic matches the checkboxes. Spawn only from the spec-to-prod
   orchestrator with its brief and payload. Writes task.md, nothing else.
-model: inherit
+model: sonnet
 effort: low
 tools: Read, Grep, Glob, Bash, Write, Edit
 disallowedTools:

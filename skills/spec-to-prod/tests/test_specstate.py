@@ -339,6 +339,52 @@ class GitHelperTests(unittest.TestCase):
                                         fake_git_run(stdout="  \n")):
             self.assertIsNone(specstate.head_sha(Path("/some/repo")))
 
+    def test_diff_paths_reads_sorted_unique_paths(self):
+        out = "repo/calc.py\nspecs/demo/survey.md\nrepo/calc.py\n"
+        with unittest.mock.patch.object(specstate.subprocess, "run",
+                                        fake_git_run(stdout=out)):
+            self.assertEqual(
+                specstate.diff_paths(Path("/some/repo"), "abc1234", "def5678"),
+                ["repo/calc.py", "specs/demo/survey.md"])
+
+    def test_diff_paths_none_on_git_failure(self):
+        """rc != 0 (unknown sha, not a repo) is None — callers degrade to
+        a full re-survey, never an empty-delta verdict."""
+        with unittest.mock.patch.object(specstate.subprocess, "run",
+                                        fake_git_run(returncode=128)):
+            self.assertIsNone(
+                specstate.diff_paths(Path("/some/repo"), "abc1234", "def5678"))
+
+    def test_diff_paths_real_repo_lists_changed_files(self):
+        """The sanctioned real-git probe: init, two commits, the changed
+        file (and only it) sits between the two shas."""
+        import os
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            env = dict(os.environ, GIT_AUTHOR_NAME="t",
+                       GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                       GIT_COMMITTER_EMAIL="t@t")
+
+            def g(*args):
+                return subprocess.run(
+                    ["git", "-C", td, *args], capture_output=True, text=True,
+                    env=env)
+
+            g("init", "-q")
+            (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+            g("add", "-A")
+            g("commit", "-qm", "base")
+            base = specstate.head_sha(repo)
+            (repo / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+            (repo / "new.py").write_text("x = 1\n")
+            g("add", "-A")
+            g("commit", "-qm", "drift")
+            head = specstate.head_sha(repo)
+            self.assertEqual(specstate.diff_paths(repo, base, head),
+                             ["calc.py", "new.py"])
+            self.assertEqual(specstate.diff_paths(repo, head, head), [])
+
+
     def test_real_workspace_probe_is_non_git(self):
         # The sanctioned rc-128 probe: a workspace that is genuinely
         # non-git. A temp dir outside any repo — the in-repo fixture can

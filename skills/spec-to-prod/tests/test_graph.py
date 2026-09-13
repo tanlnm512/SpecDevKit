@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parents[1]
@@ -1353,6 +1354,149 @@ class RunWaveDirTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class Exec011RepairDeltaTests(unittest.TestCase):
+    """EXEC-011: --repair emits one non-frontier agent node's payload
+    (the single-agent repair-run instrument), and a stale survey
+    baseline scopes that payload to a DELTA RE-SURVEY block — the files
+    git says changed since the baseline, so the converge re-survey
+    merges instead of rebuilding. Degradations stay loud: no git, a
+    fresh baseline, or a failing diff never reads as an empty delta."""
+
+    def payload_for(self, tmp: Path, git=True, head="def5678",
+                    diff=("repo/calc.py", "repo/test_calc.py")):
+        d = copy_fixture(tmp)
+        patches = [
+            unittest.mock.patch.object(graph.specstate, "git_available",
+                                       lambda repo: git),
+            unittest.mock.patch.object(graph.specstate, "head_sha",
+                                       lambda repo: head),
+            unittest.mock.patch.object(graph.specstate, "diff_paths",
+                                       lambda repo, b, h:
+                                       list(diff) if diff is not None else None),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return d, graph.input_payload_for(
+            "survey", d, tmp / "repo", None)
+
+    def test_stale_baseline_carries_delta_block(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011a-"))
+        try:
+            _d, payload = self.payload_for(tmp)
+            # copy_fixture's survey baseline is "mini-calc v1 @ 3fa9c21"
+            self.assertIn("baseline: mini-calc v1 @ 3fa9c21", payload)
+            self.assertIn("DELTA RE-SURVEY: baseline 3fa9c21 != HEAD "
+                          "def5678", payload)
+            self.assertIn("do NOT rebuild", payload)
+            self.assertIn("repo/calc.py", payload)
+            self.assertIn("repo/test_calc.py", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_fresh_baseline_has_no_delta_block(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011b-"))
+        try:
+            _d, payload = self.payload_for(tmp, head="3fa9c21")
+            self.assertNotIn("DELTA RE-SURVEY", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_no_git_has_no_delta_block(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011c-"))
+        try:
+            _d, payload = self.payload_for(tmp, git=False)
+            self.assertNotIn("DELTA RE-SURVEY", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_failing_diff_degrades_to_explicit_full_resurvey(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011d-"))
+        try:
+            _d, payload = self.payload_for(tmp, diff=None)
+            self.assertIn("delta: unavailable", payload)
+            self.assertIn("re-survey in full", payload)
+            self.assertNotIn("do NOT rebuild", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_empty_diff_says_refresh_the_stamp_only(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011e-"))
+        try:
+            _d, payload = self.payload_for(tmp, diff=())
+            self.assertIn("no files changed", payload)
+            self.assertIn("refresh", payload)
+            self.assertNotIn("do NOT rebuild", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_repair_emits_non_frontier_node_payload(self):
+        """wave2_fixture sits at wave 2 (plan ∥ tech ∥ qa; survey done) —
+        --repair survey adds the surveyor payload to that wave's dir and
+        says so; the non-git tmp gets the plain full-survey shape."""
+        tmp = Path(tempfile.mkdtemp(prefix="exec011f-"))
+        try:
+            d = wave2_fixture(tmp)
+            r = run_cli(d, "--emit-spawns", "--repair", "survey")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            wave = d / "spawns" / "wave-2"
+            self.assertEqual(sorted(p.name for p in wave.glob("*.md")),
+                             ["planner.md", "qa.md", "surveyor.md",
+                              "tech.md"])
+            payload = (wave / "surveyor.md").read_text(encoding="utf-8")
+            self.assertIn("baseline: mini-calc v1 @ 3fa9c21", payload)
+            self.assertNotIn("- DELTA RE-SURVEY:", payload)  # non-git tmp
+            self.assertIn("repair: survey emitted", r.stdout)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+    def test_docs_only_delta_excludes_the_specs_tree(self):
+        """A commit touching only specs/ (task ticks, survey.md's own
+        refresh) can't invalidate a code citation — the delta filters
+        the specs tree and reads 'no code files changed', never a
+        forced re-survey (the cost this block exists to save)."""
+        tmp = Path(tempfile.mkdtemp(prefix="exec011h-"))
+        try:
+            repo = tmp / "repo"
+            d = repo / "specs" / "demo"
+            d.mkdir(parents=True)
+            write(d / "survey.md",
+                  "# Survey: demo\n\n**Created**: 2026-09-13 | "
+                  "**Baseline**: v1 @ 3fa9c21\n")
+            for fn, f in (
+                ("git_available", lambda repo: True),
+                ("head_sha", lambda repo: "def5678"),
+                ("diff_paths", lambda repo, b, h: [
+                    "specs/CONSTITUTION.md", "specs/demo/survey.md",
+                    "specs/demo/task.md"]),
+            ):
+                p = unittest.mock.patch.object(graph.specstate, fn, f)
+                p.start()
+                self.addCleanup(p.stop)
+            payload = graph.input_payload_for("survey", d, repo, None)
+            self.assertIn("no code files changed", payload)
+            self.assertIn("only the specs tree", payload)
+            self.assertNotIn("do NOT rebuild", payload)
+            self.assertNotIn("specs/demo/task.md", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_repair_frontier_node_is_not_duplicated(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011g-"))
+        try:
+            d = spec_only(tmp)  # survey IS the frontier
+            r = run_cli(d, "--emit-spawns", "--repair", "survey")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(
+                sorted(p.name for p in (d / "spawns" / "wave-1")
+                       .glob("*.md")),
+                ["researcher.md", "surveyor.md"])
+            self.assertIn("already in the frontier", r.stdout)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class ExecutorCliValidationTests(unittest.TestCase):
     """Executor flags are bound to their mode: runner/dry-run/max-waves
     require --run; --emit-spawns and --run are separate modes; the wave
@@ -1386,6 +1530,22 @@ class ExecutorCliValidationTests(unittest.TestCase):
     def test_wave_dir_requires_emit_or_run(self):
         self.assertEqual(
             run_cli(self.spec_dir, "--wave-dir", "somewhere").returncode, 2)
+
+    def test_repair_requires_emit_spawns(self):
+        self.assertEqual(
+            run_cli(self.spec_dir, "--repair", "survey").returncode, 2)
+        self.assertEqual(
+            run_cli(self.spec_dir, "--repair", "survey", "--run").returncode,
+            2)
+
+    def test_repair_rejects_unknown_and_non_repairable_nodes(self):
+        self.assertEqual(
+            run_cli(self.spec_dir, "--emit-spawns", "--repair",
+                    "bogus").returncode, 2)
+        self.assertEqual(
+            run_cli(self.spec_dir, "--emit-spawns", "--repair",
+                    "execute").returncode, 2)
+
 
     def test_strip_frontmatter(self):
         raw = (SKILL / "agents" / "spec-reviewer.md").read_text(

@@ -3,6 +3,30 @@
 Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
+
+## 2.4.0 — 2026-09-13
+
+Cost work, two halves. (1) D-016 extends the cheap tier to the two
+volume roles: `spec-task-breaker` and `spec-implementer` briefs say
+`model: sonnet` (ported to omp's `@smol` by the existing data-driven
+omp-defs.py — no code change), leaving reviewer/planner/tech/qa on the
+session model. The implementer's fix-round ladder now escalates from
+the cheap tier: rounds 4–5's "capability tier up" is the Spawn-mechanics
+step-3 fallback — the same brief body on a generic default-model agent.
+The omp-defs lock test narrows to reviewer-only. (2) Converge re-surveys
+go delta-scoped: a stale survey baseline gets a `DELTA RE-SURVEY` block
+in its spawn payload (code files git says changed since the baseline
+commit — the specs tree excluded, so a docs-only commit reads "no code
+files changed" instead of forcing a re-survey; via new
+`specstate.diff_paths`, a citation in an unchanged file cannot
+have moved), the surveyor brief gains the merge-don't-rebuild method,
+and `graph.py --emit-spawns --repair <node>` emits one non-frontier
+agent node's payload — the single-agent repair-run instrument, so the
+converge re-survey's payload is mechanically buildable instead of
+hand-assembled. Degradations stay loud: git that can't scope the delta
+says "re-survey in full", never a silent empty delta. New EXEC-011
+suite (delta payload, repair emit, CLI validation) and DiffPathsTests.
+
 ## 2.3.0 — 2026-09-10
 
 Comment and duplication guardrails gain mechanical teeth. The prose

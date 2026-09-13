@@ -50,7 +50,11 @@ the 7-file set above): `checklist.md` (orchestrator, `check.py --checklist`
 `notes/T###.md` (implementer, fix round 2+ only, own task ID only — a
 scratch note carried into the next re-brief), and the `spawns/` directory
 (`graph.py --emit-spawns` / `--run` — one self-contained spawn payload per
-frontier agent node under `spawns/wave-<N>/<role>.md`). check.py never reads any
+frontier agent node under `spawns/wave-<N>/<role>.md`, plus optionally
+one repair payload for a named non-frontier agent node via
+`--emit-spawns --repair <node>` — the single-agent repair-run
+instrument; a stale-baseline `--repair survey` carries the DELTA
+RE-SURVEY block). check.py never reads any
 of these; none is status; `spawns/` in
 particular is derived-only and regenerate-only — safe to delete at any
 time, byte-identically rebuilt by the next `--emit-spawns` from doc state
