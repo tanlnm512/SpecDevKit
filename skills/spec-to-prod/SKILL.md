@@ -307,7 +307,14 @@ instantiation of that generic prose, not a new set of rules.
   own `model:` frontmatter by `tools/omp-defs.py`; reviewer, planner,
   tech, and qa inherit the session model. The implementer's cheap tier
   is what its fix-round ladder's "capability tier up" (rounds 4–5)
-  escalates *from*: the step-3 fallback spawn on a default-model agent.
+  escalates *from* — and the tier-up target is the **default tier**, not
+  "a generic agent": omp's `task` model role (what the `task` tool's
+  generic subagents resolve through) is itself commonly a fast-tier
+  alias — on the reference config it equals `@smol`, making a generic
+  spawn a lateral move, not an escalation. The omp-native tier-up is the
+  orchestrator working the re-brief inline (its session model is the
+  default tier), or an explicit default-tier spawn where the harness
+  allows per-spawn model choice.
 - **Recompute the frontier in-process, not one subprocess per call.**
   `graph.py`/`check.py`/`audit.py` (over `specstate.py`) are plain
   stdlib-only modules — `check.py`/`audit.py`'s `main(argv=None)` accepts
@@ -608,8 +615,10 @@ cannot resume an agent, spawn fresh carrying the task entry, its last
 digest, and the findings). Rounds 4–5 go to a **fresh** implementer one
 capability tier up: the `spec-implementer` def itself runs the cheap
 model tier (D-016), so the tier-up is the § Spawn mechanics step 3
-fallback — the same brief body + shared protocol spawned on a generic
-default-model agent — a loop that survives three re-briefs usually means
+fallback — the same brief body + shared protocol run at the **default
+model tier** (a generic default-model agent where one exists; see §
+Running under omp for why a generic subagent is not automatically one) —
+a loop that survives three re-briefs usually means
 the implementer cannot see its own problem. Round 3 failing is also the
 signal to suspect the plan, not the implementer: re-brief tech for that
 area's approach before spending rounds 4–5. At the cap, adjudicate — the finding is wrong (park it with a
