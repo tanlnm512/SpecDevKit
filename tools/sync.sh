@@ -18,6 +18,10 @@
 #                              file at any destination is refused, not
 #                              clobbered; omp needs none —
 #                              /skill:<name> auto-registers)
+#                              — ~/.factory/commands/ too, gated on
+#                              ~/.factory existing (Factory Droid's
+#                              own command root; never fabricated,
+#                              loud skip otherwise)
 #   skills/<name>/agents/*.md -> ~/.claude/agents/ (as-is; the harness
 #                                 reads Claude-style frontmatter directly)
 #                              -> ~/.omp/agent/agents/ (regenerated with
@@ -78,6 +82,7 @@ OMP_AGENTS_ROOT="$HOME/.omp/agent/agents"
 # config home exists (see the install loop).
 OPENCODE_AGENTS_ROOT="$HOME/.config/opencode/agents"
 DROID_AGENTS_ROOT="$HOME/.factory/droids"
+DROID_COMMANDS_ROOT="$HOME/.factory/commands"
 
 # Bare-named commands a skill ships beyond its collision-proof
 # <name>.md router: an explicit `commands/extra.txt` in the skill (one
@@ -173,6 +178,22 @@ install_skill_tree() {  # <skill-dir> <dest-root> — refuses on foreign files
   record_tree "$dest"
 }
 
+install_command() {  # <master-file> <base> <root> — ledger-guarded copy
+  local f="$1" base="$2" root="$3"
+  # Second statement, deliberately: in one `local a=$b c=$a` line every
+  # expansion happens BEFORE any assignment, so $root would read the
+  # caller's leftover global, not this function's parameter.
+  local dest="$root/$base.md" ledger="$root/$LEDGER_NAME"
+  mkdir -p "$root"
+  if [ -e "$dest" ] && ! cmp -s "$f" "$dest" \
+     && ! ledger_entry_matches "$ledger" "$base" "$dest"; then
+    echo "REFUSE $dest — foreign file (differs from master, not a prior deploy); resolve manually"
+    return 1
+  fi
+  cp "$f" "$dest"
+  ledger_record "$ledger" "$base" "$f"
+}
+
 for name in "${SKILLS[@]}"; do
   skill_dir="$PKG_ROOT/skills/$name"
 
@@ -188,18 +209,26 @@ for name in "${SKILLS[@]}"; do
         echo "MISSING $rel (allowlisted, absent)"; fail=1; continue
       fi
       for root in "${COMMANDS_ROOTS[@]}"; do
-        mkdir -p "$root"
-        dest="$root/$base.md"
-        ledger="$root/.spec-dev-kit-deployed"
-        if [ -e "$dest" ] && ! cmp -s "$f" "$dest" \
-           && ! ledger_entry_matches "$ledger" "$base" "$dest"; then
-          echo "REFUSE $dest — foreign file (differs from master, not a prior deploy); resolve manually"
-          fail=1; continue
-        fi
-        cp "$f" "$dest"
-        ledger_record "$ledger" "$base" "$f"
+        install_command "$f" "$base" "$root" || fail=1
       done
     done
+  fi
+
+  # Factory Droid's own command root — gated on the harness's config
+  # home existing, like the opencode/droid agent defs above: sync never
+  # fabricates a harness directory; installing the harness just needs
+  # one more sync run. Same provenance-ledger discipline, kept as a
+  # separate block so the shared roots' path is untouched (D-017).
+  if [ -d "$HOME/.factory" ]; then
+    for base in $name $(extra_commands "$name"); do
+      f="$skill_dir/commands/$base.md"
+      if [ ! -f "$f" ]; then
+        echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"; fail=1; continue
+      fi
+      install_command "$f" "$base" "$DROID_COMMANDS_ROOT" || fail=1
+    done
+  else
+    echo "skip  droid commands — ~/.factory absent (harness not installed)"
   fi
 
   if [ -d "$skill_dir/agents" ]; then
@@ -260,6 +289,14 @@ verify_tree() {  # <master> <copy> <label>
   fi
 }
 
+verify_command() {  # <master-file> <base> <root>
+  if cmp -s "$1" "$3/$2.md"; then
+    echo "OK  $3/$2.md"
+  else
+    echo "DRIFT $3/$2.md"; fail=1
+  fi
+}
+
 for name in "${SKILLS[@]}"; do
   skill_dir="$PKG_ROOT/skills/$name"
 
@@ -281,12 +318,11 @@ for name in "${SKILLS[@]}"; do
       f="$skill_dir/commands/$base.md"
       [ -f "$f" ] || { echo "MISSING $f (allowlisted)"; fail=1; continue; }
       for root in "${COMMANDS_ROOTS[@]}"; do
-        if cmp -s "$f" "$root/$base.md"; then
-          echo "OK  $root/$base.md"
-        else
-          echo "DRIFT $root/$base.md"; fail=1
-        fi
+        verify_command "$f" "$base" "$root"
       done
+      if [ -d "$HOME/.factory" ]; then
+        verify_command "$f" "$base" "$DROID_COMMANDS_ROOT"
+      fi
     done
   fi
 

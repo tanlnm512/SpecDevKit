@@ -13,7 +13,7 @@ description: >-
   task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>.
 metadata:
   owner: platform-core
-  version: "2.5.1"
+  version: "2.6.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -360,6 +360,16 @@ instantiation of that generic prose, not a new set of rules.
   (spawn one, try `write path=xd://lsp`) before trusting the claim
   again — anything less is "inherited numbers laundered as evidence"
   (anti-pattern 9) about tool capability instead of a count.
+
+## Running under Factory Droid (spec & mission modes)
+
+Droid-only adaptation, kept out of this playbook on purpose: Spec Mode
+is the authoring phase on paper (subagents clamp read-only), Mission
+Mode runs only from an orchestrator session (subagents cannot spawn
+subagents), and cost tiers ride the Task `complexity` argument. The
+mapping lives in `references/droid-modes.md`; the mission-planning
+skeleton is `references/mission-brief.md`. The graph, gates, and doc
+state are unchanged.
 
 ## Independent spawns (no cross-agent coordination)
 

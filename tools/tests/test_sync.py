@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ".spec-dev-kit-deployed"
 
 
-class SyncShTests(unittest.TestCase):
+class SyncShBase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="syncsh-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -38,6 +38,8 @@ class SyncShTests(unittest.TestCase):
     def skill_root(self, *parts):
         return self.home.joinpath(".claude", "skills", "spec-to-prod", *parts)
 
+
+class SyncShTests(SyncShBase):
     def test_fresh_install_is_clean_and_idempotent(self):
         r1 = self.run_sync()
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
@@ -102,6 +104,43 @@ class SyncShTests(unittest.TestCase):
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("DRIFT", r.stdout)
+
+
+class DroidCommandsTests(SyncShBase):
+    """Factory Droid's own command root (~/.factory/commands) — gated on
+    the harness home existing (never fabricated), same provenance-ledger
+    discipline as the other command roots, kept as a separate sync.sh
+    block (D-017)."""
+
+    def test_absent_factory_home_skips_loudly(self):
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("skip  droid commands", r.stdout)
+        self.assertFalse((self.home / ".factory" / "commands").exists())
+
+    def test_commands_install_when_factory_home_exists(self):
+        (self.home / ".factory").mkdir()
+        r1 = self.run_sync()
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        for base in ("spec", "plan", "build", "test", "review", "ship",
+                     "spec-to-prod"):
+            self.assertTrue(
+                (self.home / ".factory" / "commands" / f"{base}.md").is_file(),
+                base)
+        self.assertTrue(
+            (self.home / ".factory" / "commands" / LEDGER).is_file())
+        r2 = self.run_sync()
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+
+    def test_foreign_file_in_droid_commands_is_refused(self):
+        (self.home / ".factory").mkdir()
+        self.assertEqual(self.run_sync().returncode, 0)
+        dest = self.home / ".factory" / "commands" / "build.md"
+        dest.write_text("# a hand-written note, not the wrapper\n")
+        r = self.run_sync()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("REFUSE", r.stdout)
+        self.assertIn("hand-written note", dest.read_text())
 
 
 if __name__ == "__main__":

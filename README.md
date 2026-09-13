@@ -63,7 +63,7 @@ between.
 | omp | native root / marketplace | `~/.omp/agent/agents/` regenerated (omp dialect) | `/skill:spec-to-prod` |
 | zcode | plugin / sync | none — fallback spawn carries briefs in the payload | `/spec-to-prod` |
 | opencode | `~/.agents/skills/` (compatibility root it scans) | `~/.config/opencode/agents/` regenerated (permission map) | `skill` tool / `@spec-<role>` |
-| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | natural language / Task |
+| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | `/spec`…`/ship` via `~/.factory/commands` (gated); `references/droid-modes.md` for spec & mission modes |
 | Antigravity (agy) | this repo as a plugin | committed root `agents/` personas (byte-verbatim) | `agy plugin install` |
 
 ADR-015 records the model: one skill copy at `~/.agents/skills/` feeds
@@ -174,6 +174,10 @@ that copies out:
   `subagent_type` targets; `model: inherit` always — cost tiers ride
   the Task `complexity` argument, not the def). Absent homes are
   skipped loudly, never created.
+- **Droid commands** — where `~/.factory/` exists, the same sync run
+  installs the router and lifecycle wrappers to `~/.factory/commands/`
+  (gated on the harness home, never fabricated). Droid's spec-mode and
+  mission-mode mapping: `skills/spec-to-prod/references/droid-modes.md`.
 - **Antigravity personas** — the repo-root `agents/` dir is a
   committed, regenerate-only byte-verbatim copy of the skill's briefs:
   `agy plugin install` copies the repo wholesale, so the personas ship

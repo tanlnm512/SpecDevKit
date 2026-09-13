@@ -4,6 +4,34 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.6.0 — 2026-09-13
+
+Factory Droid spec-mode and mission-mode support, kept as a separate
+surface from every other harness (D-017). (1) `references/droid-modes.md`
+maps Droid's session modes onto the workflow graph: Spec Mode is the
+authoring phase on paper only (Spec Mode is hard read-only and spawned
+subagents clamp read-only — the spec.md draft and the researcher-gate
+decision ride in the ExitSpecMode plan; scaffold + writes start in
+Normal mode, and ExitSpecMode approval never writes `Status:
+approved`); Mission Mode runs only from the orchestrator session
+(subagents cannot spawn subagents, so mission workers can never run a
+wave); mission scrutiny/user-testing default to skipped for
+spec-to-prod features (the closing audit + DoD already govern); Task
+`complexity` carries the cost tier — light = surveyor/researcher/
+task-breaker/implementer, mirroring the briefs' `model:` frontmatter.
+(2) `references/mission-brief.md` is the mission-planning skeleton:
+features → specs, milestones → frontier bands, pause ledger, validation
+settings. SKILL.md carries only a pointer section. (3) sync.sh installs
+the router + `extra.txt` bare names to `~/.factory/commands` from a
+separate `~/.factory`-gated block with its own verify pass — the
+shared COMMANDS_ROOTS path is untouched; `/spec`…`/ship` now work as
+native Droid slash commands where the harness is installed. (4)
+test_sync.py gains DroidCommandsTests (absent-home skip, gated
+install, idempotence, foreign-file refusal); the commands install/verify
+logic is factored into `install_command`/`verify_command` used by both
+paths.
+
+
 ## 2.5.1 — 2026-09-13
 
 Install-safety and consistency hardening from the validation pass
