@@ -4,6 +4,25 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.6.1 — 2026-09-16
+
+Clarify-pass hard-stop on unanswered question rounds (D-018). A question
+round put to the user is a HUMAN gate: when the harness's question tool
+resolves without user answers — autonomous-run harnesses don't wait;
+ZCode returns "user did not provide answers" in under a second — the
+orchestrator prints the round in chat (❓ format verbatim) and ends the
+turn, never adopting the ➡️ recommendations or resolving the NEEDS
+CLARIFICATION markers itself. Open markers already hold the spec node
+(graph.py keeps the frontier at `clarify`), so the stop is resume-clean:
+the user's next message carries the answers. Execution mode's
+rulings-not-stalls gains an explicit scope clause — mid-implementation
+conflicts on an approved plan only, never a clarify/approve-gate
+fallback. Prose-only, no script changes; motivated by an observed ZCode
+run (cairn, agent-skills-output spec) where two FR rulings were
+self-answered from recommendations after the question call auto-resolved
+in 0.3s.
+
+
 ## 2.6.0 — 2026-09-13
 
 Factory Droid spec-mode and mission-mode support, kept as a separate

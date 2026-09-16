@@ -13,7 +13,7 @@ description: >-
   task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>.
 metadata:
   owner: platform-core
-  version: "2.6.0"
+  version: "2.6.1"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -577,7 +577,10 @@ costs if wrong), and keep the wave moving. Stop and ask only for: an
 irreversible or destructive operation; a security-sensitive action; a
 side effect outside the workspace (push, deploy, publish); or a plan
 broken enough that every path forward is a guess. Everything else is a
-recorded ruling.
+recorded ruling. This is an execution-mode rule: it governs
+mid-implementation conflicts on an *approved* plan — the clarify pass's
+question rounds and the approve gate are HUMAN gates that wait for an
+answer, non-answers included (§ Authoring the spec, D-018).
 
 ### Closing audit (once, after every task in task.md is implemented)
 7. **Scope diff**: `git diff --name-only` (the whole plan) ⊆ the union of
@@ -701,7 +704,26 @@ the before-audit and the closing audit, not inside an audit of its own.
    for anything substantial) instead of asking, and put only genuine
    judgment calls to the user. Don't block the round on a running check —
    only the questions downstream of it wait; ask the rest of the frontier
-   now. Each round's answers reshape the tree and push the frontier
+   now.
+
+   **A round put to the user is a HUMAN gate — an unanswered round is
+   not an answer.** Where the harness has an interactive question tool,
+   ask through it; but some modes resolve the call without ever waiting
+   (ZCode autonomous runs return "user did not provide answers" in under
+   a second), and an empty or skipped reply is the same thing. On any
+   non-answer, print the round in chat exactly as formatted above and
+   **end the turn there**: do not adopt the ➡️ recommendations, do not
+   resolve the NEEDS CLARIFICATION markers yourself, do not spawn
+   anything. Stopping is safe by construction — open markers keep the
+   spec node blocked and graph.py holds the frontier at `clarify`, so
+   the run resumes from doc state the moment the user's next message
+   carries the answers. The recommended answer exists to make answering
+   one glance cheap, not to make the round optional. Proceeding on
+   recorded defaults is Execution mode's mid-implementation rule
+   (§ Execution mode) and never applies here, at the approve gate, or at
+   the closing-audit rulings ack (D-018).
+
+   Each round's answers reshape the tree and push the frontier
    outward; recompute it and ask the next round. The pass ends when the
    frontier is empty — not at a fixed question count, though a tree that
    keeps sprouting new branches instead of closing is a signal to split
