@@ -10,10 +10,13 @@ description: >-
   spec", "refresh the tech spec", "rebuild the task list"), scaffold specs/ for a project, or
   execute an approved task.md through
   implementer agents. Recognise its specs on disk by tech-spec.md + survey.md and the singular
-  task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>.
+  task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>,
+  or run as a native dynamic workflow ("run the auth spec pipeline", "continue the
+  spec") on harnesses that have one — zcode and Claude Code ship the generated
+  /spec-run (§ Dynamic workflow runs).
 metadata:
   owner: platform-core
-  version: "2.6.1"
+  version: "2.7.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -370,6 +373,44 @@ subagents), and cost tiers ride the Task `complexity` argument. The
 mapping lives in `references/droid-modes.md`; the mission-planning
 skeleton is `references/mission-brief.md`. The graph, gates, and doc
 state are unchanged.
+
+## Dynamic workflow runs (zcode · claude code)
+
+Where the harness has a script-driven workflow runtime, the frontier
+loop has a native instantiation: the generated `spec-run` workflow
+(ADR-019) computes the ready wave from doc state, spawns it as
+subagents, recomputes, and stops `AWAITING HUMAN` at every judgment
+gate — the same loop, gates, and resume contract as this playbook; the
+workflow is `graph.py --run`'s runner seam made native, and it decides
+nothing the orchestrator wouldn't.
+
+- **Installed per harness** — `~/.zcode/workflows/spec-run.dwf.ts`
+  (zcode: run via the harness's workflow surface with
+  `{"spec": "<name>"}`) and `~/.claude/workflows/spec-run.js`
+  (claude code: `/spec-run` with the spec in args).
+  `tools/install-workflow.sh zcode|claude|all` installs one or both
+  (`--project` for `<repo>/.<harness>/workflows/`); `tools/sync.sh`
+  installs and verifies both where the harness home exists. Each
+  installed copy carries its root's own `skill_dir` baked in; a runtime
+  `skill_dir` arg overrides it.
+- **Sources** — `skills/spec-to-prod/workflows/` are committed
+  regenerate-only artifacts of `tools/workflow-defs.py` (its templates
+  are the single representation; `--check` catches hand-edits). Never
+  edit the generated files; edit the generator and regenerate.
+- **Run semantics** — state comes only from `graph.py --state-json`,
+  waves from `--emit-spawns` payloads (each subagent reads its payload
+  file and writes its artifact to disk); the run stops at a gate
+  (clarify · undetermined research-gate · before-audit · approve ·
+  closing-audit · tick-commit), on completion, on a held frontier, at
+  the wave cap (default 12), or on a no-change wave — answer the gate,
+  rerun, and the loop resumes from doc state. The zcode dialect
+  publishes a markdown run summary; the claude dialect logs the same
+  report.
+- **Limit** — per-role cost tiers do not ride into workflow runs (the
+  facades expose no per-spawn model knob); every spawned role runs the
+  session model, the same as the zcode fallback spawn. The authoring
+  half (spec node + clarify loop) stays with you and the user — a
+  workflow run on an unauthored spec reports `held` and names why.
 
 ## Independent spawns (no cross-agent coordination)
 

@@ -4,6 +4,38 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.7.0 — 2026-09-20
+
+Dynamic-workflow dialects: the frontier loop as generated, harness-native
+workflow scripts (D-019) — the third application of the D-015 dialect
+pattern (omp-defs → agent-defs → workflow-defs). `tools/workflow-defs.py`
+emits two committed regenerate-only artifacts under
+`skills/spec-to-prod/workflows/` — `spec-run.dwf.ts` (zcode dynamic
+workflows: typed agent().ask waves, literal phases, world.run invocations
+of graph.py, a published markdown run summary) and `spec-run.js` (Claude
+Code dynamic workflows: `export const meta` first statement,
+agent/pipeline/phase primitives, schema-validated digests, a single
+graph-probe agent as the shell seam — the script itself has no fs/shell
+there). Both are thin loops over the unchanged engine: state from
+`graph.py --state-json`, waves spawned from `--emit-spawns` payloads, and
+the exact find_pause gate set stopping the run AWAITING HUMAN (clarify ·
+undetermined research-gate · before-audit · approve · closing-audit ·
+tick-commit) — never auto-satisfied; a rerun resumes from doc state.
+Neither dialect implements a readiness rule. New `tools/install-workflow.sh
+zcode|claude|all` installs each dialect to its own root
+(`~/.zcode/workflows/` · `~/.claude/workflows/`, `--project` variants),
+baking the target root's own skill copy into the installed file (a runtime
+skill_dir arg overrides), under sync.sh's provenance-ledger refusal
+discipline, skipping loudly where a harness home is absent; `tools/sync.sh`
+installs and verifies both, gated per harness home. Tests:
+tools/tests/test_workflow_defs.py (generator determinism + --check,
+per-dialect structural invariants, cross-dialect gate parity, installer
+behavior under a fake HOME: install, foreign refusal, drift detection,
+absent-home skip, sync integration). Docs: SKILL.md § Dynamic workflow
+runs, README harness-table/install entries. omp keeps its documented
+kernel recipe and Droid/Codex keep their orchestrator-session shapes —
+a dialect is emitted only where a scriptable workflow runtime exists.
+
 ## 2.6.1 — 2026-09-16
 
 Clarify-pass hard-stop on unanswered question rounds (D-018). A question

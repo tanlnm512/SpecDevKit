@@ -231,6 +231,23 @@ for name in "${SKILLS[@]}"; do
     echo "skip  droid commands — ~/.factory absent (harness not installed)"
   fi
 
+  # Dynamic workflows (ADR-019): each dialect file under
+  # skills/<name>/workflows/ installs into its own harness's workflow
+  # root via the dedicated installer, which bakes that root's own skill
+  # copy as skill_dir (and refuses foreign destinations per the same
+  # ledger discipline). Gated on the harness home existing — user roots
+  # are never fabricated here either.
+  if [ -d "$skill_dir/workflows" ]; then
+    for wf_h in zcode claude; do
+      if [ -d "$HOME/.$wf_h" ]; then
+        bash "$PKG_ROOT/tools/install-workflow.sh" "$wf_h" \
+          --skill-dir "$HOME/.$wf_h/skills/$name" || fail=1
+      else
+        echo "skip  $wf_h workflows — ~/.$wf_h absent (harness not installed)"
+      fi
+    done
+  fi
+
   if [ -d "$skill_dir/agents" ]; then
     mkdir -p "$CLAUDE_AGENTS_ROOT"
     agents_ledger="$CLAUDE_AGENTS_ROOT/$LEDGER_NAME"
@@ -322,6 +339,17 @@ for name in "${SKILLS[@]}"; do
       done
       if [ -d "$HOME/.factory" ]; then
         verify_command "$f" "$base" "$DROID_COMMANDS_ROOT"
+      fi
+    done
+  fi
+
+  # Dynamic-workflow verify (mirror of the install block above): the
+  # installed copies must match a fresh bake at the same skill_dir.
+  if [ -d "$skill_dir/workflows" ]; then
+    for wf_h in zcode claude; do
+      if [ -d "$HOME/.$wf_h" ]; then
+        bash "$PKG_ROOT/tools/install-workflow.sh" "$wf_h" \
+          --skill-dir "$HOME/.$wf_h/skills/$name" --check || fail=1
       fi
     done
   fi
