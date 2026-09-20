@@ -16,7 +16,7 @@ description: >-
   /spec-run (§ Dynamic workflow runs).
 metadata:
   owner: platform-core
-  version: "2.7.0"
+  version: "2.7.1"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -405,12 +405,25 @@ nothing the orchestrator wouldn't.
   the wave cap (default 12), or on a no-change wave — answer the gate,
   rerun, and the loop resumes from doc state. The zcode dialect
   publishes a markdown run summary; the claude dialect logs the same
-  report.
+  report. A wave that changed no doc state gets exactly one re-brief
+  round for its failed payloads (failure digest verbatim in the retry
+  ask; D-020) — rounds 2+ are yours.
+- **Cost & unattended levers** (D-020) — staged tiering on zcode:
+  launch the analysis waves (survey/research — cheap-tier roles per
+  D-016) with the workflow run's subagent-model override on a cheap
+  model, and the execute waves at the default; per-role tiering is not
+  possible on either facade. Scheduled / off-peak runs: wrap the
+  workflow with the harness's scheduler (cron / off-peak queue) — only
+  spans with no gate ahead (post-approve) are safe to run unattended;
+  the run parks at the closing-audit ack by design. On Claude Code,
+  pre-approve the probe's `python3 …/graph.py` command in the project's
+  permission rules so mid-wave permission prompts don't stall the run.
 - **Limit** — per-role cost tiers do not ride into workflow runs (the
   facades expose no per-spawn model knob); every spawned role runs the
-  session model, the same as the zcode fallback spawn. The authoring
-  half (spec node + clarify loop) stays with you and the user — a
-  workflow run on an unauthored spec reports `held` and names why.
+  run's model — per-run tier choice exists on zcode (see the cost
+  levers above), per-role does not. The authoring half (spec node +
+  clarify loop) stays with you and the user — a workflow run on an
+  unauthored spec reports `held` and names why.
 
 ## Independent spawns (no cross-agent coordination)
 

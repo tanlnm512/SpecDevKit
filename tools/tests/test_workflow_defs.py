@@ -146,6 +146,16 @@ class ClaudeDialectTests(unittest.TestCase):
         self.assertNotIn("subprocess", self.js)
         self.assertIn("graph-probe", self.js)
 
+    def test_single_probe_per_wave(self):
+        # one agent fetches state + emit outputs together (marker-split),
+        # and the summary reuses the last post-wave state — no extra probe
+        self.assertIn("__SPLIT__", self.js)
+        self.assertEqual(self.js.count('"graph-probe"'), 1)
+        self.assertIn("--state-json", self.js)
+        self.assertIn("--emit-spawns", self.js)
+        self.assertIn("fetchCycle", self.js)
+        self.assertIn("const finalSt = st;", self.js)
+
 
 class ParityTests(unittest.TestCase):
     """Both dialects mirror the same loop contract: the six human gates,
@@ -178,6 +188,17 @@ class ParityTests(unittest.TestCase):
         js = WF_JS.read_text()
         self.assertEqual(ts.count(PAYLOAD_RE), 1)
         self.assertEqual(js.count(PAYLOAD_RE), 1)
+
+    def test_both_have_a_bounded_rebrief_round(self):
+        for path in (DWF_TS, WF_JS):
+            text = path.read_text()
+            self.assertIn("re-brief round 1", text, path.name)
+            self.assertIn("rebriefText", text, path.name)
+            # the once-only guard: a payload already retried is never
+            # retried again in the same run
+            self.assertIn("retriedPaths.indexOf", text, path.name)
+            # the failure evidence rides verbatim in the retry ask
+            self.assertIn("address that failure evidence directly", text, path.name)
 
 
 class InstallerBase(unittest.TestCase):

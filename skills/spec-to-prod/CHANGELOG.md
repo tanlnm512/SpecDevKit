@@ -4,6 +4,28 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.7.1 — 2026-09-20
+
+Workflow-run efficiency pass (D-020), same contracts: (1) the claude
+dialect fetches graph state and payload emission in ONE probe agent per
+wave (a single shell line running `--state-json` + `--emit-spawns`,
+outputs marker-split), and the final summary reuses the last post-wave
+state — ~3 agent calls per wave down to 1; the zcode dialect keeps its
+direct world.run calls (local subprocesses, no agent cost). (2) Both
+dialects gained a bounded re-brief round: a wave that changed no doc
+state retries its failed payloads (status blocked/gap) exactly once per
+run, the failure digest verbatim appended to the retry ask; if the
+retry also changes nothing the run stops no-change and names rounds 2+
+as the orchestrator's — the playbook's own mechanical fix-round-1
+automated, judgment rounds untouched. (3) SKILL.md § Dynamic workflow
+runs documents the cost/unattended levers: staged subagent-model tiering
+on zcode (cheap model for analysis waves, default for execute), scheduled/
+off-peak runs (safe only post-approve — the run parks at the
+closing-audit ack by design), and pre-approving the probe command in
+Claude permission rules so runs don't stall on prompts. Tests:
+test_workflow_defs.py 26 cases — new single-probe-per-wave and bounded-
+re-brief invariants on both dialects.
+
 ## 2.7.0 — 2026-09-20
 
 Dynamic-workflow dialects: the frontier loop as generated, harness-native
