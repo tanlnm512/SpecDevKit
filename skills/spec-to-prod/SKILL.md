@@ -16,7 +16,7 @@ description: >-
   /spec-run (§ Dynamic workflow runs).
 metadata:
   owner: platform-core
-  version: "2.7.1"
+  version: "2.7.2"
 ---
 
 # Spec-to-Prod (spec-driven development)

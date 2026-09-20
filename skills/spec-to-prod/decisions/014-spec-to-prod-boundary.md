@@ -1,8 +1,9 @@
 # D-014: spec-to-prod — "prod" is production-ready; release stays a human gate
 
-Renamed the skill spec-to-prod → spec-to-prod (directory, router
-command, regenerated plugin manifests, README, briefs, scripts,
-diagrams; historical CHANGELOG entries keep the old name). The rename
+Renamed the skill from its former pre-2.1.0 name → spec-to-prod
+(directory, router command, regenerated plugin manifests, README,
+briefs, scripts, diagrams; the former name is redacted repo-wide at the
+owner's request as of v2.7.2). The rename
 raises a question the old name didn't: does "to prod" promise
 deployment? It does not, and the boundary is now explicit.
 

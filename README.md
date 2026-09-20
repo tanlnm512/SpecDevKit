@@ -262,6 +262,34 @@ researcher gate → wave 1 (survey ∥ research) → wave 2 (plan ∥ tech ∥ q
 approval → execute (implementer waves) → closing audit → one tick +
 commit → `archive`.
 
+### Dynamic workflow runs (zcode · claude code)
+
+Where the harness has a script-driven workflow runtime, the same loop
+runs natively as `spec-run` (installed by `tools/sync.sh` or
+`tools/install-workflow.sh` — see [Harness support](#harness-support)).
+Same graph, same gates: the workflow is the mechanical wave-runner, the
+session keeps every judgment. The recommended shape alternates the two —
+
+| Step | Surface | What happens |
+|---|---|---|
+| 1 | session — `/spec <name>` | author spec.md with the user (clarify loop), decide the researcher gate: `skip` → write the not-applicable marker line yourself; `run` → spawn the researcher here (the workflow pauses at an undetermined gate, so resolve it first) |
+| 2 | workflow — run `spec-run` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: before-audit`** |
+| 3 | session | run the six before-audit gates, record `Before-audit: passed @ <sha>`, present the docset, get approval → `Status: approved` |
+| 4 | workflow — rerun `spec-run` | execute waves hands-off: one implementer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: closing-audit`** |
+| 5 | session — `/test` `/review` `/ship` | the closing audit portions, rulings ack, then the ONE tick + commit |
+
+Rules of thumb: the workflow stops `AWAITING HUMAN` at every judgment
+gate — resolve the gate in-session, rerun, and the loop resumes from doc
+state (reruns are cheap; the docs are the only state). Authoring never
+runs in a workflow: an unauthored spec reports `held` with the reason.
+Small specs (≤3 FRs) are usually faster fully in-session; the workflow
+earns its keep on execute-heavy plans. Cost levers (zcode): launch the
+analysis waves with the run's subagent model on a cheap tier and execute
+waves at the default; schedule post-approve runs off-peak — they park at
+the closing-audit ack by design. Invocation: on Claude Code `spec-run`
+is a `/spec-run` command; on zcode ask in natural language ("run the
+spec-run workflow for spec X").
+
 ## Scripts reference
 
 All under `skills/spec-to-prod/scripts/`, run from a workspace root:
