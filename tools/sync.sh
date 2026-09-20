@@ -326,6 +326,16 @@ for name in "${SKILLS[@]}"; do
     fail=1
   fi
 
+  # zcode/claude skill loaders reject a SKILL.md description over 1024
+  # chars — the skill silently fails to register (seen twice on
+  # spec-to-prod). Same shape as the version pairing above: mechanical
+  # guard on every sync run.
+  d_len="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"description: >-\n((?:  .*\n|\n)*?)metadata:", t); print(len("".join(l[2:] if l.startswith("  ") else l for l in m.group(1).splitlines(keepends=True)).strip()) if m else 0)' "$skill_dir/SKILL.md")"
+  if [ "${d_len:-0}" -gt 1024 ]; then
+    echo "DRIFT $name description — ${d_len} chars exceeds the 1024-char loader limit"
+    fail=1
+  fi
+
   for root in "${SKILLS_ROOTS[@]}"; do
     verify_tree "$skill_dir" "$root/$name" "$root/$name"
   done

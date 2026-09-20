@@ -105,6 +105,16 @@ class SyncShTests(SyncShBase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("DRIFT", r.stdout)
 
+    def test_oversized_description_fails_the_sync(self):
+        # zcode/claude loaders reject descriptions over 1024 chars — the
+        # skill silently fails to register; sync must catch it first
+        sk = self.repo / "skills" / "spec-to-prod" / "SKILL.md"
+        sk.write_text(sk.read_text().replace(
+            "\nmetadata:", "\n  " + "x" * 1100 + "\nmetadata:", 1))
+        r = self.run_sync()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("1024", r.stdout)
+
 
 class DroidCommandsTests(SyncShBase):
     """Factory Droid's own command root (~/.factory/commands) — gated on

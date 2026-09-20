@@ -4,6 +4,18 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.7.3 — 2026-09-20
+
+Description-limit fix: the 2.7.0 description addition pushed the
+SKILL.md frontmatter description to 1068 chars, over the 1024-char
+loader limit zcode (and Claude) enforce — the skill silently failed to
+register on zcode. The workflow-invocation clause is compressed to one
+line (the mechanics stay in § Dynamic workflow runs), back to ~900
+chars. sync.sh's verify pass now guards the limit mechanically
+(DRIFT on any skill whose description exceeds 1024 chars), with a
+test_sync.py case driving it — this failure mode has now happened twice
+and was catchable at sync time both times.
+
 ## 2.7.2 — 2026-09-20
 
 Former-name redaction at the owner's request: every mention of the

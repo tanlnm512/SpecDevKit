@@ -10,13 +10,12 @@ description: >-
   spec", "refresh the tech spec", "rebuild the task list"), scaffold specs/ for a project, or
   execute an approved task.md through
   implementer agents. Recognise its specs on disk by tech-spec.md + survey.md and the singular
-  task.md / test.md names. Invoked explicitly as /spec-to-prod <verb> <spec-name>,
-  or run as a native dynamic workflow ("run the auth spec pipeline", "continue the
-  spec") on harnesses that have one — zcode and Claude Code ship the generated
-  /spec-run (§ Dynamic workflow runs).
+  task.md / test.md names. Invoked as /spec-to-prod <verb> <spec-name>, or as
+  the native /spec-run workflow ("run the auth spec pipeline", "continue the
+  spec").
 metadata:
   owner: platform-core
-  version: "2.7.2"
+  version: "2.7.3"
 ---
 
 # Spec-to-Prod (spec-driven development)
