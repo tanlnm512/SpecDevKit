@@ -38,8 +38,12 @@ Run manually after adding a skill, bumping a skill's VERSION, or changing
 a SKILL.md description — not part of tools/sync.sh, since regenerating
 these has nothing to do with copying files to installed dotfile roots:
 
-    tools/plugin-manifest.py
+    tools/plugin-manifest.py            # (re)write the committed manifests
+    tools/plugin-manifest.py --check    # verify committed manifests match a
+                                        # fresh regeneration; exit 0 verified
+                                        # · 1 drift or missing · 2 usage error
 """
+import argparse
 import json
 import re
 import sys
@@ -113,21 +117,20 @@ def plugin_json_for(skill_dir: Path, name: str, short_desc: str) -> dict:
     }
 
 
-def main() -> int:
-    skills = discover_skills()
-    if not skills:
-        sys.exit("no skills/*/SKILL.md found")
-
+def manifests(skills) -> list[tuple[Path, str, str]]:
+    """Every derived manifest as (path, exact content, written message) —
+    the single regeneration write mode applies and --check compares."""
+    entries: list[tuple[Path, str, str]] = []
     marketplace_plugins = []
     for skill_dir in skills:
         name, desc = read_name_desc(skill_dir / "SKILL.md")
         short_desc = first_sentence(desc)
 
-        plugin_dir = skill_dir / ".claude-plugin"
-        plugin_dir.mkdir(exist_ok=True)
-        (plugin_dir / "plugin.json").write_text(
-            json.dumps(plugin_json_for(skill_dir, name, short_desc), indent=2) + "\n")
-        print(f"plugin.json  skills/{name}")
+        entries.append((
+            skill_dir / ".claude-plugin" / "plugin.json",
+            json.dumps(plugin_json_for(skill_dir, name, short_desc), indent=2) + "\n",
+            f"plugin.json  skills/{name}",
+        ))
 
         marketplace_plugins.append({
             "name": name,
@@ -147,11 +150,54 @@ def main() -> int:
         },
         "plugins": marketplace_plugins,
     }
-    marketplace_dir = ROOT / ".claude-plugin"
-    marketplace_dir.mkdir(exist_ok=True)
-    (marketplace_dir / "marketplace.json").write_text(
-        json.dumps(marketplace_doc, indent=2) + "\n")
-    print(f"marketplace.json  {len(marketplace_plugins)} plugin(s)")
+    entries.append((
+        ROOT / ".claude-plugin" / "marketplace.json",
+        json.dumps(marketplace_doc, indent=2) + "\n",
+        f"marketplace.json  {len(marketplace_plugins)} plugin(s)",
+    ))
+    return entries
+
+
+def write_all(entries: list[tuple[Path, str, str]]) -> None:
+    for path, content, message in entries:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        print(message)
+
+
+def check_all(entries: list[tuple[Path, str, str]]) -> int:
+    """0 iff every committed manifest matches a fresh regeneration."""
+    bad = 0
+    for path, content, _ in entries:
+        if not path.exists():
+            print(f"MISSING {path} — regenerate (tools/plugin-manifest.py)")
+            bad = 1
+        elif path.read_text(encoding="utf-8") == content:
+            print(f"OK  {path}")
+        else:
+            print(f"DRIFT {path} — regenerate (tools/plugin-manifest.py)")
+            bad = 1
+    return bad
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(
+        prog="plugin-manifest.py",
+        description="Generate the Claude Code plugin manifests "
+                    "(marketplace.json + per-skill plugin.json) from each "
+                    "skill's SKILL.md frontmatter and VERSION file.")
+    p.add_argument("--check", action="store_true",
+                   help="verify the committed manifests match a fresh "
+                        "regeneration; exit 1 on drift or missing files")
+    args = p.parse_args(argv)
+
+    skills = discover_skills()
+    if not skills:
+        sys.exit("no skills/*/SKILL.md found")
+    entries = manifests(skills)
+    if args.check:
+        return check_all(entries)
+    write_all(entries)
     return 0
 
 

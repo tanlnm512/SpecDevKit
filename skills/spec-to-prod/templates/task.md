@@ -1,10 +1,11 @@
 # Tasks: <name>
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+**Lifecycle**: v2
 Status reflects code state per [survey.md](survey.md), not intent.
-**Before-audit**: pending — the orchestrator writes `passed @ <sha>` here
-**Closing-audit**: pending — the orchestrator writes `approved @ <sha>` here
-**Delivered**: pending — the orchestrator writes `commit @ <sha>` here
+**Before-audit**: pending — mechanical-audit evidence; the orchestrator writes `passed @ <sha>` here
+**Closing-audit**: pending — human-acknowledgement evidence; the orchestrator writes `approved @ <sha>` here
+**Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
 
 ## Burndown
 <!-- Recompute on every status change; `check.py` verifies the arithmetic. -->
@@ -20,8 +21,9 @@ Status reflects code state per [survey.md](survey.md), not intent.
 - [ ] T003 <...> (FR-###)
 
 ## Conventions
-- `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note:
-      `done <date> — <test/command that proves it>`
+- `- [ ]` todo · `(in-progress)` claimed · `(implemented)` landed —
+      implementation evidence durable before the one all-at-once tick ·
+      `- [x]` done + proof note: `done <date> — <test/command that proves it>`
 - Dropped: `- [ ] ~~T004~~ dropped <date> (D-###)` — never delete the line;
   dropped tasks stay visible with the decision that killed them
 - `[P]` = parallelizable (default — no shared files, no upstream task);

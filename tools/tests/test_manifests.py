@@ -15,11 +15,23 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FM_VERSION = re.compile(r'^  version: "(.+)"$', re.M)
 FM_NAME = re.compile(r"^name: (\S+)$", re.M)
+CHANGELOG_HEADING = re.compile(r"(?m)^## (\d+\.\d+\.\d+)")
 
 
 def skills():
     return sorted(d for d in (REPO_ROOT / "skills").glob("*")
                   if (d / "SKILL.md").is_file())
+
+
+def changelog_head(skill: Path):
+    """The newest CHANGELOG.md version heading and that entry's body
+    (from the heading to the next one). (None, "") with no heading."""
+    text = (skill / "CHANGELOG.md").read_text()
+    heads = list(CHANGELOG_HEADING.finditer(text))
+    if not heads:
+        return None, ""
+    end = heads[1].start() if len(heads) > 1 else len(text)
+    return heads[0].group(1), text[heads[0].start():end]
 
 
 class VersionTripleTests(unittest.TestCase):
@@ -47,6 +59,29 @@ class VersionTripleTests(unittest.TestCase):
                 fm_name = FM_NAME.search((skill / "SKILL.md").read_text())
                 self.assertIsNotNone(fm_name)
                 self.assertEqual(pj["name"], fm_name.group(1))
+
+
+class ChangelogAlignmentTests(unittest.TestCase):
+    def test_changelog_head_is_the_version_file_version(self):
+        for skill in skills():
+            with self.subTest(skill=skill.name):
+                v_file = (skill / "VERSION").read_text().strip()
+                head, _ = changelog_head(skill)
+                self.assertIsNotNone(
+                    head, f"{skill.name}: no version heading in CHANGELOG.md")
+                self.assertEqual(
+                    head, v_file,
+                    f"{skill.name}: CHANGELOG.md newest entry vs VERSION")
+
+    def test_current_entry_carries_a_migration_note(self):
+        for skill in skills():
+            with self.subTest(skill=skill.name):
+                _, body = changelog_head(skill)
+                self.assertRegex(
+                    body, r"(?m)^Migration:",
+                    f"{skill.name}: newest CHANGELOG.md entry has no "
+                    f"'Migration:' note (start a paragraph with 'Migration:' "
+                    f"— the upgrade path, or 'none required')")
 
 
 class MarketplaceCatalogTests(unittest.TestCase):

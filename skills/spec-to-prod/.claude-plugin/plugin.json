@@ -1,6 +1,6 @@
 {
   "name": "spec-to-prod",
-  "version": "2.7.3",
+  "version": "2.8.0",
   "description": "Language-agnostic multi-agent pipeline for spec-driven development: orchestrates role sub-agents in parallel waves to produce grounded contract files under specs/<name>/ \u2014 spec.md, plan.md, task.md (the status holder), tech-spec.md, test.md \u2014 plus survey.md and research.md as evidence, all verified by scripts/check.py.",
   "author": {
     "name": "Stanley",

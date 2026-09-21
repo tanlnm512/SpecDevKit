@@ -15,7 +15,7 @@ description: >-
   spec").
 metadata:
   owner: platform-core
-  version: "2.7.3"
+  version: "2.8.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -882,7 +882,10 @@ never from memory — by computing the frontier:
    status, and task counts, derived from doc state alone. Work what it
    prints: run the ready wave, resolve the named pauses, unblock what the
    blocked reasons name. `scripts/check.py <spec-dir>` failures name the
-   node to re-run (single-agent repair runs cover it).
+   node to re-run (single-agent repair runs cover it). A docset still on
+   the version-1 lifecycle migrates first: dry-run preview, then
+   idempotent apply — pending evidence markers only, never fabricated
+   evidence (the skill's migration utility, `scripts/`).
 2. Progress rides the same doc state: `Status:` in spec.md gives the
    lifecycle position — draft → approved → active → done, which the graph
    reads as the approve / execute / tick-commit signals; task.md statuses
