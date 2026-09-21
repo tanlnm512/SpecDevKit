@@ -90,6 +90,18 @@ losing any status, since task.md alone holds that.
   gates themselves degrade to explicit `SKIPPED (not a git repo)` notes).
   Resume, the closing audit, and graph.py's before-audit node read that
   line (see `gates/before-audit.md`).
+- `Closing-audit: approved @ <sha>` lives beside it (`approved @ -` in
+  non-git repos) — the durable human sign-off under which proof, review,
+  rulings, regression, and sign-off were ruled green. Mechanical scores
+  never imply it; graph.py's closing-audit node reads done from that
+  record alone.
+- `Delivered: commit @ <sha>` ends the header (`commit @ -` is the explicit
+  non-git skip) — the delivery record the tick-commit node's done signal
+  cites: durable task-tick evidence (every task ticked or struck, every
+  tick carrying its `done <date> — <proof>` note) plus the recorded commit
+  SHA. Until it exists in a git repo, tick-commit stays READY after the
+  approved tick — committing is the human's move, never a script's
+  inference.
 
 ## Spawn-payload contract (every spawn, every role)
 

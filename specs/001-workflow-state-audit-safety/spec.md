@@ -1,6 +1,6 @@
 # Spec: workflow-state-audit-safety
 
-**Status**: draft
+**Status**: done
 **Created**: 2026-09-21
 **Branch**: `fix/workflow-state-audit-safety`
 

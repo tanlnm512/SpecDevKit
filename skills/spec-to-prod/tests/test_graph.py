@@ -12,8 +12,10 @@ serializes; report/exit-code/JSON-shape assertions go through the real CLI
 subprocess. Executor modes (--emit-spawns/--run) live in their own feature.
 """
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import shutil
 import subprocess
@@ -102,6 +104,47 @@ TICKED_T1_TASKS = APPROVED_TASKS.replace(
 ).replace("| 1     | 3     | 0    |", "| 1     | 3     | 1    |").replace(
     "| **Σ** | 3     | 0    |", "| **Σ** | 3     | 1    |")
 
+IMPLEMENTED_T1_TASKS = APPROVED_TASKS.replace(
+    "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
+    "- [ ] T001 [P] (implemented) implement multiply in `repo/calc.py` "
+    "(FR-001)",
+)
+
+IMPLEMENTED_ALL_TASKS = APPROVED_TASKS.replace(
+    "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
+    "- [ ] T001 [P] (implemented) implement multiply in `repo/calc.py` "
+    "(FR-001)",
+).replace(
+    "- [ ] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)",
+    "- [ ] T002 (after T001) (implemented) wire the caller "
+    "`repo/test_calc.py` (FR-001)",
+).replace(
+    "- [ ] T003 (fix 5/5) rescue the stalled refactor (FR-002)",
+    "- [ ] T003 (fix 5/5) (implemented) rescue the stalled refactor "
+    "(FR-002)",
+)
+
+MIXED_LANDED_TASKS = APPROVED_TASKS.replace(
+    "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
+    "- [x] T001 [P] implement multiply in `repo/calc.py` (FR-001)\n"
+    "      done 2026-09-08 — python3 -m pytest repo/test_calc.py green",
+).replace(
+    "- [ ] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)",
+    "- [ ] T002 (after T001) (implemented) wire the caller "
+    "`repo/test_calc.py` (FR-001)",
+).replace(
+    "- [ ] T003 (fix 5/5) rescue the stalled refactor (FR-002)",
+    "- [ ] ~~T003~~ (fix 5/5) rescue the stalled refactor (FR-002) — "
+    "dropped",
+).replace("| 1     | 3     | 0    |", "| 1     | 3     | 1    |").replace(
+    "| **Σ** | 3     | 0    |", "| **Σ** | 3     | 1    |")
+
+CLAIMED_T1_TASKS = APPROVED_TASKS.replace(
+    "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
+    "- [ ] T001 [P] (in-progress) implement multiply in `repo/calc.py` "
+    "(FR-001)",
+)
+
 STRUCK_DEP_TASKS = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
@@ -149,13 +192,10 @@ Status reflects code state per [survey.md](survey.md), not intent.
 GREEN_TC = 'python3 -c "print(\'proof ok\')"'
 
 
-def done_fixture(tmp: Path) -> Path:
-    """All tasks ticked, Status: done, before-audit recorded, and TC pass
-    conditions swapped to always-green commands so the closing audit's DoD
-    scorecard (audit.py dod) passes mechanically in the non-git tmp repo."""
-    d = copy_fixture(tmp)
-    set_status(d, "done")
-    write(d / "task.md", DONE_TASKS)
+def green_test_md(spec_dir: Path) -> None:
+    """Swap the fixture's real pytest TC pass conditions to always-green
+    commands so the closing audit's DoD scorecard (audit.py dod) passes
+    mechanically in the non-git tmp repo."""
     test = (FIXTURE / "test.md").read_text(encoding="utf-8")
     test = test.replace(
         "`cd repo && python3 -m pytest test_calc.py -k multiply` exits 0",
@@ -163,7 +203,17 @@ def done_fixture(tmp: Path) -> Path:
     test = test.replace(
         "`cd repo && python3 -m pytest test_calc.py -k zero` exits 0",
         f"`{GREEN_TC}` exits 0")
-    write(d / "test.md", test)
+    write(spec_dir / "test.md", test)
+
+
+def done_fixture(tmp: Path) -> Path:
+    """All tasks ticked, Status: done, before-audit recorded, and TC pass
+    conditions swapped to always-green commands so the closing audit's DoD
+    scorecard (audit.py dod) passes mechanically in the non-git tmp repo."""
+    d = copy_fixture(tmp)
+    set_status(d, "done")
+    write(d / "task.md", DONE_TASKS)
+    green_test_md(d)
     return d
 
 
@@ -396,10 +446,133 @@ class StruckDepFrontierTests(unittest.TestCase):
         self.assertEqual(frontier_of(self.state), ["execute"])
 
 
+class ImplementedDepFrontierTests(unittest.TestCase):
+    """FR-002: an `(after T###)` dependency is satisfied by a landed
+    upstream — `(implemented)` (unticked) releases its dependent the same
+    way a ticked or struck one does, while a merely claimed (in-progress)
+    upstream still blocks. Landing is not ticking: the release happens
+    with counts.ticked at zero."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graphimpl-"))
+        cls.impl_dir = copy_fixture(cls._tmp / "impl")
+        set_status(cls.impl_dir, "approved")
+        write(cls.impl_dir / "task.md", IMPLEMENTED_T1_TASKS)
+        cls.impl_state = compute(cls.impl_dir)
+        cls.claimed_dir = copy_fixture(cls._tmp / "claimed")
+        set_status(cls.claimed_dir, "approved")
+        write(cls.claimed_dir / "task.md", CLAIMED_T1_TASKS)
+        cls.claimed_state = compute(cls.claimed_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def tasks(self, state):
+        return {t["id"]: t for t in state["nodes"]["execute"]["tasks"]}
+
+    def test_implemented_dependency_releases_dependent(self):
+        t = self.tasks(self.impl_state)
+        self.assertEqual(t["T002"]["state"], "runnable")
+        self.assertIn("deps satisfied", t["T002"]["reason"])
+
+    def test_landing_is_not_ticking(self):
+        t = self.tasks(self.impl_state)
+        self.assertNotEqual(t["T001"]["state"], "ticked")
+        self.assertEqual(self.impl_state["counts"]["ticked"], 0)
+
+    def test_claimed_dependency_still_blocks(self):
+        t = self.tasks(self.claimed_state)
+        self.assertEqual(t["T001"]["state"], "claimed")
+        self.assertEqual(t["T002"]["state"], "blocked")
+        self.assertIn("waiting on T001", t["T002"]["reason"])
+
+
+class ImplementedExecuteCompletionTests(unittest.TestCase):
+    """TC-003 (FR-003/AC1): when every non-dropped task is `(implemented)`
+    (unticked), execute is done and closing-audit is the next transition.
+    An implemented entry is its own per-task state — never re-spawned as
+    runnable — and counts separately from todo; mixed landing (ticked +
+    implemented + struck) completes execute too. Past execute the graph
+    holds at the inert closing-audit human gate (FR-004): test.md is
+    classified, never executed, so tick-commit stays blocked on it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graphimpl3-"))
+        cls.impl_dir = implemented_fixture(cls._tmp / "impl")
+        cls.impl_state = compute(cls.impl_dir)
+        cls.mixed_dir = copy_fixture(cls._tmp / "mixed")
+        set_status(cls.mixed_dir, "approved")
+        write(cls.mixed_dir / "task.md", MIXED_LANDED_TASKS)
+        cls.mixed_state = compute(cls.mixed_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def tasks(self, state):
+        return {t["id"]: t for t in state["nodes"]["execute"]["tasks"]}
+
+    def test_execute_done_without_any_tick(self):
+        n = self.impl_state["nodes"]
+        self.assertEqual(n["execute"]["state"], "done")
+        self.assertIn("implemented", n["execute"]["reason"])
+
+    def test_implemented_tasks_are_their_own_state(self):
+        t = self.tasks(self.impl_state)
+        for tid in ("T001", "T002", "T003"):
+            self.assertEqual(t[tid]["state"], "implemented", tid)
+        self.assertNotIn(t["T003"]["state"], ("runnable", "at-fix-cap"),
+                         "landed work is neither re-spawned nor adjudicated")
+
+    def test_counts_carry_implemented_separately_from_todo(self):
+        c = self.impl_state["counts"]
+        self.assertEqual(c["implemented"], 3)
+        self.assertEqual(c["todo"], 0)
+        self.assertEqual(c["ticked"], 0)
+        self.assertEqual(c["claimed"], 0)
+
+    def test_closing_audit_is_the_next_transition(self):
+        pause = graph.find_pause(self.impl_state)
+        self.assertIsNotNone(pause)
+        self.assertEqual(pause[0], "closing-audit")
+        r = run_cli(self.impl_dir, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("AWAITING HUMAN: closing-audit", r.stdout)
+        self.assertNotIn("implementer", r.stdout)
+
+    def test_implemented_tasks_are_not_respawned(self):
+        r = run_cli(self.impl_dir, "--emit-spawns")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no agent payloads", r.stdout)
+        self.assertFalse((self.impl_dir / "spawns").exists(),
+                         "landed tasks are never re-spawned")
+
+    def test_mixed_landing_completes_execute(self):
+        n = self.mixed_state["nodes"]
+        self.assertEqual(n["execute"]["state"], "done")
+        c = self.mixed_state["counts"]
+        self.assertEqual((c["ticked"], c["implemented"], c["struck"]),
+                         (1, 1, 1))
+        self.assertEqual(c["todo"], 0)
+
+    def test_closing_audit_is_the_inert_human_gate(self):
+        n = self.impl_state["nodes"]
+        self.assertEqual(n["closing-audit"]["state"], "READY")
+        self.assertIn("HUMAN GATE", n["closing-audit"]["reason"])
+        self.assertIn("not executed", n["closing-audit"]["reason"])
+        self.assertEqual(n["tick-commit"]["state"], "blocked")
+        self.assertIn("closing-audit", n["tick-commit"]["reason"])
+
+
 class Graph005LifecycleTests(unittest.TestCase):
     """GRAPH-005: draft → approve is the frontier's human gate; approved →
-    execute eligible; done (with a dod-passing docset) → tick-commit done and
-    archive ready. The lifecycle Status shows in report and JSON throughout."""
+    execute eligible; done status with every task ticked still holds at the
+    inert closing-audit human gate (FR-004) — recorded approval (FR-005),
+    not a dod-green docset, is what opens tick-commit. The lifecycle Status
+    shows in report and JSON throughout."""
 
     @classmethod
     def setUpClass(cls):
@@ -436,14 +609,14 @@ class Graph005LifecycleTests(unittest.TestCase):
         self.assertEqual(n["execute"]["state"], "READY")
         self.assertIn("execute", frontier_of(self.approved_state))
 
-    def test_done_runs_the_table_to_archive_ready(self):
+    def test_done_status_holds_at_the_closing_audit_gate(self):
         n = self.done_state["nodes"]
         self.assertEqual(self.done_state["status"], "done")
         self.assertEqual(n["execute"]["state"], "done")
-        self.assertEqual(n["closing-audit"]["state"], "done")
-        self.assertEqual(n["tick-commit"]["state"], "done")
-        self.assertEqual(n["archive"]["state"], "READY")
-        self.assertEqual(frontier_of(self.done_state), ["archive"])
+        self.assertEqual(n["closing-audit"]["state"], "READY")
+        self.assertEqual(n["tick-commit"]["state"], "blocked")
+        self.assertEqual(n["archive"]["state"], "blocked")
+        self.assertEqual(frontier_of(self.done_state), ["closing-audit"])
 
     def test_status_line_in_reports(self):
         for state, word in ((self.draft_state, "draft"),
@@ -524,7 +697,8 @@ class Graph007StateJsonShapeTests(unittest.TestCase):
                     self.assertTrue(node["reason"], name)
                 self.assertEqual(
                     sorted(s["counts"]),
-                    ["at-fix-cap", "claimed", "struck", "ticked", "todo"])
+                    ["at-fix-cap", "claimed", "implemented", "struck",
+                     "ticked", "todo"])
                 self.assertIn("available", s["git"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -743,8 +917,10 @@ class Graph013FixtureIntegrationTests(unittest.TestCase):
 
 
 class Graph014EndStateTests(unittest.TestCase):
-    """GRAPH-014: a done docset reports archive-ready workflow-complete with
-    exit 0; a zero-file dir reports spec pending/blocked, exit 0, no crash."""
+    """GRAPH-014: a done-status docset with no recorded closing-audit
+    approval reports the closing-audit gate with exit 0 (FR-004 — no
+    inspection mode runs the DoD probe to get past it); a zero-file dir
+    reports spec pending/blocked, exit 0, no crash."""
 
     @classmethod
     def setUpClass(cls):
@@ -755,20 +931,20 @@ class Graph014EndStateTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
-    def test_done_spec_is_archive_ready_and_exit_zero(self):
+    def test_done_spec_holds_at_the_closing_audit_gate(self):
         r = run_cli(self.done_dir)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("archive", r.stdout)
-        self.assertEqual(frontier_of(compute(self.done_dir)), ["archive"])
+        self.assertIn("closing-audit", r.stdout)
         self.assertNotIn("AWAITING HUMAN", r.stdout)
+        self.assertEqual(frontier_of(compute(self.done_dir)),
+                         ["closing-audit"])
 
-    def test_run_on_done_spec_completes_without_pause_or_spawn(self):
+    def test_run_on_done_spec_pauses_at_the_closing_audit_gate(self):
         r = run_cli(self.done_dir, "--run")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("workflow complete", r.stdout)
-        self.assertNotIn("AWAITING HUMAN", r.stdout)
+        self.assertIn("AWAITING HUMAN: closing-audit", r.stdout)
         self.assertFalse((self.done_dir / "spawns").exists(),
-                         "no spawn past the end of the workflow")
+                         "no spawn past the closing-audit gate")
 
     def test_zero_file_dir_is_pending_not_a_crash(self):
         empty = self._tmp / "b" / "specs" / "void"
@@ -777,6 +953,274 @@ class Graph014EndStateTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("Traceback", r.stderr)
         self.assertEqual(compute(empty)["nodes"]["spec"]["state"], "blocked")
+
+
+NOTE_LINE = "      done 2026-09-08 — proof: python3 -m pytest repo/test_calc.py green\n"
+
+
+class Graph015TickCommitEvidenceTests(unittest.TestCase):
+    """GRAPH-015 (FR-006/AC5/AC6, TC-006): tick evidence is durable task.md
+    state — the specstate parser reads ticked/struck counts and the gaps
+    (unticked, ticked-without-proof-note) the tick-commit gate consumes once
+    the closing-audit approval is recorded (FR-005). Node-level: past execute
+    the graph holds at the inert closing-audit gate (FR-004, GRAPH-016), so
+    tick-commit never opens on inspection alone — whatever test.md's pass
+    conditions would score."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="graph015-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+
+    def test_ticked_docset_holds_at_the_closing_audit_gate(self):
+        d = closing_fixture(self._tmp / "a", dod_green=True)
+        s = compute(d)
+        n = s["nodes"]
+        self.assertEqual(n["closing-audit"]["state"], "READY")
+        self.assertEqual(n["tick-commit"]["state"], "blocked")
+        self.assertIn("closing-audit", n["tick-commit"]["reason"])
+        self.assertEqual(n["archive"]["state"], "blocked")
+
+    def test_tick_evidence_parser_reads_counts_and_gaps(self):
+        open_ev = graph.specstate.tick_evidence(APPROVED_TASKS)
+        self.assertEqual((open_ev.total, open_ev.ticked, open_ev.struck),
+                         (3, 0, 0))
+        self.assertEqual(open_ev.unticked, ["T001", "T002", "T003"])
+        self.assertEqual(open_ev.noteless, [])
+        done_ev = graph.specstate.tick_evidence(TICKED_ALL_TASKS)
+        self.assertEqual((done_ev.total, done_ev.ticked, done_ev.struck),
+                         (3, 3, 0))
+        self.assertEqual(done_ev.unticked, [])
+        self.assertEqual(done_ev.noteless, [])
+        noteless_ev = graph.specstate.tick_evidence(
+            TICKED_ALL_TASKS.replace(NOTE_LINE, "", 1))
+        self.assertEqual(noteless_ev.unticked, [])
+        self.assertEqual(noteless_ev.noteless, ["T001"])
+        struck_ev = graph.specstate.tick_evidence(STRUCK_DEP_TASKS)
+        self.assertEqual(struck_ev.struck, 1)
+        self.assertNotIn(None, struck_ev.unticked)
+        self.assertTrue(set(struck_ev.unticked) >= {"T002", "T003"})
+
+
+MUTATING_TC = "touch proof-canary.txt"
+
+
+def mutating_test_md(spec_dir: Path) -> None:
+    """Swap the fixture's real pytest TC pass conditions for a mutating
+    command — the probe no graph inspection mode may execute (FR-004)."""
+    test = (FIXTURE / "test.md").read_text(encoding="utf-8")
+    for tc in ("multiply", "zero"):
+        test = test.replace(
+            f"`cd repo && python3 -m pytest test_calc.py -k {tc}` exits 0",
+            f"`{MUTATING_TC}` exits 0")
+    write(spec_dir / "test.md", test)
+
+
+class Graph016InertInspectionTests(unittest.TestCase):
+    """GRAPH-016 (FR-004/AC3, TC-004): every inspection mode — report,
+    --state-json, --mermaid, --explain, --emit-spawns, --run --dry-run —
+    computes state without executing repository or test.md commands. A
+    mutating pass condition stays inert end-to-end; the closing-audit gate
+    reports the dry classification (auto/manual counts, nothing executed);
+    the live proof path is unreachable from compute_state."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="graph016-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        d = copy_fixture(self._tmp)
+        set_status(d, "approved")
+        write(d / "task.md", IMPLEMENTED_ALL_TASKS)
+        mutating_test_md(d)
+        self.spec_dir = d
+
+    def assert_canary_absent(self):
+        for root in (self._tmp, self.spec_dir):
+            self.assertFalse((root / "proof-canary.txt").exists(),
+                             "the mutating pass condition executed")
+
+    def test_mutating_pass_condition_stays_inert_in_every_mode(self):
+        modes = ([], ["--state-json"], ["--mermaid"],
+                 ["--explain", "closing-audit"],
+                 ["--emit-spawns"], ["--run", "--dry-run"])
+        for argv in modes:
+            r = run_cli(self.spec_dir, *argv)
+            self.assertEqual(r.returncode, 0, (argv, r.stderr))
+            self.assertNotIn("Traceback", r.stderr)
+            self.assert_canary_absent()
+
+    def test_closing_audit_gate_reports_the_dry_classification(self):
+        s = compute(self.spec_dir)
+        n = s["nodes"]
+        self.assertEqual(n["execute"]["state"], "done")
+        self.assertEqual(n["closing-audit"]["state"], "READY")
+        self.assertIn("HUMAN GATE", n["closing-audit"]["reason"])
+        self.assertIn("not executed", n["closing-audit"]["reason"])
+        self.assertIn("closing-audit", frontier_of(s))
+        self.assertEqual(n["tick-commit"]["state"], "blocked")
+
+    def test_live_proof_path_is_unreachable_from_compute_state(self):
+        self.assertFalse(hasattr(graph, "run_dod"),
+                         "the live DoD probe must be gone, not dormant")
+        def boom(*args, **kwargs):
+            self.fail("compute_state reached the live proof path")
+        with unittest.mock.patch.object(graph.audit, "proofs_data", boom), \
+                unittest.mock.patch.object(graph.audit, "mode_dod", boom):
+            s = compute(self.spec_dir)
+        self.assertEqual(s["nodes"]["closing-audit"]["state"], "READY")
+        self.assert_canary_absent()
+
+
+class Graph017ClosingApprovalTests(unittest.TestCase):
+    """GRAPH-017 (FR-005/AC4, TC-005): the closing-audit gate opens on the
+    durable task.md record, never on a mechanical score. Every task landed
+    with green TC pass conditions still holds at the gate until
+    `Closing-audit: approved` is recorded; the record — and only the record
+    — reads done and releases tick-commit (FR-006's approved tick
+    transition), on ticked and implemented-unticked plans alike."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="graph017-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+
+    def test_mechanical_green_holds_without_the_record(self):
+        # TC-005's given: the checks pass (always-green TCs, every task
+        # ticked) but no human acknowledgment is recorded anywhere.
+        d = closing_fixture(self._tmp / "a", dod_green=True)
+        s = compute(d)
+        n = s["nodes"]
+        self.assertEqual(n["closing-audit"]["state"], "READY")
+        self.assertIn("HUMAN GATE", n["closing-audit"]["reason"])
+        self.assertIn("Closing-audit: approved", n["closing-audit"]["reason"])
+        self.assertEqual(n["tick-commit"]["state"], "blocked")
+        self.assertEqual(frontier_of(s), ["closing-audit"])
+
+    def test_recorded_approval_reads_done_and_opens_tick_commit(self):
+        d = closing_fixture(self._tmp / "b", dod_green=True,
+                            closing_approved=True)
+        s = compute(d)
+        n = s["nodes"]
+        self.assertEqual(n["closing-audit"]["state"], "done")
+        self.assertIn("Closing-audit: approved", n["closing-audit"]["reason"])
+        self.assertEqual(n["tick-commit"]["state"], "done")
+        self.assertIn("SKIPPED (not a git repo)", n["tick-commit"]["reason"])
+        self.assertEqual(n["archive"]["state"], "blocked")
+
+    def test_approval_releases_the_implemented_unticked_plan(self):
+        # The FR-003 → FR-005 chain: execute completed on landing alone, the
+        # human record opens the gate, and the ticks stay the human's move
+        # (tick-commit READY, never auto-ticked).
+        d = implemented_fixture(self._tmp / "c", dod_green=True,
+                                closing_approved=True)
+        s = compute(d)
+        n = s["nodes"]
+        self.assertEqual(n["execute"]["state"], "done")
+        self.assertEqual(n["closing-audit"]["state"], "done")
+        self.assertEqual(n["tick-commit"]["state"], "READY")
+        self.assertIn("approved ticking", n["tick-commit"]["reason"])
+        self.assertEqual(n["archive"]["state"], "blocked")
+
+    def test_run_pauses_at_tick_commit_once_approved(self):
+        d = implemented_fixture(self._tmp / "d", dod_green=True,
+                                closing_approved=True)
+        r = run_cli(d, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+        self.assertNotIn("AWAITING HUMAN: closing-audit", r.stdout)
+        self.assertFalse((d / "spawns").exists(),
+                         "no spawn past the tick-commit gate")
+
+    def test_pending_placeholder_record_does_not_open_the_gate(self):
+        d = closing_fixture(self._tmp / "e", dod_green=True)
+        tasks = (d / "task.md").read_text(encoding="utf-8")
+        write(d / "task.md", tasks
+              + "\n**Closing-audit**: pending — the orchestrator writes "
+                "`approved @ <sha>` here\n")
+        s = compute(d)
+        self.assertEqual(s["nodes"]["closing-audit"]["state"], "READY")
+        self.assertEqual(s["nodes"]["tick-commit"]["state"], "blocked")
+
+
+DELIVERY_SHA = "feed7c0"
+
+
+def with_delivery_record(tasks_md: str, record: str) -> str:
+    """task.md text with the `Delivered:` header record appended — record is
+    the line body, e.g. `commit @ feed7c0`, the non-git skip `commit @ -`,
+    or the scaffold's pending placeholder wording."""
+    return tasks_md + f"\n**Delivered**: {record}\n"
+
+
+class Graph018DeliveryEvidenceTests(unittest.TestCase):
+    """GRAPH-018 (FR-006/AC6, TC-006): tick-commit's done citation carries
+    durable evidence — the task.md tick counts with proof notes plus the
+    delivery record: `Delivered: commit @ <sha>` where git exists, the
+    explicit non-git skip where it does not. Ticks alone never read done in
+    a git repo, a dash is not a SHA there, and the scaffold's pending
+    placeholders never read as records."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="graph018-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+
+    def compute_in_git(self, spec_dir):
+        """compute_state with the git probes answering as a real repository
+        (mocked, never initialized — test_git_degradation's sanctioned
+        simulation)."""
+        with unittest.mock.patch.object(graph.specstate, "git_available",
+                                        return_value=True), \
+             unittest.mock.patch.object(graph.specstate, "head_sha",
+                                        return_value=DELIVERY_SHA):
+            return compute(spec_dir)
+
+    def delivered(self, name, record):
+        d = closing_fixture(self._tmp / name, closing_approved=True)
+        tasks = (d / "task.md").read_text(encoding="utf-8")
+        write(d / "task.md", with_delivery_record(tasks, record))
+        return d
+
+    def test_recorded_commit_sha_reads_tick_commit_done(self):
+        d = self.delivered("a", f"commit @ {DELIVERY_SHA}")
+        n = self.compute_in_git(d)["nodes"]
+        self.assertEqual(n["tick-commit"]["state"], "done")
+        self.assertIn(f"Delivered: commit @ {DELIVERY_SHA}",
+                      n["tick-commit"]["reason"])
+        self.assertIn("recorded in task.md", n["tick-commit"]["reason"])
+        self.assertNotIn("delivery unproven", n["tick-commit"]["reason"])
+
+    def test_ticks_without_delivery_record_stay_ready(self):
+        d = closing_fixture(self._tmp / "b", closing_approved=True)
+        n = self.compute_in_git(d)["nodes"]
+        self.assertEqual(n["tick-commit"]["state"], "READY")
+        self.assertIn("delivery unproven", n["tick-commit"]["reason"])
+        self.assertIn("no commit SHA observed", n["tick-commit"]["reason"])
+
+    def test_dash_skip_record_is_not_a_sha_where_git_exists(self):
+        d = self.delivered("c", "commit @ -")
+        n = self.compute_in_git(d)["nodes"]
+        self.assertEqual(n["tick-commit"]["state"], "READY")
+        self.assertIn("delivery unproven", n["tick-commit"]["reason"])
+
+    def test_delivered_pending_placeholder_stays_ready(self):
+        d = self.delivered(
+            "d", "pending — the orchestrator writes `commit @ <sha>` here")
+        n = self.compute_in_git(d)["nodes"]
+        self.assertEqual(n["tick-commit"]["state"], "READY")
+        self.assertIn("delivery unproven", n["tick-commit"]["reason"])
+
+    def test_non_git_skip_record_keeps_done(self):
+        d = self.delivered("e", "commit @ -")
+        s = compute(d)
+        self.assertEqual(s["git"]["available"], False)
+        self.assertEqual(s["nodes"]["tick-commit"]["state"], "done")
+        self.assertIn("SKIPPED (not a git repo)",
+                      s["nodes"]["tick-commit"]["reason"])
+
+    def test_scaffold_placeholders_read_pending_never_done(self):
+        d = scaffold(self._tmp / "t")
+        tasks = (d / "task.md").read_text(encoding="utf-8")
+        self.assertEqual(graph.specstate.before_audit_state(tasks), "pending")
+        self.assertEqual(graph.specstate.closing_audit_state(tasks), "pending")
+        self.assertEqual(graph.specstate.delivery_state(tasks),
+                         ("pending", None))
 
 
 # ---------------------------------------------------------------------------
@@ -841,25 +1285,45 @@ Status reflects code state per [survey.md](survey.md), not intent.
 """
 
 
+def with_closing_approval(tasks_md: str) -> str:
+    """task.md text with the durable closing-audit approval record in its
+    header — `Closing-audit: approved @ -`, the non-git form (the tmp
+    fixtures sit outside any repo), mirroring the Before-audit line."""
+    return tasks_md.replace(
+        "**Before-audit**: passed @ -",
+        "**Before-audit**: passed @ -\n**Closing-audit**: approved @ -")
+
+
 def closing_fixture(tmp: Path, name: str = "demo", dod_green: bool = False,
-                    status: str = "approved") -> Path:
+                    status: str = "approved",
+                    closing_approved: bool = False) -> Path:
     """All tasks ticked + before-audit recorded: the closing-audit /
     tick-commit stretch. dod_green swaps TC pass conditions to always-green
-    commands so audit.py dod passes mechanically; dod_red (default) keeps
-    the fixture's real pytest TCs, which fail against the unimplemented
-    repo, leaving the closing audit blocked on judgment."""
+    commands (what audit.py dod's own CLI would score green); dod_red
+    (default) keeps the fixture's real pytest TCs, which fail against the
+    unimplemented repo. Graph inspection runs neither — both hold at the
+    inert closing-audit gate (FR-004) until the approval is recorded in
+    task.md (closing_approved, FR-005)."""
     d = copy_fixture(tmp, name)
     set_status(d, status)
-    write(d / "task.md", TICKED_ALL_TASKS)
+    write(d / "task.md", with_closing_approval(TICKED_ALL_TASKS)
+          if closing_approved else TICKED_ALL_TASKS)
     if dod_green:
-        test = (FIXTURE / "test.md").read_text(encoding="utf-8")
-        test = test.replace(
-            "`cd repo && python3 -m pytest test_calc.py -k multiply` exits 0",
-            f"`{GREEN_TC}` exits 0")
-        test = test.replace(
-            "`cd repo && python3 -m pytest test_calc.py -k zero` exits 0",
-            f"`{GREEN_TC}` exits 0")
-        write(d / "test.md", test)
+        green_test_md(d)
+    return d
+
+
+def implemented_fixture(tmp: Path, name: str = "demo",
+                        dod_green: bool = False,
+                        closing_approved: bool = False) -> Path:
+    """All tasks `(implemented)`, none ticked + before-audit recorded:
+    execute's completion state without the forbidden early tick (TC-003)."""
+    d = copy_fixture(tmp, name)
+    set_status(d, "approved")
+    write(d / "task.md", with_closing_approval(IMPLEMENTED_ALL_TASKS)
+          if closing_approved else IMPLEMENTED_ALL_TASKS)
+    if dod_green:
+        green_test_md(d)
     return d
 
 
@@ -1056,13 +1520,14 @@ class Exec005GateHashInvarianceTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_tick_commit_gate_when_dod_green_but_unticknoted(self):
+    def test_dod_green_docset_still_pauses_at_closing_audit(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec005c-"))
         try:
             d = closing_fixture(tmp, dod_green=True, status="approved")
             r, before, after = self.run_gate(d)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+            self.assertIn("AWAITING HUMAN: closing-audit", r.stdout)
+            self.assertNotIn("AWAITING HUMAN: tick-commit", r.stdout)
             self.assertEqual(before, after)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1495,6 +1960,114 @@ class Exec011RepairDeltaTests(unittest.TestCase):
             self.assertIn("already in the frontier", r.stdout)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class Exec012RunnerFailureTests(unittest.TestCase):
+    """EXEC-012 (FR-008/AC8): a runner that exits nonzero or raises stops
+    the run — the diagnostic names the role and node, graph.py exits
+    RUNNER_FAILED_EXIT (3), and neither the wave's remaining payloads nor
+    any later wave start. dry-run and the print runner never invoke
+    anything, so they can never trip the failure path."""
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_nonzero_runner_exits_three_and_stops_everything(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec012a-"))
+        d = wave2_fixture(self._tmp)  # wave 2: planner ∥ tech ∥ qa
+        r = run_cli(d, "--run", "--runner", "exit 7")
+        self.assertEqual(r.returncode, graph.RUNNER_FAILED_EXIT, r.stderr)
+        self.assertEqual(r.stdout.count("== wave"), 1, "no later wave")
+        self.assertEqual(r.stdout.count("→ exit"), 1,
+                         "the wave's remaining payloads are not invoked")
+        self.assertIn("role planner", r.stdout)
+        self.assertIn("node plan", r.stdout)
+        self.assertIn("exited 7", r.stdout)
+        self.assertNotIn("no doc-state change", r.stdout)
+
+    def test_raised_runner_exits_three_with_diagnostic(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec012b-"))
+        d = wave2_fixture(self._tmp)
+        real_run = subprocess.run
+        shell_calls = []
+
+        def raising_run(cmd, **kwargs):
+            # The runner invocation is the only shell=True subprocess.run
+            # (check.py/audit.py probes never use the shell).
+            if kwargs.get("shell"):
+                shell_calls.append(cmd)
+                raise OSError("cannot spawn the runner")
+            return real_run(cmd, **kwargs)
+
+        buf = io.StringIO()
+        with unittest.mock.patch.object(graph.subprocess, "run",
+                                        side_effect=raising_run), \
+                contextlib.redirect_stdout(buf):
+            rc = graph.run_loop(d, None, "agentx run {prompt_file}", False,
+                                None)
+        self.assertEqual(rc, graph.RUNNER_FAILED_EXIT)
+        self.assertEqual(len(shell_calls), 1, "fail-fast: one attempt only")
+        self.assertIn("role planner", buf.getvalue())
+        self.assertIn("node plan", buf.getvalue())
+        self.assertIn("raised", buf.getvalue())
+        self.assertNotIn("Traceback", buf.getvalue())
+
+    def test_failing_runner_progresses_then_stops_at_later_wave(self):
+        """A multi-wave run (TC-008's shape): wave 2's runners really land
+        plan/tech/qa, wave 3's task-breaker fails — wave 3 is the last one
+        started and the exit is nonzero."""
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec012c-"))
+        d = wave2_fixture(self._tmp)
+        self.seed_ok_outputs(d)
+        task_seed = (
+            "# Tasks: demo\n\n**Before-audit**: pending\n\n"
+            "## Burndown\n| Phase | Total | Done |\n|-------|-------|"
+            "------|\n| 1     | 1     | 0    |\n| **Σ** | 1     | 0    |"
+            "\n\n## Phase 1: multiply (FR-001)\n"
+            "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
+        write(Path(f"{d}-seed-task-breaker.md"), task_seed)
+        task_before = (d / "task.md").read_bytes()  # scaffold template
+        runner = (f'python3 -c "import shutil,sys;r=sys.argv[1];'
+                  f'm={{\'planner\':\'plan.md\',\'tech\':\'tech-spec.md\','
+                  f'\'qa\':\'test.md\'}};'
+                  f'sys.exit(1) if r==\'task-breaker\' else '
+                  f'shutil.copy(sys.argv[2]+\'-seed-\'+r+\'.md\','
+                  f' sys.argv[2]+\'/\'+m.get(r,\'x\'))" '
+                  f'{{role}} {{spec_dir}}')
+        r = run_cli(d, "--run", "--runner", runner)
+        self.assertEqual(r.returncode, graph.RUNNER_FAILED_EXIT, r.stderr)
+        self.assertEqual(r.stdout.count("== wave"), 2)
+        self.assertIn("role task-breaker", r.stdout)
+        self.assertIn("node tasks", r.stdout)
+        self.assertTrue((d / "plan.md").exists(), "wave 2 really ran")
+        self.assertEqual((d / "task.md").read_bytes(), task_before,
+                         "the failing runner wrote nothing")
+
+    def seed_ok_outputs(self, spec_dir: Path) -> None:
+        for role, text in (
+            ("planner",
+             "# Plan: demo\n\n## Milestone 1: multiply lands\n"
+             "All FR-001 and FR-002 work lands here; checkpoint: pytest "
+             "green.\n\n## Parallelization map\n- planner area: "
+             "`repo/calc.py` disjoint from `repo/test_calc.py`\n"),
+            ("tech",
+             "# Tech spec: demo\n\n## Approach\nA plain function in the "
+             "arithmetic module (FR-001).\n\n### D-001: plain function\n"
+             "Context: small module. Decision: plain function. "
+             "Consequences: none.\n"),
+            ("qa",
+             "# Test cases: demo\n\n## TC-001 — multiply\n"
+             "- **Traces to**: FR-001\n"
+             "- **Pass condition**: `python3 -c 'print(42)'` exits 0\n"),
+        ):
+            write(Path(f"{spec_dir}-seed-{role}.md"), text)
+
+    def test_dry_run_with_failing_template_stays_exit_zero(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="exec012d-"))
+        d = wave2_fixture(self._tmp)
+        r = run_cli(d, "--run", "--dry-run", "--runner", "exit 7")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("stopping: runner", r.stdout)
 
 
 class ExecutorCliValidationTests(unittest.TestCase):

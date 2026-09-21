@@ -2,10 +2,11 @@
 
 Every scheduling-relevant signal the tooling layer reads out of the docset
 lives here as a pure function: spec Status, task entries (checkboxes,
-phases, parallel markers, dependency chains, fix rounds), the Before-audit
-line, the survey baseline header and item list, the researcher-skip
-marker, next-free-ID allocation, ID definitions, and the git availability
-probes. check.py, audit.py, and graph.py import from this module instead
+phases, parallel markers, dependency chains, fix rounds, implemented
+markers), the Before-audit, Closing-audit, and Delivered header lines, the
+survey baseline header and item list, the researcher-skip marker,
+next-free-ID allocation, ID definitions, and the git availability probes.
+check.py, audit.py, and graph.py import from this module instead
 of inlining their own copies — one canonical regex per doc shape, so the
 validators and the workflow engine can never drift apart on what the docs
 say (the same drift-killer D-007 applied to agent defs/briefs).
@@ -49,18 +50,44 @@ STATUS_LINE = re.compile(r"^\*\*Status\*\*:\s*`?([A-Za-z]+)", re.M)
 # task.md entry shapes (the Conventions block in templates/task.md is the
 # normative wording): `- [x]` done, `(in-progress)` claimed, `~~T###~~`
 # struck/dropped, `[P]` parallelizable, `(after T###)` dependency chain,
-# `(fix <n>/5)` fix-round counter.
+# `(fix <n>/5)` fix-round counter. `(implemented)` records landed work on
+# an unticked entry — durable before the closing audit's one all-at-once
+# tick, and read independently of claimed/done/struck.
 TASK_ID = re.compile(r"- \[[ x]\]\s*(T\d{3})")
 TASK_DONE = re.compile(r"- \[x\]")
 AFTER_REF = re.compile(r"\(after\s+(T\d{3})")
 FIX_ROUND = re.compile(r"\(fix\s+(\d+)/\d+\)")
 STRIKETHROUGH = re.compile(r"~~[^~]*~~")
 
+# task.md tick proof: the `done <date> — <proof>` sub-line a ticked entry
+# carries (em dash U+2014; tick.py writes it bulleted, the conventions show
+# it indented — both shapes read). A tick without it is bookkeeping, not
+# durable evidence.
+DONE_NOTE = re.compile(r"^\s*(?:-\s*)?done \d{4}-\d{2}-\d{2} \u2014", re.M)
+
 # task.md header: the before-audit recording line. `passed @ <sha>` after a
 # real audit, `passed @ -` in a non-git repo (nothing to hash); the
 # scaffold's `pending` placeholder — and its backticked `passed @ <sha>`
 # example text — must not read as passed.
 BEFORE_AUDIT_PASSED = re.compile(r"Before-audit\*{0,2}\s*:\s*passed\s+@")
+
+# task.md header: the closing-audit approval record — `approved @ <sha>`
+# after the closing audit's human gates pass, `approved @ -` in a non-git
+# repo (the same dash form Before-audit accepts). The record is the durable
+# human sign-off that proof, review, rulings, regression, and sign-off were
+# ruled green under; the word must sit directly after the colon, so a
+# `pending` placeholder — or its backticked `approved @ <sha>` example
+# text — cannot read as approved.
+CLOSING_AUDIT_APPROVED = re.compile(
+    r"Closing-audit\*{0,2}\s*:\s*approved\s+@")
+
+# task.md header: the delivery record — `commit @ <sha>` once the plan's
+# end-of-spec commit exists, `commit @ -` the explicit non-git skip (the
+# same dash form Before-audit accepts). The record must name `commit`
+# directly after the colon, so the scaffold's `pending` placeholder — and
+# its backticked example text — cannot read as delivered.
+DELIVERED_COMMIT = re.compile(
+    r"Delivered\*{0,2}\s*:\s*commit\s+@\s*`?([0-9a-f]{7,40}|-)")
 
 # survey.md baseline header: `**Baseline**: <version> @ <sha>`, backticks on
 # the sha tolerated; the second shape matches a bare angle-bracketed baseline
@@ -116,6 +143,7 @@ class TaskEntry(NamedTuple):
     parallel: bool
     after: list[str]
     fix_round: int | None
+    implemented: bool = False
 
 
 class SurveyItem(NamedTuple):
@@ -124,6 +152,19 @@ class SurveyItem(NamedTuple):
     id: str
     description: str
     status: str  # DONE | PARTIAL | TODO | unknown
+
+
+class TickEvidence(NamedTuple):
+    """task.md's durable tick record: entry counts plus the ids whose
+    evidence is missing. `unticked` holds open (not ticked, not struck)
+    task ids in file order; `noteless` holds ticked ids whose entry block
+    carries no done-proof sub-line."""
+
+    total: int
+    ticked: int
+    struck: int
+    unticked: list[str]
+    noteless: list[str]
 
 
 def spec_status(spec_md: str) -> str | None:
@@ -166,6 +207,7 @@ def task_entries(task_md: str) -> list[TaskEntry]:
                 parallel="[P]" in first_line,
                 after=AFTER_REF.findall(block),
                 fix_round=int(fix.group(1)) if fix else None,
+                implemented="(implemented)" in block,
             ))
     return entries
 
@@ -182,6 +224,55 @@ def before_audit_state(task_md: str) -> str:
     if BEFORE_AUDIT_PASSED.search(task_md):
         return "passed"
     return "pending"
+
+
+def closing_audit_state(task_md: str) -> str:
+    """'approved' | 'pending' | 'missing' for task.md's Closing-audit line.
+
+    approved = the closing audit's human record exists (`approved @ <sha>`,
+    or `approved @ -` in a non-git repo) — the durable sign-off under which
+    proof, review, rulings, regression, and sign-off were ruled green;
+    pending = a line exists but records no approval; missing = no
+    Closing-audit line at all. Mechanical pass conditions never imply this
+    record: only the line the orchestrator writes does."""
+    if "Closing-audit" not in task_md:
+        return "missing"
+    if CLOSING_AUDIT_APPROVED.search(task_md):
+        return "approved"
+    return "pending"
+
+
+def delivery_state(task_md: str) -> tuple[str, str | None]:
+    """(state, evidence) for task.md's Delivered header line.
+
+    delivered = a commit record exists — evidence is the recorded sha, or
+    `-` for the explicit non-git skip; pending = a Delivered line exists
+    but records no commit (the scaffold's placeholder reads pending, never
+    delivered); missing = no Delivered line at all. evidence is None
+    unless delivered."""
+    if "Delivered" not in task_md:
+        return "missing", None
+    m = DELIVERED_COMMIT.search(task_md)
+    if not m:
+        return "pending", None
+    return "delivered", m.group(1)
+
+
+def tick_evidence(task_md: str) -> TickEvidence:
+    """The durable task-tick evidence for the tick-commit transition: an
+    approved tick transition is fully evidenced only when `unticked` and
+    `noteless` are both empty — every task ticked or struck, every tick
+    carrying its `done <date> — <proof>` sub-line."""
+    entries = task_entries(task_md)
+    return TickEvidence(
+        total=len(entries),
+        ticked=sum(1 for e in entries if e.done),
+        struck=sum(1 for e in entries if e.struck),
+        unticked=[e.id for e in entries
+                  if e.id and not e.done and not e.struck],
+        noteless=[e.id for e in entries
+                  if e.id and e.done and not DONE_NOTE.search(e.block)],
+    )
 
 
 def survey_baseline(survey_md: str) -> tuple[str, str] | None:
