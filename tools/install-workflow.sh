@@ -70,6 +70,19 @@ done
 
 sha() { shasum -a 256 < "$1" | cut -d' ' -f1; }
 
+# Destination-local staging + atomic replacement (FR-007), same helper
+# shape as tools/sync.sh: content lands via rename from scratch in the
+# destination's own directory, and the scratch name carries the
+# LEDGER_NAME prefix — the installer-scratch namespace the ledger,
+# check, and planner reads already exclude.
+atomic_put() {  # <src> <dest>
+  local tmp
+  tmp="$(dirname "$2")/$LEDGER_NAME.tmp-$(basename "$2").tmp"
+  rm -f "$tmp"
+  cp -p "$1" "$tmp"
+  mv "$tmp" "$2"
+}
+
 # A dest is ours-and-stale iff its hash sits in the root's ledger under
 # the same name (previous deploy of ours); anything else is foreign.
 ledger_has() {  # <ledger> <name> <dest-file>
@@ -80,8 +93,13 @@ ledger_has() {  # <ledger> <name> <dest-file>
 
 ledger_record() {  # <ledger> <name> <file-deployed>
   local h; h="$(sha "$3")"
-  touch "$1"
-  grep -v " $2\$" "$1" > "$1.tmp" || true
+  # Rewrite via destination-local scratch renamed over the ledger, so
+  # the ledger file itself never holds partial content (FR-007).
+  if [ -f "$1" ]; then
+    grep -v " $2\$" "$1" > "$1.tmp" || true
+  else
+    : > "$1.tmp"
+  fi
   printf '%s %s\n' "$h" "$2" >> "$1.tmp"
   mv "$1.tmp" "$1"
 }
@@ -136,7 +154,10 @@ install_master() {  # <master-file> <harness> <skill-name>
   skill_dir="$(resolve_skill_dir "$h" "$name")" || return 1
   expected="$(mktemp)"
   trap 'rm -f "$expected"' RETURN
-  sed "s|__SKILL_DIR__|$skill_dir|g" "$master" > "$expected"
+  # --bake encodes the path for the masters' string-literal grammar —
+  # never a raw text substitution.
+  python3 "$PKG_ROOT/tools/workflow-defs.py" --bake "$master" \
+    --skill-dir "$skill_dir" > "$expected" || return 1
 
   if [ "$CHECK" = 1 ]; then
     if [ ! -e "$dest" ]; then
@@ -158,7 +179,7 @@ install_master() {  # <master-file> <harness> <skill-name>
     echo "REFUSE $dest — foreign file (differs from a fresh bake, not a prior deploy); resolve manually"
     return 1
   fi
-  cp "$expected" "$dest"
+  atomic_put "$expected" "$dest"
   ledger_record "$root/$LEDGER_NAME" "$base" "$dest"
   echo "install $dest (skill_dir: $skill_dir)"
 }

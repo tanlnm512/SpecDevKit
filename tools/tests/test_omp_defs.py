@@ -10,6 +10,7 @@ the same code path with no new test needed here — see
 test_second_skill_needs_no_new_code, which proves that on a synthetic
 skill directory instead.
 """
+import hashlib
 import importlib.util
 import re
 import tempfile
@@ -67,6 +68,15 @@ def run_gen(skill: Path, out: Path) -> str:
     with contextlib.redirect_stdout(buf):
         omp_defs.main(["--skill-dir", str(skill), "--out", str(out)])
     return buf.getvalue()
+
+
+def run_gen_rc(skill: Path, out: Path):
+    """(exit code, stdout) — for behavior that refuses instead of raising."""
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = omp_defs.main(["--skill-dir", str(skill), "--out", str(out)])
+    return rc, buf.getvalue()
 
 
 class ModelTierTests(unittest.TestCase):
@@ -225,6 +235,78 @@ class ManifestProvenanceTests(unittest.TestCase):
             self.assertTrue((out / "gamma.md").exists())
             self.assertTrue(
                 omp_defs.manifest_path_for(out, b).is_file())
+
+
+class WriteGateTests(unittest.TestCase):
+    """FR-003 on the omp deploy root: the per-skill manifest is the
+    provenance ledger, so a role destination is replaced only when its
+    current hash is recorded there — a foreign file at a role name,
+    byte-different or byte-identical, with or without a manifest yet, is
+    refused before any write, never clobbered or silently adopted."""
+
+    def test_unledgered_role_named_file_is_refused_and_kept(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            out.mkdir()
+            intruder = out / "alpha.md"
+            intruder.write_text("---\nname: alpha\n---\nhand-made\n")
+            skill = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            rc, output = run_gen_rc(skill, out)
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSE", output)
+            self.assertIn("hand-made", intruder.read_text())
+            # planned before any write: the refusal leaves the whole
+            # destination untouched and establishes no manifest
+            self.assertFalse((out / "beta.md").exists())
+            self.assertFalse(
+                omp_defs.manifest_path_for(out, skill).exists())
+
+    def test_drifted_generated_file_is_refused_and_manifest_untouched(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            skill = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            run_gen(skill, out)
+            manifest_before = (
+                omp_defs.manifest_path_for(out, skill).read_bytes())
+            dest = out / "alpha.md"
+            dest.write_text(dest.read_text() + "\nhand-edited\n")
+            rc, output = run_gen_rc(skill, out)
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSE", output)
+            self.assertIn("hand-edited", dest.read_text())
+            self.assertEqual(
+                omp_defs.manifest_path_for(out, skill).read_bytes(),
+                manifest_before)
+
+    def test_identical_unledgered_file_is_refused_not_adopted(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "first"
+            skill = scratch_skill(Path(td), "skill-a", ["alpha"])
+            run_gen(skill, out)
+            fresh = Path(td) / "out"
+            fresh.mkdir()
+            (fresh / "alpha.md").write_bytes((out / "alpha.md").read_bytes())
+            rc, output = run_gen_rc(skill, fresh)
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSE", output)
+            self.assertFalse(
+                omp_defs.manifest_path_for(fresh, skill).exists())
+
+    def test_owned_update_is_applied_and_remanifested(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            skill = scratch_skill(Path(td), "skill-a", ["alpha"])
+            run_gen(skill, out)
+            src = skill / "agents" / "alpha.md"
+            src.write_text(
+                "---\nname: alpha\ndescription: does a thing\n"
+                "model: inherit\ntools: Read, Grep\n---\nbody v2\n")
+            rc, output = run_gen_rc(skill, out)
+            self.assertEqual(rc, 0, output)
+            self.assertIn("body v2", (out / "alpha.md").read_text())
+            manifest = omp_defs.manifest_path_for(out, skill).read_text()
+            want = hashlib.sha256((out / "alpha.md").read_bytes()).hexdigest()
+            self.assertEqual(manifest, f"{want} alpha.md\n")
 
 
 class GenerationEndToEndTests(unittest.TestCase):
