@@ -1,6 +1,6 @@
 # Spec: Transactional lifecycle tools
 
-**Status**: draft
+**Status**: done
 **Created**: 2026-09-21
 **Branch**: `fix/transactional-lifecycle-tools`
 

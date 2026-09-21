@@ -3,10 +3,17 @@
 
 Ticks `- [ ] T###` entries to `- [x]`, inserts one `done <date> — <proof>`
 sub-line per ticked task, strips the entry's `(in-progress)` claim marker,
-and recomputes task.md's burndown table via `check.py --fix-burndown` (the
-single arithmetic authority). Refuses partial application: every note is
+and recomputes task.md's burndown table in memory via check.py's pure
+burndown transform (the single arithmetic authority). The full prospective
+text — ticks, done-lines, and burndown — is computed and validated before
+any write. Replacement is durable and atomic: the prospective text goes to
+a same-directory temp file, is fsynced, then renamed over the original, and
+the promoted file is re-verified (byte-equality + re-parse); any failure at
+any stage restores the byte-identical original and exits nonzero. Refuses
+partial application: every note is
 validated against the current file before any line changes, and a re-parse
-after writing must show exactly the intended ticks.
+of the prospective text must show exactly the intended ticks and a
+burndown table that agrees with them.
 
 The transform touches ONLY: the ticked task's first line, the one inserted
 done-line under it, and the burndown Done column. Entry bodies, checkpoint
@@ -14,17 +21,21 @@ comments, and conventions stay byte-identical — the failure mode this tool
 exists to prevent is the orchestrator hand-editing a dozen hunks and
 gutting the as-built record.
 
-Exit: 0 = applied (or --dry-run validated) · 1 = validation failed (no
-changes written) · 2 = usage error.
+Exit: 0 = applied (or --dry-run validated) · 1 = validation or transaction
+failure (nothing left changed) · 2 = usage error.
 """
 from __future__ import annotations
 
+import contextlib
+import os
 import re
-import subprocess
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import check
 import specstate
 
 USAGE = __doc__.rsplit("Exit:", 1)[0].strip()
@@ -55,6 +66,109 @@ def _apply_ticks(task_md: str, notes: list[tuple[str, str]], date: str) -> str:
             out.append(line)
     assert not pending, f"validated task vanished mid-write: {sorted(pending)}"
     return "\n".join(out) + ("\n" if task_md.endswith("\n") else "")
+
+
+def _prospective(task_md: str, notes: list[tuple[str, str]], date: str) -> str:
+    """The complete prospective text — flipped entries, inserted done-lines,
+    and the burndown table recomputed from the prospective entries — with
+    no I/O, so main validates every byte of it before replacing the file."""
+    updated = _apply_ticks(task_md, notes, date)
+    ph_total, ph_done = check.phase_counts(specstate.task_entries(updated))
+    out, _ = check.burndown_rewrite(updated, ph_total, ph_done)
+    return out
+
+
+def _verify_text(text: str, by_id: dict, seen: set[str],
+                 notes: list[tuple[str, str]], date: str) -> list[str]:
+    """Re-parse a candidate text and return its problems: exactly the named
+    tasks newly done with done-lines landed, no other task's state changed,
+    and the burndown table agreeing with the entries. Runs identically on
+    the prospective text (pre-write) and the promoted text (postcheck)."""
+    problems: list[str] = []
+    after = _tasks_by_id(text)
+    for tid, proof in notes:
+        e = after.get(tid)
+        if e is None or not e.done or f"done {date} — {proof}" not in e.block:
+            problems.append(f"{tid}: post-write verification failed")
+    before_ids = {t: (by_id[t].done, by_id[t].struck, by_id[t].claimed) for t in by_id}
+    for t, state in before_ids.items():
+        if t in seen:
+            continue
+        a = after.get(t)
+        if a is None or (a.done, a.struck) != state[:2]:
+            problems.append(f"{t}: state changed but was not named")
+    sums = check.burndown_sums(text)
+    if sums is None:
+        print("warning: no burndown table in task.md; nothing to recompute", file=sys.stderr)
+    else:
+        bd_total, bd_done, sum_row = sums
+        ph_total, ph_done = check.phase_counts(specstate.task_entries(text))
+        want_total, want_done = sum(ph_total.values()), sum(ph_done.values())
+        if bd_total != want_total:
+            problems.append(f"burndown: table totals {bd_total} != prospective tasks {want_total}")
+        if bd_done != want_done:
+            problems.append(f"burndown: table done {bd_done} != prospective ticked {want_done}")
+        if sum_row is not None and sum_row != (bd_total, bd_done):
+            problems.append(
+                f"burndown: Σ row {sum_row[0]}/{sum_row[1]} disagrees with "
+                f"row sums {bd_total}/{bd_done}"
+            )
+    return problems
+
+
+def _durable_replace(path: Path, text: str) -> None:
+    """Write text to a same-directory temp file, fsync it, then rename it
+    atomically over path. Any failure unlinks the temp and raises; path is
+    only ever changed by the single atomic rename."""
+    fd, tmpname = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmpname)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+            f.flush()
+            with contextlib.suppress(OSError):
+                os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        # After a real rename the temp no longer exists; after a simulated
+        # or failed one it must not survive as debris.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+
+
+def _fsync_dir(path: Path) -> None:
+    """Sync the directory entry so the rename itself survives a crash."""
+    fd = os.open(str(path.parent), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _rollback(path: Path, original: str) -> None:
+    """Best-effort restore of the byte-identical original after a failed
+    postcheck; if restoration fails too, preserve the original bytes in a
+    journal beside the file and print the exact recovery path."""
+    try:
+        _durable_replace(path, original)
+        _fsync_dir(path)
+        print("original task.md restored byte-identically", file=sys.stderr)
+    except OSError as exc:
+        journal = path.parent / (path.name + ".rollback")
+        try:
+            journal.write_bytes(original.encode("utf-8"))
+        except OSError:
+            print(
+                f"ROLLBACK FAILED: {exc} — task.md is left replaced and no "
+                "journal could be written; restore manually from version control",
+                file=sys.stderr)
+            return
+        print(
+            f"ROLLBACK FAILED: {exc} — original bytes preserved at {journal}; "
+            f"recover with: mv {journal} {path}",
+            file=sys.stderr)
 
 
 def main(argv=None) -> int:
@@ -123,22 +237,9 @@ def main(argv=None) -> int:
         print("validation failed — nothing written", file=sys.stderr)
         return 1
 
-    updated = _apply_ticks(original, notes, date)
+    prospective = _prospective(original, notes, date)
 
-    # Re-parse the prospective text: exactly the named tasks newly done,
-    # nothing else changed state, and the done-lines landed.
-    after = _tasks_by_id(updated)
-    for tid, proof in notes:
-        e = after[tid]
-        if not e.done or f"done {date} — {proof}" not in e.block:
-            problems.append(f"{tid}: post-write verification failed")
-    before_ids = {t: (by_id[t].done, by_id[t].struck, by_id[t].claimed) for t in by_id}
-    for t, state in before_ids.items():
-        if t in seen:
-            continue
-        a = after.get(t)
-        if a is None or (a.done, a.struck) != state[:2]:
-            problems.append(f"{t}: state changed but was not named")
+    problems = _verify_text(prospective, by_id, seen, notes, date)
     if problems:
         for p in problems:
             print(f"  {p}", file=sys.stderr)
@@ -151,18 +252,43 @@ def main(argv=None) -> int:
             print(f"  [x] {tid} — {proof}")
         return 0
 
-    task_path.write_text(updated, encoding="utf-8")
+    try:
+        _durable_replace(task_path, prospective)
+    except OSError as exc:
+        print(f"tick aborted: write/sync/replace failed, original preserved: {exc}",
+              file=sys.stderr)
+        return 1
 
-    # Burndown arithmetic belongs to exactly one implementation.
-    check = Path(__file__).resolve().parent / "check.py"
-    r = subprocess.run([sys.executable, str(check), str(spec_dir), "--fix-burndown"],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"warning: check.py --fix-burndown exited {r.returncode}; burndown may need attention", file=sys.stderr)
-        print(r.stdout.strip(), file=sys.stderr)
+    # Postcheck the promoted file: byte-equality with the validated
+    # prospective text, then the same re-parse used pre-write. Any problem
+    # here rolls back to the byte-identical original.
+    problems = []
+    landed = ""
+    try:
+        landed_bytes = task_path.read_bytes()
+    except OSError as exc:
+        landed_bytes = None
+        problems.append(f"postcheck: replaced task.md unreadable: {exc}")
+    if landed_bytes is not None:
+        if landed_bytes != prospective.encode("utf-8"):
+            problems.append(
+                "postcheck: task.md on disk differs from the validated prospective text")
+        landed = landed_bytes.decode("utf-8", errors="replace")
+        problems += _verify_text(landed, by_id, seen, notes, date)
+    if not problems:
+        try:
+            _fsync_dir(task_path)
+        except OSError as exc:
+            problems = [f"postcheck: directory sync failed after replace: {exc}"]
+    if problems:
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        print("postcheck failed — rolling back", file=sys.stderr)
+        _rollback(task_path, original)
+        return 1
 
-    done_now = sum(1 for e in specstate.task_entries(task_path.read_text(encoding="utf-8")) if e.done)
-    total = len(specstate.task_entries(task_path.read_text(encoding="utf-8")))
+    done_now = sum(1 for e in specstate.task_entries(landed) if e.done)
+    total = len(specstate.task_entries(landed))
     print(f"ticked {len(notes)}: {', '.join(tid for tid, _ in notes)}")
     print(f"burndown now {done_now}/{total} done")
     return 0

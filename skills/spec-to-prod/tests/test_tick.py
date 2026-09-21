@@ -3,17 +3,22 @@
 The mechanical-tick contract: entry bodies and checkpoint comments survive
 byte-identical; only the ticked first line, one inserted done-line, and the
 burndown Done column change. Validation is atomic (no partial application),
-and check.py stays green on the ticked copy.
+and check.py stays green on the ticked copy. The transaction contract: a
+failed validation, write, sync, replace, or postcheck must exit nonzero and
+leave every file under the spec dir byte-identical — no stray temp file left
+behind.
 """
 
 import contextlib
 import difflib
 import importlib.util
 import io
+import os
 import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 from pathlib import Path
 SKILL = Path(__file__).resolve().parents[1]
@@ -35,12 +40,20 @@ def run_tick(*argv):
     return rc, buf.getvalue()
 
 
+def tree_snapshot(root):
+    """relpath -> bytes for every file under root: the byte-identical
+    guarantee covers the whole spec dir, stray temp files included."""
+    return {str(p.relative_to(root)): p.read_bytes()
+            for p in sorted(root.rglob("*")) if p.is_file()}
+
+
 class TickTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.spec = Path(self.tmp) / "mini-spec"
         shutil.copytree(FIXTURE, self.spec)
         self.before = (self.spec / "task.md").read_text(encoding="utf-8")
+        self.snapshot = tree_snapshot(self.spec)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -106,6 +119,85 @@ class TickTests(unittest.TestCase):
     def test_note_shape_enforced(self):
         rc, out = run_tick(str(self.spec), "--note", "no double colon here")
         self.assertEqual(rc, 2, out)
+
+    # Failure matrix for the tick transaction: every stage — validation,
+    # write, sync, replace, postcheck — must exit nonzero and leave the
+    # tree byte-identical. Injection seams: filesystem perms for write,
+    # os.fsync / os.replace for the durable pipeline (Path.replace routes
+    # through os.replace), and a real check.py failure for postcheck.
+
+    def _assert_original(self):
+        self.assertEqual(tree_snapshot(self.spec), self.snapshot)
+
+    def _run_tick_must_fail(self, *argv):
+        """A tick must fail handled (no escaping exception = no crash),
+        nonzero, and without touching a byte."""
+        try:
+            rc, out = run_tick(*argv)
+        except Exception as exc:
+            self.fail(f"tick crashed instead of exiting nonzero: {exc!r}")
+        self.assertNotEqual(rc, 0)
+        self._assert_original()
+
+    def test_validation_failure_is_atomic(self):
+        self._run_tick_must_fail(
+            str(self.spec),
+            "--note", "T001 :: good", "--note", "T999 :: no such task")
+
+    def test_duplicate_note_refused(self):
+        self._run_tick_must_fail(
+            str(self.spec),
+            "--note", "T001 :: one", "--note", "T001 :: twice")
+
+    def test_write_failure_preserves_original(self):
+        # spec dir made unwritable: the beside-target write must fail cleanly
+        os.chmod(self.spec, 0o555)
+        try:
+            self._run_tick_must_fail(str(self.spec), "--note", "T001 :: proof")
+        finally:
+            os.chmod(self.spec, 0o755)
+
+    def test_sync_failure_preserves_original(self):
+        # first fsync (the temp's durability barrier) fails; recovery may
+        # still fsync
+        real_fsync = os.fsync
+        synced = []
+        def refuse_once(fd):
+            if not synced:
+                synced.append(fd)
+                raise OSError("injected fsync failure")
+            return real_fsync(fd)
+        with unittest.mock.patch("os.fsync", side_effect=refuse_once):
+            self._run_tick_must_fail(str(self.spec), "--note", "T001 :: proof")
+
+    def test_replace_failure_preserves_original(self):
+        # the promotion replace fails once; a recovery replace may proceed
+        real_replace = os.replace
+        refused = []
+        def refuse_once(src, dst):
+            if Path(dst).name == "task.md" and not refused:
+                refused.append(dst)
+                raise OSError("injected replace failure")
+            return real_replace(src, dst)
+        with unittest.mock.patch("os.replace", side_effect=refuse_once), \
+                unittest.mock.patch("os.rename", side_effect=refuse_once):
+            self._run_tick_must_fail(str(self.spec), "--note", "T001 :: proof")
+
+    def test_postcheck_failure_restores_original(self):
+        # The replace appears to succeed but lands corrupted content: the
+        # post-replace postcondition check must catch it and roll back.
+        real_replace = os.replace
+        promoted = []
+        def corrupt_once(src, dst):
+            if Path(dst).name == "task.md" and not promoted:
+                promoted.append(dst)
+                Path(dst).write_text("corrupted — no task entries",
+                                     encoding="utf-8")
+                return
+            return real_replace(src, dst)
+        with unittest.mock.patch("os.replace", side_effect=corrupt_once), \
+                unittest.mock.patch("os.rename", side_effect=corrupt_once):
+            self._run_tick_must_fail(str(self.spec), "--note", "T001 :: proof")
 
 
 if __name__ == "__main__":

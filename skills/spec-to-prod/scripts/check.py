@@ -112,9 +112,9 @@ VAGUE = re.compile(
 )
 
 # A burndown table row (label + two integers), anchored to the whole line —
-# used by fix_burndown's rewrite (it must not touch a 4-column row).
+# used by burndown_rewrite (it must not touch a 4-column row).
 BD_ROW = re.compile(r"^\|([^|]+)\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*$")
-# Same, unanchored — used by check 3's scan (tolerates a trailing 4th column).
+# Same, unanchored — used by burndown_sums' scan (tolerates a trailing 4th column).
 BD_ROW_SCAN = re.compile(r"^\|([^|]+)\|\s*(\d+)\s*\|\s*(\d+)\s*\|", re.M)
 
 # Burndown label classification. A label is the Σ/total row, an attributable
@@ -213,7 +213,7 @@ def _pytest_target_exists(repo_root: Path, tok: str) -> bool:
 def bd_label(cell: str) -> tuple[str, int | None]:
     """Classify a burndown row label: ('sum'|'data'|'skip', phase or None).
 
-    Shared by check 3 and both fix_burndown passes so validation and repair
+    Shared by burndown_sums and burndown_rewrite so validation and repair
     can never drift apart on what counts as a data row (that drift was the
     actual root cause of "Phase 1" rows escaping both).
     """
@@ -422,9 +422,43 @@ def build_checklist(name: str, spec: str, entries: list[TaskEntry]) -> str:
     return "\n".join(lines)
 
 
-def fix_burndown(task: str, path: Path, ph_total: dict[int, int],
-                 ph_done: dict[int, int]) -> str:
-    """Rewrite data-row Total/Done (and the Σ row) from actual phase entries.
+def phase_counts(entries: list[TaskEntry]) -> tuple[dict[int, int], dict[int, int]]:
+    """Per-phase (total, done) entry counts — the burndown table's data rows.
+    The one counting implementation behind both the table's validation and
+    its repair, so the two can never drift apart on the numbers."""
+    ph_total: dict[int, int] = {}
+    ph_done: dict[int, int] = {}
+    for e in entries:
+        if e.phase is None:
+            continue
+        ph_total[e.phase] = ph_total.get(e.phase, 0) + 1
+        if e.done:
+            ph_done[e.phase] = ph_done.get(e.phase, 0) + 1
+    return ph_total, ph_done
+
+
+def burndown_sums(task: str) -> tuple[int, int, tuple[int, int] | None] | None:
+    """(table total, table done, first Σ row) scanned from task text; None
+    when no attributable data row exists (no table). Shared by check 3 and
+    tick.py's pre-write validation via the same bd_label classifier."""
+    data_rows: list[tuple[int, int]] = []
+    sum_row: tuple[int, int] | None = None
+    for cell, a, b in BD_ROW_SCAN.findall(task):
+        kind, _ = bd_label(cell)
+        if kind == "data":
+            data_rows.append((int(a), int(b)))
+        elif kind == "sum" and sum_row is None:
+            sum_row = (int(a), int(b))
+    if not data_rows:
+        return None
+    return (sum(a for a, _ in data_rows), sum(b for _, b in data_rows), sum_row)
+
+
+def burndown_rewrite(task: str, ph_total: dict[int, int],
+                     ph_done: dict[int, int]) -> tuple[str, list[str]]:
+    """Pure rewrite of the burndown table from the given phase counts:
+    returns (new text, fix messages) with no I/O, so tick.py can compute
+    the prospective table before replacing the original file.
 
     Row labels, header, and separator lines are left byte-identical; only the
     two number cells of attributable data rows and the Σ row change. Rows we
@@ -433,6 +467,7 @@ def fix_burndown(task: str, path: Path, ph_total: dict[int, int],
     """
     lines = task.split("\n")
     new_lines = list(lines)
+    msgs: list[str] = []
 
     # pass 1: data rows attributable to a parsed phase section
     fixes: list[tuple[int, str, int, int, int, int]] = []  # ln, label, old..
@@ -449,9 +484,9 @@ def fix_burndown(task: str, path: Path, ph_total: dict[int, int],
 
     for ln, label, a, b, na, nb in fixes:
         if a != na:
-            print(f"fixed: {label} Total {a}→{na}")
+            msgs.append(f"fixed: {label} Total {a}→{na}")
         if b != nb:
-            print(f"fixed: {label} Done {b}→{nb}")
+            msgs.append(f"fixed: {label} Done {b}→{nb}")
         if (a, b) != (na, nb):
             new_lines[ln] = f"| {label} | {na} | {nb} |"
 
@@ -466,14 +501,24 @@ def fix_burndown(task: str, path: Path, ph_total: dict[int, int],
             continue
         a, b = int(m.group(2)), int(m.group(3))
         if a != sum_total:
-            print(f"fixed: Σ Total {a}→{sum_total}")
+            msgs.append(f"fixed: Σ Total {a}→{sum_total}")
         if b != sum_done:
-            print(f"fixed: Σ Done {b}→{sum_done}")
+            msgs.append(f"fixed: Σ Done {b}→{sum_done}")
         if (a, b) != (sum_total, sum_done):
             new_lines[ln] = f"|{m.group(1)}| {sum_total} | {sum_done} |"
         break
 
-    out = "\n".join(new_lines)
+    return "\n".join(new_lines), msgs
+
+
+def fix_burndown(task: str, path: Path, ph_total: dict[int, int],
+                 ph_done: dict[int, int]) -> str:
+    """Rewrite data-row Total/Done (and the Σ row) from actual phase entries
+    and write the result: burndown_rewrite plus the printed fix messages and
+    file write the --fix-burndown CLI mode owns."""
+    out, msgs = burndown_rewrite(task, ph_total, ph_done)
+    for m in msgs:
+        print(m)
     path.write_text(out, encoding="utf-8")
     return out
 
@@ -592,8 +637,7 @@ def main(argv: list[str] | None = None) -> int:
     # don't count. specstate.task_entries is the shared parser; the
     # bookkeeping below is this file's per-check view of the same entries.
     entries = task_entries(task)
-    ph_total: dict[int, int] = {}
-    ph_done: dict[int, int] = {}
+    ph_total, ph_done = phase_counts(entries)
     task_phase: dict[str, int] = {}
     # phase -> backticked path-ish span -> [task ids]; [P] tasks in one
     # phase sharing a span is the parallel-wave collision risk.
@@ -601,9 +645,6 @@ def main(argv: list[str] | None = None) -> int:
     for e in entries:
         if e.phase is None:
             continue
-        ph_total[e.phase] = ph_total.get(e.phase, 0) + 1
-        if e.done:
-            ph_done[e.phase] = ph_done.get(e.phase, 0) + 1
         if e.id:
             task_phase[e.id] = e.phase
             if e.parallel:
@@ -820,21 +861,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"index: INDEX.md line for {name} doesn't say '{status}' - update to match spec.md"
                 )
 
-    # 3. burndown arithmetic vs actual entries, via the shared bd_label
-    # classifier (also used by fix_burndown — validation and repair must
-    # never disagree on what counts as a data row vs the Σ row).
-    bd_rows = BD_ROW_SCAN.findall(task)
-    data_rows: list[tuple[int, int]] = []
-    sum_row: tuple[int, int] | None = None
-    for cell, a, b in bd_rows:
-        kind, _ = bd_label(cell)
-        if kind == "data":
-            data_rows.append((int(a), int(b)))
-        elif kind == "sum" and sum_row is None:
-            sum_row = (int(a), int(b))
-    if data_rows:
-        bd_total = sum(a for a, _ in data_rows)
-        bd_done = sum(b for _, b in data_rows)
+    # 3. burndown arithmetic vs actual entries, via the shared burndown_sums
+    # scan (burndown_rewrite repairs from the same phase_counts — validation
+    # and repair must never disagree on what counts as a data row vs the Σ row).
+    sums = burndown_sums(task)
+    if sums is not None:
+        bd_total, bd_done, sum_row = sums
         if bd_total != total_tasks:
             fails.append(f"burndown: table totals {bd_total} != actual tasks {total_tasks}")
         if bd_done != done:
