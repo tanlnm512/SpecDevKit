@@ -1,6 +1,6 @@
 # Spec: provenance-safe-installation
 
-**Status**: draft
+**Status**: approved
 **Created**: 2026-09-21
 **Branch**: `fix/provenance-safe-installation`
 
