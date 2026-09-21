@@ -50,14 +50,28 @@ generated file edited since generation is kept with a loud note. A
 missing manifest (first run into a fresh root) skips stale removal
 entirely: nothing is deleted that this tool cannot prove it made.
 
+The same manifest gates writes, through the shared ownership planner
+(tools/ownership.py): a role destination is replaced only when its
+current hash is recorded there, and output is staged before the first
+write, each file landing via a destination-local temp replaced
+atomically. A foreign file at a role name — byte-different or even
+byte-identical, with or without a manifest — is refused with a nonzero
+exit and nothing written: never clobbered, never silently adopted.
+
 Run by tools/sync.sh; standalone:
 
     tools/omp-defs.py --skill-dir skills/spec-to-prod --out ~/.omp/agent/agents
 """
 import hashlib
+import os
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ownership
 
 TOOL_MAP = {
     "read": "read",
@@ -134,22 +148,11 @@ def manifest_path_for(out: Path, skill_dir: Path) -> Path:
     return out / f".spec-dev-kit-omp-defs-{skill_dir.name}"
 
 
-def read_manifest(path: Path) -> dict:
-    """name -> sha of what a previous run generated here, or {} when no
-    manifest exists (first run — stale removal is skipped, never guessed)."""
-    if not path.is_file():
-        return {}
-    recorded = {}
-    for line in path.read_text().splitlines():
-        sha, _, name = line.partition(" ")
-        if sha and name:
-            recorded[name] = sha
-    return recorded
-
-
 def write_manifest(path: Path, out: Path, names: set) -> None:
     lines = sorted(f"{file_sha(out / n)} {n}" for n in names)
-    path.write_text("\n".join(lines) + ("\n" if lines else ""))
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("\n".join(lines) + ("\n" if lines else ""))
+    os.replace(tmp, path)
 
 
 def main(argv=None) -> int:
@@ -166,31 +169,67 @@ def main(argv=None) -> int:
     if not agents.is_dir():
         sys.exit(f"{agents}: no agents/ dir")
     sources = sorted(p for p in agents.glob("*.md") if not p.name.startswith("_"))
-    out.mkdir(parents=True, exist_ok=True)
-    keep = set()
-    for source in sources:
-        name, desc, fields, body = parse(source)
-        (out / source.name).write_text(render(name, desc, fields, body))
-        keep.add(source.name)
-        print(f"omp def {name}")
     mpath = manifest_path_for(out, skill_dir)
-    prev = read_manifest(mpath)
-    for name in sorted(prev.keys() - keep):
-        stale = out / name
-        if not stale.is_file():
-            continue
-        if file_sha(stale) != prev[name]:
-            print(f"omp def kept {name} — changed since generation; "
-                  f"remove manually if stale")
-            continue
-        stale.unlink()
-        print(f"omp def removed {name}")
-    if not prev and keep:
-        print(f"omp def stale-check skipped — no provenance manifest in "
-              f"{out} (first run establishes it; delete renamed roles' "
-              f"old files manually this once)")
-    write_manifest(mpath, out, keep)
-    return 0
+
+    stage = Path(tempfile.mkdtemp(prefix="omp-defs-stage-"))
+    try:
+        # Full render into staging before the first destination write: a
+        # bad role aborts with --out untouched.
+        rendered = {}
+        for source in sources:
+            name, desc, fields, body = parse(source)
+            rendered[source.name] = (name, render(name, desc, fields, body))
+            (stage / source.name).write_text(rendered[source.name][1])
+
+        # The per-skill manifest is the provenance ledger: a destination
+        # may be replaced only when its current hash is recorded there.
+        # Anything else at a role name is foreign — refused before any
+        # write, never clobbered, never silently adopted.
+        try:
+            prev = ownership.read_ledger(mpath)
+            planned, refused = [], []
+            for fname in sorted(rendered):
+                d = ownership.plan_file(stage / fname, out / fname,
+                                        name=fname, ledger_file=mpath)
+                (refused if d.kind == ownership.REFUSE else planned).append(
+                    (d, fname))
+        except (ValueError, OSError) as e:
+            print(f"ERROR {e}", file=sys.stderr)
+            return 2
+        if refused:
+            for _, fname in refused:
+                print(f"REFUSE {out / fname} — foreign file (differs from "
+                      f"generated, not a prior deploy); resolve manually")
+            return 1
+
+        out.mkdir(parents=True, exist_ok=True)
+        for d, fname in planned:
+            if d.kind == ownership.UNCHANGED:
+                continue
+            tmp = out / f".{fname}.tmp"
+            tmp.write_text(rendered[fname][1])
+            tmp.replace(out / fname)
+            print(f"omp def {rendered[fname][0]}")
+
+        keep = set(rendered)
+        for name in sorted(prev.keys() - keep):
+            stale = out / name
+            if not stale.is_file():
+                continue
+            if file_sha(stale) != prev[name]:
+                print(f"omp def kept {name} — changed since generation; "
+                      f"remove manually if stale")
+                continue
+            stale.unlink()
+            print(f"omp def removed {name}")
+        if not prev and keep:
+            print(f"omp def stale-check skipped — no provenance manifest in "
+                  f"{out} (first run establishes it; delete renamed roles' "
+                  f"old files manually this once)")
+        write_manifest(mpath, out, keep)
+        return 0
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 if __name__ == "__main__":

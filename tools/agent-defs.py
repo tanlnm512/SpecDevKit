@@ -41,10 +41,20 @@ Targets:
   copies wholesale, so sync.sh regenerates it into the repo and it
   ships with the tree.
 
-Stale-output scoping (omp-defs.py's rule): regeneration removes only
-files in --out sharing this skill's own role-name prefix (e.g. "spec-"
-for spec-to-prod); no shared prefix, no removal — never guess at
-ownership of a file this run didn't produce.
+Output discipline: the complete set is rendered into a staging dir and
+planned against the destination before the first write, and each file
+lands via a destination-local temp replaced atomically — a bad role or
+a refused destination aborts with --out untouched. A destination is
+this generator's to replace only when its current hash sits in the
+destination's .spec-dev-kit-deployed ledger (a prior deploy); a foreign
+file at a generated name — even a byte-identical one — exits nonzero
+and is never clobbered or adopted. The generator deletes nothing in
+--out and merges, never prunes, ledger entries (shared roots hold other
+skills' deployments): stale-role cleanup is the installer's provenance
+ledger's call, never a name-pattern guess. Exception: agy output is
+committed regenerate-only repo content — git is its provenance and
+sync.sh byte-compares it against a fresh render — so it consults no
+destination ledger.
 
 Run by tools/sync.sh; standalone:
 
@@ -58,7 +68,11 @@ Run by tools/sync.sh; standalone:
 import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ownership
 
 FM = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 DROID_NAME = re.compile(r"^[a-z0-9-_]+$")
@@ -112,19 +126,6 @@ def claude_names(tools: str):
     return [t.strip().lower() for t in tools.split(",") if t.strip()]
 
 
-def role_prefix(names):
-    """Common basename prefix across this skill's own roles (omp-defs
-    rule): stale removal is scoped to it; empty -> skip removal."""
-    if not names:
-        return ""
-    p = names[0]
-    for n in names[1:]:
-        while not n.startswith(p):
-            p = p[:-1]
-    cut = p.rfind("-")
-    return p[:cut + 1] if cut > 0 else ""
-
-
 def q(desc):
     return "'" + desc.replace("'", "''") + "'"
 
@@ -154,6 +155,28 @@ def render_droid(name, desc, fields, body):
 TARGETS = {"opencode": render_opencode, "droid": render_droid, "agy": None}
 
 
+def put(stage: Path, outd: Path, name: str):
+    # Temp inside the destination dir: same filesystem, so the replace
+    # is atomic.
+    tmp = outd / f".{name}.tmp"
+    tmp.write_bytes((stage / name).read_bytes())
+    tmp.replace(outd / name)
+
+
+def record_ledger(outd: Path, written):
+    """Merge this run's deploys into the destination ledger, atomically.
+    Entries for names this run did not generate are kept: shared roots
+    hold other skills' deployments, and a dropped role's entry is the
+    installer's stale-cleanup evidence, not this generator's to prune."""
+    ledger = outd / ownership.LEDGER_NAME
+    entries = ownership.read_ledger(ledger)
+    for d in written:
+        entries[d.name] = d.src_sha
+    tmp = outd / f"{ownership.LEDGER_NAME}.tmp"
+    tmp.write_text("".join(f"{entries[n]} {n}\n" for n in sorted(entries)))
+    tmp.replace(ledger)
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     target = out = None
@@ -179,21 +202,57 @@ def main(argv=None):
         sys.exit(f"{src}: no role files")
 
     outd = Path(out)
-    outd.mkdir(parents=True, exist_ok=True)
-    prefix = role_prefix([p.stem for p in roles])
-    if prefix:
-        for old in outd.glob(prefix + "*.md"):
-            old.unlink()
+    stage = Path(tempfile.mkdtemp(prefix="agent-defs-stage-"))
+    try:
+        # Full render into staging before the first destination write: a
+        # bad role aborts with --out untouched.
+        names = []
+        for p in roles:
+            if target == "agy":
+                (stage / p.name).write_bytes(p.read_bytes())  # byte-verbatim persona
+            else:
+                name, desc, fields, body = parse(p)
+                (stage / p.name).write_bytes(TARGETS[target](
+                    name, desc, fields, body).encode())
+            names.append(p.name)
 
-    for p in roles:
-        dest = outd / p.name
         if target == "agy":
-            shutil.copyfile(p, dest)  # byte-verbatim persona
-        else:
-            name, desc, fields, body = parse(p)
-            dest.write_text(TARGETS[target](name, desc, fields, body))
-    print(f"{target} defs  {len(roles)} roles -> {outd}")
-    return 0
+            outd.mkdir(parents=True, exist_ok=True)
+            for name in names:
+                put(stage, outd, name)
+            print(f"{target} defs  {len(names)} roles -> {outd}")
+            return 0
+
+        # Plan every destination before the first write: only a current
+        # hash that sits in the destination ledger proves a prior deploy
+        # of this generator; anything else there is foreign.
+        try:
+            planned, refused = [], []
+            for name in names:
+                d = ownership.plan_file(stage / name, outd / name, name=name)
+                (refused if d.kind == ownership.REFUSE else planned).append(d)
+        except (ValueError, OSError) as e:
+            print(f"ERROR {e}", file=sys.stderr)
+            return 2
+        if refused:
+            for d in refused:
+                print(f"REFUSE {outd / d.name} — foreign file (differs from "
+                      f"generated, not a prior deploy); resolve manually")
+            return 1
+
+        outd.mkdir(parents=True, exist_ok=True)
+        written = []
+        for d in planned:
+            if d.kind == ownership.UNCHANGED:
+                continue
+            put(stage, outd, d.name)
+            written.append(d)
+        if written:
+            record_ledger(outd, written)
+        print(f"{target} defs  {len(names)} roles -> {outd}")
+        return 0
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 if __name__ == "__main__":
