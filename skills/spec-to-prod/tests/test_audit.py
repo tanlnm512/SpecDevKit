@@ -14,6 +14,13 @@ Covers the four TESTCOV contract groups assigned to audit.py:
 - dod gate 4 delegation (SPECSTATE-003, graph-engine user-testing round 1):
   completeness totals flow through specstate.task_entries and no second
   copy of the task-entries parser survives in audit.py.
+- dod fail-closed checker handling (FR-007 / TC-007): a checker that
+  cannot start, times out, or delivers no verdict line fails its gate
+  with a diagnostic instead of reading as green, and every failed proof
+  is named.
+- dry/live proof separation (FR-004 / TC-004, audit half): classify_proofs
+  and `dod --dry-run` execute no test.md command — a mutating pass
+  condition leaves no canary — while plain dod still executes it.
 
 No test invokes git for real: every git path runs with subprocess.run
 patched (the sibling test_git_degradation.py additionally exercises the
@@ -150,19 +157,27 @@ class ArchivedModeTests(unittest.TestCase):
 
 
 def fake_run(git_rc=128, git_stderr="fatal: not a git repository",
-             check_stdout=None):
+             check_stdout=None, check_rc=0, check_stderr="",
+             check_raises=None, proof_raises=None):
     """subprocess.run stand-in mediating every call audit.py makes: git
     commands get a failing CompletedProcess (never a real git process), an
-    optional check.py invocation gets check_stdout, and anything else
-    (proofs' shell commands) reaches the real subprocess.run."""
+    optional check.py invocation gets check_stdout/rc/stderr or raises
+    check_raises, proof shell commands raise proof_raises when given, and
+    anything else (proofs' shell commands) reaches the real subprocess.run."""
     real = subprocess.run
 
     def fake(cmd, *a, **k):
         if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "git":
             return subprocess.CompletedProcess(cmd, git_rc, "", git_stderr)
-        if (check_stdout is not None and isinstance(cmd, list)
-                and len(cmd) >= 2 and Path(cmd[1]).name == "check.py"):
-            return subprocess.CompletedProcess(cmd, 0, check_stdout, "")
+        if (isinstance(cmd, list) and len(cmd) >= 2
+                and Path(cmd[1]).name == "check.py"):
+            if check_raises is not None:
+                raise check_raises
+            if check_stdout is not None:
+                return subprocess.CompletedProcess(cmd, check_rc, check_stdout, check_stderr)
+            return real(cmd, *a, **k)
+        if proof_raises is not None:
+            raise proof_raises
         return real(cmd, *a, **k)
 
     return fake
@@ -212,6 +227,9 @@ UNTICKED_TASK = TICKED_TASK.replace("- [x] T001", "- [ ] T001")
 
 PASSING_TC = '### TC-001 — add\n**Pass condition**: `python3 -c "print(2 + 2)"` exits 0.\n'
 FAILING_TC = '### TC-001 — add\n**Pass condition**: `python3 -c "import sys; sys.exit(9)"`\n'
+CANARY_TC = ('### TC-001 — side effect\n'
+             '**Pass condition**: `python3 -c "open(\'canary.txt\', \'w\')"` '
+             'exits 0.\n')
 GREEN_CHECK = "spec: ok\nsurvey: ok\nPASS (0 fail, 0 warn)\n"
 EMPTY_PROOFS = {"auto": [], "manual": [], "ok": {}, "errors": [], "failed": 0}
 
@@ -370,17 +388,95 @@ class ProofsClassificationTests(unittest.TestCase):
             self.assertEqual(d["manual"], [])
 
 
+class DodDryRunTests(unittest.TestCase):
+    """FR-004 (TC-004, audit half): the dry DoD classification is separate
+    from proof execution — classify_proofs and `dod --dry-run` run no
+    test.md command (a mutating pass condition leaves no canary), gate 1
+    reads DRY, and plain dod still executes."""
+
+    def test_classify_proofs_spawns_no_process(self):
+        calls = []
+        real = subprocess.run
+
+        def spy(cmd, *a, **k):
+            calls.append(cmd)
+            return real(cmd, *a, **k)
+
+        with tempfile.TemporaryDirectory() as td:
+            spec_dir = make_spec(Path(td), {"test.md": CANARY_TC})
+            with unittest.mock.patch.object(audit.subprocess, "run", spy):
+                d = audit.classify_proofs(spec_dir)
+        self.assertEqual([tc for tc, _ in d["auto"]], ["TC-001"])
+        self.assertEqual(calls, [])
+
+    def test_proofs_data_dry_is_classification_plus_empty_execution(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec_dir = make_spec(Path(td), {"test.md": CANARY_TC})
+            d = audit.proofs_data(spec_dir, Path(td), run=False)
+            cls = audit.classify_proofs(spec_dir)
+        self.assertEqual(d["auto"], cls["auto"])
+        self.assertEqual(d["manual"], cls["manual"])
+        self.assertEqual((d["ok"], d["errors"], d["failed"]), ({}, [], 0))
+
+    def test_dry_dod_never_executes_the_mutating_command(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            spec_dir = make_spec(root, {"task.md": TICKED_TASK,
+                                        "test.md": CANARY_TC})
+            with unittest.mock.patch.object(
+                    audit.subprocess, "run",
+                    fake_run(check_stdout=GREEN_CHECK)):
+                code, out = run_audit("dod", str(spec_dir), "--dry-run")
+            self.assertEqual(code, 0, out)
+            self.assertFalse((root / "canary.txt").exists())
+        self.assertIn("DRY", find_gate_row(out, 1, "PROOF auto"))
+        self.assertIn("1 auto TC(s) classified, not executed", out)
+        self.assertNotIn("TCs green", out)  # no verdict from commands never run
+        self.assertIn("VERDICT: MECHANICAL PASS — gate(s) 1 classified, "
+                      "not executed (dry run); git gates 6, 7 SKIPPED", out)
+
+    def test_dry_dod_still_measures_the_other_mechanical_gates(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec_dir = make_spec(Path(td), {"task.md": UNTICKED_TASK,
+                                            "test.md": CANARY_TC})
+            with unittest.mock.patch.object(
+                    audit.subprocess, "run",
+                    fake_run(check_stdout=GREEN_CHECK)):
+                code, out = run_audit("dod", str(spec_dir), "--dry-run")
+        self.assertEqual(code, 1)
+        self.assertIn("0/1 ticked, 0/1 landed, 0 in-progress", out)
+        self.assertIn("VERDICT: MECHANICAL FAIL — gate(s) 4;", out)
+
+    def test_plain_dod_still_executes_proofs(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            spec_dir = make_spec(root, {"task.md": TICKED_TASK,
+                                        "test.md": CANARY_TC})
+            with unittest.mock.patch.object(
+                    audit.subprocess, "run",
+                    fake_run(check_stdout=GREEN_CHECK)):
+                code, out = run_audit("dod", str(spec_dir))
+            self.assertEqual(code, 0, out)
+            self.assertTrue((root / "canary.txt").exists())
+        self.assertIn("1/1 TCs green", out)
+
+
+def find_gate_row(out, num, name):
+    """The one gate-row locator — shared by every dod test class."""
+    lines = [l for l in out.splitlines()
+             if l.strip().startswith(f"{num} ") and name in l]
+    assert len(lines) == 1, f"gate {num} ({name}) row not found in:\n{out}"
+    return lines[0]
+
+
 class DodGateTests(unittest.TestCase):
-    """TESTCOV-004: gate presence (all ten rows on a green sample) and the
+    """TESTCOV-004: gate presence (all ten gates on a green sample) and the
     representative missing-gate detections. check.py's subprocess is
     stubbed (its verdict parsing is gate 5's unit under test) and git is
     faked; proofs classification/execution runs for real."""
 
     def gate_row(self, out, num, name):
-        lines = [l for l in out.splitlines()
-                 if l.strip().startswith(f"{num} ") and name in l]
-        self.assertEqual(len(lines), 1, f"gate {num} ({name}) row not found in:\n{out}")
-        return lines[0]
+        return find_gate_row(out, num, name)
 
     def test_all_ten_gates_present_and_mechanical_pass(self):
         with tempfile.TemporaryDirectory() as td:
@@ -400,7 +496,7 @@ class DodGateTests(unittest.TestCase):
         for num, name, status in expected:
             self.assertIn(status, self.gate_row(out, num, name))
         self.assertIn("1/1 TCs green", out)
-        self.assertIn("1/1 ticked, 0 in-progress", out)
+        self.assertIn("1/1 ticked, 1/1 landed, 0 in-progress", out)
         self.assertIn("VERDICT: MECHANICAL PASS — git gates 6, 7 SKIPPED", out)
 
     def test_unticked_tasks_fail_completeness_gate_4(self):
@@ -413,8 +509,22 @@ class DodGateTests(unittest.TestCase):
                      audit, "proofs_data", return_value=EMPTY_PROOFS):
                 code, out = run_audit("dod", str(spec_dir))
         self.assertEqual(code, 1)
-        self.assertIn("0/1 ticked, 0 in-progress", out)
+        self.assertIn("0/1 ticked, 0/1 landed, 0 in-progress", out)
         self.assertIn("VERDICT: MECHANICAL FAIL — gate(s) 4;", out)
+
+    def test_implemented_unticked_passes_completeness_gate_4(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec_dir = make_spec(Path(td), {
+                "task.md": UNTICKED_TASK.replace(
+                    "- [ ] T001", "- [ ] T001 (implemented)"),
+                "test.md": ""})
+            with unittest.mock.patch.object(
+                    audit.subprocess, "run", fake_run(check_stdout=GREEN_CHECK)), \
+                 unittest.mock.patch.object(
+                     audit, "proofs_data", return_value=EMPTY_PROOFS):
+                code, out = run_audit("dod", str(spec_dir))
+        self.assertEqual(code, 0)
+        self.assertIn("0/1 ticked, 1/1 landed, 0 in-progress", out)
 
     def test_failing_auto_proof_fails_gate_1(self):
         with tempfile.TemporaryDirectory() as td:
@@ -455,6 +565,76 @@ class DodGateTests(unittest.TestCase):
         self.assertIn("0 observation TC(s)", out)
 
 
+class DodFailClosedTests(unittest.TestCase):
+    """FR-007 / TC-007: a checker that cannot start, times out, or
+    delivers no verdict line fails its gate closed — exit 1 plus a
+    concise diagnostic — instead of reading its own silence as a green
+    gate, and every failed proof is named: id in the gate row, verdict
+    line under the table. Proof-side timeout/crash/nonzero ride gate 1."""
+
+    def run_dod(self, files=None, check_stdout=GREEN_CHECK, **run_kw):
+        with tempfile.TemporaryDirectory() as td:
+            spec_dir = make_spec(
+                Path(td),
+                files or {"task.md": TICKED_TASK, "test.md": PASSING_TC})
+            with unittest.mock.patch.object(
+                    audit.subprocess, "run", fake_run(check_stdout=check_stdout,
+                                                      **run_kw)):
+                return run_audit("dod", str(spec_dir))
+
+    def test_checker_cannot_start_fails_gate_closed(self):
+        code, out = self.run_dod(
+            check_raises=OSError(2, "No such file or directory"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", find_gate_row(out, 5, "CONTRACT"))
+        self.assertIn("check.py could not start", out)
+
+    def test_checker_timeout_fails_gate_closed(self):
+        code, out = self.run_dod(
+            check_raises=subprocess.TimeoutExpired("check.py", 120))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", find_gate_row(out, 5, "CONTRACT"))
+        self.assertIn("timed out", out)
+
+    def test_crashed_checker_without_verdict_fails_gate_closed(self):
+        code, out = self.run_dod(check_stdout="", check_rc=1,
+                                 check_stderr="TypeError: bad doc shape\n")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", find_gate_row(out, 5, "CONTRACT"))
+        self.assertIn("no verdict", out)
+        self.assertIn("TypeError: bad doc shape", out)
+        self.assertNotIn("check.py: 0 fail, 0 warn", out)  # the green read of silence
+
+    def test_zero_rc_without_verdict_line_also_fails_closed(self):
+        code, out = self.run_dod(check_stdout="unexpected shape\n", check_rc=0)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", find_gate_row(out, 5, "CONTRACT"))
+        self.assertIn("no verdict", out)
+
+    def test_failing_proof_named_in_gate_row_and_under_table(self):
+        code, out = self.run_dod(
+            files={"task.md": TICKED_TASK, "test.md": FAILING_TC})
+        self.assertEqual(code, 1)
+        self.assertIn("failed: TC-001", find_gate_row(out, 1, "PROOF auto"))
+        self.assertIn("TC-001  python3", out)  # verdict line: id + command
+
+    def test_proof_timeout_fails_closed_and_names_tc(self):
+        code, out = self.run_dod(
+            proof_raises=subprocess.TimeoutExpired("proof", 120))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", find_gate_row(out, 1, "PROOF auto"))
+        self.assertIn("TIMEOUT", out)
+        self.assertIn("TC-001", out)
+
+    def test_proof_cannot_start_fails_closed_and_names_tc(self):
+        code, out = self.run_dod(proof_raises=OSError(8, "Exec format error"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", find_gate_row(out, 1, "PROOF auto"))
+        self.assertIn("ERROR", out)
+        self.assertIn("Exec format error", out)
+        self.assertIn("TC-001", out)
+
+
 class DodGate4DelegationTests(unittest.TestCase):
     """SPECSTATE-003 (graph-engine user-testing round 1): dod gate 4 must
     compute its totals through specstate.task_entries — the one canonical
@@ -477,7 +657,7 @@ class DodGate4DelegationTests(unittest.TestCase):
                 code, out = run_audit("dod", str(spec_dir))
         self.assertEqual(calls, [TICKED_TASK])  # the file's exact text, once
         self.assertEqual(code, 0)
-        self.assertIn("1/1 ticked, 0 in-progress", out)
+        self.assertIn("1/1 ticked, 1/1 landed, 0 in-progress", out)
 
     def test_gate4_counts_come_from_the_entries_not_a_reparse(self):
         """The detail line and gate status reflect the entries task_entries
@@ -497,7 +677,7 @@ class DodGate4DelegationTests(unittest.TestCase):
                      audit, "task_entries", return_value=synthetic):
                 code, out = run_audit("dod", str(spec_dir))
         self.assertEqual(code, 0)
-        self.assertIn("1/1 ticked, 0 in-progress", out)  # the file is UNTICKED
+        self.assertIn("1/1 ticked, 1/1 landed, 0 in-progress", out)  # the file is UNTICKED
         self.assertNotIn("0/1 ticked", out)
 
     def test_no_second_task_entries_parser_in_audit_source(self):

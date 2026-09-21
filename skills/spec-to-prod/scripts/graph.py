@@ -51,14 +51,19 @@ Modes:
                  auto-satisfied and this loop mutates no doc state of its
                  own); run the mechanical verify node (check.py) directly;
                  emit payloads for the ready agent wave; invoke --runner per
-                 payload (default `print`: echo the invocation); recompute
-                 and repeat until a gate, workflow completion, --max-waves,
-                 or a wave that changed nothing.
+                 payload (default `print`: echo the invocation) — a runner
+                 that exits nonzero or raises stops the loop with a
+                 role/node diagnostic and exit 3, so no later wave starts;
+                 recompute and repeat until a gate, workflow completion,
+                 --max-waves, or a wave that changed nothing.
 
-Mechanical probes: the survey node runs `check.py <spec-dir> --survey-only`,
-the verify node runs `check.py <spec-dir>`, and the closing-audit node runs
-`audit.py dod <spec-dir>` — each only once its inputs are in place. Human gates
-(clarify, approve, an undetermined research-gate, closing-audit judgment,
+Mechanical probes: the survey node runs `check.py <spec-dir> --survey-only`
+and the verify node runs `check.py <spec-dir>` — skill-owned contract
+checkers, each only once its inputs are in place. No inspection mode ever
+executes repository or `test.md` commands: the closing-audit node classifies
+test.md's pass conditions dry (`audit.classify_proofs` — nothing runs), and
+proofs execute only on the explicit audit.py CLI. Human gates (clarify,
+approve, an undetermined research-gate, the closing-audit judgment,
 tick-commit) are never auto-satisfied by this script.
 
 Usage: graph.py <spec-dir> [--repo <path>] [--state-json] [--mermaid]
@@ -67,6 +72,7 @@ Usage: graph.py <spec-dir> [--repo <path>] [--state-json] [--mermaid]
                 [--run [--runner '<template>'] [--dry-run] [--max-waves N]]
 Exit:  0 = report produced (any workflow state) · 1 = unreadable spec-dir ·
        2 = usage error (unknown flag, unknown --explain node, missing args)
+       · 3 = --run stopped: a runner exited nonzero or raised
 """
 from __future__ import annotations
 
@@ -87,6 +93,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from check import CODE_SPAN, HTML_COMMENT, INVISIBLE, PLACEHOLDER  # noqa: E402
+import audit  # noqa: E402
 import specstate  # noqa: E402
 
 # The workflow graph's nodes, in canonical (dependency) order. Names are
@@ -157,8 +164,8 @@ READY_WHEN = {
     "before-audit": "verify done",
     "approve": "before-audit done (HUMAN gate)",
     "execute": "approved + before-audit recorded",
-    "closing-audit": "execute done — every task ticked/struck (0 todo; digests are orchestrator-confirmed)",
-    "tick-commit": "closing-audit done",
+    "closing-audit": "execute done — every task implemented/ticked/struck (0 todo; digests are orchestrator-confirmed)",
+    "tick-commit": "closing-audit done (HUMAN gate: the tick, then the delivery)",
     "archive": "tick-commit done AND spec Status: done",
 }
 DONE_WHEN = {
@@ -174,9 +181,11 @@ DONE_WHEN = {
     "verify": "`check.py <spec-dir>` exits 0",
     "before-audit": "`Before-audit: passed @ <sha-or-dash>` recorded in task.md",
     "approve": "spec.md Status: approved (or later)",
-    "execute": "every task entry ticked [x] or struck ~~",
-    "closing-audit": "`audit.py dod <spec-dir>` DoD scorecard's mechanical gates pass",
-    "tick-commit": "tasks ticked + burndown consistent; commit step SKIPPED-noted in non-git repos",
+    "execute": "every task entry implemented, ticked [x], or struck ~~",
+    "closing-audit": "`Closing-audit: approved @ <sha-or-dash>` recorded "
+                    "in task.md — the human gates (proof, review, rulings, "
+                    "regression, sign-off) on top of the mechanical ones",
+    "tick-commit": "durable task-tick evidence (every task ticked/struck, every tick with its proof note) plus the delivery record — `Delivered: commit @ <sha>` in task.md, or the explicit non-git skip",
     "archive": "dir moved to specs/archive/<date>-<name>/, INDEX repointed",
 }
 
@@ -204,6 +213,10 @@ SKILL_DIR = _SCRIPTS_DIR.parent
 # Default --run runner: echo the invocation instead of executing it —
 # equivalent to --dry-run with payloads emitted (architecture §4.5).
 PRINT_RUNNER = "print"
+
+# --run's failure exit: the first runner that exits nonzero or raises stops
+# the loop (0/1/2 keep their documented meanings).
+RUNNER_FAILED_EXIT = 3
 
 
 def read_doc(path: Path) -> str | None:
@@ -265,13 +278,6 @@ def run_check(spec_dir: Path, repo: Path | None, extra: list[str]) -> int | None
     return _run_script("check.py", args + extra)
 
 
-def run_dod(spec_dir: Path, repo: Path | None) -> int | None:
-    args = ["dod", str(spec_dir)]
-    if repo is not None:
-        args += ["--repo", str(repo)]
-    return _run_script("audit.py", args)
-
-
 def task_files(entry: specstate.TaskEntry) -> list[str]:
     """File paths the entry names (backticked tokens that look like paths) —
     the planner's parallelization map in per-task form."""
@@ -280,9 +286,12 @@ def task_files(entry: specstate.TaskEntry) -> list[str]:
 
 
 def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
-    """The per-task frontier inside execute (§2.1): a task is runnable when it
-    is `- [ ]`, its `(after T###)` deps are all ticked/struck, and it is not at
-    the fix-round cap. At-cap tasks are surfaced for adjudication, never
+    """The per-task frontier inside execute (§2.1): a task is runnable when
+    it is `- [ ]`, unimplemented, its `(after T###)` deps are all
+    implemented, ticked, or struck, and it is not at the fix-round cap. An
+    `(implemented)` entry has landed: it reads `implemented`, never
+    runnable, and counts toward execute's completion. At-cap tasks are
+    surfaced for adjudication, never
     runnable; file overlaps between runnable tasks are noted for wave
     scheduling (the orchestrator picks the disjoint wave)."""
     by_id = {e.id: e for e in entries if e.id}
@@ -302,6 +311,10 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
             state, why = "ticked", "done — ticked with its proof note"
         elif e.struck:
             state, why = "struck", "struck (dropped) — stays visible, never runnable"
+        elif e.implemented:
+            state, why = "implemented", (
+                "landed unticked — the plan-wide tick follows the "
+                "closing audit")
         elif e.claimed:
             state, why = "claimed", "marked (in-progress) — an implementer holds it"
         elif e.id is None:
@@ -309,12 +322,15 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
         else:
             missing = [d for d in e.after if d not in by_id]
             unmet = [d for d in e.after if d in by_id
-                     and not (by_id[d].done or by_id[d].struck)]
+                     and not (by_id[d].done or by_id[d].struck
+                              or by_id[d].implemented)]
             if missing:
                 state, why = "blocked", (
                     f"dependency not defined in task.md: {', '.join(missing)}")
             elif unmet:
-                state, why = "blocked", f"waiting on {', '.join(unmet)} (unticked)"
+                state, why = "blocked", (
+                    f"waiting on {', '.join(unmet)} "
+                    "(unticked, unimplemented)")
             elif e.fix_round is not None and e.fix_round >= FIX_CAP:
                 state, why = "at-fix-cap", (
                     f"fix cap reached ({e.fix_round}/{FIX_CAP}) — adjudicate "
@@ -815,7 +831,8 @@ def find_pause(state: dict, wave_dir: str | None = None) -> tuple[str, str] | No
                                  "<spec-dir> --run`, scope and clean, "
                                  "`audit.py dod`; rule on the findings, "
                                  "surface every D-###, and get the user's "
-                                 "ack")
+                                 "ack, then record `Closing-audit: approved "
+                                 "@ <sha-or-dash>` in task.md")
     if n["closing-audit"]["state"] == DONE and state["status"] != "done":
         commit_note = ("commit the plan" if state["git"]["available"]
                        else "commit SKIPPED (not a git repo)")
@@ -879,7 +896,9 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
              wave_dir: str | None = None) -> int:
     """The auto-trigger loop (architecture §4.5): pause at every judgment
     node, run the mechanical verify directly, emit payloads for the ready
-    agent wave, invoke the runner per payload, recompute, repeat — until a
+    agent wave, invoke the runner per payload — the first runner that exits
+    nonzero or raises stops the loop with a role/node diagnostic and exit
+    RUNNER_FAILED_EXIT, so no later wave starts — recompute, repeat until a
     gate, workflow completion, the --max-waves bound, or a wave that changed
     nothing. Payloads go to --wave-dir when given, otherwise the default
     <spec-dir>/spawns/wave-<N>/ (the same override --emit-spawns takes).
@@ -914,10 +933,20 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
             invocation = substitute(runner, path, role, spec_dir, SKILL_DIR)
             if dry_run:
                 print(f"   runner[dry-run]: {role}: {invocation}")
-            else:
+                continue
+            try:
                 r = subprocess.run(invocation, shell=True)
-                print(f"   runner: {role}: {invocation} → exit "
-                      f"{r.returncode}")
+            except (OSError, subprocess.SubprocessError) as exc:
+                print(f"   runner: {role}: {invocation} → raised {exc!r}")
+                print(f"stopping: runner for role {role} (node {node}, "
+                      f"payload {path}) raised — no later wave starts")
+                return RUNNER_FAILED_EXIT
+            print(f"   runner: {role}: {invocation} → exit {r.returncode}")
+            if r.returncode != 0:
+                print(f"stopping: runner for role {role} (node {node}, "
+                      f"payload {path}) exited {r.returncode} — no later "
+                      "wave starts")
+                return RUNNER_FAILED_EXIT
         waves_done += 1
         new_state = compute_state(spec_dir, repo_override)
         if max_waves is not None and waves_done >= max_waves:
@@ -962,9 +991,10 @@ def emit_spawns(spec_dir: Path, repo_override: str | None,
 
 def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     """Derive the full workflow-graph state from doc state alone — the same
-    dict --state-json serializes. Pure reads: no doc file is ever written,
-    and the subprocess probes (check.py, audit.py dod) only run once their
-    node's inputs are in place."""
+    dict --state-json serializes. Pure reads: no doc file is ever written and
+    no repository or test.md command ever executes — the check.py probes run
+    only once their node's inputs are in place, and the closing-audit gate
+    classifies test.md dry (audit.classify_proofs) instead of running it."""
     spec_dir = Path(spec_dir)
     repo = Path(repo_override) if repo_override else spec_dir.parent.parent
     docs = {f: read_doc(spec_dir / f) for f in DOC_FILES}
@@ -1176,13 +1206,15 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     else:
         per_task = task_frontier(entries)
         open_tasks = [t for t in per_task
-                      if t["state"] not in ("ticked", "struck")]
+                      if t["state"] not in ("ticked", "struck",
+                                           "implemented")]
         n_run = sum(1 for t in open_tasks if t["state"] == "runnable")
         n_claim = sum(1 for t in open_tasks if t["state"] == "claimed")
         n_cap = sum(1 for t in open_tasks if t["state"] == "at-fix-cap")
         if not open_tasks:
             nodes["execute"] = {"state": DONE, "reason":
-                                f"all {len(per_task)} task(s) ticked/struck"}
+                                f"all {len(per_task)} task(s) "
+                                "implemented/ticked/struck"}
         else:
             nodes["execute"] = {"state": READY, "reason":
                                 f"{n_run} of {len(per_task)} task(s) "
@@ -1195,37 +1227,51 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
 
     counts = {
         "todo": sum(1 for e in entries
-                    if not e.done and not e.struck and not e.claimed),
+                    if not e.done and not e.struck and not e.claimed
+                    and not e.implemented),
         "claimed": sum(1 for e in entries
-                       if e.claimed and not e.done and not e.struck),
+                       if e.claimed and not e.done and not e.struck
+                       and not e.implemented),
+        "implemented": sum(1 for e in entries
+                           if e.implemented and not e.done and not e.struck),
         "ticked": sum(1 for e in entries if e.done),
         "struck": sum(1 for e in entries if e.struck),
         "at-fix-cap": sum(1 for e in entries
-                          if not e.done and not e.struck and e.fix_round
+                          if not e.done and not e.struck
+                          and not e.implemented and e.fix_round
                           and e.fix_round >= FIX_CAP),
     }
 
-    # -- closing-audit (orchestrator judgment + audit.py dod) ---------------
+    # -- closing-audit (HUMAN gate: nothing executes here — the dry
+    #    classification surfaces what the explicit audit.py run will prove,
+    #    and done reads only the durable task.md approval record, never a
+    #    mechanical score) --
+    approval = (specstate.closing_audit_state(task_text)
+                if task_text is not None else "missing")
     if not execute_done:
+        n_open = (len(entries) - counts["ticked"] - counts["struck"]
+                  - counts["implemented"])
         nodes["closing-audit"] = {"state": BLOCKED, "reason":
                                   f"waiting on: execute ({counts['todo']} "
-                                  f"todo, {len(entries) - counts['ticked'] - counts['struck']} task(s) unticked)"}
+                                  f"todo, {n_open} task(s) not landed)"}
+    elif approval == "approved":
+        nodes["closing-audit"] = {"state": DONE, "reason":
+                                  "Closing-audit: approved recorded in "
+                                  "task.md — the human gates (proof, review, "
+                                  "rulings, regression, sign-off) are in"}
     else:
-        rc = run_dod(spec_dir, repo_override)
-        if rc == 0:
-            nodes["closing-audit"] = {"state": DONE, "reason":
-                                      "audit.py dod — DoD mechanical gates "
-                                      "pass (judgment gates stay with the "
-                                      "orchestrator)"}
-        elif rc is None:
-            nodes["closing-audit"] = {"state": BLOCKED, "reason":
-                                      "audit.py could not run — dod "
-                                      "unverified"}
-        else:
-            nodes["closing-audit"] = {"state": BLOCKED, "reason":
-                                      f"audit.py dod exits {rc} — run "
-                                      f"`python3 scripts/audit.py dod "
-                                      f"{spec_dir}` for the failing gates"}
+        proofs = audit.classify_proofs(spec_dir)
+        nodes["closing-audit"] = {"state": READY, "reason":
+                                  "HUMAN GATE — state inspection executes "
+                                  "nothing: "
+                                  f"{len(proofs['auto'])} auto + "
+                                  f"{len(proofs['manual'])} manual TC(s) "
+                                  "classified from test.md, not executed — "
+                                  "run the closing audit explicitly "
+                                  "(`audit.py proofs <spec-dir> --run`, "
+                                  "`audit.py dod <spec-dir>`) and record "
+                                  "`Closing-audit: approved @ <sha-or-dash>` "
+                                  "in task.md"}
     closing_done = nodes["closing-audit"]["state"] == DONE
 
     # -- tick-commit ---------------------------------------------------------
@@ -1233,11 +1279,46 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
         nodes["tick-commit"] = {"state": BLOCKED,
                                 "reason": "waiting on: closing-audit"}
     else:
-        commit_note = (f"commit per the delivery plan (HEAD {head})" if git_ok
-                       else "commit SKIPPED (not a git repo)")
-        nodes["tick-commit"] = {"state": DONE, "reason":
-                                f"tasks ticked + burndown consistent — "
-                                f"{commit_note}"}
+        ticks = specstate.tick_evidence(task_text or "")
+        if ticks.unticked:
+            nodes["tick-commit"] = {"state": READY, "reason":
+                                    "HUMAN GATE — the closing audit "
+                                    "approved ticking: tick every task "
+                                    "`- [x]` with its proof note "
+                                    f"({len(ticks.unticked)} unticked: "
+                                    f"{', '.join(ticks.unticked)}), then "
+                                    "recompute the burndown"}
+        elif ticks.noteless:
+            nodes["tick-commit"] = {"state": READY, "reason":
+                                    "tick evidence incomplete — ticked "
+                                    "without proof notes: "
+                                    f"{', '.join(ticks.noteless)}; add the "
+                                    "`done <date> — <proof>` sub-lines"}
+        elif not git_ok:
+            nodes["tick-commit"] = {"state": DONE, "reason":
+                                    f"task.md cites {ticks.ticked} ticked + "
+                                    f"{ticks.struck} struck of {ticks.total}, "
+                                    "every tick with its proof note — "
+                                    "commit SKIPPED (not a git repo)"}
+        else:
+            delivery = specstate.delivery_state(task_text or "")
+            if delivery[0] == "delivered" and delivery[1] != "-":
+                nodes["tick-commit"] = {"state": DONE, "reason":
+                                        f"task.md cites {ticks.ticked} ticked "
+                                        f"+ {ticks.struck} struck of "
+                                        f"{ticks.total}, every tick with its "
+                                        "proof note — Delivered: commit @ "
+                                        f"{delivery[1]} recorded in task.md"}
+            else:
+                nodes["tick-commit"] = {"state": READY, "reason":
+                                        f"approved tick transition consumed — "
+                                        f"task.md cites {ticks.ticked} ticked "
+                                        f"+ {ticks.struck} struck of "
+                                        f"{ticks.total}, every tick with its "
+                                        "proof note; delivery unproven: no "
+                                        "commit SHA observed — commit the "
+                                        "plan and record the delivery "
+                                        "evidence"}
     tick_done = nodes["tick-commit"]["state"] == DONE
 
     # -- archive -------------------------------------------------------------
@@ -1280,7 +1361,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
         converge = "no survey.md — nothing to converge yet"
 
     n_fix = sum(1 for e in entries if e.fix_round is not None
-                and not e.done and not e.struck)
+                and not e.done and not e.struck and not e.implemented)
     loops = {
         "clarify": (f"active — {markers} open marker(s)" if markers
                     else "clear — no open markers"),
@@ -1337,8 +1418,8 @@ def render_report(s: dict) -> str:
     c = s["counts"]
     out.append("")
     out.append(f"tasks: {c['todo']} todo · {c['claimed']} claimed · "
-               f"{c['ticked']} ticked · {c['struck']} struck · "
-               f"{c['at-fix-cap']} at fix-cap")
+               f"{c['implemented']} implemented · {c['ticked']} ticked · "
+               f"{c['struck']} struck · {c['at-fix-cap']} at fix-cap")
     g = s["git"]
     out.append("")
     out.append(f"git: available (HEAD {g['head']})" if g["available"]
@@ -1393,7 +1474,8 @@ def main(argv: list[str] | None = None) -> int:
                     "state alone (see the module docstring for the node "
                     "model).",
         epilog="exit codes: 0 report produced (any state) · 1 unreadable "
-               "spec-dir · 2 usage error")
+               "spec-dir · 2 usage error · 3 --run runner failure (later "
+               "waves stopped)")
     p.add_argument("spec_dir", help="path to specs/<name>")
     p.add_argument("--repo", metavar="PATH",
                    help="repo root for git-derived signals (default: the "

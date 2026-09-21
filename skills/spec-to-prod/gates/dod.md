@@ -10,7 +10,7 @@ gates and prints the scorecard; the closing audit owns the verdict.
 | 1 | Proof (auto) | Auto-TC pass rate | 100% | `audit.py proofs --run` |
 | 2 | Proof (manual) | Observed TCs | every MANUAL TC recorded | observation note per TC |
 | 3 | Regression | Repo suite | exit 0 | suite output |
-| 4 | Completeness | Ticks | done == total, 0 in-progress | check.py burndown arithmetic |
+| 4 | Completeness | Landed tasks | every task ticked/implemented/struck, 0 in-progress | check.py burndown arithmetic |
 | 5 | Contract health | check.py | 0 FAIL; every WARN fixed or ruled | check.py output |
 | 6 | Scope | Unexplained files | 0 unadjudicated UNMENTIONED | `audit.py scope` |
 | 7 | Hygiene | Debris | 0 unadjudicated suspects | `audit.py clean` |

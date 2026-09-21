@@ -14,6 +14,9 @@ closing audit in portions, never three audits).
   burndown (`scripts/check.py --fix-burndown`)
 - ONE commit for the entire plan (code + docs together) — implementers'
   suggested lines as the body, one bullet per task
+- record the delivery evidence: `**Delivered**: commit @ <sha>` in
+  task.md's header (the observed sha of the plan commit; `commit @ -`
+  only in a non-git repo) — tick-commit reads done only with it
 - rulings report: every D-### (decision, why, cost if wrong) plus every
   irreversible or state-mutating change the plan shipped — user acks
 - `Status: done`, INDEX update; the archive node (`/spec-to-prod archive

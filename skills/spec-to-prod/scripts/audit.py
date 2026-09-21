@@ -5,7 +5,7 @@ SKILL.md's closing audit — scope diff, cleanliness sweep, TC proofs.
 Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py clean    [<spec-dir>] [--repo <path>] [--base <rev>]
        audit.py proofs   <spec-dir> [--repo <path>] [--run]
-       audit.py dod      <spec-dir> [--repo <path>] [--base <rev>]
+       audit.py dod      <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
        audit.py archived [--repo <path>]
        audit.py -h | --help        (prints this text, exit 0)
@@ -37,7 +37,13 @@ dod    — the Definition-of-Done scorecard (gates/dod.md): runs
          check.py, live TC proofs, and the scope/hygiene counts in one
          pass; mechanical gates print PASS/FAIL, judgment gates print
          MANUAL for the orchestrator to satisfy. Like proofs --run, dod
-         executes the TC commands embedded in test.md.
+         executes the TC commands embedded in test.md. Every checker
+         subprocess fails closed: one that cannot start, times out, or
+         delivers no verdict line fails its gate with a diagnostic
+         instead of reading as green, and failed proofs are named under
+         the gate table. --dry-run keeps the scorecard inert: auto TCs
+         are classified, gate 1 reads DRY, and no test.md command
+         executes — the state-inspection path.
 converge — diffs specs/<name>/survey.md against its last committed
          version (default: HEAD; --base overrides) to surface what a
          fresh re-survey found that the previous one didn't: run this
@@ -59,7 +65,9 @@ archived — the archive gate (OpenSpec validate --archived semantics):
 
 Exit:  0 = report produced (scope/clean/converge always; proofs without
        --run) · proofs --run / dod / archived: 0 = every mechanical
-       gate green, 1 = any FAILED or errored · 2 = usage error.
+       gate green, 1 = any FAILED or errored (dod --dry-run: gate 1
+       reads DRY — classified, not executed — and is not a failure) ·
+       2 = usage error.
 
 Non-git repos: git-derived output degrades explicitly, never silently —
 scope/clean print `SKIPPED (not a git repo)` instead of a false all-clear
@@ -276,11 +284,11 @@ def looks_runnable(cmd: str) -> bool:
     return bool(shutil.which(first))
 
 
-def proofs_data(spec_dir: Path, repo: Path, run: bool) -> dict:
-    """Classify every TC's pass condition; execute the auto ones when run.
-    {"auto": [(tc, cmd)], "manual": [(tc, note)], "ok": {tc: (passed,
-    summary)}, "errors": [(tc, cmd, err)], "failed": n} — ok/errors/failed
-    stay empty/zero on a dry run. Shared by proofs and dod."""
+def classify_proofs(spec_dir: Path) -> dict:
+    """Classify every TC's pass condition — {"auto": [(tc, cmd)],
+    "manual": [(tc, note)]}. Pure doc-state read: nothing executes on this
+    path, so state inspection can consume it freely; execution happens only
+    in proofs_data, on the explicit live paths."""
     test_p = spec_dir / "test.md"
     text = test_p.read_text(encoding="utf-8", errors="replace") if test_p.exists() else ""
     tc_blocks: dict[str, str] = {}
@@ -304,14 +312,24 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool) -> dict:
         cmds = re.findall(r"`([^`]+)`", chunk)
         cmd = cmds[0].strip() if cmds else ""
         (auto if cmd and looks_runnable(cmd) else manual).append((tc, cmd or "(observation only)"))
-    data = {"auto": auto, "manual": manual, "ok": {}, "errors": [], "failed": 0, "timeouts": set()}
+    return {"auto": auto, "manual": manual}
+
+
+def proofs_data(spec_dir: Path, repo: Path, run: bool) -> dict:
+    """classify_proofs plus, only when run, execution of the auto commands:
+    {"auto": [(tc, cmd)], "manual": [(tc, note)], "ok": {tc: (passed,
+    summary)}, "errors": [(tc, cmd, err)], "failed": n} — ok/errors/failed
+    stay empty/zero on a dry run. Shared by proofs and dod's live path;
+    callers that must stay inert use classify_proofs itself."""
+    data: dict = {"ok": {}, "errors": [], "failed": 0, "timeouts": set()}
+    data.update(classify_proofs(spec_dir))
     if not run:
         return data
-    for tc, cmd in auto:
+    for tc, cmd in data["auto"]:
         try:
             r = subprocess.run(
                 cmd, shell=True, cwd=str(repo), timeout=120,
-                capture_output=True, text=True,
+                capture_output=True, text=True, errors="replace",
             )
             ok = r.returncode == 0
             summary = (r.stdout.strip().splitlines() or [""])[-1]
@@ -330,6 +348,21 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool) -> dict:
     return data
 
 
+def proof_verdict_lines(data: dict) -> dict[str, str]:
+    """{tc: verdict line} for a run proofs_data returned — the one
+    formatter behind proofs' full listing and dod's failed-proof naming."""
+    errs = {tc: e for tc, _, e in data["errors"]}
+    lines: dict[str, str] = {}
+    for tc, cmd in data["auto"]:
+        if tc in data["ok"]:
+            ok, summary = data["ok"][tc]
+            verdict = "TIMEOUT" if (not ok and tc in data["timeouts"]) else ("PASS" if ok else "FAIL")
+            lines[tc] = f"  {verdict:<7}  {tc}  {cmd}  ->  {summary}"
+        else:
+            lines[tc] = f"  ERROR   {tc}  {cmd}  ({errs[tc]})"
+    return lines
+
+
 def mode_proofs(spec_dir: Path, repo: Path, run: bool) -> int:
     d = proofs_data(spec_dir, repo, run)
     auto, manual = d["auto"], d["manual"]
@@ -341,21 +374,21 @@ def mode_proofs(spec_dir: Path, repo: Path, run: bool) -> int:
             print(f"  MANUAL {tc}  {note}")
         return 0
     print(f"proofs: running {len(auto)} auto command(s), {len(manual)} manual (yours to observe)")
-    errs = {tc: e for tc, _, e in d["errors"]}
-    for tc, cmd in auto:
-        if tc in d["ok"]:
-            ok, summary = d["ok"][tc]
-            verdict = "TIMEOUT" if (not ok and tc in d["timeouts"]) else ("PASS" if ok else "FAIL")
-            print(f"  {verdict:<7}  {tc}  {cmd}  ->  {summary}")
-        else:
-            print(f"  ERROR   {tc}  {cmd}  ({errs[tc]})")
+    for line in proof_verdict_lines(d).values():
+        print(line)
     return 1 if d["failed"] else 0
 
 
-def mode_dod(spec_dir: Path, repo: Path, base: str | None) -> int:
+def mode_dod(spec_dir: Path, repo: Path, base: str | None,
+             dry: bool = False) -> int:
     """The DoD scorecard: mechanical gates measured, judgment gates MANUAL.
     Runs check.py, live proofs, and the scope/hygiene counts — the same
-    trust level as the closing audit itself (it executes TC commands)."""
+    trust level as the closing audit itself (it executes TC commands).
+    Every checker subprocess fails closed: one that cannot start, times
+    out, or delivers no verdict fails its gate with a diagnostic, and
+    failed proofs are named under the gate table. dry classifies the
+    auto TCs without executing any command (gate 1 reads DRY) — the
+    state-inspection path."""
     # gate 4 — task.md completeness (specstate.task_entries, the same
     # shared parser check.py reads the docset with)
     task_p = spec_dir / "task.md"
@@ -363,17 +396,49 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None) -> int:
     entries = task_entries(task)
     total = len(entries)
     done = sum(1 for e in entries if e.done)
+    landed = sum(1 for e in entries
+                 if e.done or e.implemented or e.struck)
     inprog = sum(1 for e in entries if e.claimed)
     # gate 5 — check.py (sibling script; WARNs don't fail, ownership is a
-    # judgment the detail line reminds the orchestrator of)
+    # judgment the detail line reminds the orchestrator of). Fail-closed:
+    # a checker that never delivered a verdict must fail the gate — its
+    # stdout holds no FAIL lines, so counting alone would read as green.
+    nfail = nwarn = 0
+    check_err: str | None = None
     check = Path(__file__).resolve().parent / "check.py"
-    cp = subprocess.run([sys.executable, str(check), str(spec_dir)],
-                        capture_output=True, text=True)
-    nfail = len(re.findall(r"^  FAIL  ", cp.stdout, flags=re.M))
-    mw = re.search(r"\((\d+) fail, (\d+) warn\)", cp.stdout)
-    nwarn = int(mw.group(2)) if mw else 0
-    # gates 1-2 — proofs, live
-    pr = proofs_data(spec_dir, repo, True)
+    try:
+        cp = subprocess.run([sys.executable, str(check), str(spec_dir)],
+                            capture_output=True, text=True, errors="replace",
+                            timeout=120)
+    except subprocess.TimeoutExpired:
+        check_err = "check.py timed out after 120s — no contract verdict"
+    except OSError as e:
+        check_err = f"check.py could not start: {e}"
+    else:
+        mw = re.search(r"\((\d+) fail, (\d+) warn\)", cp.stdout)
+        if mw is None:
+            # Nonzero rc WITH the summary is check.py's normal failing
+            # verdict; any rc without it is a crash — stderr's last line
+            # is the concise cause.
+            cause = (cp.stderr.strip().splitlines() or ["(no stderr)"])[-1]
+            check_err = (f"check.py produced no verdict (rc {cp.returncode}): "
+                         f"{cause[:80]}")
+        else:
+            nfail = len(re.findall(r"^  FAIL  ", cp.stdout, flags=re.M))
+            nwarn = int(mw.group(2))
+    # gates 1-2 — proofs. --dry-run classifies only: no test.md command
+    # executes on that path; the live run stays the explicit default.
+    verdict_lines: dict[str, str] = {}
+    bad_tcs: list[str] = []
+    if dry:
+        pr = classify_proofs(spec_dir)
+    else:
+        pr = proofs_data(spec_dir, repo, True)
+        verdict_lines = proof_verdict_lines(pr)
+        bad_tcs = sorted(
+            {tc for tc, (ok, _) in pr["ok"].items() if not ok}
+            | {tc for tc, _, _ in pr["errors"]}
+        )
     nauto = len(pr["auto"])
     # gates 6-7 — scope + hygiene. Git-derived: without a repository they
     # print SKIPPED instead of passing off the empty diff as a clean one.
@@ -390,17 +455,27 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None) -> int:
         scope_dt = "(not a git repo) — no scope verdict"
         hyg_dt = "(not a git repo) — no cleanliness verdict"
 
+    if dry:
+        proof_st = "DRY"
+        proof_dt = (f"{nauto} auto TC(s) classified, not executed — drop "
+                    "--dry-run to prove them")
+    else:
+        proof_st = "PASS" if pr["failed"] == 0 else "FAIL"
+        proof_dt = (f"{nauto - pr['failed']}/{nauto} TCs green"
+                    if nauto else "no auto TCs (n/a)")
+        if bad_tcs:
+            proof_dt += f" — failed: {', '.join(bad_tcs)}"
+
     gates = [
-        (1, "PROOF auto", "PASS" if pr["failed"] == 0 else "FAIL",
-         f"{nauto - pr['failed']}/{nauto} TCs green" if nauto else "no auto TCs (n/a)"),
+        (1, "PROOF auto", proof_st, proof_dt),
         (2, "PROOF manual", "MANUAL",
          f"{len(pr['manual'])} observation TC(s) — record each result"),
         (3, "REGRESSION", "MANUAL", "run the repo suite; paste exit-0 output"),
         (4, "COMPLETENESS",
-         "PASS" if total and done == total and not inprog else "FAIL",
-         f"{done}/{total} ticked, {inprog} in-progress"),
-        (5, "CONTRACT", "PASS" if nfail == 0 else "FAIL",
-         f"check.py: {nfail} fail, {nwarn} warn (each WARN fixed or ruled)"),
+         "PASS" if total and landed == total and not inprog else "FAIL",
+         f"{done}/{total} ticked, {landed}/{total} landed, {inprog} in-progress"),
+        (5, "CONTRACT", "FAIL" if nfail or check_err else "PASS",
+         check_err or f"check.py: {nfail} fail, {nwarn} warn (each WARN fixed or ruled)"),
         (6, "SCOPE", scope_st, scope_dt),
         (7, "HYGIENE", hyg_st, hyg_dt),
         (8, "REVIEW", "MANUAL",
@@ -409,17 +484,27 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None) -> int:
          "every D-### surfaced in the closing report"),
         (10, "SIGN-OFF", "MANUAL", "user acks the rulings report"),
     ]
-    print(f"dod: {spec_dir} — gate table in gates/dod.md")
+    print(f"dod: {spec_dir} — gate table in gates/dod.md"
+          + (" (dry run)" if dry else ""))
     for num, name, st, detail in gates:
         print(f"  {num:>2} {name:<13} {st:<7} {detail}")
+    for tc in bad_tcs:
+        print(verdict_lines[tc])
     bad = [str(n) for n, _, st, _ in gates if st == "FAIL"]
     if bad:
         print(f"  VERDICT: MECHANICAL FAIL — gate(s) {', '.join(bad)}; manual gates remain")
         return 1
+    notes: list[str] = []
+    dry_gates = [str(n) for n, _, st, _ in gates if st == "DRY"]
+    if dry_gates:
+        notes.append(f"gate(s) {', '.join(dry_gates)} classified, not "
+                     "executed (dry run)")
     skipped = [str(n) for n, _, st, _ in gates if st == "SKIPPED"]
     if skipped:
-        print(f"  VERDICT: MECHANICAL PASS — git gates {', '.join(skipped)} "
-              "SKIPPED (not a git repo); manual gates (2, 3, 8, 9, 10) remain")
+        notes.append(f"git gates {', '.join(skipped)} SKIPPED (not a git repo)")
+    if notes:
+        print(f"  VERDICT: MECHANICAL PASS — {'; '.join(notes)}; "
+              "manual gates (2, 3, 8, 9, 10) remain")
         return 0
     print("  VERDICT: MECHANICAL PASS — manual gates (2, 3, 8, 9, 10) remain")
     return 0
@@ -526,11 +611,14 @@ def parse_args(argv: list[str]):
     repo = None
     base = None
     run = "--run" in argv
+    dry = "--dry-run" in argv
     rest = []
     i = 1
     while i < len(argv):
         a = argv[i]
         if a == "--run":
+            i += 1
+        elif a == "--dry-run":
             i += 1
         elif a == "--repo":
             if i + 1 >= len(argv):
@@ -557,7 +645,7 @@ def parse_args(argv: list[str]):
         # should not be a usage error.
         print(__doc__)
         return None
-    return mode, (rest[0] if rest else None), repo, base, run
+    return mode, (rest[0] if rest else None), repo, base, run, dry
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -572,7 +660,7 @@ def main(argv: list[str] | None = None) -> int:
     parsed = parse_args(argv)
     if parsed is None:
         return 2
-    mode, spec_dir_s, repo_arg, base, run = parsed
+    mode, spec_dir_s, repo_arg, base, run, dry = parsed
     spec_dir = Path(spec_dir_s) if spec_dir_s else None
     if spec_dir is not None and not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory")
@@ -588,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "archived":
         return mode_archived(repo)
     if mode == "dod":
-        return mode_dod(spec_dir, repo, base)
+        return mode_dod(spec_dir, repo, base, dry)
     if mode == "converge":
         return mode_converge(spec_dir, repo, base)
     return mode_proofs(spec_dir, repo, run)

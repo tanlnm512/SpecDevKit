@@ -101,13 +101,14 @@ doc): `done` · `READY` · `blocked(<reason>)` · `gate:undetermined` ·
 | `verify` | plan, tech, qa, tasks, survey all done | `check.py <spec-dir>` exits 0 |
 | `before-audit` | verify done | `Before-audit: passed @ <sha-or-dash>` recorded in task.md |
 | `approve` (HUMAN) | before-audit done | spec.md `Status: approved` (or later) |
-| `execute` | approved + before-audit recorded | every task entry ticked `[x]` or struck `~~` |
-| `closing-audit` | execute done — 0 todo (digests orchestrator-confirmed) | `audit.py dod` DoD scorecard's mechanical gates pass |
-| `tick-commit` | closing-audit done | tasks ticked + burndown consistent; commit step SKIPPED-noted in non-git repos |
+| `execute` | approved + before-audit recorded | every task entry landed — `(implemented)`, ticked `[x]`, or struck `~~` |
+| `closing-audit` | execute done — 0 todo (digests orchestrator-confirmed) | `Closing-audit: approved @ <sha-or-dash>` recorded in task.md |
+| `tick-commit` | closing-audit done | tasks ticked with proof notes + burndown consistent; `Delivered: commit @ <sha-or-dash>` recorded (non-git: SKIPPED-noted) |
 | `archive` | tick-commit done AND spec `Status: done` | dir moved to `specs/archive/<date>-<name>/`, INDEX repointed |
 
 The per-task frontier inside `execute`: a task is runnable when it is
-`- [ ]`, its `(after T###)` dependencies are all ticked or struck, it is
+`- [ ]`, its `(after T###)` dependencies are all implemented, ticked, or
+struck, it is
 not at the fix-round cap `(fix 5/5)`, and its intended files are disjoint
 from its wave-mates' (the planner's parallelization map, per task). Tasks
 at the cap are surfaced for adjudication, never auto-retried.
@@ -342,10 +343,13 @@ instantiation of that generic prose, not a new set of rules.
   graph.main(["specs/<name>", "--state-json"])  # or no flag for the report
   ```
 
-  `graph.py`'s own internal probes (survey/verify/closing-audit) keep
-  shelling out to check.py/audit.py via `subprocess` regardless — that
+  `graph.py`'s own internal probes keep shelling out to check.py via
+  `subprocess` regardless (survey/verify) — that
   isolates their prints/argv from graph.py's own process, deliberately,
-  and stays untouched; this recipe optimizes the orchestrator's own
+  and stays untouched; the closing-audit probe is different: it consumes
+  `audit.classify_proofs` in-process and never executes, so no subprocess
+  and no test.md command ever runs from state computation. This recipe
+  optimizes the orchestrator's own
   repeated top-level calls, the ones the recompute loop actually pays for.
 - **`xd://lsp`/`ast_edit` are orchestrator-session devices, not
   automatically a spawned subagent's.** Verified empirically, not
@@ -611,16 +615,17 @@ task.md has:
    has been implemented.
 
 **Chained tasks gate on landing, not on ticks.** graph.py's per-task
-readiness is tick/struck-based — an `(after T###)` dependency counts
-satisfied only once the upstream entry is `[x]` or struck — the
-conservative mechanical truth. Live execution can never meet it: ticks
-stay forbidden until the closing audit (audits happen exactly twice,
-above), so a chained task sits `waiting on T001 (unticked)` for the whole
-implementation even after its upstream has landed. When the frontier
-shows a chained task blocked-on-unticked and the upstream's digest plus
-your own scoped re-verification of its acceptance commands prove it
-landed, spawn the dependent on that evidence and record the ruling — the
-frontier is the mechanical floor, not a veto.
+readiness counts an `(after T###)` dependency satisfied once the upstream
+entry is ticked `[x]`, struck, or `(implemented)` — landing releases
+dependents; ticks stay forbidden until the closing audit (audits happen
+exactly twice, above). The `(implemented)` marker is orchestrator-written
+bookkeeping, so its honesty is the guard: record it only after the
+implementer's digest plus your own scoped re-verification of its
+acceptance commands prove the work landed — a marker without verified
+landing is a fabricated tick in cheaper clothing. When a legacy docset
+(predating the implemented marker) shows a chained task blocked on an
+unticked-but-landed upstream, spawn the dependent on that same evidence
+and record the ruling — the frontier is the mechanical floor, not a veto.
 
 **Rulings, not stalls**: a running plan does not park on the user for
 every conflict. An implementer's `blocked:why` digest, a task that

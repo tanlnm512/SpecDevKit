@@ -1,8 +1,9 @@
 """Tests for scripts/specstate.py — the shared doc-state parsers.
 
 specstate.py is the extraction of every doc-state parser check.py's
-monolithic main() and audit.py used to inline: spec Status, task entries,
-the Before-audit line, the survey baseline/items, the researcher-skip
+monolithic main() and audit.py used to inline: spec Status, task entries
+(including the implemented marker), the Before-audit, Closing-audit, and
+Delivered header lines, the survey baseline/items, the researcher-skip
 marker, next-free-ID allocation, ID definitions, and the git availability
 probes. Pure functions, stdlib only, no CLI: importing the module must
 produce no output and write nothing (asserted here, SPECSTATE-001), and
@@ -57,6 +58,7 @@ TASK_SAMPLE = """# Tasks: demo
 - [x] T003 polish (FR-002)
       done 2026-09-08 — pytest green
 - [ ] T004 [P] (in-progress) (fix 2/5) retry the flaky bit (FR-002)
+- [ ] T006 (implemented) landed, unticked until the plan-wide tick (FR-002)
 - [ ] ~~T005~~ dropped 2026-09-08 (D-001)
 
 ## Conventions
@@ -95,8 +97,8 @@ class TaskEntryTests(unittest.TestCase):
         # T-ID, so — exactly like the parser it was extracted from — its
         # id reads None while the struck flag carries the drop signal.
         self.assertEqual([e.id for e in self.entries],
-                         ["T001", "T002", "T003", "T004", None])
-        self.assertEqual([e.phase for e in self.entries], [1, 1, 2, 2, 2])
+                         ["T001", "T002", "T003", "T004", "T006", None])
+        self.assertEqual([e.phase for e in self.entries], [1, 1, 2, 2, 2, 2])
         # The Conventions section's checkbox-shaped prose is not an entry.
         self.assertNotIn("not an entry", {e.first_line for e in self.entries})
 
@@ -142,6 +144,43 @@ class TaskEntryTests(unittest.TestCase):
         self.assertTrue(all(e.parallel and not e.done for e in entries))
 
 
+class ImplementedMarkerTests(unittest.TestCase):
+    """Landed work on an unticked entry parses as implemented — never as
+    todo, claimed, ticked, or struck — and entries without the marker keep
+    their legacy reading, so existing task files parse unchanged."""
+
+    def test_implemented_is_none_of_the_legacy_states(self):
+        by_id = {e.id: e for e in specstate.task_entries(TASK_SAMPLE) if e.id}
+        impl = by_id["T006"]
+        self.assertTrue(impl.implemented)
+        self.assertFalse(impl.done)
+        self.assertFalse(impl.claimed)
+        self.assertFalse(impl.struck)
+
+    def test_legacy_entries_without_the_marker_stay_unimplemented(self):
+        by_id = {e.id: e for e in specstate.task_entries(TASK_SAMPLE) if e.id}
+        self.assertFalse(by_id["T001"].implemented)  # plain todo
+        self.assertFalse(by_id["T003"].implemented)  # ticked
+        self.assertFalse(by_id["T004"].implemented)  # claimed + fix round
+
+    def test_marker_coexists_with_fix_round_and_dependency_chain(self):
+        text = ("## Phase 1: p (FR-001)\n"
+                "- [ ] T001 (implemented) (fix 1/5) landed, then re-briefed\n"
+                "- [ ] T002 (after T001) (implemented) also landed\n")
+        e = {x.id: x for x in specstate.task_entries(text)}
+        self.assertTrue(e["T001"].implemented)
+        self.assertEqual(e["T001"].fix_round, 1)
+        self.assertTrue(e["T002"].implemented)
+        self.assertEqual(e["T002"].after, ["T001"])
+
+    def test_direct_construction_defaults_to_unimplemented(self):
+        entry = specstate.TaskEntry(
+            id="T001", phase=1, block="- [ ] T001", first_line="- [ ] T001",
+            done=False, claimed=False, struck=False, parallel=False,
+            after=[], fix_round=None)
+        self.assertFalse(entry.implemented)
+
+
 class BeforeAuditStateTests(unittest.TestCase):
     def test_passed_with_sha_and_with_non_git_dash(self):
         self.assertEqual(
@@ -157,6 +196,59 @@ class BeforeAuditStateTests(unittest.TestCase):
     def test_missing_line(self):
         self.assertEqual(specstate.before_audit_state("no audit line here\n"), "missing")
         self.assertEqual(specstate.before_audit_state(""), "missing")
+
+
+class ClosingAuditStateTests(unittest.TestCase):
+    def test_approved_with_sha_and_with_non_git_dash(self):
+        self.assertEqual(
+            specstate.closing_audit_state(
+                "**Closing-audit**: approved @ 3fa9c21\n"),
+            "approved")
+        self.assertEqual(
+            specstate.closing_audit_state("Closing-audit: approved @ -\n"),
+            "approved")
+
+    def test_placeholder_and_example_text_do_not_read_approved(self):
+        pending = ("**Closing-audit**: pending — the orchestrator writes "
+                   "`approved @ <sha>` here\n")
+        self.assertEqual(specstate.closing_audit_state(pending), "pending")
+
+    def test_missing_line(self):
+        self.assertEqual(
+            specstate.closing_audit_state("no closing record here\n"),
+            "missing")
+        self.assertEqual(specstate.closing_audit_state(""), "missing")
+
+
+class DeliveryStateTests(unittest.TestCase):
+    def test_commit_sha_and_backticks_record_delivered(self):
+        self.assertEqual(
+            specstate.delivery_state("**Delivered**: commit @ 3fa9c21\n"),
+            ("delivered", "3fa9c21"))
+        self.assertEqual(
+            specstate.delivery_state("Delivered: commit @ `abc1234`\n"),
+            ("delivered", "abc1234"))
+
+    def test_dash_is_the_explicit_non_git_skip(self):
+        self.assertEqual(specstate.delivery_state("Delivered: commit @ -\n"),
+                         ("delivered", "-"))
+
+    def test_template_pending_line_is_not_delivered(self):
+        pending = ("**Delivered**: pending — the orchestrator writes "
+                   "`commit @ <sha>` here\n")
+        self.assertEqual(specstate.delivery_state(pending), ("pending", None))
+
+    def test_malformed_commit_token_reads_pending_not_delivered(self):
+        for bad in ("Delivered: commit @ abc12\n",     # too short for a sha
+                    "Delivered: commit @ zz9c21\n",    # not hex
+                    "Delivered: commit @ 3FA9C21\n"):  # shas are lowercase
+            self.assertEqual(specstate.delivery_state(bad), ("pending", None),
+                             bad)
+
+    def test_missing_line(self):
+        self.assertEqual(specstate.delivery_state("no delivery record\n"),
+                         ("missing", None))
+        self.assertEqual(specstate.delivery_state(""), ("missing", None))
 
 
 class SurveyBaselineTests(unittest.TestCase):

@@ -3,6 +3,8 @@
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 Status reflects code state per [survey.md](survey.md), not intent.
 **Before-audit**: pending — the orchestrator writes `passed @ <sha>` here
+**Closing-audit**: pending — the orchestrator writes `approved @ <sha>` here
+**Delivered**: pending — the orchestrator writes `commit @ <sha>` here
 
 ## Burndown
 <!-- Recompute on every status change; `check.py` verifies the arithmetic. -->
