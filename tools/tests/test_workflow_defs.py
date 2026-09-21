@@ -4,10 +4,13 @@ Three layers, one file: the generator (determinism, --check), the two
 committed dialect artifacts (per-runtime structural invariants — the
 tokens each workflow runtime requires or forbids), and the installer
 (per-harness targeting, skill_dir baking, foreign refusal, drift
-detection, absent-home skip) under a fake HOME, plus the sync.sh wiring.
+detection, absent-home skip, no-write --dry-run/--check, FR-009) under
+a fake HOME, plus the sync.sh wiring.
 The install tests never touch the live HOME: the repo is copied to a
 temp dir and HOME pointed at a fresh one, exactly like test_sync.py.
 """
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -68,6 +71,51 @@ class GeneratorTests(unittest.TestCase):
     def test_masters_carry_the_skill_dir_placeholder(self):
         for path in (DWF_TS, WF_JS):
             self.assertIn("__SKILL_DIR__", path.read_text(), path.name)
+
+
+# Both dialects carry the placeholder inside a double-quoted JS-family
+# string literal; --bake must encode for that grammar, so every character
+# raw substitution would eat (&, |, backslash) or that would terminate the
+# literal (quote, newline, control chars) survives verbatim.
+BAKED_LITERAL_RE = r'const SKILL_DIR_BAKED = ("(?:[^"\\]|\\.)*");'
+ADVERSARIAL_DIR = '/sk"ill & d\'ir \\ back|pipe $dollar (paren) tab\tend'
+
+
+class BakeTests(unittest.TestCase):
+    def baked(self, master, skill_dir):
+        r = run_py("--bake", str(master), "--skill-dir", skill_dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_bake_encodes_the_path_as_a_string_literal(self):
+        for master in (DWF_TS, WF_JS):
+            baked = self.baked(master, ADVERSARIAL_DIR)
+            self.assertNotIn("__SKILL_DIR__", baked, master.name)
+            m = re.search(BAKED_LITERAL_RE, baked)
+            self.assertIsNotNone(
+                m, f"no SKILL_DIR_BAKED literal in {master.name}")
+            self.assertEqual(json.loads(m.group(1)), ADVERSARIAL_DIR)
+
+    def test_bake_touches_only_the_placeholder(self):
+        master = DWF_TS
+        baked = self.baked(master, ADVERSARIAL_DIR)
+        m = re.search(BAKED_LITERAL_RE, baked)
+        self.assertEqual(
+            baked.replace(m.group(1)[1:-1], "__SKILL_DIR__"),
+            master.read_text())
+
+    def test_bake_keeps_each_literal_on_one_line(self):
+        weird = "/nl\nline\ttab\x01ctl"
+        for master in (DWF_TS, WF_JS):
+            baked = self.baked(master, weird)
+            m = re.search(BAKED_LITERAL_RE, baked)
+            self.assertEqual(json.loads(m.group(1)), weird)
+            self.assertEqual(len(baked.splitlines()),
+                             len(master.read_text().splitlines()))
+
+    def test_bake_without_skill_dir_is_a_usage_error(self):
+        r = run_py("--bake", str(DWF_TS))
+        self.assertEqual(r.returncode, 2)
 
 
 class ZcodeDialectTests(unittest.TestCase):
@@ -225,6 +273,14 @@ class InstallerBase(unittest.TestCase):
             env=dict(os.environ, HOME=str(self.home)),
             capture_output=True, text=True, timeout=120)
 
+    def home_snapshot(self):
+        """relpath -> sha256 for every file under the temp HOME."""
+        return {
+            str(p.relative_to(self.home)):
+                hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(self.home.rglob("*")) if p.is_file()
+        }
+
 
 class InstallTests(InstallerBase):
     def test_all_installs_each_dialect_to_its_own_root(self):
@@ -243,6 +299,23 @@ class InstallTests(InstallerBase):
                           f"{path.name} did not bake its own root's skill dir")
         # idempotent: a second install stays clean
         r2 = self.run_install("all")
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+
+    def test_adversarial_home_bakes_a_verbatim_literal(self):
+        # the whole install root — HOME included — may carry characters a
+        # raw substitution would eat; the baked literal must parse back to
+        # the exact resolved skill dir and --check must agree
+        self.home = self.tmp / 'we&ird "q" $doll\'ar |pipe\\ back'
+        self.home.mkdir()
+        self.stub_skill("zcode")
+        r = self.run_install("zcode")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        dest = self.home / ".zcode" / "workflows" / "spec-run.dwf.ts"
+        skill = self.home / ".zcode" / "skills" / "spec-to-prod"
+        m = re.search(BAKED_LITERAL_RE, dest.read_text())
+        self.assertIsNotNone(m, "no SKILL_DIR_BAKED literal in the install")
+        self.assertEqual(json.loads(m.group(1)), str(skill))
+        r2 = self.run_install("zcode", "--check")
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
 
     def test_absent_harness_home_skips_loudly(self):
@@ -276,6 +349,31 @@ class InstallTests(InstallerBase):
         r2 = self.run_install("claude", "--check")
         self.assertNotEqual(r2.returncode, 0)
         self.assertIn("MISSING", r2.stdout)
+
+    def test_dry_run_and_check_write_nothing(self):
+        # FR-009: both modes report without touching a byte — --dry-run
+        # on a fresh HOME fabricates no workflow root, and --check on a
+        # drifted copy reports DRIFT and repairs nothing
+        self.stub_skill("zcode")
+        r = self.run_install("zcode", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("would install", r.stdout)
+        self.assertFalse((self.home / ".zcode" / "workflows").exists())
+        self.assertEqual(self.run_install("zcode").returncode, 0)
+        before = self.home_snapshot()
+        ok = self.run_install("zcode", "--check")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        self.assertIn("OK", ok.stdout)
+        self.assertEqual(self.home_snapshot(), before)
+        victim = self.home / ".zcode" / "workflows" / "spec-run.dwf.ts"
+        drifted = victim.read_text() + "\n// hand edit\n"
+        victim.write_text(drifted)
+        after_edit = self.home_snapshot()
+        bad = self.run_install("zcode", "--check")
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("DRIFT", bad.stdout)
+        self.assertEqual(victim.read_text(), drifted)
+        self.assertEqual(self.home_snapshot(), after_edit)
 
     def test_master_update_reinstalls_over_ledgered_copy(self):
         # the repo's provenance rule (sync.sh's): a deployed copy that

@@ -60,10 +60,36 @@
 #
 # Run from anywhere: tools/sync.sh — edits always land in skills/<name>/
 # first; this script is the only thing that copies out.
+#
+# Modes (FR-009): plain `tools/sync.sh` applies the plan; `--dry-run`
+# prints the full plan — create/update/unchanged/delete/refuse per
+# destination — and exits; `--check` reports refusals plus drift between
+# the masters and what is installed. Neither mode writes a destination
+# or records ownership.
 set -euo pipefail
 
 PKG_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail=0
+
+usage() {
+  echo "usage: tools/sync.sh [--dry-run|--check]" >&2
+}
+
+DRY_RUN=0
+CHECK=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1 ;;
+    --check) CHECK=1 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; usage; exit 2 ;;
+  esac
+  shift
+done
+if [ "$DRY_RUN" = 1 ] && [ "$CHECK" = 1 ]; then
+  echo "ERROR: --dry-run and --check are mutually exclusive" >&2
+  usage
+  exit 2
+fi
 
 SKILLS_ROOTS=(
   "$HOME/.agents/skills"
@@ -113,8 +139,13 @@ ledger_entry_matches() {  # <ledger-file> <command-name> <dest-file>
 ledger_record() {  # <ledger-file> <command-name> <master-file>
   local h
   h="$(shasum -a 256 < "$3" | cut -d' ' -f1)"
-  touch "$1"
-  grep -v " $2\$" "$1" > "$1.tmp" || true
+  # Rewrite via destination-local scratch renamed over the ledger, so
+  # the ledger file itself never holds partial content (FR-007).
+  if [ -f "$1" ]; then
+    grep -v " $2\$" "$1" > "$1.tmp" || true
+  else
+    : > "$1.tmp"
+  fi
   printf '%s %s\n' "$h" "$2" >> "$1.tmp"
   mv "$1.tmp" "$1"
 }
@@ -125,29 +156,59 @@ sha() {  # <file> -> sha256 on stdout
 
 LEDGER_NAME=".spec-dev-kit-deployed"
 
+# Destination-local staging + atomic replacement (FR-007): content lands
+# via rename from a scratch file in the destination's own directory, so
+# a destination is never seen half-written. Scratch carries the
+# LEDGER_NAME prefix — the installer-scratch namespace the sweep, the
+# ledger rewrites, the verify pass, and tools/ownership.py's inventory
+# all already exclude — so even a crash leftover can never be
+# misclassified as a foreign file.
+atomic_put() {  # <src> <dest>
+  local tmp
+  tmp="$(dirname "$2")/$LEDGER_NAME.tmp-$(basename "$2").tmp"
+  rm -f "$tmp"
+  cp -p "$1" "$tmp"
+  mv "$tmp" "$2"
+}
+
 # Skills-tree provenance — the command roots' refuse-don't-clobber
-# rule, applied to a whole installed directory. A dest file the master
-# no longer ships is either stale-own (its hash sits in the tree's
-# ledger — a previous deploy of ours; deleted) or foreign (not in the
-# ledger; REFUSED loudly, the tree is left untouched). Returns 1 when
-# anything foreign was found.
+# rule, applied to a whole installed directory. Every dest file is
+# classified before anything is touched: a path the master still ships
+# may be replaced only when identical or ledger-own (a previous deploy
+# of ours); a path the master no longer ships is deleted only when its
+# current hash is still the ledgered deployed hash; anything else is
+# foreign — REFUSED loudly, and nothing in the tree is written or
+# removed. Returns 1 when anything foreign was found.
 sweep_tree() {  # <master-dir> <dest-dir> <ledger>
   local master="$1" dest="$2" ledger="$3" rel bad=0
+  local stale=()
   [ -d "$dest" ] || return 0
   while IFS= read -r rel; do
     rel="${rel#./}"; [ -n "$rel" ] || continue
-    if [ -f "$master/$rel" ]; then continue; fi
-    if [ -f "$ledger" ] && awk -v h="$(sha "$dest/$rel")" -v n="$rel" \
-        '$1 == h && $2 == n {found = 1} END {exit found ? 0 : 1}' "$ledger"; then
-      rm "$dest/$rel"
-      echo "clean $dest/$rel (stale deploy)"
+    if [ -f "$master/$rel" ]; then
+      if cmp -s "$master/$rel" "$dest/$rel" \
+         || ledger_entry_matches "$ledger" "$rel" "$dest/$rel"; then
+        continue
+      fi
+      echo "REFUSE $dest/$rel — foreign file (differs from master, not a prior deploy); resolve manually"
+      bad=1
+    elif ledger_entry_matches "$ledger" "$rel" "$dest/$rel"; then
+      stale+=("$rel")
     else
       echo "REFUSE $dest/$rel — foreign file (not shipped by the skill, not a prior deploy); resolve manually"
       bad=1
     fi
   done < <(cd "$dest" && find . -type f ! -name '.DS_Store' \
       ! -path '*/__pycache__/*' ! -name "$LEDGER_NAME*")
-  return "$bad"
+  [ "$bad" -eq 0 ] || return 1
+  # bash 3.2 + set -u: expanding an empty array errors; guard the loop
+  if [ "${#stale[@]}" -gt 0 ]; then
+    for rel in "${stale[@]}"; do
+      rm "$dest/$rel"
+      echo "clean $dest/$rel (stale deploy)"
+    done
+  fi
+  return 0
 }
 
 # Rebuild a tree's ledger from what is now installed — the deployed
@@ -170,11 +231,18 @@ for d in "$PKG_ROOT"/skills/*/; do
 done
 
 install_skill_tree() {  # <skill-dir> <dest-root> — refuses on foreign files
-  local dest="$2/$(basename "$1")"
-  sweep_tree "$1" "$dest" "$dest/$LEDGER_NAME" || return 1
+  local master="$1" dest="$2/$(basename "$1")" rel
+  sweep_tree "$master" "$dest" "$dest/$LEDGER_NAME" || return 1
   mkdir -p "$dest"
-  rsync -a --exclude '.DS_Store' --exclude '__pycache__/' \
-    --exclude "$LEDGER_NAME*" "$1/" "$dest/"
+  # Per-file atomic replacement, not a tree copy: each destination file
+  # lands whole or not at all (FR-007); identical files stay untouched.
+  while IFS= read -r rel; do
+    rel="${rel#./}"; [ -n "$rel" ] || continue
+    mkdir -p "$dest/$(dirname "$rel")"
+    cmp -s "$master/$rel" "$dest/$rel" \
+      || atomic_put "$master/$rel" "$dest/$rel" || return 1
+  done < <(cd "$master" && find . -type f ! -name '.DS_Store' \
+      ! -path '*/__pycache__/*' ! -name "$LEDGER_NAME*")
   record_tree "$dest"
 }
 
@@ -190,111 +258,272 @@ install_command() {  # <master-file> <base> <root> — ledger-guarded copy
     echo "REFUSE $dest — foreign file (differs from master, not a prior deploy); resolve manually"
     return 1
   fi
-  cp "$f" "$dest"
+  atomic_put "$f" "$dest" || return 1
   ledger_record "$ledger" "$base" "$f"
+}
+
+# --- preflight -------------------------------------------------------------
+# Plan every destination this run may touch BEFORE the first write
+# (FR-001, FR-002): tools/ownership.py classifies each candidate as
+# create / update / unchanged / delete / refuse from the destination's
+# provenance ledger, and generated content is rendered to scratch first
+# so a generator or source failure also costs zero writes (D-002 — a
+# collision in the last root must not leave the first root
+# half-updated). Refuse means the ledger cannot prove the occupant is a
+# prior deploy: however identical it looks, it is never adopted.
+# Unplanned here: agy personas (committed regenerate-only repo
+# artifacts, no destination ledger) and the opencode/droid agent roots
+# (no provenance record exists yet; their deployment alignment is
+# T006's) — but their renders are still validated before any write.
+PREFLIGHT_FAIL=0
+preflight_stage="$(mktemp -d)"
+trap 'rm -rf "$preflight_stage"' EXIT
+
+plan_tree_root() {  # <src-dir> <dest-dir> — fail the run on any refusal
+  local dest="$2" out rc line
+  out="$(python3 "$PKG_ROOT/tools/ownership.py" plan-tree \
+      --src "$1" --dest "$dest")" && rc=0 || rc=$?
+  # rc 2 is a planner validation error (missing source, corrupt ledger)
+  # — a prerequisite failure, loud on stderr, fatal here either way.
+  if [ "$rc" -eq 2 ]; then PREFLIGHT_FAIL=1; return 0; fi
+  while IFS= read -r line; do
+    case "$line" in
+      refuse\ *)
+        PREFLIGHT_FAIL=1
+        echo "REFUSE $dest/${line#refuse } — foreign file (differs from master, not a prior deploy); resolve manually" ;;
+      *)
+        # --dry-run reports every decision in the planner's own
+        # create/update/unchanged/delete vocabulary (FR-009)
+        [ "$DRY_RUN" = 1 ] && echo "plan  ${line%% *} $dest/${line#* }" ;;
+    esac
+  done <<< "$out"
+  return 0
+}
+
+plan_file_dest() {  # <src-file> <dest-file> [planner args...] — same contract
+  local src="$1" dest="$2" out rc
+  shift 2
+  out="$(python3 "$PKG_ROOT/tools/ownership.py" plan-file \
+      --src "$src" --dest "$dest" "$@")" && rc=0 || rc=$?
+  if [ "$rc" -eq 2 ]; then PREFLIGHT_FAIL=1; return 0; fi
+  case "$out" in
+    refuse\ *)
+      PREFLIGHT_FAIL=1
+      echo "REFUSE $dest — foreign file (differs from master, not a prior deploy); resolve manually" ;;
+    *)
+      [ "$DRY_RUN" = 1 ] && echo "plan  ${out%% *} $dest" ;;
+  esac
+  return 0
 }
 
 for name in "${SKILLS[@]}"; do
   skill_dir="$PKG_ROOT/skills/$name"
 
   for root in "${SKILLS_ROOTS[@]}"; do
-    install_skill_tree "$skill_dir" "$root" || fail=1
+    plan_tree_root "$skill_dir" "$root/$name"
   done
 
+  # Allowlisted command sources validated before any root is planned.
+  cmd_bases=()
   if [ -d "$skill_dir/commands" ]; then
     for base in $name $(extra_commands "$name"); do
-      f="$skill_dir/commands/$base.md"
-      rel="skills/$name/commands/$base.md"
-      if [ ! -f "$f" ]; then
-        echo "MISSING $rel (allowlisted, absent)"; fail=1; continue
-      fi
-      for root in "${COMMANDS_ROOTS[@]}"; do
-        install_command "$f" "$base" "$root" || fail=1
-      done
-    done
-  fi
-
-  # Factory Droid's own command root — gated on the harness's config
-  # home existing, like the opencode/droid agent defs above: sync never
-  # fabricates a harness directory; installing the harness just needs
-  # one more sync run. Same provenance-ledger discipline, kept as a
-  # separate block so the shared roots' path is untouched (D-017).
-  if [ -d "$HOME/.factory" ]; then
-    for base in $name $(extra_commands "$name"); do
-      f="$skill_dir/commands/$base.md"
-      if [ ! -f "$f" ]; then
-        echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"; fail=1; continue
-      fi
-      install_command "$f" "$base" "$DROID_COMMANDS_ROOT" || fail=1
-    done
-  else
-    echo "skip  droid commands — ~/.factory absent (harness not installed)"
-  fi
-
-  # Dynamic workflows (ADR-019): each dialect file under
-  # skills/<name>/workflows/ installs into its own harness's workflow
-  # root via the dedicated installer, which bakes that root's own skill
-  # copy as skill_dir (and refuses foreign destinations per the same
-  # ledger discipline). Gated on the harness home existing — user roots
-  # are never fabricated here either.
-  if [ -d "$skill_dir/workflows" ]; then
-    for wf_h in zcode claude; do
-      if [ -d "$HOME/.$wf_h" ]; then
-        bash "$PKG_ROOT/tools/install-workflow.sh" "$wf_h" \
-          --skill-dir "$HOME/.$wf_h/skills/$name" || fail=1
+      if [ -f "$skill_dir/commands/$base.md" ]; then
+        cmd_bases+=("$base")
       else
-        echo "skip  $wf_h workflows — ~/.$wf_h absent (harness not installed)"
+        echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"
+        PREFLIGHT_FAIL=1
+      fi
+    done
+  fi
+  if [ "${#cmd_bases[@]}" -gt 0 ]; then
+    for base in "${cmd_bases[@]}"; do
+      f="$skill_dir/commands/$base.md"
+      for root in "${COMMANDS_ROOTS[@]}"; do
+        plan_file_dest "$f" "$root/$base.md" --name "$base"
+      done
+      if [ -d "$HOME/.factory" ]; then
+        plan_file_dest "$f" "$DROID_COMMANDS_ROOT/$base.md" --name "$base"
       fi
     done
   fi
 
   if [ -d "$skill_dir/agents" ]; then
-    mkdir -p "$CLAUDE_AGENTS_ROOT"
-    agents_ledger="$CLAUDE_AGENTS_ROOT/$LEDGER_NAME"
-    for f in "$skill_dir"/agents/*.md; do
-      base="$(basename "$f")"
-      [[ "$base" == _* ]] && continue
-      dest="$CLAUDE_AGENTS_ROOT/$base"
-      if [ -e "$dest" ] && ! cmp -s "$f" "$dest" \
-         && ! ledger_entry_matches "$agents_ledger" "$base" "$dest"; then
-        echo "REFUSE $dest — foreign file (differs from master, not a prior deploy); resolve manually"
-        fail=1; continue
-      fi
-      cp "$f" "$dest"
-      ledger_record "$agents_ledger" "$base" "$f"
-    done
-    mkdir -p "$OMP_AGENTS_ROOT"
-    python3 "$PKG_ROOT/tools/omp-defs.py" --skill-dir "$skill_dir" --out "$OMP_AGENTS_ROOT"
-
-    # Optional harnesses: agent defs land only where the harness's own
-    # config home already exists — a fresh harness install just needs
-    # one more sync run. Skills for both flow through the
-    # ~/.agents/skills compatibility root each already scans.
+    # Validate all generated content up front: render every dialect to
+    # scratch, gated exactly like the install blocks below (defs land
+    # only where the harness home already exists).
+    python3 "$PKG_ROOT/tools/omp-defs.py" --skill-dir "$skill_dir" \
+      --out "$preflight_stage/$name/omp" || PREFLIGHT_FAIL=1
+    python3 "$PKG_ROOT/tools/agent-defs.py" --target agy \
+      --skill-dir "$skill_dir" --out "$preflight_stage/$name/agy" || PREFLIGHT_FAIL=1
     if [ -d "$HOME/.config/opencode" ]; then
-      mkdir -p "$OPENCODE_AGENTS_ROOT"
-      python3 "$PKG_ROOT/tools/agent-defs.py" --target opencode --skill-dir "$skill_dir" --out "$OPENCODE_AGENTS_ROOT"
-    else
-      echo "skip  opencode defs — ~/.config/opencode absent (harness not installed)"
+      python3 "$PKG_ROOT/tools/agent-defs.py" --target opencode \
+        --skill-dir "$skill_dir" --out "$preflight_stage/$name/opencode" || PREFLIGHT_FAIL=1
     fi
     if [ -d "$HOME/.factory" ]; then
-      mkdir -p "$DROID_AGENTS_ROOT"
-      python3 "$PKG_ROOT/tools/agent-defs.py" --target droid --skill-dir "$skill_dir" --out "$DROID_AGENTS_ROOT"
-    else
-      echo "skip  droid defs — ~/.factory absent (harness not installed)"
+      python3 "$PKG_ROOT/tools/agent-defs.py" --target droid \
+        --skill-dir "$skill_dir" --out "$preflight_stage/$name/droid" || PREFLIGHT_FAIL=1
     fi
 
-    # Antigravity (agy) consumes this REPO as a plugin (root plugin.json;
-    # `agy plugin install <repo>` owns ~/.gemini/config/plugins) — sync
-    # never writes there. The root agents/ personas it registers are a
-    # committed, regenerate-only artifact of the briefs.
-    python3 "$PKG_ROOT/tools/agent-defs.py" --target agy --skill-dir "$skill_dir" --out "$PKG_ROOT/agents" >/dev/null
+    # Claude agents: plain copies under the agents root's own ledger.
+    for f in "$skill_dir"/agents/*.md; do
+      [ -e "$f" ] || continue
+      base="$(basename "$f")"
+      [[ "$base" == _* ]] && continue
+      plan_file_dest "$f" "$CLAUDE_AGENTS_ROOT/$base"
+    done
+
+    # omp defs: the generator's per-skill manifest IS this skill's
+    # provenance in the shared root, so it is the plan's ledger.
+    for f in "$preflight_stage/$name/omp"/*.md; do
+      [ -e "$f" ] || continue
+      plan_file_dest "$f" "$OMP_AGENTS_ROOT/$(basename "$f")" \
+        --ledger "$OMP_AGENTS_ROOT/.spec-dev-kit-omp-defs-$name"
+    done
+  fi
+
+  # Workflow dialects: bake each master against the skill copy the
+  # install step will create (the bake is a pure text transform, so the
+  # copy need not exist yet) and plan the harness's workflow root.
+  if [ -d "$skill_dir/workflows" ]; then
+    for wf in "$skill_dir"/workflows/*; do
+      [ -f "$wf" ] || continue
+      case "$wf" in
+        *.dwf.ts) wf_h=zcode ;;
+        *.js)     wf_h=claude ;;
+        *) continue ;;  # unknown extensions: install-workflow.sh notes them
+      esac
+      if [ -d "$HOME/.$wf_h" ]; then
+        expected="$preflight_stage/$name-wf-$(basename "$wf")"
+        python3 "$PKG_ROOT/tools/workflow-defs.py" --bake "$wf" \
+            --skill-dir "$HOME/.$wf_h/skills/$name" > "$expected" \
+            || { PREFLIGHT_FAIL=1; continue; }
+        plan_file_dest "$expected" "$HOME/.$wf_h/workflows/$(basename "$wf")"
+      fi
+    done
   fi
 done
+
+if [ "$PREFLIGHT_FAIL" -ne 0 ]; then
+  echo "PREFLIGHT FAILED — nothing was written; resolve the refusals above and rerun"
+  exit 1
+fi
+
+if [ "$DRY_RUN" = 1 ]; then
+  echo "dry run complete — nothing was written, no ownership recorded"
+  exit 0
+fi
+
+# --- apply -----------------------------------------------------------------
+# --check stops here (FR-009): the preflight above reported refusals and
+# the verify pass below reports drift — read-only either way.
+if [ "$CHECK" = 0 ]; then
+  for name in "${SKILLS[@]}"; do
+    skill_dir="$PKG_ROOT/skills/$name"
+
+    for root in "${SKILLS_ROOTS[@]}"; do
+      install_skill_tree "$skill_dir" "$root" || fail=1
+    done
+
+    if [ -d "$skill_dir/commands" ]; then
+      for base in $name $(extra_commands "$name"); do
+        f="$skill_dir/commands/$base.md"
+        rel="skills/$name/commands/$base.md"
+        if [ ! -f "$f" ]; then
+          echo "MISSING $rel (allowlisted, absent)"; fail=1; continue
+        fi
+        for root in "${COMMANDS_ROOTS[@]}"; do
+          install_command "$f" "$base" "$root" || fail=1
+        done
+      done
+    fi
+
+    # Factory Droid's own command root — gated on the harness's config
+    # home existing, like the opencode/droid agent defs above: sync never
+    # fabricates a harness directory; installing the harness just needs
+    # one more sync run. Same provenance-ledger discipline, kept as a
+    # separate block so the shared roots' path is untouched (D-017).
+    if [ -d "$HOME/.factory" ]; then
+      for base in $name $(extra_commands "$name"); do
+        f="$skill_dir/commands/$base.md"
+        if [ ! -f "$f" ]; then
+          echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"; fail=1; continue
+        fi
+        install_command "$f" "$base" "$DROID_COMMANDS_ROOT" || fail=1
+      done
+    else
+      echo "skip  droid commands — ~/.factory absent (harness not installed)"
+    fi
+
+    # Dynamic workflows (ADR-019): each dialect file under
+    # skills/<name>/workflows/ installs into its own harness's workflow
+    # root via the dedicated installer, which bakes that root's own skill
+    # copy as skill_dir (and refuses foreign destinations per the same
+    # ledger discipline). Gated on the harness home existing — user roots
+    # are never fabricated here either.
+    if [ -d "$skill_dir/workflows" ]; then
+      for wf_h in zcode claude; do
+        if [ -d "$HOME/.$wf_h" ]; then
+          bash "$PKG_ROOT/tools/install-workflow.sh" "$wf_h" \
+            --skill-dir "$HOME/.$wf_h/skills/$name" || fail=1
+        else
+          echo "skip  $wf_h workflows — ~/.$wf_h absent (harness not installed)"
+        fi
+      done
+    fi
+
+    if [ -d "$skill_dir/agents" ]; then
+      mkdir -p "$CLAUDE_AGENTS_ROOT"
+      agents_ledger="$CLAUDE_AGENTS_ROOT/$LEDGER_NAME"
+      for f in "$skill_dir"/agents/*.md; do
+        base="$(basename "$f")"
+        [[ "$base" == _* ]] && continue
+        dest="$CLAUDE_AGENTS_ROOT/$base"
+        if [ -e "$dest" ] && ! cmp -s "$f" "$dest" \
+           && ! ledger_entry_matches "$agents_ledger" "$base" "$dest"; then
+          echo "REFUSE $dest — foreign file (differs from master, not a prior deploy); resolve manually"
+          fail=1; continue
+        fi
+        atomic_put "$f" "$dest" || { fail=1; continue; }
+        ledger_record "$agents_ledger" "$base" "$f"
+      done
+      mkdir -p "$OMP_AGENTS_ROOT"
+      python3 "$PKG_ROOT/tools/omp-defs.py" --skill-dir "$skill_dir" --out "$OMP_AGENTS_ROOT"
+
+      # Optional harnesses: agent defs land only where the harness's own
+      # config home already exists — a fresh harness install just needs
+      # one more sync run. Skills for both flow through the
+      # ~/.agents/skills compatibility root each already scans.
+      if [ -d "$HOME/.config/opencode" ]; then
+        mkdir -p "$OPENCODE_AGENTS_ROOT"
+        python3 "$PKG_ROOT/tools/agent-defs.py" --target opencode --skill-dir "$skill_dir" --out "$OPENCODE_AGENTS_ROOT"
+      else
+        echo "skip  opencode defs — ~/.config/opencode absent (harness not installed)"
+      fi
+      if [ -d "$HOME/.factory" ]; then
+        mkdir -p "$DROID_AGENTS_ROOT"
+        python3 "$PKG_ROOT/tools/agent-defs.py" --target droid --skill-dir "$skill_dir" --out "$DROID_AGENTS_ROOT"
+      else
+        echo "skip  droid defs — ~/.factory absent (harness not installed)"
+      fi
+
+      # Antigravity (agy) consumes this REPO as a plugin (root plugin.json;
+      # `agy plugin install <repo>` owns ~/.gemini/config/plugins) — sync
+      # never writes there. The root agents/ personas it registers are a
+      # committed, regenerate-only artifact of the briefs.
+      python3 "$PKG_ROOT/tools/agent-defs.py" --target agy --skill-dir "$skill_dir" --out "$PKG_ROOT/agents" >/dev/null
+    fi
+  done
+fi
 
 # --- verify ---------------------------------------------------------------
 
 verify_tree() {  # <master> <copy> <label>
   local master="$1" copy="$2" label="$3" m c
+  if [ ! -d "$copy" ]; then
+    # --check on a destination nothing ever installed (FR-009)
+    echo "MISSING $label — not installed"; fail=1
+    return 0
+  fi
   m="$(cd "$master" && find . -type f ! -name .DS_Store ! -path '*/__pycache__/*' ! -name '.spec-dev-kit-deployed*' -exec shasum -a 256 {} + | sort -k2)"
   c="$(cd "$copy" && find . -type f ! -name .DS_Store ! -path '*/__pycache__/*' ! -name '.spec-dev-kit-deployed*' -exec shasum -a 256 {} + | sort -k2)"
   if [[ "$m" == "$c" ]]; then
@@ -307,7 +536,9 @@ verify_tree() {  # <master> <copy> <label>
 }
 
 verify_command() {  # <master-file> <base> <root>
-  if cmp -s "$1" "$3/$2.md"; then
+  if [ ! -e "$3/$2.md" ]; then
+    echo "MISSING $3/$2.md"; fail=1
+  elif cmp -s "$1" "$3/$2.md"; then
     echo "OK  $3/$2.md"
   else
     echo "DRIFT $3/$2.md"; fail=1

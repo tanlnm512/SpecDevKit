@@ -33,8 +33,9 @@ constants here and regenerate.
 
 The masters carry a literal __SKILL_DIR__ placeholder.
 tools/install-workflow.sh bakes each harness root's own skill copy into
-the installed file (and a runtime skill_dir arg wins over the bake —
-tech-spec D-002).
+the installed file through --bake, which encodes the path for the
+masters' double-quoted JS-family string literals (a runtime skill_dir
+arg wins over the bake — tech-spec D-002).
 
 Run by hand; also the engine behind sync.sh's workflow step:
 
@@ -42,12 +43,16 @@ Run by hand; also the engine behind sync.sh's workflow step:
     tools/workflow-defs.py --check        # verify committed files match
     tools/workflow-defs.py --out DIR      # write into DIR instead
     tools/workflow-defs.py --list         # print dialect + target mapping
+    tools/workflow-defs.py --bake MASTER --skill-dir DIR
+                                          # write MASTER to stdout with the
+                                          # path baked as a language literal
 
 Exit: 0 written/verified · 1 drift or missing artifact · 2 usage error.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -765,6 +770,14 @@ def render(dialect: str) -> str:
     return template.replace("__CONTRACT__", CONTRACT_NOTE)
 
 
+def bake(master: Path, skill_dir: str) -> str:
+    """Master text with every __SKILL_DIR__ swapped for skill_dir encoded
+    as the body of a double-quoted JS-family string literal (both dialects
+    carry the placeholder inside one)."""
+    encoded = json.dumps(skill_dir)[1:-1]
+    return master.read_text(encoding="utf-8").replace("__SKILL_DIR__", encoded)
+
+
 def write_all(out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
@@ -808,7 +821,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--list", action="store_true",
                    help="print the dialect → filename → harness-root mapping "
                         "and exit")
+    p.add_argument("--bake", metavar="MASTER", type=Path,
+                   help="write MASTER to stdout with every __SKILL_DIR__ "
+                        "replaced by --skill-dir, encoded as the body of a "
+                        "double-quoted JS-family string literal")
+    p.add_argument("--skill-dir", metavar="DIR",
+                   help="resolved skill dir to bake (required with --bake)")
     args = p.parse_args(argv)
+
+    if args.bake:
+        if not args.skill_dir:
+            p.error("--bake needs --skill-dir")
+        sys.stdout.write(bake(args.bake, args.skill_dir))
+        return 0
 
     if args.list:
         print("dialect   filename            installed by tools/install-workflow.sh")
