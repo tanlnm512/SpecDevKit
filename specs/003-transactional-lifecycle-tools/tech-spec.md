@@ -50,3 +50,23 @@ Split tick into a pure prospective transform and same-directory durable replacem
 - **Context**: Lifecycle state must survive interruption and failed postconditions.
 - **Decision**: Validate first, promote atomically, and retain rollback state through final validation.
 - **Consequences**: In-place partial updates are forbidden.
+
+### D-003: Chained waves spawn on landing evidence
+- **Context**: wave 1 landed T001/T002 (tick transform + failure matrix)
+  and T004/T005 (archive containment + rollback journal); the tick
+  failure matrix is red x4 by design until T003 lands the transaction.
+- **Decision**: per SKILL.md § Implementation the orchestrator spawns
+  T003 (after T001+T002) and T006 (after T004+T005) on the digests plus
+  scoped re-verification; landings recorded `(implemented)` in
+  `specs/003-transactional-lifecycle-tools/task.md`.
+- **Consequences**: the frontier stays the mechanical floor; T003 turns
+  the matrix green and the closing audit re-runs the full acceptance set.
+### D-004: Tick refuses unattributable burndown arithmetic
+- **Context**: T001's stricter contract — prospective burndown rows that
+  cannot be attributed to a phase (e.g. ad-hoc `| Setup | 1 | 0 |`) now
+  exit 1 with nothing written; previously tick wrote and left check.py
+  red.
+- **Decision**: refusal-before-write is the FR-001 reading; the
+  table-less task.md case stays a WARN-and-proceed.
+- **Consequences**: a task.md needing burndown repair must fix the table
+  (check.py --fix-burndown) before ticking; no silent inconsistent state.
