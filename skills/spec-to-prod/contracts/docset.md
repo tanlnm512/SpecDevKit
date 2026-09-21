@@ -74,6 +74,15 @@ losing any status, since task.md alone holds that.
 
 ## Status lifecycle
 
+**Lifecycle version: 2** — each docset declares it as the `**Lifecycle**:
+v2` line in task.md's header; a task.md without that line is a lifecycle
+v1 docset, upgraded only by the migration tool's dry-run preview and
+idempotent apply (pending markers only — legacy evidence is never
+inferred). Version 2 carries exactly four evidence fields, labeled in the
+bullets below: implementation evidence on the task entries, and three
+header record lines — mechanical-audit, human-acknowledgement, and
+delivery evidence.
+
 - spec.md `Status:` — `draft` → `approved` (the approve gate — explicit user
   sign-off, a HUMAN gate never auto-satisfied by any script) →
   `active` (first task spawned) → `done` (all ticked, TCs green, check.py
@@ -82,21 +91,27 @@ losing any status, since task.md alone holds that.
   `specs/archive/<date>-<name>/` and INDEX is repointed). The graph reads
   these statuses as the approve / execute / tick-commit nodes' done signals.
 - task.md entry states — `- [ ]` todo · `(in-progress)` claimed (bookkeeping
-  only) · `- [x]` done + proof note · `~~struck~~` dropped (D-###). Ticks
-  happen exactly once per plan: at the closing audit, all together, one
-  commit.
-- `Before-audit: passed @ <sha>` lives in task.md's header (`passed @ -`
-  where no git sha exists — the accepted non-git recording form; the git
-  gates themselves degrade to explicit `SKIPPED (not a git repo)` notes).
+  only) · `(implemented)` landed — **implementation evidence**, durable
+  before the closing audit's one all-at-once tick · `- [x]` done + proof
+  note (`done <date> — <proof>`, em dash — the durable per-task proof; a
+  tick without it is bookkeeping, not evidence) · `~~struck~~` dropped
+  (D-###). Ticks happen exactly once per plan: at the closing audit, all
+  together, one commit.
+- **Mechanical-audit evidence** — `Before-audit: passed @ <sha>` lives in
+  task.md's header (`passed @ -` where no git sha exists — the accepted
+  non-git recording form; the git gates themselves degrade to explicit
+  `SKIPPED (not a git repo)` notes).
   Resume, the closing audit, and graph.py's before-audit node read that
   line (see `gates/before-audit.md`).
-- `Closing-audit: approved @ <sha>` lives beside it (`approved @ -` in
-  non-git repos) — the durable human sign-off under which proof, review,
+- **Human-acknowledgement evidence** — `Closing-audit: approved @ <sha>`
+  lives beside it (`approved @ -` in non-git repos) — the durable human
+  sign-off under which proof, review,
   rulings, regression, and sign-off were ruled green. Mechanical scores
   never imply it; graph.py's closing-audit node reads done from that
   record alone.
-- `Delivered: commit @ <sha>` ends the header (`commit @ -` is the explicit
-  non-git skip) — the delivery record the tick-commit node's done signal
+- **Delivery evidence** — `Delivered: commit @ <sha>` ends the header
+  (`commit @ -` is the explicit non-git skip) — the delivery record the
+  tick-commit node's done signal
   cites: durable task-tick evidence (every task ticked or struck, every
   tick carrying its `done <date> — <proof>` note) plus the recorded commit
   SHA. Until it exists in a git repo, tick-commit stays READY after the

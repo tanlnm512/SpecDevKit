@@ -235,6 +235,37 @@ class BrokenFixtureTests(unittest.TestCase):
         finally:
             shutil.rmtree(spec_dir.parent.parent)
 
+    def test_unmapped_ac_fails(self):
+        spec_dir = fixture_copy()
+        try:
+            test_md = (spec_dir / "test.md").read_text(encoding="utf-8")
+            (spec_dir / "test.md").write_text(
+                test_md.replace("**Traces to**: FR-002, AC2",
+                                "**Traces to**: FR-002"),
+                encoding="utf-8",
+            )
+            code, out = run_check(str(spec_dir))
+            self.assertEqual(code, 1, out)
+            self.assertIn("traceability: AC2 has no test case", out)
+        finally:
+            shutil.rmtree(spec_dir.parent.parent)
+
+    def test_ac_match_is_token_exact(self):
+        spec_dir = fixture_copy()
+        try:
+            # AC10 names a different criterion: it must not stand in for AC1.
+            test_md = (spec_dir / "test.md").read_text(encoding="utf-8")
+            (spec_dir / "test.md").write_text(
+                test_md.replace("**Traces to**: FR-001, AC1",
+                                "**Traces to**: FR-001, AC10"),
+                encoding="utf-8",
+            )
+            code, out = run_check(str(spec_dir))
+            self.assertEqual(code, 1, out)
+            self.assertIn("traceability: AC1 has no test case", out)
+        finally:
+            shutil.rmtree(spec_dir.parent.parent)
+
 
 class MainArgvTests(unittest.TestCase):
     """main(argv) accepts args directly, no sys.argv patch needed — so a

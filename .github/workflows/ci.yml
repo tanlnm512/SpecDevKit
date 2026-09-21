@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Skill suite
+        run: skills/spec-to-prod/tests/run.sh
+      - name: Tooling suite
+        run: tools/tests/run.sh
+      - name: Compile Python sources
+        run: python3 -m compileall -q skills tools
+      - name: Shell syntax
+        run: |
+          set -euo pipefail
+          find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n 1 bash -n
+      - name: Generated-artifact drift
+        run: python3 tools/drift-check.py
+      - name: Representative docset
+        run: python3 skills/spec-to-prod/scripts/check.py skills/spec-to-prod/examples/mini-spec/specs/mini-spec

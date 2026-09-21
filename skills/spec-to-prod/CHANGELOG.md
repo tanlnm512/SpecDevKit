@@ -4,6 +4,35 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.8.0 — 2026-09-21
+
+The contract, documentation, and release-validation reconciliation. The
+docset contract declares lifecycle version 2 with explicit implementation,
+mechanical-audit, human-acknowledgement, and delivery evidence fields, and
+a migration moves version 1 active docsets forward with a dry-run and an
+idempotent apply — missing legacy evidence becomes an explicit pending
+marker, never inferred proof — while archived docsets stay readable with a
+compatibility warning. check.py fails when a user-story acceptance
+criterion or functional requirement lacks a test mapping. A CI workflow
+now runs both Python suites, compilation, shell syntax, generated-artifact
+drift checks, and representative docset checks on Linux and macOS, and
+generated workflows, diagrams, manifests, and examples fail release
+validation when they differ from their canonical sources. Public docs
+state actual runtime dependencies, portability limits, supported
+harnesses, and safe command trust boundaries — support claims name only
+what the CI matrix exercises. The release surfaces are locked together:
+the semantic version, the newest changelog entry, and every generated
+manifest are checked for agreement by tools/tests/test_manifests.py, and
+the root RELEASE.md is the release checklist that turns those gates into
+one ordered pass.
+
+Migration: existing active spec dirs are lifecycle version 1 — preview
+with the migration's dry-run, then apply; the apply is idempotent (a
+second apply changes nothing). Legacy docsets gain explicit pending
+evidence markers that require a one-time human acknowledgement; no
+evidence is backfilled as passed. Archived specs stay readable and are
+never auto-migrated.
+
 ## 2.7.3 — 2026-09-20
 
 Description-limit fix: the 2.7.0 description addition pushed the

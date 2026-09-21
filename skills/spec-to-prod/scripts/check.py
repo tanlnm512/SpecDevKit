@@ -2,7 +2,8 @@
 """Mechanical Phase-C checks for a spec folder under specs/<name>/.
 
 Verifies what a script can: file presence (5 contract files + survey.md/
-research.md as optional inputs), ID traceability graph (FR/AC/US/TC/D),
+research.md as optional inputs), ID traceability graph (FR/AC/US/TC/D;
+FR and AC test coverage enforced, US stays WARN),
 task-dependency and coverage-matrix consistency (including cross-phase
 `(after T###)` chains and FR→milestone coverage in plan.md), D-###
 structural completeness, burndown arithmetic (incl. the Σ total row),
@@ -788,6 +789,11 @@ def main(argv: list[str] | None = None) -> int:
     for us in sorted(uss):
         if not any(us in blk for blk in tc_blocks.values()):
             warns.append(f"traceability: {us} has no test case")
+    # AC coverage is FAIL: every acceptance criterion needs a TC mapping.
+    # \b over a bare `in`: AC1 must not read as mapped by a block naming AC10.
+    for ac in sorted(acs):
+        if not any(re.search(rf"\b{ac}\b", blk) for blk in tc_blocks.values()):
+            fails.append(f"traceability: {ac} has no test case")
     # FR → milestone coverage: planner's "every FR in exactly one
     # milestone" rule, enforced against the ## Milestones table rows.
     # No milestone is FAIL (same severity as FR-has-no-task); membership
