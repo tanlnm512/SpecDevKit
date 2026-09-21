@@ -1,6 +1,6 @@
 # Spec: Contract, documentation, and release validation
 
-**Status**: approved
+**Status**: done
 **Created**: 2026-09-21
 **Branch**: `fix/contract-docs-release-validation`
 
