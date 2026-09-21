@@ -1,0 +1,33 @@
+# Tasks: provenance-safe-installation
+
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+Status reflects code state per [survey.md](survey.md), not intent.
+**Before-audit**: pending — the orchestrator writes `passed @ <sha>` here
+
+## Burndown
+| Phase | Total | Done |
+|-------|-------|------|
+| 1 | 3 | 0 |
+| 2 | 3 | 0 |
+| 3 | 3 | 0 |
+| **Σ** | 9 | 0 |
+
+## Phase 1: Ownership model and preflight (FR-001, FR-002, FR-003)
+- [ ] T001 [P] Add ownership-plan primitives and unit tests under `tools/` and `tools/tests/` (FR-001, FR-003)
+- [ ] T002 Add all-root preflight to `tools/sync.sh` consuming T001's ownership decisions (after T001) (FR-001, FR-002)
+- [ ] T003 Add zero-write-on-late-collision integration fixtures to `tools/tests/test_sync.py` (after T002) (FR-002)
+
+## Phase 2: Safe skill and agent deployment (FR-004, FR-005, FR-006)
+- [ ] T004 Update skill-tree collision and stale-file handling in `tools/sync.sh` with same-path foreign fixtures (FR-004, FR-005)
+- [ ] T005 Remove prefix deletion and stage outputs in `tools/agent-defs.py` with adversarial tests in `tools/tests/test_agent_defs.py` (FR-006)
+- [ ] T006 Align OMP, opencode, Droid, agy, and Claude deployment with the shared ownership plan across generators and tests (after T004, after T005) (FR-003, FR-006)
+
+## Phase 3: Atomic apply and workflow baking (FR-007, FR-008, FR-009)
+- [ ] T007 Add destination-local atomic content and ledger replacement to the shared installer path (after T006) (FR-007)
+- [ ] T008 [P] Replace raw workflow path substitution in `tools/install-workflow.sh` and extend `tools/tests/test_workflow_defs.py` (FR-008)
+- [ ] T009 Add no-write dry-run/check and idempotence coverage across `tools/tests/test_sync.py` and workflow tests (after T007, after T008) (FR-009)
+
+## Conventions
+- Tests use temporary HOME roots only.
+- `[P]` means disjoint files; chained tasks name the ownership-plan interface consumed.
+- No foreign file is deleted or adopted to make a test pass.
