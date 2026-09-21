@@ -4,6 +4,7 @@
 Status reflects code state per [survey.md](survey.md), not intent.
 **Before-audit**: passed @ c7f5202
 **Closing-audit**: approved @ 31da94e
+**Delivered**: commit @ 780ad03
 
 ## Burndown
 | Phase | Total | Done |
