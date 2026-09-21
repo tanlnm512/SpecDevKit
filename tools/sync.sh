@@ -358,10 +358,22 @@ for name in "${SKILLS[@]}"; do
     if [ -d "$HOME/.config/opencode" ]; then
       python3 "$PKG_ROOT/tools/agent-defs.py" --target opencode \
         --skill-dir "$skill_dir" --out "$preflight_stage/$name/opencode" || PREFLIGHT_FAIL=1
+      # Optional-harness agent roots plan like every other destination:
+      # the generator's own write-gate at apply time is the last resort,
+      # never the plan (a foreign collision here must fail before the
+      # first write anywhere).
+      for f in "$preflight_stage/$name/opencode"/*.md; do
+        [ -e "$f" ] || continue
+        plan_file_dest "$f" "$OPENCODE_AGENTS_ROOT/$(basename "$f")"
+      done
     fi
     if [ -d "$HOME/.factory" ]; then
       python3 "$PKG_ROOT/tools/agent-defs.py" --target droid \
         --skill-dir "$skill_dir" --out "$preflight_stage/$name/droid" || PREFLIGHT_FAIL=1
+      for f in "$preflight_stage/$name/droid"/*.md; do
+        [ -e "$f" ] || continue
+        plan_file_dest "$f" "$DROID_AGENTS_ROOT/$(basename "$f")"
+      done
     fi
 
     # Claude agents: plain copies under the agents root's own ledger.

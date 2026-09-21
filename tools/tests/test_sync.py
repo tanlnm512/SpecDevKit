@@ -318,6 +318,26 @@ class SyncShTests(SyncShBase):
         for root in (".agents", ".claude", ".zcode", ".omp"):
             self.assertFalse((self.home / root).exists(), root)
 
+    def test_foreign_optional_agent_defs_write_nothing_anywhere(self):
+        # The optional agent-def roots (droid, opencode) are planned like
+        # every other destination: a foreign file there must fail the
+        # preflight before the first write — not mid-apply with the
+        # skill roots already updated.
+        for foreign_rel in (
+                ".factory/droids/spec-surveyor.md",
+                ".config/opencode/agents/spec-surveyor.md"):
+            foreign = self.home / foreign_rel
+            foreign.parent.mkdir(parents=True, exist_ok=True)
+            foreign.write_text("---\nname: spec-surveyor\nstale: old deploy\n")
+            before = self.home_snapshot()
+            r = self.run_sync()
+            self.assertNotEqual(r.returncode, 0, foreign_rel)
+            self.assertIn("REFUSE", r.stdout, foreign_rel)
+            self.assertIn("PREFLIGHT FAILED", r.stdout, foreign_rel)
+            self.assertIn("stale: old deploy", foreign.read_text())
+            self.assertEqual(self.home_snapshot(), before, foreign_rel)
+            foreign.unlink()
+
     def test_dry_run_reports_the_plan_and_writes_nothing(self):
         # FR-009: --dry-run prints the planner's create/update/unchanged/
         # delete/refuse decisions and touches no destination — a fresh
