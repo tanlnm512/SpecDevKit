@@ -15,10 +15,13 @@ description: >-
   spec").
 metadata:
   owner: platform-core
-  version: "2.8.0"
+  version: "2.9.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
+
+Quick navigation: `references/quickstart.md`. The graph, gates, and docset
+contract below remain canonical.
 
 Orchestrate role-specific sub-agents to produce an execution-ready, grounded
 doc set per feature. You (the main session) are the **orchestrator**: you own
@@ -26,17 +29,17 @@ the spec's intent and the coordination; the agents own depth in their lane.
 
 ```text
 specs/<name>/
-├── spec.md        # WHAT & WHY — business, user stories, FR-###/AC  (orchestrator + user)
+├── spec.md        # WHAT & WHY — business, user stories, FR/NFR-###/AC  (orchestrator + user)
 ├── survey.md      # code-state ground truth — evidence/status/verify  (surveyor)
 ├── research.md    # external references + options                    (researcher)
 ├── plan.md        # milestones, dependencies, parallelization map    (planner)
 ├── tech-spec.md   # architecture, diagram, impact, decisions         (tech)
 ├── task.md        # phased checkboxes — the ONLY status holder       (task-breaker)
-└── test.md        # TC-### business test cases traced to FRs         (qa)
+└── test.md        # TC-### business test cases traced to FRs/NFRs    (qa)
 ```
 
 The 5 contract files are the deliverable; survey.md/research.md are inputs
-that stay for provenance. Traceability chain `FR → T → TC` must be greppable
+that stay for provenance. Traceability chain `FR/NFR → T → TC` must be greppable
 — `scripts/check.py` enforces it. The full contract — file ownership,
 status lifecycle, spawn-payload rules — is canonical in
 `contracts/docset.md`.
@@ -166,13 +169,13 @@ never a silent false result). Modes:
 - **`--emit-spawns`** — writes one self-contained spawn payload per
   frontier agent node to `specs/<name>/spawns/wave-<N>/<role>.md`
   (`--wave-dir` overrides the directory): header (spec_dir / repo /
-  resolved skill_dir) + the input payload filled from doc state (FR list,
+  resolved skill_dir) + the input payload filled from doc state (requirement list,
   the task entry verbatim + TC acceptance commands, research questions) +
   the frontmatter-stripped brief body byte-verbatim +
   `_shared-protocol.md` verbatim — **the reviewer is the one exempt role**
   (its brief states it needs no `_shared-protocol.md`). While the
   research-gate is undetermined it also prepares `researcher.md` (spec
-  digest + FR list + questions): the instrument of a `run` decision — the
+  digest + requirement list + questions): the instrument of a `run` decision — the
   gate itself is still never decided by tooling, and `--run` still pauses
   before any wave. Wave numbers are state-derived: 1 = analysis (survey ∥
   research), 2 = plan ∥ tech ∥ qa, 3 = tasks, 4+ = execute batches.
@@ -199,23 +202,28 @@ never a silent false result). Modes:
   judgment, which no script can perform. `--run` itself mutates no doc
   state — only the runner's own effects move the workflow.
 
-## Effort scaling (parallel by default — scale down only with a reason)
+## Effort scaling (right-size the artifacts, never the gates)
 
-Parallel spawning is the DEFAULT at every size; running serial/inline is
-the exception that needs justification.
+Spec discipline is mandatory at every size; agent count is not. Choose the
+tier from FR/NFR count, touched areas, and unknowns — then keep check.py,
+before-audit, user approval, and the closing audit intact.
 
-- **Default — small and medium** (≤3 FRs, one area): the graph runs the
-  same waves as large — analysis (surveyor ∥ researcher, if the gate above
-  says there's real uncertainty), then plan ∥ tech ∥ qa, then
-  task-breaker. Depth per agent shrinks (fewer items each), but the wave
-  shape holds.
-- **Large** (multi-area, gated, research-heavy): the full graph, full
-  depth.
-- **Inline exception** — the orchestrator works a node itself ONLY when
-  the work is a single file with zero unknowns (e.g. one grep-verifiable
-  survey item, one-file task execution). Cost honesty: multi-agent ≈15× a
-  solo pass — accepted because correctness and wall-clock beat token
-  spend; a user's "go cheap/inline" is the override, not the default.
+- **Tiny** (≤1 applicable requirement, ≤2 intended files, no unknowns, no
+  migration/public-API break): author/refresh the seven artifacts inline,
+  execute inline or with one implementer, and run the same mechanical gates.
+  No research spawn; no parallel wave.
+- **Standard — small and medium** (≤3 requirements or one area): shallow
+  agent artifacts are allowed, but do not spawn depth the questions do not
+  justify. A one-known-pattern change may run survey inline, author plan/tech/qa
+  inline where exclusive ownership is preserved, and spawn only execution if
+  useful.
+- **Large / high-risk** (multi-area, external input, auth, persistence,
+  migration, performance, security/privacy NFR, research-heavy): full waves,
+  full depth, reviewer before implementation, implementation-diff reviewer at
+  closing, and release handoff.
+- Cost honesty: multi-agent ≈15× a solo pass. Parallelism buys wall-clock and
+  independent review when the frontier is genuinely independent; it is not a
+  prestige default.
 
 ## Spawn mechanics (how to launch a role agent)
 
@@ -265,7 +273,7 @@ the exception that needs justification.
    single-message batch returns every digest at once — the wave shape is
    identical either way, only when you read the digests differs. Spawns
    are also fresh: no conversation context carries over, so the payload
-   must name the spec dir and quote the FR list / research questions. For
+   must name the spec dir and quote the requirement list / research questions. For
    agents producing code or scripts, include the **acceptance-test
    commands** in the payload — agents correct even the orchestrator's own
    mistakes when the tests are in the prompt.
@@ -289,7 +297,7 @@ instantiation of that generic prose, not a new set of rules.
   entry shares (spec dir path, resolved `skill_dir`, repo root) in the
   batch's `context` field once instead of repeating it inside each task's
   own prompt text; each entry's `task` field then carries only what's
-  unique to that role (its Input payload — FR list, the task entry
+  unique to that role (its Input payload — requirement list, the task entry
   verbatim, research questions).
 - **`outputSchema` mechanically enforces a brief's `digest:` shape** — the
   fields stay exactly what the brief defines (contracts/docset.md's return
@@ -457,7 +465,7 @@ re-briefs whoever needs it (§ Spawn mechanics, step 6).
 | qa | `agents/spec-qa.md` | `spec-qa` | GP | spec + survey done → qa (never reads plan/tech) | test.md | web-gui-tester (UI specs), agent-native-design (agent CLIs) |
 | task-breaker | `agents/spec-task-breaker.md` | `spec-task-breaker` | GP | plan + tech + survey done → tasks | task.md | — |
 | implementer | `agents/spec-implementer.md` | `spec-implementer` | GP | approved + before-audit recorded → execute, per-task frontier | code/tests only | repo's own conventions |
-| reviewer | `agents/spec-reviewer.md` | `spec-reviewer` | Explore | never a frontier node — the orchestrator's optional adversarial call during verification | nothing — findings only | — |
+| reviewer | `agents/spec-reviewer.md` | `spec-reviewer` | Explore | never a frontier node — contract review during verification; implementation-diff review during closing audit | nothing — findings only | — |
 
 defs and briefs are the same file: `agents/spec-*.md` = frontmatter + brief body; install
 them where the harness reads agent defs (`~/.claude/agents/` on Claude
@@ -488,8 +496,8 @@ machinery, contract unchanged:
 | `/plan <spec>` | PLAN — run waves from current doc state through verify + before-audit to the approve gate |
 | `/build <spec> [T###]` | BUILD — the execute node (the `implement` verb): implementer waves, no ticks, no commits |
 | `/test <spec>` | VERIFY — closing-audit steps 9–10: `audit.py proofs --run` + regression gate; requires execute done |
-| `/review <spec>` | REVIEW — closing-audit steps 7–8 + the DoD scorecard: scope diff, cleanliness sweep |
-| `/ship <spec>` | SHIP — the tick-commit node: the ONE commit, rulings ack, `Status: done`, archive on request |
+| `/review <spec>` | REVIEW — closing-audit steps 7–10 + the DoD scorecard: evidence integrity, scope diff, cleanliness sweep, implementation review |
+| `/ship <spec>` | SHIP — durable closing evidence, rulings ack, tick, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
 
 Namespace split, one surface apart: the bare lifecycle commands are
 graph-spanning runs; the `/spec-to-prod <verb>` router keeps its own
@@ -503,10 +511,14 @@ surface: per-task commits and per-task verification.
 
 "Prod" means production-READY, not deployed (ADR-014): the graph's
 terminal path is execute → closing-audit → tick-commit → archive — what
-leaves the pipeline is a verified, single-commit changeset in the local
-repo. Push, PR, deploy, and publish are out-of-workspace side effects
+leaves the pipeline is verified implementation commit C1 plus delivery-record
+commit C2 in the local repo. Push, PR, deploy, and publish are out-of-workspace side effects
 the rulings rule already stop-and-asks; they stay human/CI actions, and
-there is deliberately no release node in the graph.
+there is deliberately no release node in the graph. For operator-facing work,
+copy `templates/release-handoff.md` into the spec and fill it; after release,
+optionally use `templates/post-delivery.md` to compare business-value targets,
+incidents, drift, and follow-up specs. These records extend the SDLC feedback
+loop without pretending that this skill controls production.
 
 ## Run modes (the full workflow is not the only way)
 
@@ -641,18 +653,28 @@ question rounds and the approve gate are HUMAN gates that wait for an
 answer, non-answers included (§ Authoring the spec, D-018).
 
 ### Closing audit (once, after every task in task.md is implemented)
-7. **Scope diff**: `git diff --name-only` (the whole plan) ⊆ the union of
-   every task's intended files + tests — `scripts/audit.py scope
-   <spec-dir>` does the grep: every changed file no doc mentions is
-   listed as UNMENTIONED for you to adjudicate (renames and generated
-   files may be legitimate). Anything unexplained → revert it or record
-   it as a deviation.
-8. **Cleanliness sweep**: the full diff carries no debug prints, temporary
+7. **Evidence integrity**: `scripts/audit.py evidence <spec-dir>` verifies
+   the approval freeze, resolves/relates recorded lifecycle SHAs, and checks
+   the durable closing-evidence record. A hex-looking marker is not proof;
+   `deadbeef` must fail here and at verify.
+8. **Scope diff**: the diff from the recorded before-audit SHA (explicit
+   `--base` overrides only with a ruling) ⊆ the union of every task's
+   intended files + tests — `scripts/audit.py scope <spec-dir>` does the
+   grep. The spec's own `specs/<name>/` tree is expected delivery surface;
+   `specs/INDEX.md`, `specs/CONSTITUTION.md`, and `specs/context/` are
+   admitted only when a contract doc names them. Every other changed path —
+   including one under another spec — is UNMENTIONED and must be reverted or
+   ruled.
+9. **Cleanliness sweep**: the full diff carries no debug prints, temporary
    log statements, commented-out code, scratch files, or leftover TODOs
    from any task (unless a task's FR explicitly requires logging) —
    `scripts/audit.py clean` lists the suspects in the added lines; you
    adjudicate.
-9. **Proof**: every task's FR gets its TC pass condition (test.md) run
+10. **Implementation review**: spawn the read-only reviewer in
+    `implementation-diff` mode with the complete final diff, base SHA,
+    task/tech/test excerpts, and constitution. Resolve every BLOCK; own or
+    rule every WARN/NIT. Tests passing is not a substitute for this review.
+11. **Proof**: every task's FR/NFR gets its TC pass condition (test.md) run
    green — `scripts/audit.py proofs <spec-dir> --run` extracts each TC's
    command, runs it, and prints the command + summary line for the audit
    (opt-in: it executes commands embedded in test.md). TCs it lists as
@@ -663,34 +685,40 @@ answer, non-answers included (§ Authoring the spec, D-018).
    that flips red→green unexplained is a finding, not noise — flaky ≠
    ignorable: fix the flake or park it with a D-###; a waived flake is a
    lying green.
-10. **Regression gate**: the repo's broader check per conventions (full
+12. **Regression gate**: the repo's broader check per conventions (full
     suite, impacted subset, or lint/format gates), green.
-11. All green per the DoD gates (`gates/dod.md`; `audit.py dod
-    <spec-dir>` prints the scorecard) → tick every task `- [x]` with its
-    done-note (proof command), recompute burndown, **one commit for the
-    entire plan's implementation** (code + docs together, `check.py
-    --fix-burndown` for the arithmetic). Use `scripts/tick.py <spec-dir>
-    --note 'T### :: <proof>'` per task — it applies the ticks, inserts
-    the done-lines, and fixes the burndown mechanically; hand-editing a
-    dozen entries has gutted as-built records (entry bodies and
-    checkpoint comments must survive byte-identical into the archive).
-12. **Rulings report**: surface every D-### (decision, why, cost if
+13. All green per the DoD gates (`gates/dod.md`; `audit.py dod
+    <spec-dir>` prints the scorecard) → fill `evidence/closing.md` from
+    the template with fresh DoD, manual-TC, regression, review, and sign-off
+    evidence, then record `Closing-evidence: sha256:<digest>` in task.md.
+    Surface every D-### (decision, why, cost if
     wrong) in the closing summary and get the user's ack — DoD gates 9–10 (rulings
     surfaced, then sign-off). A
     ruling that dies inside tech-spec.md was a decision made in secret.
     The report also names every irreversible or state-mutating change the
     plan shipped (migrations, backfills, anything hard to roll back) so
     the ack covers them explicitly.
-13. Anything fails → nothing is ticked or committed. Use the scope diff to
+    Only then record `Closing-audit: approved @ <sha-or-dash>`, tick every
+    task `- [x]` with its done-note, and recompute burndown (`check.py
+    --fix-burndown`; use `scripts/tick.py` — hand-editing a dozen entries
+    guts the as-built record).
+14. **Implementation commit C1**: commit code + tests + ticked task.md +
+    closing evidence together. This is the verified changeset referenced by
+    delivery evidence.
+15. **Delivery-record commit C2**: record `Delivered: commit @ <C1>`,
+    set `Status: done`, update INDEX, and archive on request. A commit cannot
+    contain its own SHA; C2 exists precisely to carry that metadata. The tree
+    must end clean.
+16. Anything fails → nothing is ticked or committed. Use the scope diff to
     localize which task(s) likely caused it, fix the cause (spec, plan, or
     fix rounds — below), then re-run the **entire closing audit from
     step 7** — this gates the whole plan all-or-nothing, not task-by-task
     or phase-by-phase.
 
 The lifecycle commands `/test`, `/review`, and `/ship` enter this one
-procedure at its steps — `/test` = 9–10, `/review` = 7–8 plus the DoD
-scorecard of step 11, `/ship` = 11–12 plus `Status: done` and, on
-request, archive — portions of the ONE audit, never three; a failure in
+procedure at its steps — `/test` = 11–12, `/review` = 7–10 plus the DoD
+scorecard of step 13, `/ship` = 13–15 plus delivery record, `Status:
+done`, and on request archive — portions of the ONE audit, never three; a failure in
 any portion is a fix round, and the whole procedure re-runs from step 7.
 
 **Fix rounds** (a task that came back wrong — a `blocked:why` digest
@@ -793,7 +821,7 @@ the before-audit and the closing audit, not inside an audit of its own.
    blocked, and graph.py holds the frontier there). An ambiguity caught
    here never reaches a downstream agent.
 3. Fill spec.md WITH the user: what/why/business, stories+ACs, FR-###,
-   scope in/out. Unresolved ambiguity → `NEEDS CLARIFICATION: <question>`
+   NFR-### quality triage, scope in/out. Unresolved ambiguity → `NEEDS CLARIFICATION: <question>`
    inline — collect answers before the task list is written (check.py and
    the graph hold the spec node blocked while any marker stands), never
    guess.
@@ -805,11 +833,13 @@ the before-audit and the closing audit, not inside an audit of its own.
 Run `scripts/check.py <spec-dir>` — the verify node runs it mechanically,
 you run it for the judgment calls around it — mechanical checks: 7 files
 present (5 contract files + survey.md/research.md as optional inputs), ID
-traceability (every FR/US has a task + TC; no dangling IDs), burndown
+traceability (every FR/applicable NFR/AC has a task + TC; no dangling IDs), burndown
 arithmetic vs checkboxes including the Σ total row, status-bleed
 (checkboxes outside task.md), open NEEDS CLARIFICATION, unfilled template
 placeholders, vague plan phrases (TBD, "handle edge cases"…), FR→milestone
-coverage, cross-phase dependency chains, parallel file overlap, TC shape,
+coverage, cross-phase dependency chains, directory/glob-aware parallel file
+overlap, TC shape, approval-freeze and lifecycle-SHA integrity (lifecycle
+v2), closing-evidence presence once Closing-audit is approved,
 status/INDEX consistency, tech-spec
 citation paths vs the repo (any known source
 extension, not just .py), survey baseline vs HEAD (staleness), survey.md
@@ -828,7 +858,7 @@ drift, both-sides-wrong parity); it returns BLOCK/WARN/NIT findings and
 edits nothing. Still human: integration behavior end-to-end.
 
 Optionally, `check.py <spec-dir> --checklist` (re)generates
-`specs/<name>/checklist.md` — a plain FR/AC summary for readers who won't
+`specs/<name>/checklist.md` — a plain FR/NFR/AC summary for readers who won't
 parse task.md's burndown table. It is a derived, regenerate-only view
 (never hand-edited, never read by check.py, task.md stays the only status
 holder) — the same anti-drift shape as merging the agent defs/briefs
@@ -869,7 +899,13 @@ explicit go-ahead before the first implementer is ever spawned. "An
 approved task.md" (§ Run modes) means this sign-off. Record it the
 moment it's given — spec.md `Status: approved` (a resumed session reads
 it instead of re-asking; check.py fails progress on a still-draft spec,
-and the approve node — a HUMAN gate — stays open without it).
+and the approve node — a HUMAN gate — stays open without it). Immediately
+after the explicit yes, run `scripts/freeze.py <spec-dir> --record`:
+`approvals/approval.md` hashes the approved intent/evidence docs (spec
+Status excluded; tech-spec is an immutable prefix with append-only D-###
+room). `check.py` and `audit.py evidence` fail a lifecycle-v2 approved
+docset whose freeze is missing or changed. A post-approval correction is a
+fresh user approval and a new freeze, never an unrecorded rewrite.
 
 ## Resuming (recompute the frontier — state lives in the docs)
 
@@ -913,7 +949,7 @@ never from memory — by computing the frontier:
 ## During implementation (status lifecycle & scope changes)
 
 Execution mode (§ above) owns the mechanics — waves, the two audits, the
-single end-of-plan tick-and-commit. This section covers what it doesn't:
+one all-at-once tick, implementation commit C1, and delivery-record C2. This section covers what it doesn't:
 the docs' own lifecycle.
 
 1. **Spec status**: first task of the whole spec spawned → spec.md

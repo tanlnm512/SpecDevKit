@@ -91,7 +91,8 @@ class MigrateTests(unittest.TestCase):
         # declaration plus the three header evidence records
         names = set(template_field_lines())
         self.assertEqual(
-            names, {"Spec", "Lifecycle", "Before-audit", "Closing-audit", "Delivered"})
+            names, {"Spec", "Lifecycle", "Before-audit", "Closing-audit",
+                    "Closing-evidence", "Delivered"})
         self.assertEqual(template_field_lines()["Lifecycle"], "**Lifecycle**: v2")
 
     def test_dry_run_previews_exactly_and_writes_nothing(self):
@@ -99,7 +100,9 @@ class MigrateTests(unittest.TestCase):
         rc, out = run_migrate(str(self.spec), "--template", self.tpl, "--dry-run")
         self.assertEqual(rc, 0, out)
         inserted = preview_lines(out)
-        self.assertEqual(field_names(inserted), ["Lifecycle", "Closing-audit", "Delivered"])
+        self.assertEqual(field_names(inserted),
+                         ["Lifecycle", "Closing-audit", "Closing-evidence",
+                          "Delivered"])
         by_name = template_field_lines()
         for line in inserted:
             self.assertEqual(line, by_name[migrate.FIELD_LINE.match(line).group(1)])
@@ -148,7 +151,8 @@ class MigrateTests(unittest.TestCase):
         rc, out = run_migrate(str(spec), "--template", self.tpl)
         self.assertEqual(rc, 0, out)
         self.assertEqual(field_names(preview_lines(out)),
-                         ["Lifecycle", "Before-audit", "Closing-audit", "Delivered"])
+                         ["Lifecycle", "Before-audit", "Closing-audit",
+                          "Closing-evidence", "Delivered"])
         assert_no_evidence_invented(self, preview_lines(out))
         rc, out = run_migrate(str(spec), "--template", self.tpl)
         self.assertEqual(rc, 0, out)

@@ -11,8 +11,13 @@ scorecard. Same precondition as /test (execute node done).
 
 - scope diff: `scripts/audit.py scope specs/<spec>` — every UNMENTIONED
   file adjudicated (revert or record as deviation)
+- evidence integrity: `scripts/audit.py evidence specs/<spec>` — approval
+  freeze, lifecycle SHAs, and durable closing evidence
 - cleanliness sweep: `scripts/audit.py clean` — suspects adjudicated
   (takes no spec-dir; run from the repo root or pass `--repo <path>`)
+- implementation review: spawn the read-only reviewer in
+  `implementation-diff` mode with the complete final diff, base SHA,
+  task/tech/test excerpts, and constitution
 - DoD scorecard: `scripts/audit.py dod specs/<spec>` — mechanical gates
   green (executes embedded TC commands like /test — not read-only)
 

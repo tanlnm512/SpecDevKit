@@ -405,6 +405,38 @@ class Graph004ExecuteFrontierTests(unittest.TestCase):
         self.assertEqual(state["counts"]["ticked"], 1)
         self.assertEqual(state["counts"]["todo"], 2)
 
+    def test_directory_and_glob_overlap_surfaces_wave_note(self):
+        tasks = """# Tasks
+
+## Phase 1
+- [ ] T001 [P] first (FR-001)
+  - Touches:
+    - `src/module/`
+- [ ] T002 [P] second (FR-001)
+  - Touches:
+    - `src/*.py`
+"""
+        ts = {t["id"]: t for t in graph.task_frontier(
+            graph.specstate.task_entries(tasks))}
+        self.assertIn("T002", ts["T001"]["note"])
+
+
+class LifecycleEvidenceIntegrityTests(unittest.TestCase):
+    def test_fabricated_lifecycle_shas_block_verify(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec = copy_fixture(Path(td))
+            set_status(spec, "done")
+            task = DONE_TASKS.replace(
+                "**Before-audit**: passed @ -",
+                "**Before-audit**: passed @ deadbeef\n"
+                "**Closing-audit**: approved @ deadbeef\n"
+                "**Delivered**: commit @ deadbeef",
+            )
+            write(spec / "task.md", task)
+            node = compute(spec)["nodes"]["verify"]
+            self.assertEqual(node["state"], "blocked")
+            self.assertIn("check.py exits 1", node["reason"])
+
 
 class StruckDepFrontierTests(unittest.TestCase):
     """Scrutiny round-1 finding 1: the canonical dropped form
@@ -880,9 +912,14 @@ class Graph012VerifyAndBeforeAuditTests(unittest.TestCase):
             write(task_path, original.replace(
                 "**Before-audit**: pending — the orchestrator writes "
                 "`passed @ <sha>` here", line))
-            self.assertEqual(
-                compute(self.spec_dir)["nodes"]["before-audit"]["state"],
-                "done", line)
+            # A SHA belongs to a git repo; this temp fixture is non-git, so
+            # only the dash form can pass the real integrity-aware check.
+            # The SHA form is still a parsed before-audit record when verify
+            # is green (mocked here).
+            with unittest.mock.patch.object(graph, "run_check",
+                                            return_value=0):
+                state = compute(self.spec_dir)["nodes"]["before-audit"]["state"]
+            self.assertEqual(state, "done", line)
 
 
 class Graph013FixtureIntegrationTests(unittest.TestCase):
@@ -1168,7 +1205,8 @@ class Graph018DeliveryEvidenceTests(unittest.TestCase):
         with unittest.mock.patch.object(graph.specstate, "git_available",
                                         return_value=True), \
              unittest.mock.patch.object(graph.specstate, "head_sha",
-                                        return_value=DELIVERY_SHA):
+                                        return_value=DELIVERY_SHA), \
+             unittest.mock.patch.object(graph, "run_check", return_value=0):
             return compute(spec_dir)
 
     def delivered(self, name, record):

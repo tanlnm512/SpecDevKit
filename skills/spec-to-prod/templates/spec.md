@@ -41,6 +41,16 @@ As a <persona>, I want <capability>, so that <benefit>.
 - **FR-004**: WHERE <optional feature is included>, the system shall <behavior>.
 - **FR-005**: The system shall [NEEDS CLARIFICATION: <the open question — e.g. auth method not specified>]
 
+## Quality attributes
+<!-- Triage every family. An applicable NFR is EARS-shaped and traces to a
+     task and TC like an FR. An inapplicable NFR must say why. -->
+- **NFR-001**: Security — applicable: The system shall <security quality constraint>.
+- **NFR-002**: Privacy — applicable: The system shall <privacy/data-handling constraint>.
+- **NFR-003**: Performance — not applicable: <why this feature introduces no performance-sensitive path>.
+- **NFR-004**: Reliability — not applicable: <why no new failure/recovery contract is needed>.
+- **NFR-005**: Observability — not applicable: <why no new signal is required>.
+- **NFR-006**: Accessibility — not applicable: <why no user-facing surface is touched>.
+
 ## Scope
 **In**: ...
 **Out (deferred)**: ...        <!-- explicit non-goals; deferred ≠ forgotten -->

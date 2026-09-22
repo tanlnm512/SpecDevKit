@@ -31,7 +31,7 @@ else, unless your spawn payload already contains it verbatim — that copy
 is authoritative.
 
 ## Input payload (orchestrator embeds)
-1. The spec's What/Why + FR list (verbatim)
+1. The spec's What/Why + FR/NFR list (verbatim)
 2. The spec dir path
 3. 3–6 research questions (orchestrator derives them from the spec's open
    technical choices — e.g. "mature tsvector ranking alternatives to bm25?")
@@ -45,8 +45,9 @@ is authoritative.
    (both fetchable with WebFetch).
 2. Breadth first: start broad per question, then narrow to the 2–3 sources
    that actually answer it.
-3. Record each finding as: **source** (URL/DOI) · **claim** (one sentence) ·
-   **relevance** (which research question / FR it informs) · **confidence**
+3. Record each finding as: **source** (URL/DOI) · **publisher/source date
+   when available** · **retrieval date** · **claim** (one sentence) ·
+   **relevance** (which research question / FR/NFR it informs) · **confidence**
    (high/med/low).
 4. End with a ≤15-line "Options summary": for each open choice, the credible
    candidates and the one-line trade-off between them. No recommendation —

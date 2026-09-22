@@ -106,16 +106,23 @@ function findPause(st) {
     };
   }
   if (nodeState(st, "approve") === "READY") {
-    return { kind: "gate", gate: "approve", need: nodeReason(st, "approve") };
+    return {
+      kind: "gate",
+      gate: "approve",
+      need:
+        nodeReason(st, "approve") +
+        " — after the explicit yes, run freeze.py <spec-dir> --record",
+    };
   }
   if (nodeState(st, "execute") === "done" && nodeState(st, "closing-audit") !== "done") {
     return {
       kind: "gate",
       gate: "closing-audit",
       need:
-        "run the closing audit: audit.py proofs <spec-dir> --run, scope and " +
-        "clean, audit.py dod; rule on the findings, surface every D-###, get " +
-        "the user's ack",
+        "run the closing audit: audit.py evidence, scope (from the " +
+        "before-audit SHA), clean, implementation-diff review, proofs " +
+        "--run, regression, and dod; record evidence/closing.md, surface " +
+        "every D-###, and get the user's ack",
     };
   }
   if (nodeState(st, "closing-audit") === "done" && st.status !== "done") {
@@ -123,8 +130,9 @@ function findPause(st) {
       kind: "gate",
       gate: "tick-commit",
       need:
-        "tick every task with its proof (scripts/tick.py), fix the burndown " +
-        "(check.py --fix-burndown), set spec.md Status: done, repoint INDEX.md",
+        "tick every task with its proof (scripts/tick.py), fix the burndown, " +
+        "make implementation commit C1, then delivery-record commit C2 with " +
+        "Delivered: commit @ C1, Status: done, and INDEX repointed",
     };
   }
   return null;

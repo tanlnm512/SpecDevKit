@@ -1,6 +1,6 @@
 # Tech baseline — SpecDevKit
 
-**Baseline**: cd62be8 (2026-09-20) · living view — refresh where the
+**Baseline**: bc5e9de + current working tree (2026-09-22 assurance hardening) · living view — refresh where the
 code moved; per-spec surveys carry their own evidence.
 
 ## Stack
@@ -19,6 +19,8 @@ code moved; per-spec surveys carry their own evidence.
   (check / audit / graph / specstate / tick / git-degradation).
 - Spec verification: `python3 skills/spec-to-prod/scripts/check.py
   <spec-dir>`; workflow state: `…/scripts/graph.py <spec-dir>`.
+- Approval/evidence integrity: `freeze.py <spec-dir> --record|--verify`
+  and `audit.py evidence <spec-dir>`.
 - Install + verify: `bash tools/sync.sh` (SHA-verifies every root).
 - Manifests: `python3 tools/plugin-manifest.py` after VERSION or
   SKILL.md description changes.

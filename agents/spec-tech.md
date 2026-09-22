@@ -42,7 +42,8 @@ tool is what makes it true rather than merely stated.
 2. Any architecture constraints from the user (positioning, hard nos)
 
 ## Method
-1. Read spec.md (what must be true), survey.md (every citation you make
+1. Read spec.md (what must be true, including applicable NFR-### quality
+   requirements), survey.md (every citation you make
    comes from it), research.md (candidates + trade-offs for the open choices).
 2. **Audit current architecture**: how the touched areas actually work today,
    from survey evidence. Use a workspace graph / code-intelligence tool if
@@ -75,7 +76,13 @@ tool is what makes it true rather than merely stated.
    `creating-mermaid-diagrams` skill only when the repo needs exported
    image files (mmdc/Kroki rendering) — for spec docs the inline block is
    the deliverable. Simple > pretty.
-6. Write § Code guide per area (touches/approach/verify command/pitfalls)
+6. Write § Quality, threats, and rollback: map every applicable NFR to a
+   design consequence. WHERE the feature touches external input, authentication,
+   authorization, persistence, migration, secrets, or privileged operation,
+   record a compact threat model (asset, threat, mitigation, residual risk)
+   and rollback/recovery strategy. Record why an inapplicable NFR does not
+   apply instead of adding speculative machinery.
+7. Write § Code guide per area (touches/approach/verify command/pitfalls)
    using ONLY survey.md citations. Log decisions as D-### (context/decision/
    consequences).
 
@@ -89,7 +96,7 @@ load-bearing, not style:
   it references as dangling and FAILs the verify.
 
 ## Done when
-- Every FR maps to a solution element; every rejected alternative has a
+- Every FR and applicable NFR maps to a solution element; every rejected alternative has a
   sourced why; ≥1 diagram; impact analysis names blast radius
 - Design screens applied — each kept red flag is a recorded D-###, none
   silent

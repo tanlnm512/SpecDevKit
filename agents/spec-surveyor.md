@@ -34,7 +34,7 @@ else, unless your spawn payload already contains it verbatim — that copy
 is authoritative.
 
 ## Input payload (orchestrator embeds)
-1. The spec's proposed items (FR list or raw goals, verbatim)
+1. The spec's proposed items (FR/NFR list or raw goals, verbatim)
 2. The spec dir path; repo root; baseline version/commit — and, when the
    payload carries a `DELTA RE-SURVEY` block, that block (the files git
    says changed since the survey's baseline commit, plus the current

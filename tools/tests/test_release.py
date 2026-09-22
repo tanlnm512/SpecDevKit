@@ -3,7 +3,8 @@
 End-to-end lifecycle (FR-007's "end-to-end lifecycle evidence"): scaffold.sh
 raises a fresh docset in a hermetic temp repo, this file fills it as a real
 plan and drives it to the delivered v2 end state — implemented-and-ticked
-tasks with proof notes, Before-audit / Closing-audit / Delivered records —
+tasks with proof notes, Before-audit / Closing-audit / Closing-evidence /
+Delivered records —
 then check.py must read it green and every specstate evidence reader must
 recover the recorded lifecycle state from it.
 
@@ -16,6 +17,7 @@ Hermetic: fixture work happens only inside a tempdir; the live tree is
 read, never written. Run: python3 tools/tests/test_release.py
 """
 import importlib.util
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -27,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL = REPO_ROOT / "skills" / "spec-to-prod"
 SCAFFOLD = SKILL / "scripts" / "scaffold.sh"
 CHECK = SKILL / "scripts" / "check.py"
+FREEZE = SKILL / "scripts" / "freeze.py"
 DRIFT_CHECK = REPO_ROOT / "tools" / "drift-check.py"
 TEST_MANIFESTS = REPO_ROOT / "tools" / "tests" / "test_manifests.py"
 
@@ -157,7 +160,7 @@ their proof is green.
 ## Checkpoints
 - **After Phase 1**: `python3 test_calc.py` exits 0 with both multiply
   tests green
-- **After Phase 2**: task.md carries Before-audit, Closing-audit, and
+- **After Phase 2**: task.md carries Before-audit, Closing-audit, Closing-evidence, and
   Delivered records and check.py reads the docset green
 
 ## Risks & mitigations
@@ -231,6 +234,7 @@ TASK_MD = f'''# Tasks: {SPEC_NAME}
 Status reflects code state per [survey.md](survey.md), not intent.
 **Before-audit**: passed @ - — mechanical audit green on the finished plan
 **Closing-audit**: approved @ - — human gates ruled green over the recorded proof
+**Closing-evidence**: pending — replaced with the evidence-file digest
 **Delivered**: commit @ - — the fixture repo keeps no git; the skip form records it
 
 ## Burndown
@@ -248,7 +252,7 @@ Status reflects code state per [survey.md](survey.md), not intent.
   - done {TODAY} — python3 test_calc.py exits 0
 
 ## Phase 2: Lifecycle records
-<!-- Checkpoint: Before-audit, Closing-audit, and Delivered all recorded -->
+<!-- Checkpoint: Before-audit, Closing-audit, Closing-evidence, and Delivered all recorded -->
 - [x] T003 Record the audits and delivery for the finished plan (after T001, T002: consumes their recorded proof) (implemented) (FR-001, FR-002)
   - done {TODAY} — check.py green on specs/{SPEC_NAME}
 
@@ -346,6 +350,35 @@ generated files have each broken releases before these articles existed.
 INDEX_MD = (f"# Specs index\n"
             f"- [{SPEC_NAME}]({SPEC_NAME}/spec.md) — done (created {TODAY})\n")
 
+CLOSING_EVIDENCE_MD = f'''# Closing evidence: {SPEC_NAME}
+
+**Spec**: [spec.md](spec.md) | **Recorded**: {TODAY}
+**Baseline**: non-git fixture
+
+## Mechanical DoD
+The fixture's two TCs and repository proof command exit 0; the mechanical
+DoD scorecard is green.
+
+## Manual test cases
+- No MANUAL TCs in this fixture.
+
+## Regression
+`python3 test_calc.py` exits 0.
+
+## Review findings
+- Contract review: no BLOCK findings.
+- Implementation diff review: no BLOCK findings.
+
+## Rulings surfaced
+- D-001 — one pure function; rejected parser machinery.
+
+## Irreversible or state-mutating changes
+- none
+
+## User sign-off
+Fixture approval recorded by the release-gate builder.
+'''
+
 
 def build_docset() -> tuple[Path, Path]:
     """Fresh repo via scaffold.sh, filled and driven to the delivered v2 end
@@ -373,6 +406,23 @@ def build_docset() -> tuple[Path, Path]:
         (repo / "specs" / "INDEX.md").write_text(INDEX_MD, encoding="utf-8")
         (repo / "calc.py").write_text(CALC_PY, encoding="utf-8")
         (repo / "test_calc.py").write_text(TEST_CALC_PY, encoding="utf-8")
+        evidence = spec_dir / "evidence" / "closing.md"
+        evidence.parent.mkdir()
+        evidence.write_text(CLOSING_EVIDENCE_MD, encoding="utf-8")
+        digest = hashlib.sha256(
+            CLOSING_EVIDENCE_MD.encode("utf-8")
+        ).hexdigest()
+        task_path = spec_dir / "task.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace(
+                "**Closing-evidence**: pending — replaced with the evidence-file digest",
+                f"**Closing-evidence**: sha256:{digest}",
+            ),
+            encoding="utf-8",
+        )
+        r = run_py(FREEZE, str(spec_dir), "--record", cwd=repo)
+        if r.returncode != 0:
+            raise AssertionError(f"freeze.py failed: {r.stdout}{r.stderr}")
         return tmp, repo
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)

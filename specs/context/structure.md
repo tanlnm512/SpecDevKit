@@ -1,6 +1,6 @@
 # Code structure — SpecDevKit
 
-**Baseline**: cd62be8 (2026-09-20) · living view — later specs' surveys
+**Baseline**: bc5e9de + current working tree (2026-09-22 assurance hardening) · living view — later specs' surveys
 read this first and re-survey only the delta.
 
 ## Module map
@@ -17,11 +17,15 @@ read this first and re-survey only the delta.
     scope/clean/proofs/dod/converge), `specstate.py` (shared doc-state
     parsers), `tick.py` (task ticker), `scaffold.sh`, `archive.sh`,
     `skill-dir.sh`.
-  - `templates/` — the seven doc templates + constitution.md.
+  - `scripts/freeze.py` — post-approval hash manifest and integrity
+    verification; `scripts/specstate.py` also exposes lifecycle SHA values
+    and conservative task-touch overlap.
+  - `templates/` — the seven doc templates plus constitution,
+    closing-evidence, release-handoff, and post-delivery templates.
   - `commands/` — the router + six lifecycle commands (+ `extra.txt`).
   - `workflows/` — generated dynamic-workflow dialects
     (regenerate-only; see tools/workflow-defs.py).
-  - `decisions/` — ADRs 001–019; `contracts/docset.md` — the file
+  - `decisions/` — ADRs 001–021; `contracts/docset.md` — the file
     ownership/status contract; `gates/`, `references/`, `evals/`,
     `tests/` (the scripts' own suites), `VERSION`, `CHANGELOG.md`.
 - `tools/` — repo install/maintenance tooling: `sync.sh` (the one

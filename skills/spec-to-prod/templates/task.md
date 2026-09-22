@@ -5,6 +5,7 @@
 Status reflects code state per [survey.md](survey.md), not intent.
 **Before-audit**: pending — mechanical-audit evidence; the orchestrator writes `passed @ <sha>` here
 **Closing-audit**: pending — human-acknowledgement evidence; the orchestrator writes `approved @ <sha>` here
+**Closing-evidence**: pending — the orchestrator writes `sha256:<digest of evidence/closing.md>` here
 **Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
 
 ## Burndown
@@ -17,8 +18,14 @@ Status reflects code state per [survey.md](survey.md), not intent.
 ## Phase 1: <milestone name> (FR-###)
 <!-- Checkpoint: <exit condition from plan.md> -->
 - [ ] T001 <verb phrase — files touched> (FR-###)
+  - Touches:
+    - `<file or glob>`
 - [ ] T002 [P] <...> (FR-###)
+  - Touches:
+    - `<file or glob>`
 - [ ] T003 <...> (FR-###)
+  - Touches:
+    - `<file or glob>`
 
 ## Conventions
 - `- [ ]` todo · `(in-progress)` claimed · `(implemented)` landed —
@@ -35,5 +42,8 @@ Status reflects code state per [survey.md](survey.md), not intent.
   implementer's scratch note (what was tried, why it failed) may live at
   `notes/T###.md` — the one file an implementer may write under specs/,
   never read by check.py, never counted as status
-- Every task cites its FR-###; tasks with no FR are scope creep — fix the
-  spec first
+- Every task cites FR-### or an applicable NFR-###; a task with neither is
+  scope creep — fix the spec first
+- Every code task carries a `Touches:` block (repo-relative files,
+  directories, or globs); `[P]` tasks whose touches overlap are chained, not
+  spawned together

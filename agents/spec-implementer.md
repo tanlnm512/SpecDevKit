@@ -58,9 +58,9 @@ are all-or-nothing — there is no path scoping)**:
   leave half-done work behind.
 
 ## Input payload (orchestrator embeds)
-1. The single task entry, verbatim (its `- [ ] T### …` block with the FR
+1. The single task entry, verbatim (its `- [ ] T### …` block with the FR/NFR
    citation and any proof anchors)
-2. Spec dir path (read spec.md's FR, tech-spec.md's relevant Code-guide
+2. Spec dir path (read spec.md's FR/NFR, tech-spec.md's relevant Code-guide
    area, survey.md's evidence for it)
 3. Repo conventions pointer (AGENTS.md / test runner / lint gate) and
    specs/CONSTITUTION.md — every article binds you; a task that cannot
@@ -78,10 +78,10 @@ are all-or-nothing — there is no path scoping)**:
 
 ## Method
 
-1. Read the task entry, the FR it cites, tech-spec.md's relevant area, and
+1. Read the task entry, the FR/NFR it cites, tech-spec.md's relevant area, and
    survey.md's evidence for it. If the FR already looks satisfied, stop and
    report `already satisfied` in your digest instead of implementing.
-2. Smallest change that satisfies the FR, following repo conventions —
+2. Smallest change that satisfies the FR/NFR, following repo conventions —
    and "smallest" never licenses skipping validation, error handling,
    security, or accessibility: those are never the place to be small.
    **Comments/docs policy**: write a comment only when the code cannot
@@ -115,11 +115,11 @@ are all-or-nothing — there is no path scoping)**:
    accident. Callers outside the task's file scope → deviation, not
    improvisation.
 5. Leave no debris behind as you go — no debug prints, temporary log
-   statements (unless the task's FR explicitly requires logging),
+   statements (unless the task's FR/NFR explicitly requires logging),
    commented-out code, scratch files, or TODOs about the work you just did.
    The closing audit sweeps the whole plan's diff for this; a clean
    task-level diff is less for it to find.
-6. Stay inside the task's intended files + tests. If satisfying the FR
+6. Stay inside the task's `Touches:` set + tests. If satisfying the requirement
    genuinely requires touching something outside that scope, don't
    improvise — report it as a deviation instead of expanding scope
    yourself.
@@ -127,7 +127,7 @@ are all-or-nothing — there is no path scoping)**:
    project's broader test/regression suite yourself — the orchestrator
    proves and commits the entire plan together in its closing audit.
    Return a commit-line suggestion for the orchestrator to use once that
-   audit passes: `type(<spec-name>): T### <task verb phrase> (FR-###)`.
+   audit passes: `type(<spec-name>): T### <task verb phrase> (FR/NFR-###)`.
 
 ## Done when
 - The change is on disk, scoped to the task, with no process debris

@@ -344,7 +344,8 @@ class ResearchStateTests(unittest.TestCase):
 
 class NextIdsTests(unittest.TestCase):
     TEXTS = {
-        "spec.md": "- **FR-001**: x\n- **FR-002**: y\n- AC1: a\n### US1 — s\n",
+        "spec.md": ("- **FR-001**: x\n- **FR-002**: y\n"
+                    "- **NFR-001**: q\n- AC1: a\n### US1 — s\n"),
         "task.md": "- [x] T001 a\n- [ ] T002 (after T001) b\n",
         "test.md": "## TC-001 — case\n",
         "tech-spec.md": "### D-001: decision\n",
@@ -353,19 +354,20 @@ class NextIdsTests(unittest.TestCase):
     def test_next_free_ids_per_family(self):
         self.assertEqual(specstate.next_ids(self.TEXTS), {
             "FR": "FR-003", "AC": "AC2", "US": "US2",
-            "T": "T003", "TC": "TC-002", "D": "D-002",
+            "NFR": "NFR-002", "T": "T003", "TC": "TC-002", "D": "D-002",
         })
 
     def test_empty_texts_allocate_first_ids(self):
         self.assertEqual(specstate.next_ids({}), {
             "FR": "FR-001", "AC": "AC1", "US": "US1",
-            "T": "T001", "TC": "TC-001", "D": "D-001",
+            "NFR": "NFR-001", "T": "T001", "TC": "TC-001", "D": "D-001",
         })
 
 
 class DefinedIdsTests(unittest.TestCase):
     TEXT = (
         "- **FR-001**: The system shall x\n"
+        "- **NFR-001**: The system shall stay observable\n"
         "- AC1: Given x\n"
         "### US1 — Story\n"
         "## TC-001 — Case\n"
@@ -373,11 +375,11 @@ class DefinedIdsTests(unittest.TestCase):
         "a prose mention of FR-002 is not a definition\n"
     )
 
-    def test_all_five_families_from_one_text(self):
+    def test_all_six_families_from_one_text(self):
         ids = specstate.defined_ids(self.TEXT)
         self.assertEqual(ids, {
             "FR": {"FR-001"}, "AC": {"AC1"}, "US": {"US1"},
-            "TC": {"TC-001"}, "D": {"D-001"},
+            "NFR": {"NFR-001"}, "TC": {"TC-001"}, "D": {"D-001"},
         })
 
     def test_mentions_are_not_definitions(self):
@@ -386,7 +388,7 @@ class DefinedIdsTests(unittest.TestCase):
     def test_empty_text_yields_empty_families(self):
         self.assertEqual(specstate.defined_ids(""),
                          {"FR": set(), "AC": set(), "US": set(),
-                          "TC": set(), "D": set()})
+                          "NFR": set(), "TC": set(), "D": set()})
 
 
 def fake_git_run(returncode=0, stdout=""):
@@ -485,6 +487,62 @@ class GitHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             self.assertFalse(specstate.git_available(Path(td)))
             self.assertIsNone(specstate.head_sha(Path(td)))
+
+
+class LifecycleValueTests(unittest.TestCase):
+    def test_extracts_exact_sha_or_dash(self):
+        text = (
+            "**Before-audit**: passed @ `abc1234`\n"
+            "**Closing-audit**: approved @ def5678\n"
+            "**Delivered**: commit @ 90abcdef\n"
+        )
+        self.assertEqual(specstate.lifecycle_shas(text), {
+            "before": "abc1234",
+            "closing": "def5678",
+            "delivered": "90abcdef",
+        })
+
+    def test_pending_markers_are_not_values(self):
+        text = (
+            "**Before-audit**: pending\n"
+            "**Closing-audit**: pending\n"
+            "**Delivered**: pending\n"
+        )
+        self.assertEqual(specstate.lifecycle_shas(text),
+                         {"before": None, "closing": None,
+                          "delivered": None})
+
+
+class TaskTouchTests(unittest.TestCase):
+    TASKS = """# Tasks
+
+## Phase 1: x
+- [ ] T001 [P] first (FR-001)
+  - Touches:
+    - `src/module/`
+    - `tests/test_first.py`
+- [ ] T002 [P] second (FR-001)
+  - Touches:
+    - `src/*.py`
+- [ ] T003 third (NFR-001)
+  - Touches:
+    - `docs/usage.md`
+"""
+
+    def test_structured_touches_read_beyond_first_line(self):
+        entries = {e.id: e for e in specstate.task_entries(self.TASKS)}
+        self.assertEqual(specstate.task_touches(entries["T001"]),
+                         ["src/module", "tests/test_first.py"])
+        self.assertEqual(specstate.task_touches(entries["T002"]),
+                         ["src/*.py"])
+
+    def test_directory_and_glob_overlap_are_conservative(self):
+        self.assertTrue(specstate.paths_overlap(
+            "src/module", "src/module/deep/file.py"))
+        self.assertTrue(specstate.paths_overlap(
+            "src/*.py", "src/service.py"))
+        self.assertFalse(specstate.paths_overlap(
+            "src/module/a.py", "src/other/b.py"))
 
 
 class ModuleShapeTests(unittest.TestCase):

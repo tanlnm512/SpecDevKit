@@ -4,6 +4,39 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.9.0 — 2026-09-22
+
+Assurance and SDLC hardening. (1) New `scripts/freeze.py`: after explicit
+user approval, the orchestrator records a SHA-256 manifest for spec.md
+(volatile Status excluded), plan.md, survey.md, test.md, and tech-spec.md's
+immutable prefix; `check.py` and the new `audit.py evidence` mode fail a
+lifecycle-v2 docset whose freeze is missing or changed. Recorded
+Before-audit/Closing-audit/Delivered SHAs are now resolved as commits and
+checked for plausible ancestry — `deadbeef` is no longer evidence. (2)
+Closing evidence is durable: `evidence/closing.md` records fresh DoD,
+manual observations, regression, reviews, rulings, irreversible changes,
+and user sign-off. (3) Closing audit adds evidence integrity, defaults
+scope diffs to the before-audit SHA, admits only named shared specs files
+(foreign `specs/**` changes are UNMENTIONED), and requires a read-only
+implementation-diff review for semantic/security/rollback issues. (4)
+Delivery is now honest about git: implementation commit C1 carries code,
+tests, ticks, and closing evidence; delivery-record commit C2 records
+`Delivered: commit @ C1`, Status done, and INDEX updates. (5) Specs gain
+NFR-### quality triage with the same task/TC traceability as FRs; tech
+specs map applicable NFRs to threat/rollback design; QA adds abuse/misuse
+coverage. (6) Task `Touches:` blocks are machine-parsed from the full entry
+and overlap detection understands directories and glob prefixes. (7) Tiny
+changes keep artifacts/gates but can avoid unnecessary spawns; large/high
+risk work gets both reviewer modes and optional release-handoff/post-delivery
+records. ADR-021 records the decision.
+
+Migration: run `scripts/migrate.py <spec-dir> --dry-run`, then `--apply`
+for version-1 active docsets as before. Existing lifecycle-v2 drafts need no
+freeze until approval; approved/active lifecycle-v2 docsets need a fresh user
+confirmation and `freeze.py --record` before further execution. Marker-only
+records are no longer sufficient where a git repository is available.
+
+
 ## 2.8.0 — 2026-09-21
 
 The contract, documentation, and release-validation reconciliation. The

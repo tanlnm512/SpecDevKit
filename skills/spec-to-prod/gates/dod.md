@@ -11,18 +11,19 @@ gates and prints the scorecard; the closing audit owns the verdict.
 | 2 | Proof (manual) | Observed TCs | every MANUAL TC recorded | observation note per TC |
 | 3 | Regression | Repo suite | exit 0 | suite output |
 | 4 | Completeness | Landed tasks | every task ticked/implemented/struck, 0 in-progress | check.py burndown arithmetic |
-| 5 | Contract health | check.py | 0 FAIL; every WARN fixed or ruled | check.py output |
+| 5 | Contract & evidence integrity | check.py | 0 FAIL; approval freeze valid; closing evidence present; every WARN fixed or ruled | check.py + `audit.py evidence` |
 | 6 | Scope | Unexplained files | 0 unadjudicated UNMENTIONED | `audit.py scope` |
 | 7 | Hygiene | Debris | 0 unadjudicated suspects | `audit.py clean` |
-| 8 | Review | Open BLOCKs | 0; WARN/NIT fixed or parked | reviewer digest |
+| 8 | Review | Contract + implementation diff | 0 BLOCK; WARN/NIT fixed or parked | reviewer digest(s) |
 | 9 | Rulings | D-### surfaced | all in the closing report | the report itself |
 | 10 | Sign-off | User ack | explicit yes on the report | conversation |
 
 Gates 2, 3, 8, 9, 10 are judgment/human gates — the scorecard lists
 them MANUAL; satisfying and recording them is the orchestrator's job.
-Gate 8 applies only when a reviewer was spawned (SKILL.md: the reviewer
-is optional for small specs); without one, the report records
-`reviewer not spawned — N/A` rather than a vacuous green.
+Gate 8 has two halves. Contract review may be inline for a tiny, zero-unknown
+change when the orchestrator records its findings. The implementation-diff
+review is required at closing: tests alone do not certify security, rollback,
+maintainability, or semantic conformance.
 
 ## Rules that keep the metrics honest
 
@@ -34,7 +35,8 @@ is optional for small specs); without one, the report records
   evidence — cached or prior-session output is rerun, or it doesn't
   count.
 - The numerator's quality is gated above it: gate 8 (vacuous TCs,
-  over-promised ACs, parity risk) is what makes gate 1 mean something.
+  over-promised ACs, parity risk, implementation drift, unsafe change, and
+  test deception) is what makes gate 1 mean something.
 - Behavioral thresholds live in the spec — an FR's own number, measured
   by its TC's command. DoD only guarantees every number the spec set was
   measured and met; it sets no thresholds of its own.

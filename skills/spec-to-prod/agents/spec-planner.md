@@ -37,13 +37,13 @@ is authoritative.
 2. One line on team context if any (solo dev, PR cadence)
 
 ## Method
-1. Read spec.md (FRs, scope, risks) and survey.md (what exists, what's
+1. Read spec.md (FRs/NFRs, scope, risks) and survey.md (what exists, what's
    PARTIAL). Statuses come ONLY from survey.md.
-2. Group FRs into milestones — each milestone demoable at its checkpoint,
+2. Group FRs/applicable NFRs into milestones — each milestone demoable at its checkpoint,
    smallest-first, risky things pulled early enough to de-risk.
 3. Derive the dependency graph: what blocks what. Use a workspace graph /
    code-intelligence tool if the repo has one (call-graph, impact analysis,
-   dependency trace) to check real coupling between the areas the FRs touch.
+   dependency trace) to check real coupling between the areas the requirements touch.
 4. Write the **parallelization map** — the user-critical part. Parallel is
    the DEFAULT; the map's job is to prove where it must yield:
    - *Independent* areas are assumed concurrent — list which files each
@@ -57,7 +57,7 @@ is authoritative.
    (reuse survey.md's verify commands where they fit).
 
 ## Done when
-- Every FR appears in exactly one milestone; every milestone has a checkpoint
+- Every FR and applicable NFR appears in exactly one milestone; every milestone has a checkpoint
 - The parallelization map names areas, reasons, and file evidence
 - plan.md on disk; return the one-line digest contract —
   `digest: milestones <n>: <names> · parallel groups <groups> · serial spine <one line>`

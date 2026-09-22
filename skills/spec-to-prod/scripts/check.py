@@ -2,8 +2,8 @@
 """Mechanical Phase-C checks for a spec folder under specs/<name>/.
 
 Verifies what a script can: file presence (5 contract files + survey.md/
-research.md as optional inputs), ID traceability graph (FR/AC/US/TC/D;
-FR and AC test coverage enforced, US stays WARN),
+research.md as optional inputs), ID traceability graph (FR/NFR/AC/US/TC/D;
+FR, applicable NFR, and AC test coverage enforced, US stays WARN),
 task-dependency and coverage-matrix consistency (including cross-phase
 `(after T###)` chains and FR→milestone coverage in plan.md), D-###
 structural completeness, burndown arithmetic (incl. the Σ total row),
@@ -14,12 +14,14 @@ citation-path reality (heuristic, any known source extension — not just
 file:symbol:line citation names a real def/class — FAIL on a fabricated
 symbol, WARN on line drift), verify-command path reality (a pytest path/glob
 argument, in any contract/input file, must match a real file — WARN on
-zero matches), parallel-file overlap between [P] tasks, TC structural
+zero matches), directory/glob-aware parallel-file overlap between [P] tasks, TC structural
 shape, spec-status ↔ task/INDEX consistency, EARS-shaped FRs (every FR
 line says 'shall'), constitution presence, context-baseline presence, and
 stage gating (progress requires Status ≥ approved; NEEDS CLARIFICATION
 resolved before tasks exist; before-audit recorded once implementation
-starts). Test quality itself stays a human/LLM check.
+starts), lifecycle-v2 approval-freeze/closing-evidence presence, and git
+existence/ancestry for recorded lifecycle SHAs. Test quality itself stays
+a human/LLM check.
 --fix-burndown repairs the burndown table from the actual task entries
 before checking; --next-ids prints the next free ID per family
 (append-scope helper) and exits; --survey-only runs just the evidence-
@@ -48,6 +50,7 @@ Exit:  0 = pass (warnings allowed) · 1 = at least one FAIL · 2 = usage error
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import sys
@@ -68,12 +71,18 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     PLACEHOLDER,
     TaskEntry,
     before_audit_state,
+    closing_audit_state,
+    closing_evidence_hash,
     defined_ids,
+    lifecycle_shas,
     next_ids,
+    paths_overlap,
     spec_status,
     survey_baseline,
+    task_touches,
     task_entries,
 )
+import freeze  # noqa: E402 - sibling module, loaded through scripts/
 
 CONTRACT_FILES = ["spec.md", "plan.md", "tech-spec.md", "task.md", "test.md"]
 # Stage-1 inputs: created by scaffold.sh, optional (WARN not FAIL) here.
@@ -389,21 +398,26 @@ def build_checklist(name: str, spec: str, entries: list[TaskEntry]) -> str:
     on every --checklist run, never hand-edited: a second, independently
     maintained status representation is exactly the drift class D-007
     (agents/_shared-protocol.md) already killed once for agent defs/briefs.
-    FR checkboxes derive from task.md ticks (task.md stays the only status
+    Requirement checkboxes derive from task.md ticks (task.md stays the only status
     holder — this mirrors it, never adds a new one); ACs are listed plain
     since no independent AC-level status exists to mirror."""
-    fr_ticked: dict[str, list[bool]] = {}
+    req_ticked: dict[str, list[bool]] = {}
     for e in entries:
-        for fr in re.findall(r"FR-\d{3}", e.block):
-            fr_ticked.setdefault(fr, []).append(e.done)
+        for req in re.findall(r"\b(?:FR|NFR)-\d{3}\b", e.block):
+            req_ticked.setdefault(req, []).append(e.done)
 
     fr_text: dict[str, str] = {}
+    nfr_text: dict[str, str] = {}
     ac_text: dict[str, str] = {}
     for line in spec.splitlines():
         s = line.strip()
         m = DEFINITIONS["FR"].match(s)
         if m:
             fr_text[m.group(1)] = s.lstrip("- ").strip()
+            continue
+        m = DEFINITIONS["NFR"].match(s)
+        if m:
+            nfr_text[m.group(1)] = s.lstrip("- ").strip()
             continue
         m = DEFINITIONS["AC"].match(s)
         if m:
@@ -421,8 +435,13 @@ def build_checklist(name: str, spec: str, entries: list[TaskEntry]) -> str:
         "## Functional requirements",
     ]
     for fr in sorted(fr_text):
-        done = fr in fr_ticked and all(fr_ticked[fr])
+        done = fr in req_ticked and all(req_ticked[fr])
         lines.append(f"- [{'x' if done else ' '}] {fr_text[fr]}")
+    if nfr_text:
+        lines += ["", "## Quality requirements"]
+    for nfr in sorted(nfr_text):
+        done = nfr in req_ticked and all(req_ticked[nfr])
+        lines.append(f"- [{'x' if done else ' '}] {nfr_text[nfr]}")
     lines += ["", "## Acceptance criteria"]
     for ac in sorted(ac_text, key=lambda a: int(re.sub(r"\D", "", a) or 0)):
         lines.append(f"- {ac_text[ac]}")
@@ -538,8 +557,57 @@ def print_next_ids(texts: dict[str, str]) -> None:
     itself is specstate.next_ids."""
     ids = next_ids(texts)
     print("next free IDs:")
-    for family in ("FR", "AC", "US", "T", "TC", "D"):
+    for family in ("FR", "NFR", "AC", "US", "T", "TC", "D"):
         print(f"  {ids[family]}")
+
+
+def _git_probe(repo: Path, *args: str) -> bool:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True, text=True, timeout=10,
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def lifecycle_integrity_problems(task: str, repo: Path) -> list[str]:
+    """Validate recorded lifecycle SHAs against the actual git repository."""
+    values = lifecycle_shas(task)
+    git_ok = _git_probe(repo, "rev-parse", "--git-dir")
+    problems: list[str] = []
+    resolved: dict[str, str] = {}
+    for label, value in values.items():
+        if value is None:
+            continue
+        if value == "-":
+            if git_ok:
+                problems.append(
+                    f"{label}: explicit non-git dash recorded inside a git repo"
+                )
+            continue
+        if not git_ok:
+            problems.append(f"{label}: SHA {value!r} recorded in a non-git repo")
+            continue
+        if not _git_probe(repo, "cat-file", "-e", f"{value}^{{commit}}"):
+            problems.append(f"{label}: commit {value!r} not found")
+            continue
+        if not _git_probe(repo, "merge-base", "--is-ancestor", value, "HEAD"):
+            problems.append(f"{label}: commit {value!r} is not an ancestor of HEAD")
+        resolved[label] = value
+    if ("before" in resolved and "closing" in resolved
+            and not _git_probe(
+                repo, "merge-base", "--is-ancestor",
+                resolved["before"], resolved["closing"],
+            )):
+        problems.append("before-audit SHA is not an ancestor of the closing-audit SHA")
+    if ("closing" in resolved and "delivered" in resolved
+            and not _git_probe(
+                repo, "merge-base", "--is-ancestor",
+                resolved["closing"], resolved["delivered"],
+            )):
+        problems.append("closing-audit SHA is not an ancestor of the delivered commit")
+    return problems
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -627,17 +695,25 @@ def main(argv: list[str] | None = None) -> int:
 
     # 2. ID graph
     frs = defined(spec, "FR")
+    nfrs = defined(spec, "NFR")
     acs = defined(spec, "AC")
     uss = defined(spec, "US")
     tcs = defined(test, "TC")
     ds = defined(tech, "D")
+    nfr_defs: dict[str, str] = {}
+    for line in spec.splitlines():
+        m = DEFINITIONS["NFR"].match(line.strip())
+        if m:
+            nfr_defs[m.group(1)] = line
 
-    # EARS shape: every FR definition line must say "shall" (the spec
+    # EARS shape: every FR/NFR definition line must say "shall" (the spec
     # template's SHALL-statement convention). WARN — a missing "shall" is
     # a wording defect the reviewer fixes in place, not ID corruption.
     for line in spec.splitlines():
-        m = DEFINITIONS["FR"].match(line.strip())
-        if m and "shall" not in line.lower():
+        m = (DEFINITIONS["FR"].match(line.strip())
+             or DEFINITIONS["NFR"].match(line.strip()))
+        if m and ("shall" not in line.lower()
+                and "not applicable" not in line.lower()):
             warns.append(f"{m.group(1)}: not EARS-shaped (no 'shall')")
 
     # Task entries: "- [ ]"-anchored blocks (with wrapped continuation
@@ -647,8 +723,9 @@ def main(argv: list[str] | None = None) -> int:
     entries = task_entries(task)
     ph_total, ph_done = phase_counts(entries)
     task_phase: dict[str, int] = {}
-    # phase -> backticked path-ish span -> [task ids]; [P] tasks in one
-    # phase sharing a span is the parallel-wave collision risk.
+    # phase -> task id -> intended touches. Touches are read from the full
+    # entry (including a structured `Touches:` block) and compared using
+    # directory/glob-aware overlap, not exact string equality alone.
     par_files: dict[int, dict[str, list[str]]] = {}
     for e in entries:
         if e.phase is None:
@@ -656,15 +733,13 @@ def main(argv: list[str] | None = None) -> int:
         if e.id:
             task_phase[e.id] = e.phase
             if e.parallel:
-                for span in re.findall(r"`([^`\n]+)`", e.block):
-                    pathish = " " not in span and (
-                        "/" in span
-                        or span.rsplit(".", 1)[-1].lower() in CODE_EXT
+                touches = task_touches(e)
+                if not touches:
+                    warns.append(
+                        f"parallel: {e.id} marks [P] but names no intended "
+                        "file/directory/glob — add a Touches block"
                     )
-                    if pathish:
-                        par_files.setdefault(e.phase, {}).setdefault(
-                            span, []
-                        ).append(e.id)
+                par_files.setdefault(e.phase, {})[e.id] = touches
     in_progress = sum(1 for e in entries if e.claimed)
     tsks = {m for e in entries for m in re.findall(r"\bT\d{3}\b", e.block)}
     done = sum(1 for e in entries if e.done)
@@ -716,10 +791,19 @@ def main(argv: list[str] | None = None) -> int:
             fails.append(f"traceability: {fr} has no task")
         if not any(fr in blk for blk in tc_blocks.values()):
             fails.append(f"traceability: {fr} has no test case")
+    for nfr, definition in sorted(nfr_defs.items()):
+        if "not applicable" in definition.lower():
+            if not re.search(r"not applicable\s*[—:-]", definition, re.I):
+                warns.append(f"traceability: {nfr} skips coverage without a reason")
+            continue
+        if not any(nfr in e.block for e in entries):
+            fails.append(f"traceability: {nfr} has no task")
+        if not any(nfr in blk for blk in tc_blocks.values()):
+            fails.append(f"traceability: {nfr} has no test case")
     for t in sorted(tsks):
         entry = next((e.block for e in entries if re.search(rf"\b{t}\b", e.block)), "")
-        if not re.search(r"FR-\d{3}", entry):
-            fails.append(f"traceability: {t} cites no FR (scope creep?)")
+        if not re.search(r"\b(?:FR|NFR)-\d{3}\b", entry):
+            fails.append(f"traceability: {t} cites no FR/NFR (scope creep?)")
     # Task-dependency dangling check: a "(after T###)" chain marker (the
     # Conventions-documented shape) pointing at a T-ID that doesn't exist —
     # same pattern as the FR/AC/D dangling checks below, just for the one ID
@@ -739,18 +823,24 @@ def main(argv: list[str] | None = None) -> int:
                     f"dependency: {e.id} (phase {task_phase[e.id]}) "
                     f"chains after {ref} in a later phase ({task_phase[ref]})"
                 )
-    # Parallel-wave collision: two [P] tasks in one phase naming the same
-    # path. WARN — prose can legitimately mention a shared context file;
-    # the orchestrator adjudicates (chain them or confirm disjoint).
+    # Parallel-wave collision: two [P] tasks whose exact paths, directories,
+    # or glob prefixes overlap. WARN keeps legacy prose adjudicable, but the
+    # overlap computation itself is conservative rather than exact-string.
     for n, files in sorted(par_files.items()):
-        for span, ids in sorted(files.items()):
-            uniq = sorted(set(ids))
-            if len(uniq) > 1:
-                warns.append(
-                    f"parallel: {', '.join(uniq)} (phase {n}) both name `{span}` "
-                    "- chain them or confirm the files are disjoint"
+        ids = sorted(files)
+        for i, left in enumerate(ids):
+            for right in ids[i + 1:]:
+                overlap = next(
+                    (x for x in files[left] for y in files[right]
+                     if paths_overlap(x, y)),
+                    None,
                 )
-    for ref in sorted(set(re.findall(r"FR-\d{3}", task + test)) - frs):
+                if overlap is not None:
+                    warns.append(
+                        f"parallel: {left}, {right} (phase {n}) overlap at "
+                        f"`{overlap}` — chain them or prove disjoint touches"
+                    )
+    for ref in sorted(set(re.findall(r"\b(?:FR|NFR)-\d{3}", task + test)) - frs - nfrs):
         fails.append(f"dangling: {ref} referenced but not defined in spec.md")
     for ref in sorted(set(re.findall(r"AC\d+", test)) - acs):
         fails.append(f"dangling: {ref} referenced but not defined in spec.md")
@@ -773,13 +863,14 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             warns.append(f"{d}: missing {'/'.join(missing)} label(s) — stub decision? (every D-### opens with - **Context** / **Decision** / **Consequences** labels, and names literal file paths when it touches files)")
     for tc in sorted(tcs):
-        if not re.search(r"FR-\d{3}", tc_blocks.get(tc, "")):
-            fails.append(f"traceability: {tc} traces to no FR")
+        if not re.search(r"\b(?:FR|NFR)-\d{3}\b", tc_blocks.get(tc, "")):
+            fails.append(f"traceability: {tc} traces to no FR/NFR")
     # Coverage-matrix ↔ TC consistency: a matrix row's own claim (this FR is
     # covered by this TC) must be backed by that TC's own content — a stale
     # row citing a TC that no longer exists, or one whose Traces-to line was
     # since changed to a different FR, silently passed before this check.
-    for fr_m, tc_col in re.findall(r"^\|\s*(FR-\d{3})\s*\|([^|]*)\|[^|]*\|\s*$", test, re.M):
+    for fr_m, tc_col in re.findall(
+            r"^\|\s*((?:FR|NFR)-\d{3})\s*\|([^|]*)\|[^|]*\|\s*$", test, re.M):
         for tc_ref in re.findall(r"TC-\d{3}", tc_col):
             if tc_ref not in tc_blocks:
                 warns.append(f"coverage matrix: {fr_m} cites {tc_ref}, which doesn't exist")
@@ -801,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
     for ac in sorted(acs):
         if not any(re.search(rf"\b{ac}\b", blk) for blk in tc_blocks.values()):
             fails.append(f"traceability: {ac} has no test case")
-    # FR → milestone coverage: planner's "every FR in exactly one
+    # FR/NFR → milestone coverage: planner's "every requirement in exactly one
     # milestone" rule, enforced against the ## Milestones table rows.
     # No milestone is FAIL (same severity as FR-has-no-task); membership
     # in multiple rows is WARN (the planner says exactly one, but a FR
@@ -810,20 +901,27 @@ def main(argv: list[str] | None = None) -> int:
     ms_rows: list[str] = []
     for sec in re.split(r"^## ", texts["plan.md"], flags=re.M):
         if sec.split("\n", 1)[0].strip().lower().startswith("milestone"):
-            ms_rows = [l for l in sec.splitlines() if l.startswith("|") and "FR-" in l]
+            ms_rows = [
+                l for l in sec.splitlines()
+                if l.startswith("|") and re.search(r"\b(?:FR|NFR)-\d{3}\b", l)
+            ]
             break
     if ms_rows:
-        fr_ms: dict[str, int] = {}
+        req_ms: dict[str, int] = {}
         for line in ms_rows:
-            for fr in re.findall(r"FR-\d{3}", line):
-                fr_ms[fr] = fr_ms.get(fr, 0) + 1
-        for fr in sorted(frs):
-            if fr not in fr_ms:
-                fails.append(f"traceability: {fr} has no milestone in plan.md")
-            elif fr_ms[fr] > 1:
-                warns.append(f"plan: {fr} appears in {fr_ms[fr]} milestone rows (exactly one expected)")
+            for req in re.findall(r"\b(?:FR|NFR)-\d{3}\b", line):
+                req_ms[req] = req_ms.get(req, 0) + 1
+        requirements = set(frs) | {
+            nfr for nfr, line in nfr_defs.items()
+            if "not applicable" not in line.lower()
+        }
+        for req in sorted(requirements):
+            if req not in req_ms:
+                fails.append(f"traceability: {req} has no milestone in plan.md")
+            elif req_ms[req] > 1:
+                warns.append(f"plan: {req} appears in {req_ms[req]} milestone rows (exactly one expected)")
     else:
-        warns.append("plan: no ## Milestones table rows with FR-### found")
+        warns.append("plan: no ## Milestones table rows with FR/NFR-### found")
     # TC structural shape: presence of the four labels only — vacuousness
     # is the reviewer agent's job, missing scaffolding is mechanical.
     for tc in sorted(tcs):
@@ -835,6 +933,49 @@ def main(argv: list[str] | None = None) -> int:
     # requires an approved spec, clarifications are resolved before tasks
     # exist, and the before-audit is recorded once implementation starts.
     status = spec_status(spec)
+    for problem in lifecycle_integrity_problems(task, repo_root):
+        fails.append(f"evidence: {problem}")
+    lifecycle_v2 = bool(re.search(r"\*\*Lifecycle\*\*:\s*v2\b", task, re.I))
+    if lifecycle_v2 and status in ("approved", "active", "done"):
+        if not (spec_dir / "approvals" / "approval.md").exists():
+            fails.append(
+                "evidence: lifecycle-v2 approved spec has no approvals/approval.md "
+                "freeze — run freeze.py --record only after user sign-off"
+            )
+        else:
+            for problem in freeze.verify(spec_dir, repo_root):
+                fails.append(f"evidence: {problem}")
+    if lifecycle_v2 and closing_audit_state(task) == "approved":
+        evidence = spec_dir / "evidence" / "closing.md"
+        if not evidence.exists():
+            fails.append(
+                "evidence: Closing-audit approved but evidence/closing.md is missing"
+            )
+        else:
+            evidence_text = evidence.read_text(
+                encoding="utf-8", errors="replace"
+            )
+            digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
+            if closing_evidence_hash(task) != digest:
+                fails.append(
+                    "evidence: closing evidence does not match the "
+                    "Closing-evidence sha256 recorded in task.md"
+                )
+            missing = [
+                section for section in (
+                    "Mechanical DoD", "Manual test cases", "Regression",
+                    "Review findings", "Rulings surfaced",
+                    "Irreversible or state-mutating changes", "User sign-off",
+                )
+                if section not in evidence_text
+            ]
+            if missing:
+                fails.append(
+                    "evidence: closing evidence missing "
+                    + "/".join(missing)
+                )
+            if re.search(r"<[^>\n]+>|YYYY-MM-DD", evidence_text):
+                fails.append("evidence: closing evidence still contains placeholders")
     if status == "draft" and (done or in_progress):
         fails.append(
             f"gate: implementation progress ({done} ticked, {in_progress} in-progress) "
@@ -1099,7 +1240,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"check: {spec_dir}")
     print(
-        f"  IDs: {len(frs)} FR · {len(acs)} AC · {len(uss)} US · "
+        f"  IDs: {len(frs)} FR · {len(nfrs)} NFR · {len(acs)} AC · {len(uss)} US · "
         f"{len(tsks)} T · {len(tcs)} TC · {len(ds)} D"
     )
     print(f"  tasks: {total_tasks} total · {done} done · {todo} open")

@@ -4,8 +4,10 @@ Spec-driven development as a skill suite: an orchestrator (your main
 session) plus eight role agents produce an execution-ready, grounded doc
 set per feature under `specs/<name>/` — `spec.md`, `plan.md`, `task.md`
 (the status holder), `tech-spec.md`, `test.md`, with `survey.md` and
-`research.md` as evidence — every artifact mechanically verified by
-`scripts/check.py` and scheduled by a **dynamic state graph**
+`research.md` as evidence — with FR/NFR → task → test traceability, an
+approval freeze, durable closing evidence, and an implementation-diff
+review. Every artifact is mechanically verified by `scripts/check.py`
+and scheduled by a **dynamic state graph**
 (`scripts/graph.py`), not a fixed stage ladder.
 
 This repo — published on GitHub as **SpecDevKit**
@@ -19,6 +21,8 @@ second one follows.
 The single organizing rule: **the doc state under `specs/<name>/` is the
 only state.** Every workflow node's readiness is derived from it; nothing
 else (no session log, no step ledger) is consulted.
+
+New-user entry point: `skills/spec-to-prod/references/quickstart.md`.
 
 ## How the workflow works
 
@@ -54,6 +58,10 @@ Audits run exactly twice per plan: the **before-audit** once, when the
 execution frontier first becomes eligible, and the **closing audit**
 once, after every task is implemented. Nothing is ticked or committed in
 between.
+
+Right-sizing is explicit: tiny changes keep the artifacts and gates but
+avoid unnecessary spawns; large/high-risk changes add NFR triage, threat
+modeling, rollback design, and both reviewer modes.
 
 ## Harness support
 
@@ -106,9 +114,11 @@ readable and report a compatibility warning instead.
 
 **Safe commands**: read-only on any docset — `check.py` (without
 `--fix-burndown`), `graph.py --state-json|--mermaid|--explain`,
-`audit.py scope|clean|converge|archived`, `skill-dir.sh`. Everything else
+`audit.py scope|clean|evidence|converge|archived`, `freeze.py --verify`,
+`skill-dir.sh`. Everything else
 writes: `scaffold.sh`, `archive.sh`, `tick.py`, `check.py
---fix-burndown` (docsets); `sync.sh`, `install-workflow.sh` (harness
+--fix-burndown`, `freeze.py --record` (docsets); `sync.sh`,
+`install-workflow.sh` (harness
 homes under `$HOME`); `plugin-manifest.py`, `workflow-defs.py`,
 `omp-defs.py`, `agent-defs.py` (regenerate committed artifacts);
 `graph.py --run|--emit-spawns` (spawn agents, write payloads);
@@ -267,8 +277,8 @@ Two invocation surfaces:
 | `/plan <spec>` | waves from current doc state through verify + before-audit to the approve gate |
 | `/build <spec> [T###]` | the execute node — implementer waves; nothing ticked or committed |
 | `/test <spec>` | closing-audit proof half: every TC pass condition green + regression gate |
-| `/review <spec>` | scope diff, cleanliness sweep, DoD scorecard |
-| `/ship <spec>` | the ONE commit, rulings ack, `Status: done`, archive on request |
+| `/review <spec>` | evidence integrity, scope diff, cleanliness sweep, implementation review, DoD scorecard |
+| `/ship <spec>` | durable closing evidence, rulings ack, tick, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
 
 `/test`, `/review`, `/ship` are three portions of the ONE closing
 audit, never three audits. "Prod" means production-READY (ADR-014):
@@ -299,8 +309,10 @@ A typical pass: `scaffold` → author spec.md with the user → resolve the
 researcher gate → wave 1 (survey ∥ research) → wave 2 (plan ∥ tech ∥ qa)
 → tasks → verify (`check.py` green) → before-audit (six gates, record
 `Before-audit: passed @ <sha>` or `@ -` in a non-git repo) → user
-approval → execute (implementer waves) → closing audit → one tick +
-commit → `archive`.
+approval → approval freeze (`freeze.py --record`) → execute (implementer
+waves) → closing audit (evidence, scope, hygiene, implementation review,
+proofs, regression, DoD) → one tick → implementation commit C1 →
+delivery-record commit C2 → `archive`.
 
 ### Dynamic workflow runs (zcode · claude code)
 
@@ -314,9 +326,9 @@ session keeps every judgment. The recommended shape alternates the two —
 |---|---|---|
 | 1 | session — `/spec <name>` | author spec.md with the user (clarify loop), decide the researcher gate: `skip` → write the not-applicable marker line yourself; `run` → spawn the researcher here (the workflow pauses at an undetermined gate, so resolve it first) |
 | 2 | workflow — run `spec-run` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: before-audit`** |
-| 3 | session | run the six before-audit gates, record `Before-audit: passed @ <sha>`, present the docset, get approval → `Status: approved` |
+| 3 | session | run the six before-audit gates, record `Before-audit: passed @ <sha>`, present the docset, get approval → `Status: approved` + `freeze.py --record` |
 | 4 | workflow — rerun `spec-run` | execute waves hands-off: one implementer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: closing-audit`** |
-| 5 | session — `/test` `/review` `/ship` | the closing audit portions, rulings ack, then the ONE tick + commit |
+| 5 | session — `/test` `/review` `/ship` | the closing audit portions, rulings ack, durable closing evidence, then tick + C1/C2 |
 
 Rules of thumb: the workflow stops `AWAITING HUMAN` at every judgment
 gate — resolve the gate in-session, rerun, and the loop resumes from doc
@@ -337,8 +349,9 @@ All under `skills/spec-to-prod/scripts/`, run from a workspace root:
 | Script | Purpose |
 |---|---|
 | `scaffold.sh <name> [root]` | create `specs/<name>/` from templates, register in INDEX; refuses overwrite, requires kebab-case |
-| `check.py <spec-dir>` | the doc-set validator: 7 files, FR→T→TC traceability, burndown, status-bleed, citation reality, staleness, constitution; `--survey-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
-| `audit.py <sub> <spec-dir>` | closing-audit halves: `scope`, `clean`, `proofs --run`, `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
+| `check.py <spec-dir>` | the doc-set validator: 7 files, FR/NFR→T→TC traceability, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze/evidence integrity, constitution; `--survey-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
+| `freeze.py <spec-dir>` | approval freeze: `--record` writes the approved-doc hash manifest after explicit sign-off (existing manifests refuse overwrite; `--record --force` represents a fresh approval); `--verify` is read-only |
+| `audit.py <sub> <spec-dir>` | closing-audit halves: `evidence`, `scope` (defaults to the before-audit SHA), `clean`, `proofs --run`, `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
 | `graph.py <spec-dir>` | the workflow engine: frontier report, `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads), `--run [--runner] [--dry-run] [--max-waves N]` |
 | `archive.sh <name> [root]` | move a `Status: done` spec to `specs/archive/<date>-<name>/`, repoint INDEX |
 | `skill-dir.sh` | print the active skill directory (spawn-payload `skill_dir`) |
@@ -406,11 +419,11 @@ skills/
     ├── agents/spec-*.md    # 8 role briefs = harness defs (frontmatter + body) + _shared-protocol.md
     ├── contracts/docset.md # canonical doc-set/ownership/payload contract
     ├── gates/              # before-audit (6 gates) + dod (10-gate scorecard)
-    ├── templates/          # the 7 scaffolded doc templates
-    ├── scripts/            # scaffold.sh · check.py · audit.py · graph.py · archive.sh · skill-dir.sh · specstate.py
-    ├── decisions/           # this skill's own ADRs (D-001…D-015)
+    ├── templates/          # 7 scaffolded doc templates + assurance/release records
+    ├── scripts/            # scaffold.sh · check.py · audit.py · graph.py · freeze.py · archive.sh · skill-dir.sh · specstate.py
+    ├── decisions/           # this skill's own ADRs (D-001…D-021)
     ├── diagrams/           # workflow graph (.mmd + 2 HTML renders)
-    ├── references/         # bugfix deltas, mermaid cheatsheet
+    ├── references/         # quickstart, bugfix deltas, mermaid cheatsheet, harness mappings
     ├── evals/              # prepared eval cases
     ├── examples/mini-spec/ # green fixture used by the test suite
     ├── observations/       # living open-items list

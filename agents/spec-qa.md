@@ -36,14 +36,15 @@ is authoritative.
 1. Spec dir path (read spec.md and survey.md yourself — NOT tech-spec.md)
 
 ## Method
-1. Read spec.md only for intent: user stories + acceptance criteria + FRs.
+1. Read spec.md only for intent: user stories + acceptance criteria +
+   FRs/NFRs.
    Deliberately do NOT read tech-spec.md or plan.md: test cases derive from
    requirements (BDD), so implementation blindness is a feature — it keeps
    the suite from encoding the solution instead of the promise.
-2. Read survey.md for one thing only: which FRs are already DONE/PARTIAL —
+2. Read survey.md for one thing only: which FRs/NFRs are already DONE/PARTIAL —
    those cases are regression guards, and their pass condition can cite the
    existing verify command.
-3. Per FR write ≥1 TC: Given/When/Then + an observable pass condition
+3. Per FR and applicable NFR write ≥1 TC: Given/When/Then + an observable pass condition
    (exact command or human observation). Business language — no file paths,
    no symbols, no stack.
 4. Boundary cases per story: the empty input, the concurrent access, the
@@ -57,7 +58,10 @@ is authoritative.
    Plain Given/When/Then stands.
 6. For standing/guard requirements (e.g. "shall never require X"), write a
    standing regression TC that fails if X ever creeps into the default path.
-7. Fill the coverage matrix: every FR → its TCs; `⚠ MISSING` for any FR you
+7. For applicable security/privacy NFRs, include at least one abuse/misuse
+   case (attacker action, observable safe response) unless the spec explicitly
+   scopes it out with a recorded reason.
+8. Fill the coverage matrix: every FR/applicable NFR → its TCs; `⚠ MISSING` for any requirement you
    genuinely cannot test observably (that's a spec smell — report it).
 
 ## Parser-exact formats (what the tooling actually parses)
@@ -73,9 +77,9 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
   DoD proof gate can vacuously pass on zero auto TCs (a false green). The
   auto/manual designation lives in the coverage matrix's **Type** column,
   never in the heading.
-- **Every TC section carries a trace line** — `- **Story**: US1 ·
-  **Traces to**: FR-001` — naming an FR-###. check.py FAILs a TC whose
-  section never mentions an FR-### and WARNs stories no TC mentions;
+-- **Every TC section carries a trace line** — `- **Story**: US1 ·
+  **Traces to**: FR-001` — naming an FR-### or applicable NFR-###. check.py
+  FAILs a TC whose section never mentions either and WARNs stories no TC mentions;
   standing regression guards trace to their FR too.
 - **Every auto TC's pass-condition command must finish in well under two
   minutes** — the closing audit's proofs runner caps each TC at 120 s and
@@ -94,10 +98,10 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
   trusting it.
 
 ## Done when
-- Every AC and FR traced; every TC has an observable pass condition; the
+- Every AC, FR, and applicable NFR traced; every TC has an observable pass condition; the
   matrix is complete
 - test.md on disk; return the one-line digest contract —
-  `digest: TCs <n> · FR coverage <n>/<total FRs> · untestable <FR ids or none>`
+  `digest: TCs <n> · requirement coverage <n>/<total FRs+NFRs> · untestable <requirement ids or none>`
 
 ## Guardrails
 - **Never read tech-spec.md or plan.md, in a full-pipeline wave or a

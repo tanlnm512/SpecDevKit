@@ -346,6 +346,64 @@ class GitMockedDegradationTests(unittest.TestCase):
             all(isinstance(c, (list, tuple)) and c[0] == "git" for c in calls))
 
 
+class ScopeIntegrityTests(unittest.TestCase):
+    def test_uses_before_audit_base_and_flags_foreign_spec_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            spec = repo / "specs" / "demo"
+            spec.mkdir(parents=True)
+            task = spec / "task.md"
+            task.write_text(
+                "# Tasks\n\n## Phase 1\n"
+                "- [ ] T001 change `src/app.py` (FR-001)\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "specs/demo/task.md"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "-c", "user.name=Test",
+                 "-c", "user.email=test@example.invalid", "commit", "-qm", "base"],
+                check=True,
+            )
+            base = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            task.write_text(
+                task.read_text(encoding="utf-8").replace(
+                    "# Tasks\n",
+                    f"# Tasks\n\n**Before-audit**: passed @ {base}\n",
+                ),
+                encoding="utf-8",
+            )
+            (repo / "src").mkdir()
+            (repo / "src" / "app.py").write_text("x = 1\n")
+            (repo / "specs" / "rogue.md").write_text("rogue\n")
+
+            self.assertEqual(audit.effective_base(spec, None), base)
+            paths, unmentioned = audit.scope_data(spec, repo, None)
+            self.assertIn("src/app.py", paths)
+            self.assertIn("specs/demo/task.md", paths)
+            self.assertIn("specs/rogue.md", paths)
+            self.assertIn("specs/rogue.md", unmentioned)
+            self.assertNotIn("src/app.py", unmentioned)
+            self.assertNotIn("specs/demo/task.md", unmentioned)
+
+
+class EvidenceModeTests(unittest.TestCase):
+    def test_missing_freeze_fails_without_running_tests(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec = make_spec(Path(td), {
+                "task.md": "**Before-audit**: passed @ -\n",
+            })
+            code, out = run_audit("evidence", str(spec), "--repo", str(Path(td)))
+            self.assertEqual(code, 1)
+            self.assertIn("approval freeze missing", out)
+
+
 class ProofsClassificationTests(unittest.TestCase):
     """TESTCOV-003: proofs parsing — auto vs manual, dry run (run=False)
     never executes anything."""

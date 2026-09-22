@@ -6,6 +6,7 @@ Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py clean    [<spec-dir>] [--repo <path>] [--base <rev>]
        audit.py proofs   <spec-dir> [--repo <path>] [--run]
        audit.py dod      <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
+       audit.py evidence <spec-dir> [--repo <path>]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
        audit.py archived [--repo <path>]
        audit.py -h | --help        (prints this text, exit 0)
@@ -14,8 +15,9 @@ Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
 root; clean, whose optional spec-dir positional is accepted and ignored,
 defaults to ., as does archived, which takes no positional)
 
-scope  — every file changed vs base (default: working tree vs HEAD, plus
-         untracked files) is grep'd against the spec dir's task.md,
+scope  — every file changed vs base (default: the recorded before-audit
+         SHA, falling back to HEAD; explicit --base overrides) is grep'd
+         against the spec dir's task.md,
          tech-spec.md and plan.md. A changed path no doc mentions (full
          path, then bare filename) is listed as UNMENTIONED — a scope-creep
          candidate for the orchestrator to adjudicate, not a verdict:
@@ -44,6 +46,9 @@ dod    — the Definition-of-Done scorecard (gates/dod.md): runs
          the gate table. --dry-run keeps the scorecard inert: auto TCs
          are classified, gate 1 reads DRY, and no test.md command
          executes — the state-inspection path.
+evidence — verifies the approval freeze, resolves and relates recorded
+         lifecycle SHAs, and checks evidence/closing.md. Pure inspection:
+         no test command runs and nothing is written.
 converge — diffs specs/<name>/survey.md against its last committed
          version (default: HEAD; --base overrides) to surface what a
          fresh re-survey found that the previous one didn't: run this
@@ -64,8 +69,8 @@ archived — the archive gate (OpenSpec validate --archived semantics):
          enough for a pre-push or pre-archive hook.
 
 Exit:  0 = report produced (scope/clean/converge always; proofs without
-       --run) · proofs --run / dod / archived: 0 = every mechanical
-       gate green, 1 = any FAILED or errored (dod --dry-run: gate 1
+      --run) · proofs --run / dod / evidence / archived: 0 = every
+      mechanical gate green, 1 = any FAILED or errored (dod --dry-run: gate 1
        reads DRY — classified, not executed — and is not a failure) ·
        2 = usage error.
 
@@ -77,6 +82,7 @@ read SKIPPED.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -91,7 +97,9 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from specstate import survey_items, task_entries  # noqa: E402 - the sys.path setup above runs first
+from specstate import closing_audit_state, closing_evidence_hash, lifecycle_shas, survey_items, task_entries  # noqa: E402 - the sys.path setup above runs first
+import check  # noqa: E402 - sibling module through scripts/
+import freeze  # noqa: E402 - sibling module through scripts/
 
 # Debug prints across common languages. printf( is deliberately absent —
 # ordinary C output; WARN heuristics err toward recall, the orchestrator
@@ -199,6 +207,19 @@ def added_lines(repo: Path, base: str | None):
                 pass
 
 
+def effective_base(spec_dir: Path, base: str | None) -> str | None:
+    """Closing-audit diff base: explicit override, else recorded before-audit."""
+    if base:
+        return base
+    task = spec_dir / "task.md"
+    if not task.exists():
+        return None
+    value = lifecycle_shas(
+        task.read_text(encoding="utf-8", errors="replace")
+    ).get("before")
+    return value if value not in (None, "-") else None
+
+
 def scope_data(spec_dir: Path, repo: Path, base: str | None) -> tuple[list[str], list[str]]:
     """(changed paths, unmentioned subset) — shared by scope and dod."""
     docs = ""
@@ -206,11 +227,30 @@ def scope_data(spec_dir: Path, repo: Path, base: str | None) -> tuple[list[str],
         p = spec_dir / f
         if p.exists():
             docs += p.read_text(encoding="utf-8", errors="replace") + "\n"
-    paths = [p for p in changed_paths(repo, base) if not p.startswith("specs/")]
-    unmentioned = [
-        p for p in paths
-        if p not in docs and Path(p).name not in docs
-    ]
+    base = effective_base(spec_dir, base)
+    paths = changed_paths(repo, base)
+    try:
+        own_prefix = spec_dir.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        own_prefix = f"specs/{spec_dir.name}"
+    unmentioned: list[str] = []
+    for p in paths:
+        if not p.startswith("specs/"):
+            if p not in docs and Path(p).name not in docs:
+                unmentioned.append(p)
+            continue
+        # This spec's own contract/evidence tree is expected delivery
+        # surface. Shared specs files are allowed only when a contract doc
+        # names them; every other specs/ path is scope creep.
+        if p.startswith(own_prefix + "/"):
+            continue
+        shared = (
+            p == "specs/INDEX.md"
+            or p == "specs/CONSTITUTION.md"
+            or p.startswith("specs/context/")
+        )
+        if not shared or (p not in docs and Path(p).name not in docs):
+            unmentioned.append(p)
     return paths, unmentioned
 
 
@@ -218,6 +258,7 @@ def mode_scope(spec_dir: Path, repo: Path, base: str | None) -> int:
     if not git_available(repo):
         print("scope: SKIPPED (not a git repo) — no scope verdict")
         return 0
+    base = effective_base(spec_dir, base)
     paths, unmentioned = scope_data(spec_dir, repo, base)
     print(f"scope: {len(paths)} changed file(s) vs {base or 'working tree'}")
     for p in unmentioned:
@@ -225,6 +266,50 @@ def mode_scope(spec_dir: Path, repo: Path, base: str | None) -> int:
     if not unmentioned:
         print("  every changed file is named in task/tech-spec/plan")
     return 0
+
+
+def evidence_data(spec_dir: Path, repo: Path) -> list[str]:
+    """Integrity problems for freeze, lifecycle SHAs, and durable evidence."""
+    problems = freeze.verify(spec_dir, repo)
+    task_p = spec_dir / "task.md"
+    task = task_p.read_text(encoding="utf-8", errors="replace") if task_p.exists() else ""
+    problems.extend(check.lifecycle_integrity_problems(task, repo))
+    if closing_audit_state(task) == "approved":
+        evidence = spec_dir / "evidence" / "closing.md"
+        if not evidence.exists():
+            problems.append("closing evidence missing: evidence/closing.md")
+        else:
+            text = evidence.read_text(encoding="utf-8", errors="replace")
+            digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
+            if closing_evidence_hash(task) != digest:
+                problems.append(
+                    "closing evidence does not match Closing-evidence sha256"
+                )
+            required = (
+                "Mechanical DoD", "Manual test cases", "Regression",
+                "Review findings", "Rulings surfaced",
+                "Irreversible or state-mutating changes", "User sign-off",
+            )
+            missing = [section for section in required if section not in text]
+            if missing:
+                problems.append(
+                    "closing evidence missing sections: " + ", ".join(missing)
+                )
+            if re.search(r"<[^>\n]+>|YYYY-MM-DD", text):
+                problems.append("closing evidence contains unfilled placeholders")
+    return problems
+
+
+def mode_evidence(spec_dir: Path, repo: Path) -> int:
+    problems = evidence_data(spec_dir, repo)
+    print(f"evidence: {spec_dir}")
+    for problem in problems:
+        print(f"  FAIL  {problem}")
+    print(
+        f"  {'PASS' if not problems else 'FAIL'} "
+        f"({len(problems)} integrity problem(s))"
+    )
+    return 1 if problems else 0
 
 
 def clean_findings(repo: Path, base: str | None) -> list[tuple[str, int | None, str, str]]:
@@ -407,7 +492,10 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
     check_err: str | None = None
     check = Path(__file__).resolve().parent / "check.py"
     try:
-        cp = subprocess.run([sys.executable, str(check), str(spec_dir)],
+        check_argv = [str(spec_dir)]
+        if repo != spec_dir.parent.parent:
+            check_argv += ["--repo", str(repo)]
+        cp = subprocess.run([sys.executable, str(check), *check_argv],
                             capture_output=True, text=True, errors="replace",
                             timeout=120)
     except subprocess.TimeoutExpired:
@@ -605,7 +693,7 @@ def parse_args(argv: list[str]):
         print(__doc__)
         return None
     mode = argv[0]
-    if mode not in ("scope", "clean", "proofs", "dod", "converge", "archived"):
+    if mode not in ("scope", "clean", "proofs", "dod", "evidence", "converge", "archived"):
         print(__doc__)
         return None
     repo = None
@@ -633,7 +721,7 @@ def parse_args(argv: list[str]):
         else:
             rest.append(a)
             i += 1
-    if mode in ("scope", "proofs", "dod", "converge") and len(rest) != 1:
+    if mode in ("scope", "proofs", "dod", "evidence", "converge") and len(rest) != 1:
         print(__doc__)
         return None
     if mode == "archived" and rest:
@@ -677,6 +765,8 @@ def main(argv: list[str] | None = None) -> int:
         return mode_archived(repo)
     if mode == "dod":
         return mode_dod(spec_dir, repo, base, dry)
+    if mode == "evidence":
+        return mode_evidence(spec_dir, repo)
     if mode == "converge":
         return mode_converge(spec_dir, repo, base)
     return mode_proofs(spec_dir, repo, run)

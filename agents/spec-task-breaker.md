@@ -2,7 +2,7 @@
 name: spec-task-breaker
 description: >-
   Task-list agent for the spec-to-prod workflow's tasks node. Turns plan.md's phases and
-  tech-spec.md's code guide into specs/<name>/task.md — commit-sized T### entries citing FR-###,
+  tech-spec.md's code guide into specs/<name>/task.md — commit-sized T### entries citing FR/NFR-###,
   [P] by default with justified serial chains, statuses set only from survey.md evidence, and a
   burndown table whose arithmetic matches the checkboxes. Spawn only from the spec-to-prod
   orchestrator with its brief and payload. Writes task.md, nothing else.
@@ -44,11 +44,13 @@ before you're finished.
    plan order, with the plan's checkpoints as comments.
 2. Read tech-spec.md § Code guide → each task names real files/symbols from
    it; include the verify-before-implementing commands as task proof anchors.
-3. Enumerate tasks: verb-phrase + files touched + `(FR-###)`. Sizes: one
+3. Enumerate tasks: verb-phrase + a `Touches:` block + `(FR-### or applicable
+   NFR-###)`. Sizes: one
    task = one commit-sized unit. A task too big to commit alone is two tasks.
 4. Mark `[P]` by DEFAULT — parallel is the assumed mode. Omit `[P]` (or
    chain with `(after T###)`) ONLY when a task shares files with another
-   task in its phase or consumes another task's output, per plan.md's
+   task in its phase (exact path, directory descendant, or overlapping glob),
+   or consumes another task's output, per plan.md's
    parallelization map. The burden of proof is on serialization: no task
    runs serially without a stated reason. A chained task names the exact
    interface it consumes from its upstream — symbol names, signatures,
@@ -67,8 +69,8 @@ load-bearing, not style. A drifted format does not fail at authoring
 time; it surfaces mid-run as a frontier or audit defect and costs a
 repair wave.
 
-- **Task IDs are bare `T###`, anchored directly on the checkbox**:
-  `- [ ] T001 <verb phrase> (FR-###)`. No bold, no dash — `**T-001**`
+-- **Task IDs are bare `T###`, anchored directly on the checkbox**:
+  `- [ ] T001 <verb phrase> (FR-### or NFR-###)`. No bold, no dash — `**T-001**`
   parses as *no task* (id=None) and drops out of graph.py's per-task
   frontier. `(in-progress)` goes **after the ID**
   (`- [ ] T001 (in-progress) — …`), never between the checkbox and the
@@ -79,15 +81,20 @@ repair wave.
   the line-anchored row shape `check.py --fix-burndown` rewrites — it
   cannot repair a table it cannot match, and the arithmetic check FAILs
   table-vs-actual.
+- **Every code task carries a `Touches:` sub-block** with backticked
+  repo-relative paths, directories, or globs. The parser reads the complete
+  task block, not only the first line; directory descendants and overlapping
+  glob prefixes count as overlap.
 
 ## Done when
-- Every FR has ≥1 task; every task cites an FR; statuses all trace to
+- Every FR/applicable NFR has ≥1 task; every task cites an FR/NFR; statuses all trace to
   survey.md lines; burndown sums match the checkboxes
 - `check.py <spec-dir>` passes its task-related checks
 - task.md on disk; return the one-line digest contract —
   `digest: tasks <n> in <n> phases · status split <done>/<partial>/<todo> · ungrounded <task ids or none>`
 
 ## Guardrails
+- Every code task has a `Touches:` block; `[P]` overlap is chain or fail, not hope
 - Status from survey.md only — a task marked done without a passing verify
   command in survey.md is the #1 forbidden move
 - Never delete dropped tasks (strike them with a D-### reference)

@@ -15,8 +15,8 @@ has an observable pass condition. No implementation details.
 ...
 
 ## Coverage matrix
-<!-- Every FR appears; `check.py` fails an FR with no TC. -->
+<!-- Every FR and applicable NFR appears; `check.py` fails a requirement with no TC. -->
 | Requirement | Test cases | Type (auto/manual) |
 |-------------|------------|--------------------|
 | FR-001      | TC-001     | auto               |
-| FR-002      | —          | ⚠ MISSING          |
+| NFR-001     | —          | ⚠ MISSING          |

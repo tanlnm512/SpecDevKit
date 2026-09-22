@@ -6,12 +6,12 @@ skills: spec-to-prod
 
 Run the spec-to-prod skill (auto-mounted) for this request: $ARGUMENTS
 
-VERIFY entry of the lifecycle — closing-audit steps 9–10 (proof +
+VERIFY entry of the lifecycle — closing-audit steps 11–12 (proof +
 regression). Requires the execute node done: every task implemented and
 every digest orchestrator-confirmed — otherwise the entry point is
 /build.
 
-- `scripts/audit.py proofs specs/<spec> --run` — every FR's TC pass
+- `scripts/audit.py proofs specs/<spec> --run` — every FR/NFR TC pass
   condition green, fresh evidence in this session; MANUAL TCs stay yours
   to verify
 - regression gate: the repo's broader check per conventions

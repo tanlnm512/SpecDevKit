@@ -35,7 +35,7 @@ Modes:
                  --wave-dir): frontmatter-stripped brief body byte-verbatim +
                  `_shared-protocol.md` verbatim (the reviewer is the exempt
                  role) + the input payload filled from doc state (spec dir,
-                 FR list, task entry verbatim + TC acceptance commands,
+                 requirement list, task entry verbatim + TC acceptance commands,
                  research questions) + the resolved skill_dir. spawns/ is
                  derived and regenerate-only: safe to delete, never read by
                  check.py, never status. --repair NODE additionally emits
@@ -279,10 +279,8 @@ def run_check(spec_dir: Path, repo: Path | None, extra: list[str]) -> int | None
 
 
 def task_files(entry: specstate.TaskEntry) -> list[str]:
-    """File paths the entry names (backticked tokens that look like paths) —
-    the planner's parallelization map in per-task form."""
-    toks = [m.group(1) for m in re.finditer(r"`([^`]+)`", entry.first_line)]
-    return [t for t in toks if "/" in t or re.search(r"\.[A-Za-z0-9]{1,4}$", t)]
+    """Intended touches from the complete entry, including `Touches:` blocks."""
+    return specstate.task_touches(entry)
 
 
 def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
@@ -344,8 +342,10 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
     # so the orchestrator keeps each wave's files disjoint ([P] discipline).
     runnable = [t for t in out if t["state"] == "runnable"]
     for t in runnable:
-        mates = sorted({o["id"] for o in runnable
-                        if o is not t and set(o["files"]) & set(t["files"])})
+        mates = sorted({o["id"] for o in runnable if o is not t and any(
+            specstate.paths_overlap(x, y)
+            for x in o["files"] for y in t["files"]
+        )})
         if mates:
             t["note"] = (f"shares files with {', '.join(mates)} — "
                          "schedule in separate waves")
@@ -360,7 +360,7 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
-FR_ENTRY = re.compile(r"^-\s+\*\*FR-\d{3}\*\*", re.M)
+FR_ENTRY = re.compile(r"^-\s+\*\*(?:FR|NFR)-\d{3}\*\*", re.M)
 PASS_CONDITION = re.compile(r"\*\*Pass condition\*\*:?(.*)")
 QUESTION_SECTION = re.compile(
     r"^#+\s*(?:open (?:technical )?questions|research questions)\s*$",
@@ -403,8 +403,8 @@ def wave_number(state: dict) -> int:
 
 
 def fr_entries(spec_text: str) -> list[str]:
-    """The spec's FR-### entries verbatim (a line plus its wrapped
-    continuation lines) — the payload's FR list."""
+    """The spec's FR/NFR entries verbatim (a line plus wrapped
+    continuation lines) — the payload's requirement list."""
     lines = spec_text.splitlines()
     out: list[str] = []
     i = 0
@@ -480,7 +480,7 @@ def tc_conditions(test_text: str) -> dict[str, dict]:
                            "note": None if cmds
                            else "(observation only — MANUAL)"}
     for line in test_text.splitlines():
-        rm = re.match(r"\|\s*(FR-\d{3})\s*\|", line)
+        rm = re.match(r"\|\s*((?:FR|NFR)-\d{3})\s*\|", line)
         if rm:
             for tc in re.findall(r"TC-\d{3}", line):
                 out.setdefault(tc, {"frs": set(), "commands": [],
@@ -490,12 +490,12 @@ def tc_conditions(test_text: str) -> dict[str, dict]:
 
 
 def acceptance_for(entry_block: str, test_text: str) -> list[str]:
-    """The TC pass-condition command(s) for the FRs a task entry cites — the
+    """The TC pass-condition command(s) for the requirements a task entry cites — the
     implementer's acceptance list (always for code tasks). MANUAL TCs are
     named; a missing test.md says so instead of inventing a command."""
     if not test_text.strip():
         return ["(test.md not written yet — no TC pass conditions)"]
-    frs = set(re.findall(r"FR-\d{3}", entry_block))
+    frs = set(re.findall(r"\b(?:FR|NFR)-\d{3}\b", entry_block))
     tcs = tc_conditions(test_text)
     matched = [tc for tc in sorted(tcs) if not frs or tcs[tc]["frs"] & frs]
     lines: list[str] = []
@@ -505,7 +505,7 @@ def acceptance_for(entry_block: str, test_text: str) -> list[str]:
             lines += [f"{tc}: `{c}`" for c in info["commands"]]
         else:
             lines.append(f"{tc}: {info['note']}")
-    return lines or ["(no TC pass conditions match this task's FRs)"]
+    return lines or ["(no TC pass conditions match this task's requirements)"]
 
 
 def _indent(text: str, pad: str = "   ") -> str:
@@ -586,13 +586,13 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     """The filled input payload (SKILL.md § Spawn mechanics step 3): the
     doc-state facts each brief's `Input payload` section asks the
     orchestrator to embed — verbatim where the brief says verbatim. Every
-    payload names the spec dir and carries the FR list (EXEC-001); the
+    payload names the spec dir and carries the requirement list (EXEC-001); the
     role-specific facts come first."""
     spec_text = read_doc(spec_dir / "spec.md") or ""
     test_text = read_doc(spec_dir / "test.md") or ""
     fr_lines = [f"   {b}" for b in fr_entries(spec_text)]
     if not fr_lines:
-        fr_lines = ["   (no FR-### entries in spec.md)"]
+        fr_lines = ["   (no FR/NFR-### entries in spec.md)"]
     constitution = spec_dir.parent / "CONSTITUTION.md"
 
     if node == "survey":
@@ -606,7 +606,7 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
                               else "none recorded yet (first survey)"),
         ]
         lines += _survey_delta_lines(base, repo, spec_dir)
-        lines += ["- The spec's proposed items (FR list, verbatim):",
+        lines += ["- The spec's proposed items (FR/NFR list, verbatim):",
                   *fr_lines]
         return "\n".join(lines)
 
@@ -624,9 +624,9 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             lines += [_indent(q) for q in questions]
         else:
             lines += ["- Research questions: none recorded in spec.md — "
-                      "derive 3-6 from the open technical choices in the FR "
-                      "list below; the orchestrator confirms them."]
-        lines += ["- FR list (verbatim):", *fr_lines]
+                      "derive 3-6 from the open technical choices in the "
+                      "requirement list below; the orchestrator confirms them."]
+        lines += ["- Requirement list (verbatim):", *fr_lines]
         return "\n".join(lines)
 
     if node == "plan":
@@ -677,7 +677,7 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     else:
         lines = [f"- spec_dir: {spec_dir}"]
 
-    lines += ["- FR list (verbatim from spec.md):", *fr_lines]
+    lines += ["- Requirement list (verbatim from spec.md):", *fr_lines]
     return "\n".join(lines)
 
 
@@ -824,23 +824,29 @@ def find_pause(state: dict, wave_dir: str | None = None) -> tuple[str, str] | No
                                 "`Before-audit: passed @ <sha-or-dash>` in "
                                 "task.md")
     if n["approve"]["state"] == READY:
-        return "approve", n["approve"]["reason"]
+        return "approve", (n["approve"]["reason"]
+                           + " — after the explicit yes, run "
+                           "`freeze.py <spec-dir> --record`")
     if (n["execute"]["state"] == DONE
             and n["closing-audit"]["state"] != DONE):
-        return "closing-audit", ("run the closing audit: `audit.py proofs "
-                                 "<spec-dir> --run`, scope and clean, "
-                                 "`audit.py dod`; rule on the findings, "
-                                 "surface every D-###, and get the user's "
-                                 "ack, then record `Closing-audit: approved "
+        return "closing-audit", ("run `audit.py evidence`, scope from the "
+                                 "before-audit SHA, clean, the "
+                                 "implementation-diff review, `audit.py "
+                                 "proofs <spec-dir> --run`, regression, and "
+                                 "`audit.py dod`; record evidence/closing.md, "
+                                 "surface every D-###, get the user's ack, "
+                                 "then record `Closing-audit: approved "
                                  "@ <sha-or-dash>` in task.md")
     if n["closing-audit"]["state"] == DONE and state["status"] != "done":
-        commit_note = ("commit the plan" if state["git"]["available"]
+        commit_note = ("make implementation commit C1, then delivery-record "
+                       "commit C2" if state["git"]["available"]
                        else "commit SKIPPED (not a git repo)")
         return "tick-commit", ("tick every task `- [x]` with its proof "
                                "note, recompute the burndown "
                                "(`check.py --fix-burndown`), " + commit_note
                                + ", then set spec.md Status: done and "
-                               "repoint INDEX.md")
+                               "repoint INDEX.md (git delivery: record "
+                               "`Delivered: commit @ C1` in C2)")
     return None
 
 
@@ -1084,11 +1090,11 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     elif docs["survey.md"] is None:
         nodes["survey"] = {"state": READY, "reason":
                            "no survey.md — the surveyor writes it from the "
-                           "spec's FR list"}
+                           "spec's requirement list"}
     elif not filled["survey.md"]:
         nodes["survey"] = {"state": READY, "reason":
                            "survey.md is still the unfilled template — the "
-                           "surveyor rewrites it from the spec's FR list "
+                           "surveyor rewrites it from the spec's requirement list "
                            f"(residue: {unfilled_hits(docs['survey.md']) or 'none'})"}
     else:
         rc = run_check(spec_dir, repo_override, ["--survey-only"])
@@ -1268,8 +1274,11 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                                   f"{len(proofs['manual'])} manual TC(s) "
                                   "classified from test.md, not executed — "
                                   "run the closing audit explicitly "
-                                  "(`audit.py proofs <spec-dir> --run`, "
-                                  "`audit.py dod <spec-dir>`) and record "
+                                  "(`audit.py evidence`, scope/clean, "
+                                  "implementation review, `audit.py proofs "
+                                  "<spec-dir> --run`, regression, "
+                                  "`audit.py dod <spec-dir>`), record "
+                                  "evidence/closing.md, and record "
                                   "`Closing-audit: approved @ <sha-or-dash>` "
                                   "in task.md"}
     closing_done = nodes["closing-audit"]["state"] == DONE

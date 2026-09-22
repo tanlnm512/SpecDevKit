@@ -112,6 +112,120 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(check._symbol_def_lines(text, "missing"), [])
 
 
+class EvidenceIntegrityTests(unittest.TestCase):
+    def test_fabricated_lifecycle_sha_fails(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        task = spec / "task.md"
+        task.write_text(task.read_text(encoding="utf-8").replace(
+            "**Before-audit**: pending — the orchestrator writes "
+            "`passed @ <sha>` here",
+            "**Before-audit**: passed @ deadbeef",
+        ), encoding="utf-8")
+        code, out = run_check(str(spec), "--repo", str(Path.cwd()))
+        self.assertEqual(code, 1)
+        self.assertIn("before: commit 'deadbeef' not found", out)
+
+    def test_approved_v2_freeze_detects_contract_mutation(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        set_text = spec.joinpath("spec.md")
+        set_text.write_text(
+            set_text.read_text(encoding="utf-8").replace(
+                "**Status**: draft", "**Status**: approved"
+            ), encoding="utf-8")
+        task = spec / "task.md"
+        task.write_text(
+            "**Lifecycle**: v2\n" + task.read_text(encoding="utf-8"),
+            encoding="utf-8")
+        self.assertEqual(check.freeze.record(spec, Path.cwd()), 0)
+        self.assertEqual(check.freeze.record(spec, Path.cwd()), 1)
+        code, out = run_check(str(spec), "--repo", str(Path.cwd()))
+        self.assertEqual(code, 0, out)
+
+        test = spec / "test.md"
+        test.write_text(test.read_text(encoding="utf-8") + "\nmutated\n",
+                       encoding="utf-8")
+        code, out = run_check(str(spec), "--repo", str(Path.cwd()))
+        self.assertEqual(code, 1)
+        self.assertIn("test.md changed after approval", out)
+
+    def test_approved_closing_requires_durable_evidence(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        set_text = spec / "spec.md"
+        set_text.write_text(set_text.read_text(encoding="utf-8").replace(
+            "**Status**: draft", "**Status**: approved"), encoding="utf-8")
+        task = spec / "task.md"
+        text = task.read_text(encoding="utf-8")
+        text = "**Lifecycle**: v2\n" + text.replace(
+            "**Before-audit**: pending — the orchestrator writes "
+            "`passed @ <sha>` here",
+            "**Before-audit**: passed @ -\n"
+            "**Closing-audit**: approved @ -",
+        )
+        task.write_text(text, encoding="utf-8")
+        # The temp fixture is non-git, but the current repo is git. Pointing
+        # --repo at the temp root makes the explicit dash forms valid.
+        code, out = run_check(str(spec), "--repo", str(spec.parents[1]))
+        self.assertEqual(code, 1)
+        self.assertIn("evidence/closing.md is missing", out)
+
+    def test_closing_evidence_hash_must_match_task_record(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        set_text = spec / "spec.md"
+        set_text.write_text(set_text.read_text(encoding="utf-8").replace(
+            "**Status**: draft", "**Status**: approved"), encoding="utf-8")
+        task = spec / "task.md"
+        text = task.read_text(encoding="utf-8")
+        text = "**Lifecycle**: v2\n" + text.replace(
+            "**Before-audit**: pending — the orchestrator writes "
+            "`passed @ <sha>` here",
+            "**Before-audit**: passed @ -\n"
+            "**Closing-audit**: approved @ -",
+        )
+        task.write_text(text, encoding="utf-8")
+        evidence = spec / "evidence" / "closing.md"
+        evidence.parent.mkdir()
+        evidence.write_text(
+            "# Closing evidence\n\n## Mechanical DoD\n## Manual test cases\n"
+            "## Regression\n## Review findings\n## Rulings surfaced\n"
+            "## Irreversible or state-mutating changes\n## User sign-off\n",
+            encoding="utf-8",
+        )
+        code, out = run_check(str(spec), "--repo", str(spec.parents[1]))
+        self.assertEqual(code, 1)
+        self.assertIn("does not match the Closing-evidence sha256", out)
+
+
+class QualityRequirementTests(unittest.TestCase):
+    def test_applicable_nfr_requires_task_and_test(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        path = spec / "spec.md"
+        path.write_text(path.read_text(encoding="utf-8") + (
+            "\n- **NFR-001**: Security — applicable: The system shall reject "
+            "forged requests.\n"
+        ), encoding="utf-8")
+        code, out = run_check(str(spec), "--repo", str(spec.parents[1]))
+        self.assertEqual(code, 1)
+        self.assertIn("NFR-001 has no task", out)
+        self.assertIn("NFR-001 has no test case", out)
+
+    def test_inapplicable_nfr_needs_reason_but_not_coverage(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        path = spec / "spec.md"
+        path.write_text(path.read_text(encoding="utf-8") + (
+            "\n- **NFR-001**: Accessibility — not applicable: no user-facing "
+            "surface changes.\n"
+        ), encoding="utf-8")
+        _, out = run_check(str(spec), "--repo", str(spec.parents[1]))
+        self.assertNotIn("NFR-001 has no task", out)
+        self.assertNotIn("NFR-001 has no test case", out)
+
+
 class FixBurndownTests(unittest.TestCase):
     def test_rewrites_numbers_keeps_labels(self):
         with tempfile.TemporaryDirectory() as td:

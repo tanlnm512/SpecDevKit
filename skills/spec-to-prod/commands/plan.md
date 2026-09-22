@@ -10,6 +10,8 @@ PLAN entry of the lifecycle: continue the workflow graph from the spec's
 current doc state until the approve gate — research-gate (yours to
 decide) → survey ∥ research → plan ∥ tech ∥ qa → tasks → verify
 (`scripts/check.py`) → before-audit → user approval (`Status: approved`).
+After the explicit approval, record the contract freeze with
+`scripts/freeze.py <spec-dir> --record`.
 `scripts/graph.py specs/<spec>` is the mechanical truth — run the ready
 frontier as one wave, recompute, repeat; every human gate (clarify,
 research-gate, approve) pauses for you.

@@ -23,12 +23,14 @@ Full mode mapping: `references/droid-modes.md`.
   (the verify node).
 - **M3 — Audits & approval**: before-audit gates recorded
   (`Before-audit: passed @ <sha>`); the user approves each spec
-  (`Status: approved`). **MISSION PAUSES HERE.**
+  (`Status: approved`), then `freeze.py --record` writes the approval
+  manifest. **MISSION PAUSES HERE.**
 - **M4 — Execute**: implementer waves per spec; fix rounds ≤5 per
   task; specs with disjoint files may run in parallel.
-- **M5 — Close**: closing audit per spec (scope, clean, proofs,
-  DoD scorecard, rulings report), tick-commit, ONE commit per plan;
-  archive on request.
+- **M5 — Close**: closing audit per spec (evidence integrity, scope,
+  clean, implementation review, proofs, regression, DoD scorecard,
+  rulings report), durable closing evidence, tick-commit, implementation
+  commit C1 + delivery-record C2; archive on request.
 
 ## Pause ledger (the mission parks at every one)
 

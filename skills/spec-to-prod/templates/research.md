@@ -11,8 +11,9 @@
      question; if none is credible, keep the fallback line verbatim. -->
 
 ### <research question 1>
-- **source**: <URL or DOI> · **claim**: <one sentence> · **relevance**: <which
-  question / FR it informs> · **confidence**: high | med | low
+- **source**: <URL or DOI> · **publisher/source date when available> ·
+  **retrieved**: YYYY-MM-DD · **claim**: <one sentence> · **relevance**: <which
+  question / FR/NFR it informs> · **confidence**: high | med | low
 - no credible source found — decide from first principles <!-- fallback only -->
 
 ### <research question 2>

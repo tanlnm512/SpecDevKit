@@ -32,6 +32,7 @@ from typing import NamedTuple
 # its checklist builder, and graph.py's ID bookkeeping all read this table.
 DEFINITIONS = {
     "FR": re.compile(r"^-\s+\*\*(FR-\d{3})\*\*"),
+    "NFR": re.compile(r"^-\s+\*\*(NFR-\d{3})\*\*"),
     "AC": re.compile(r"^-\s+(AC\d+):"),
     "US": re.compile(r"^###\s+(US\d{1,2})\b"),
     "TC": re.compile(r"^#{2,3}\s+(TC-\d{3})"),
@@ -88,6 +89,24 @@ CLOSING_AUDIT_APPROVED = re.compile(
 # its backticked example text — cannot read as delivered.
 DELIVERED_COMMIT = re.compile(
     r"Delivered\*{0,2}\s*:\s*commit\s+@\s*`?([0-9a-f]{7,40}|-)")
+
+CLOSING_EVIDENCE_SHA = re.compile(
+    r"Closing-evidence\*{0,2}\s*:\s*sha256:([0-9a-f]{64})"
+)
+
+# Exact lifecycle evidence values. The older state helpers intentionally
+# answer only "was this marker recorded?"; these parsers expose the SHA (or
+# explicit non-git dash) so integrity checks can prove it exists and belongs
+# to the repository instead of trusting any hex-looking text.
+LIFECYCLE_VALUES = {
+    "before": re.compile(
+        r"Before-audit\*{0,2}\s*:\s*passed\s+@\s*`?([0-9a-f]{7,40}|-)"
+    ),
+    "closing": re.compile(
+        r"Closing-audit\*{0,2}\s*:\s*approved\s+@\s*`?([0-9a-f]{7,40}|-)"
+    ),
+    "delivered": DELIVERED_COMMIT,
+}
 
 # survey.md baseline header: `**Baseline**: <version> @ <sha>`, backticks on
 # the sha tolerated; the second shape matches a bare angle-bracketed baseline
@@ -258,6 +277,26 @@ def delivery_state(task_md: str) -> tuple[str, str | None]:
     return "delivered", m.group(1)
 
 
+def lifecycle_shas(task_md: str) -> dict[str, str | None]:
+    """Exact recorded values for passed/approved/delivered evidence.
+
+    A value is a commit SHA or the explicit non-git dash. None means the
+    marker has not been recorded yet. These values are inputs to integrity
+    checks, not themselves proof: a hex string must still resolve to a commit.
+    """
+    out: dict[str, str | None] = {}
+    for name, pattern in LIFECYCLE_VALUES.items():
+        m = pattern.search(task_md)
+        out[name] = m.group(1) if m else None
+    return out
+
+
+def closing_evidence_hash(task_md: str) -> str | None:
+    """SHA-256 recorded for evidence/closing.md, when Closing-audit wrote it."""
+    m = CLOSING_EVIDENCE_SHA.search(task_md)
+    return m.group(1) if m else None
+
+
 def tick_evidence(task_md: str) -> TickEvidence:
     """The durable task-tick evidence for the tick-commit transition: an
     approved tick transition is fully evidenced only when `unticked` and
@@ -353,12 +392,83 @@ def next_ids(texts: dict[str, str]) -> dict[str, str]:
 
     return {
         "FR": nxt(r"FR-(\d{3})", texts.get("spec.md", ""), "FR-{:03d}"),
+        "NFR": nxt(r"NFR-(\d{3})", texts.get("spec.md", ""), "NFR-{:03d}"),
         "AC": nxt(r"\bAC(\d+)\b", texts.get("spec.md", ""), "AC{}"),
         "US": nxt(r"\bUS(\d+)\b", texts.get("spec.md", ""), "US{}"),
         "T": nxt(r"\bT(\d{3})\b", texts.get("task.md", ""), "T{:03d}"),
         "TC": nxt(r"TC-(\d{3})", texts.get("test.md", ""), "TC-{:03d}"),
         "D": nxt(r"D-(\d{3})", texts.get("tech-spec.md", ""), "D-{:03d}"),
     }
+
+
+PATH_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,12}$")
+
+
+def _pathish(span: str) -> bool:
+    span = span.strip().strip("'\"")
+    return bool(span) and " " not in span and "://" not in span and (
+        "/" in span or span.endswith("/") or PATH_EXTENSION.search(span)
+    )
+
+
+def _normalize_path(span: str) -> str:
+    span = span.strip().strip("'\"")
+    if span.startswith("./"):
+        span = span[2:]
+    return span.rstrip("/")
+
+
+def task_touches(entry: TaskEntry) -> list[str]:
+    """Intended file/directory/glob touches for one task.
+
+    Reads the complete entry, not only its first line. Explicit `Touches:`
+    bullets are authoritative; legacy path-shaped backticks remain supported
+    so existing docsets do not silently lose overlap detection.
+    """
+    touches: set[str] = set()
+    in_touches = False
+    for line in entry.block.splitlines():
+        if re.match(r"^\s*-\s*Touches:\s*$", line):
+            in_touches = True
+            continue
+        if in_touches:
+            if not line.strip():
+                break
+            m = re.match(r"^\s*-\s+(.*)$", line)
+            if not m:
+                break
+            for span in re.findall(r"`([^`]+)`", m.group(1)):
+                if _pathish(span):
+                    touches.add(_normalize_path(span))
+            continue
+        for span in re.findall(r"`([^`]+)`", line):
+            if _pathish(span):
+                touches.add(_normalize_path(span))
+    return sorted(touches)
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    """Conservative overlap for exact paths, directories, and glob prefixes."""
+    a, b = _normalize_path(left), _normalize_path(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a.startswith(b + "/") or b.startswith(a + "/"):
+        return True
+
+    def prefix(path: str) -> str | None:
+        m = re.search(r"[*?\[]", path)
+        return path[:m.start()] if m else None
+
+    ap, bp = prefix(a), prefix(b)
+    if ap and bp:
+        return ap.startswith(bp) or bp.startswith(ap)
+    if ap and b.startswith(ap):
+        return True
+    if bp and a.startswith(bp):
+        return True
+    return False
 
 
 def git_available(repo: Path | str) -> bool:

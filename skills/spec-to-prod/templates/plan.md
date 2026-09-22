@@ -4,9 +4,9 @@
 
 ## Milestones
 <!-- Each milestone = a phase in task.md. -->
-| Phase | Milestone | Delivers (demoable) | FRs | Depends on |
-|-------|-----------|---------------------|-----|------------|
-| 1     | <name>    | <what's true when it lands> | FR-### | — |
+| Phase | Milestone | Delivers (demoable) | Requirements | Depends on |
+|-------|-----------|---------------------|--------------|------------|
+| 1     | <name>    | <what's true when it lands> | FR-###, NFR-### | — |
 | 2     | <name>    | <...>               | FR-### | Phase 1 |
 
 ## Dependencies

@@ -20,9 +20,17 @@ paragraph. Show how it sits in the existing system (grounded in survey.md).>
 
 ## Impact analysis
 <!-- Blast radius: what existing code/symbols this touches, who calls them,
-     what breaks if the approach is wrong. Use the workspace's graph /
-     code-intelligence tool when one is available, else grep. Ground every
-     claim in survey evidence. -->
+what breaks if the approach is wrong. Use the workspace's graph /
+code-intelligence tool when one is available, else grep. Ground every
+claim in survey evidence. -->
+
+## Quality, threats, and rollback
+<!-- Map every applicable NFR-### to a concrete design consequence. For
+external input, auth, persistence, migration, or privileged operation,
+record a compact threat model and rollback/recovery strategy. -->
+| Requirement | Design consequence / threat mitigation | Rollback or verification |
+|-------------|----------------------------------------|--------------------------|
+| NFR-###     | <...>                                  | <...>                    |
 
 ## Code guide
 <!-- Per area: where work lands, verified to exist by survey. -->
