@@ -206,8 +206,15 @@ def _pytest_target_exists(repo_root: Path, tok: str) -> bool:
         if "*" in tok:
             if list(root.glob(tok)):
                 return True
-        elif (root / tok).exists():
-            return True
+        else:
+            # root can be unreadable (shared /tmp on CI: mode-700
+            # systemd-private-* dirs) — treat the probe as a miss
+            # instead of crashing the checker.
+            try:
+                if (root / tok).exists():
+                    return True
+            except OSError:
+                continue
     return False
 
 
@@ -983,7 +990,15 @@ def main(argv: list[str] | None = None) -> int:
         repo_hit = None
         saw_git_dir = False
         for cand in candidates:
-            if not (cand / ".git").exists():
+            # A candidate dir can be unreadable (shared /tmp on CI holds
+            # root-owned mode-700 systemd-private-* dirs): stat'ing inside
+            # raises EACCES, which Path.exists does not swallow. An
+            # unreadable dir is not a repo of ours — skip it.
+            try:
+                has_git = (cand / ".git").exists()
+            except OSError:
+                continue
+            if not has_git:
                 continue
             saw_git_dir = True
             try:

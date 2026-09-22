@@ -8,6 +8,7 @@ changelog. The broken-fixture tests mutate a temp copy, never the example.
 import contextlib
 import importlib.util
 import io
+import os
 import shutil
 import sys
 import tempfile
@@ -133,6 +134,26 @@ class GreenFixtureTests(unittest.TestCase):
         code, out = run_check(str(FIXTURE))
         self.assertEqual(code, 0, out)
         self.assertIn("PASS (0 fail, 0 warn)", out)
+
+    def test_unreadable_sibling_is_skipped_not_fatal(self):
+        # CI's shared /tmp holds root-owned mode-700 dirs (systemd
+        # private mounts) beside the runner's temp trees; repo_root
+        # defaults to an ancestor that enumerates them. A probe into an
+        # unreadable sibling must skip it, never crash the checker.
+        spec = fixture_copy()
+        hostile = spec.parent.parent / "systemd-private-hostile"
+        hostile.mkdir()
+        (hostile / "keep").write_text("x")
+        os.chmod(hostile, 0o000)
+        try:
+            if os.access(hostile, os.R_OK):
+                self.skipTest("running as root — chmod 000 does not bite")
+            code, out = run_check(str(spec))
+            self.assertEqual(code, 0, out)
+            self.assertIn("PASS (0 fail, 0 warn)", out)
+        finally:
+            os.chmod(hostile, 0o700)
+            shutil.rmtree(hostile, ignore_errors=True)
 
     def test_survey_only_passes(self):
         code, out = run_check(str(FIXTURE), "--survey-only")
