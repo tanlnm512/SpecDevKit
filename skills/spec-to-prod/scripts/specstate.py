@@ -48,6 +48,12 @@ HTML_COMMENT = re.compile(r"<!--.*?-->")
 # spec.md lifecycle: `**Status**: <word>` (backticked words tolerated).
 STATUS_LINE = re.compile(r"^\*\*Status\*\*:\s*`?([A-Za-z]+)", re.M)
 
+# spec.md effort tier: `**Effort**: <word>` — the mechanical handle for the
+# effort-scaling tiers (D-024). Absent or unknown reads "large" so every
+# pre-field docset keeps the full-wave graph unchanged.
+EFFORT_LINE = re.compile(r"^\*\*Effort\*\*:\s*`?([A-Za-z]+)", re.M)
+EFFORT_TIERS = ("tiny", "standard", "large")
+
 # task.md entry shapes (the Conventions block in templates/task.md is the
 # normative wording): `- [x]` done, `(in-progress)` claimed, `~~T###~~`
 # struck/dropped, `[P]` parallelizable, `(after T###)` dependency chain,
@@ -191,6 +197,16 @@ def spec_status(spec_md: str) -> str | None:
     None when no line-leading `**Status**:` header exists."""
     m = STATUS_LINE.search(spec_md)
     return m.group(1).lower() if m else None
+
+
+def spec_effort(spec_md: str) -> str:
+    """The spec.md effort tier (tiny/standard/large), lowercased; "large"
+    when no `**Effort**:` header exists or the word is not a known tier —
+    the legacy full-wave behavior, so docsets predating the field keep
+    today's graph (D-024)."""
+    m = EFFORT_LINE.search(spec_md) if spec_md else None
+    word = m.group(1).lower() if m else ""
+    return word if word in EFFORT_TIERS else "large"
 
 
 def task_entries(task_md: str) -> list[TaskEntry]:

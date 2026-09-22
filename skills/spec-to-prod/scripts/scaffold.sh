@@ -20,9 +20,16 @@ if [[ -e "$target" ]]; then
 fi
 
 mkdir -p "$target"
-for f in spec plan tech-spec task test survey research; do
+for f in spec plan tech-spec task test survey; do
   cp "$skill_dir/templates/$f.md" "$target/$f.md"
 done
+# research.md ships as the resolved skip marker, not the template: the
+# research-gate's common case (no real open questions — most bugfixes) is
+# the default, so no run ever pauses "undetermined" on a fresh scaffold
+# (D-025). The orchestrator flips it to run by replacing this file with
+# the filled template when the spec has real open questions.
+printf 'not applicable — no open questions at Stage 0\n' \
+  > "$target/research.md"
 
 # Register the new spec in the INDEX registry (create if absent, no duplicates).
 index="$root/specs/INDEX.md"

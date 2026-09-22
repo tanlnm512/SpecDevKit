@@ -4,6 +4,74 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.11.0 — 2026-09-22
+
+Pipeline shortening (SDLC-aligned, quality anchors intact). (1) ONE
+pre-execute stop instead of two: new `audit.py pre-execute <spec-dir>`
+runs the mechanical half of the before-audit's six gates (clean tree,
+branch vs spec.md's `Branch:` field, the tech-spec's recorded `Verify
+before implementing` command — executed only with `--run`); `graph.py
+--run` prints it at the pause, and the stop's contract (find_pause, both
+workflow dialects, gates/before-audit.md, SKILL.md) is one session:
+pre-execute → three semantic judgments → record `Before-audit: passed`
+→ user approval → `Status: approved` → freeze. The separate approve
+pause survives only for the withheld-approval split case. (2) Pipelined
+closing pre-check: when execute lands its last task, the read-only
+closing modes (`scope`, `clean`, `dod --dry-run`, dry `proofs` listing)
+run at the stop — `--run` prints them, the spec-run workflow runs them
+before returning (zcode world.run, claude one marker-split probe) and
+spawns the implementation-diff reviewer from the new `reviewer-diff.md`
+payload `--emit-spawns` prepares while the closing audit is due (base =
+the recorded Before-audit SHA); `evidence`, `proofs --run`, regression,
+and the ack stay the session's. (3) Mechanical effort tiering (D-024):
+spec.md gains `**Effort**: tiny | standard | large` (template default
+`standard`; missing/unknown reads `large` = the full-wave legacy
+behavior; `--state-json` carries `effort`). At `standard`, the plan ∥
+tech ∥ qa wave collapses into ONE merged designer payload authoring
+plan → tech-spec → test → task in a single spawn (four briefs, protocol
+once; partial writes self-heal; `--repair` stays single-role); gates,
+check.py, docset, and both audits are identical at every tier — the
+pre-execute stretch is now two waves + one human stop. (4) Ticks are
+per-wave bookkeeping (D-023): tick on verified landing (digest + scoped
+re-verification, tick.py, fresh output as the done-note) or mark
+`(implemented)` and batch; commits still wait for the closing audit,
+which re-checks every proof. (5) `scaffold.sh` ships research.md as the
+resolved skip marker (D-025) — the gate's common case needs zero
+actions; flip to run by replacing the file with the filled template.
+
+Migration: none required — `--launch-check`, `pre-execute`, and the
+tier field are additive; docsets without `**Effort**` keep the full-wave
+graph; the reviewer-diff payload is emitted only while the closing audit
+is due. Re-run `tools/sync.sh` to pick up the regenerated dialects
+(closing pre-check phase + reviewer spawn).
+
+
+## 2.10.0 — 2026-09-22
+
+Workflow launch discipline. (1) New `scripts/graph.py --launch-check`:
+a pure-read advisory `{weight, launch_workflow, gate, frontier_agents,
+payloads, reason}` that decides whether the spec-run dynamic workflow
+should be launched at all — only `weight: "wave"` (a multi-payload
+wave, or any execute span) says launch; `gate` (a pending human gate),
+`single` (exactly one light doc node), `complete`, and `held` are
+inline moves, so runs that would read state once and stop seconds
+later (zero waves; on Claude Code that fetch is a whole probe agent)
+are never launched. Payloads are counted through the same
+`frontier_payloads` enumeration `--emit-spawns` writes, so the advisory
+cannot drift from a real wave. (2) Both regenerated workflow dialects
+carry the rule in their metadata (`whenToUse` / `meta.description`),
+and the zcode dialect drops its redundant final `--state-json` fetch
+(the summary reuses the last post-wave state — parity with the claude
+dialect, D-020). (3) SKILL.md § Dynamic workflow runs gained the
+launch-weight bullet; § Run modes points the full-workflow mode at the
+preflight. D-022 records the decision. The weight is a default, not
+a refusal — an explicit user ask still launches the workflow.
+
+Migration: none required — `--launch-check` is additive and existing
+docsets are unaffected; re-run `tools/sync.sh` to pick up the
+regenerated workflow dialects.
+
+
 ## 2.9.0 — 2026-09-22
 
 Assurance and SDLC hardening. (1) New `scripts/freeze.py`: after explicit

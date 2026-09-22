@@ -5,7 +5,9 @@ export const meta = {
     "wave from doc state, spawn it as subagents, recompute — until a human " +
     "gate (clarify, research-gate, before-audit, approve, closing-audit, " +
     "tick-commit) or completion. graph.py is the only oracle; rerunning " +
-    "after each gate resumes from doc state.",
+    "after each gate resumes from doc state. Launch only when graph.py " +
+    "--launch-check says weight 'wave' — light spans (a pending gate, one " +
+    "doc node, held/complete) run inline.",
 }
 
 // ---------------------------------------------------------------------------
@@ -101,8 +103,14 @@ function findPause(st) {
       kind: "gate",
       gate: "before-audit",
       need:
-        "run the six before-audit gates (gates/before-audit.md), then record " +
-        "`Before-audit: passed @ <sha-or-dash>` in task.md",
+        "ONE session, gates + approval together (D-023): run `audit.py " +
+        "pre-execute <spec-dir>` (+ `--run` for the baseline command), " +
+        "judge the three semantic gates (gates/before-audit.md: dependency " +
+        "reality, already-done sweep, constitution semantics + branch " +
+        "consent), record `Before-audit: passed @ <sha-or-dash>` in " +
+        "task.md — then seek the user's explicit approval, set spec.md " +
+        "Status: approved, and run `freeze.py <spec-dir> --record` before " +
+        "rerunning",
     };
   }
   if (nodeState(st, "approve") === "READY") {
@@ -119,10 +127,13 @@ function findPause(st) {
       kind: "gate",
       gate: "closing-audit",
       need:
-        "run the closing audit: audit.py evidence, scope (from the " +
-        "before-audit SHA), clean, implementation-diff review, proofs " +
-        "--run, regression, and dod; record evidence/closing.md, surface " +
-        "every D-###, and get the user's ack",
+        "the mechanical pre-check (audit.py scope/clean/dod-dry/proofs " +
+        "listings) and the implementation-diff reviewer already ran this " +
+        "stop (D-023) — adjudicate their findings, then run `audit.py " +
+        "evidence`, `proofs <spec-dir> --run`, and regression; record " +
+        "evidence/closing.md, surface every D-###, and get the user's " +
+        "ack before recording `Closing-audit: approved @ <sha-or-dash>` " +
+        "in task.md",
     };
   }
   if (nodeState(st, "closing-audit") === "done" && st.status !== "done") {
@@ -301,6 +312,53 @@ async function main() {
     if (waves >= MAX_WAVES) {
       stop = { kind: "max-waves", detail: "wave cap " + MAX_WAVES + " reached" };
       break;
+    }
+  }
+
+  // D-023: at the closing-audit stop the run has already done the
+  // mechanical precheck and spawned the implementation-diff reviewer —
+  // the ack session opens with results, never honor-system claims.
+  if (stop && stop.kind === "gate" && stop.gate === "closing-audit") {
+    phase("Closing pre-check — reviewer + read-only audits");
+    // the reviewer payload rode the last fetch (--emit-spawns prepared
+    // reviewer-diff.md while the closing audit is due)
+    const reviewers = cycle.payloads.filter((p) => p.role === "reviewer");
+    const rd = await pipeline(reviewers, (p) =>
+      agent(askText(p), { label: "reviewer-diff", schema: DIGEST_SCHEMA })
+    );
+    for (let i = 0; i < reviewers.length; i++) {
+      const d = rd[i];
+      if (!d) continue;
+      allDigests.push({ wave: waves + 1, role: reviewers[i].role, status: d.status, digest: d.digest });
+      log("  reviewer (implementation-diff) → " + d.status + (d.status === "done" ? "" : ": " + d.digest));
+    }
+    // ONE probe for the four read-only audit modes, marker-split per mode
+    const precheckCmd =
+      'for m in "scope" "clean" "dod --dry-run" "proofs"; do echo __MODE__ $m; ' +
+      "python3 " + skillDir + "/scripts/audit.py $m specs/" + specName + " 2>&1; " +
+      "echo __EXIT__ $?; done";
+    const pre = await agent(
+      "Run this exact shell command from the repo root and return ONLY its " +
+      "combined stdout verbatim in the stdout field (empty string if none):\n" +
+      "  " + precheckCmd,
+      { label: "closing-precheck", schema: PROBE_SCHEMA }
+    );
+    if (pre && pre.stdout) {
+      const sections = pre.stdout.split("__MODE__ ").slice(1);
+      for (const sec of sections) {
+        const nl = sec.indexOf("\n");
+        const m = (nl < 0 ? sec : sec.slice(0, nl)).trim();
+        const body = nl < 0 ? "" : sec.slice(nl + 1);
+        const em = body.match(/__EXIT__ (\d+)/);
+        const code = em ? em[1] : "?";
+        log("  closing precheck: audit.py " + m + " → exit " + code);
+        if (code !== "0" && body.trim()) {
+          const lines = body.trim().split("\n");
+          for (const line of lines.slice(Math.max(0, lines.length - 7), lines.length - 1)) {
+            log("    " + line);
+          }
+        }
+      }
     }
   }
 

@@ -152,6 +152,7 @@ class ZcodeDialectTests(unittest.TestCase):
         self.assertEqual(phases, [
             "Read doc state and check the human gates",
             "Run the ready wave",
+            "Closing pre-check — reviewer + read-only audits",
             "Recompute and summarize",
         ])
         self.assertFalse(re.search(r"phase\((?!\"|\))", re.sub(
@@ -161,6 +162,13 @@ class ZcodeDialectTests(unittest.TestCase):
         self.assertIn('world.run("python3", [', self.ts)
         self.assertIn(".ask<WaveDigest>(", self.ts)
         self.assertIn("await artifact.markdown(", self.ts)
+
+    def test_summary_reuses_the_last_post_wave_state(self):
+        # every stop path leaves st fresh from its most recent fetch —
+        # the summary needs no extra graph.py run (D-020 parity with the
+        # claude dialect)
+        self.assertIn("const finalSt = st;", self.ts)
+        self.assertNotIn("const finalSt = await graphState();", self.ts)
 
 
 class ClaudeDialectTests(unittest.TestCase):
@@ -247,6 +255,25 @@ class ParityTests(unittest.TestCase):
             self.assertIn("retriedPaths.indexOf", text, path.name)
             # the failure evidence rides verbatim in the retry ask
             self.assertIn("address that failure evidence directly", text, path.name)
+
+    def test_both_carry_the_launch_weight_preflight(self):
+        # D-022: the dialects' metadata points the invoker at graph.py
+        # --launch-check — only a weight "wave" span justifies a launch
+        for path in (DWF_TS, WF_JS):
+            text = path.read_text()
+            self.assertIn("--launch-check", text, path.name)
+            self.assertIn('wave', text, path.name)
+
+    def test_both_precheck_the_closing_stop(self):
+        # D-023: at the closing-audit stop both dialects spawn the
+        # implementation-diff reviewer and run the read-only audit modes
+        # before returning — the ack session opens with results
+        for path in (DWF_TS, WF_JS):
+            text = path.read_text()
+            self.assertIn("reviewer-diff", text, path.name)
+            self.assertIn("closing precheck", text, path.name)
+            self.assertIn("--dry-run", text, path.name)
+            self.assertIn("implementation-diff", text, path.name)
 
 
 class InstallerBase(unittest.TestCase):

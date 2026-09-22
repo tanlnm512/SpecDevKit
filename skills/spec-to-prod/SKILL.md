@@ -15,7 +15,7 @@ description: >-
   spec").
 metadata:
   owner: platform-core
-  version: "2.9.0"
+  version: "2.11.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -136,16 +136,18 @@ choices:
 
 - **≥1 real open question** (a genuine unknown — which library, which
   algorithm, which protocol version): resolve the gate as **run** — the
-  researcher joins the analysis wave alongside the surveyor.
+  researcher joins the analysis wave alongside the surveyor. Replace
+  research.md (the scaffold ships it as the resolved skip marker, below)
+  with the filled template's answers.
 - **Zero real open questions** (the approach is already obvious — most
   bugfixes, most single-known-pattern internal changes): resolve as
-   **skip**: write research.md containing the line `not applicable — no
-   open questions at Stage 0` — exactly that bare line (the detector
-   matches the stripped line byte-exact, em dash included; a prefixed
-   `research.md:` form reads as real content and the gate resolves "run")
-   — in place of the template yourself, so every frontier
-  computation can tell "skipped on purpose" apart from "forgotten." The
-  analysis wave becomes a solo surveyor spawn.
+  **skip**: the scaffold already wrote research.md containing the line
+  `not applicable — no open questions at Stage 0` — exactly that bare
+  line (the detector matches the stripped line byte-exact, em dash
+  included; a prefixed `research.md:` form reads as real content and the
+  gate resolves "run") — so the default needs nothing; leave it in place,
+  and every frontier computation can tell "skipped on purpose" apart
+  from "forgotten." The analysis wave becomes a solo surveyor spawn.
 
 Manufacturing questions to justify the spawn is the failure mode this gate
 exists to prevent.
@@ -206,17 +208,28 @@ never a silent false result). Modes:
 
 Spec discipline is mandatory at every size; agent count is not. Choose the
 tier from FR/NFR count, touched areas, and unknowns — then keep check.py,
-before-audit, user approval, and the closing audit intact.
+before-audit, user approval, and the closing audit intact. The tier is
+mechanical (D-024): spec.md's `**Effort**:` header field
+(`tiny | standard | large`; docsets without the field read `large` — the
+full-wave legacy behavior), chosen with the user at authoring and read by
+graph.py: at `standard`, `--emit-spawns` collapses the plan ∥ tech ∥ qa
+wave (plus the tasks wave it feeds) into ONE merged designer payload —
+one spawn authors plan.md → tech-spec.md → test.md → task.md in that
+order, carrying all four briefs and the shared protocol once; a partial
+write self-heals (whatever doc is missing still spawns individually the
+next wave). `--repair` always emits single-role payloads.
 
 - **Tiny** (≤1 applicable requirement, ≤2 intended files, no unknowns, no
   migration/public-API break): author/refresh the seven artifacts inline,
   execute inline or with one implementer, and run the same mechanical gates.
   No research spawn; no parallel wave.
-- **Standard — small and medium** (≤3 requirements or one area): shallow
-  agent artifacts are allowed, but do not spawn depth the questions do not
-  justify. A one-known-pattern change may run survey inline, author plan/tech/qa
-  inline where exclusive ownership is preserved, and spawn only execution if
-  useful.
+- **Standard — small and medium** (≤3 requirements or one area): the merged
+  design spawn above; a one-known-pattern change may go further inline
+  (survey inline, execution inline where exclusive ownership is
+  preserved). The tier's recorded trade-off: test.md shares its author
+  with plan/tech (no qa blindness) — the payload instructs deriving TCs
+  strictly from spec.md's acceptance criteria and survey evidence, and
+  check.py + the audits are unchanged.
 - **Large / high-risk** (multi-area, external input, auth, persistence,
   migration, performance, security/privacy NFR, research-heavy): full waves,
   full depth, reviewer before implementation, implementation-diff reviewer at
@@ -395,6 +408,19 @@ gate — the same loop, gates, and resume contract as this playbook; the
 workflow is `graph.py --run`'s runner seam made native, and it decides
 nothing the orchestrator wouldn't.
 
+- **Launch weight — preflight before every launch (D-022)** —
+  `python3 <skill-dir>/scripts/graph.py specs/<name> --launch-check`
+  prints the advisory `{weight, launch_workflow, gate, frontier_agents,
+  payloads, reason}`: launch the workflow only on `weight: "wave"` — a
+  multi-payload wave or an execute span, the heavy spans the loop
+  automation exists for. Every other weight is an inline move: `gate`
+  (a human gate is pending — the launch would read state once and stop
+  AWAITING HUMAN seconds later, deciding nothing; on Claude Code that
+  one fetch is a whole probe agent), `single` (exactly one light doc
+  node — the single-agent run mode: `--emit-spawns` + one spawn),
+  `complete` (archive inline), `held` (unblock inline). The weight is
+  the default decision rule, never a refusal of an explicit user ask
+  for the workflow.
 - **Installed per harness** — `~/.zcode/workflows/spec-run.dwf.ts`
   (zcode: run via the harness's workflow surface with
   `{"spec": "<name>"}`) and `~/.claude/workflows/spec-run.js`
@@ -414,7 +440,12 @@ nothing the orchestrator wouldn't.
   (clarify · undetermined research-gate · before-audit · approve ·
   closing-audit · tick-commit), on completion, on a held frontier, at
   the wave cap (default 12), or on a no-change wave — answer the gate,
-  rerun, and the loop resumes from doc state. The zcode dialect
+  rerun, and the loop resumes from doc state. At `Effort: standard`
+  the plan ∥ tech ∥ qa wave arrives as ONE merged designer payload
+  (D-024), and at the closing-audit stop the run has already executed
+  the closing pre-check — the read-only audit modes plus the
+  implementation-diff reviewer from `reviewer-diff.md` (D-023) — before
+  it returns. The zcode dialect
   publishes a markdown run summary; the claude dialect logs the same
   report. A wave that changed no doc state gets exactly one re-brief
   round for its failed payloads (failure digest verbatim in the retry
@@ -527,7 +558,9 @@ spec-to-prod.md` router), via the six bare lifecycle commands (§
 Lifecycle commands), or naturally ("re-survey the auth spec"). Three
 ways to run, chosen by the user's ask or the state of the graph:
 
-**Full workflow** — default for a new large spec: compute the frontier,
+**Full workflow** — default for a new large spec — launch the spec-run
+workflow once the `--launch-check` preflight says `wave` (§ Dynamic
+workflow runs): compute the frontier,
 run the ready wave, recompute, repeat until the graph completes
 (archive).
 
@@ -584,8 +617,15 @@ before any task is ever spawned; the user's approval (§ Verification) then
 opens the execute node. The **closing audit runs once, after every task in
 task.md across every phase has been implemented**. Between those two
 points, implementers just implement — no per-task gate, no per-phase
-audit, no tick, no commit. **Nothing is ticked or committed until every
-task in the plan is done and the closing audit passes.**
+audit, no commit. **Nothing is committed until every task in the plan is
+done and the closing audit passes.** Ticks are per-wave bookkeeping
+(D-023): once an implementer's digest plus your own scoped re-verification
+of its acceptance commands prove the work landed, tick it then
+(`scripts/tick.py`, the verified output as the done-note — evidence is
+freshest at that moment) or mark it `(implemented)` and batch the ticks —
+either way, the tick's proof must already be on record when you write it;
+the closing audit re-checks every proof, and a rollback re-opens its tasks
+via the converge edge.
 
 ### Implementation (no gating, no per-phase audit)
 
@@ -629,8 +669,7 @@ task.md has:
 **Chained tasks gate on landing, not on ticks.** graph.py's per-task
 readiness counts an `(after T###)` dependency satisfied once the upstream
 entry is ticked `[x]`, struck, or `(implemented)` — landing releases
-dependents; ticks stay forbidden until the closing audit (audits happen
-exactly twice, above). The `(implemented)` marker is orchestrator-written
+dependents. The `(implemented)` marker is orchestrator-written
 bookkeeping, so its honesty is the guard: record it only after the
 implementer's digest plus your own scoped re-verification of its
 acceptance commands prove the work landed — a marker without verified
@@ -653,6 +692,16 @@ question rounds and the approve gate are HUMAN gates that wait for an
 answer, non-answers included (§ Authoring the spec, D-018).
 
 ### Closing audit (once, after every task in task.md is implemented)
+
+**Mechanical pre-check first (D-023)**: the moment execute lands its last
+task, the read-only modes — `audit.py scope`, `clean`, `dod --dry-run`,
+and the dry `proofs` listing — and the implementation-diff reviewer
+(step 10; `--emit-spawns` prepares `reviewer-diff.md`, `graph.py --run`
+prints the modes at the pause, and the spec-run workflow runs both before
+it returns) put their results on the table before the ack conversation
+starts. Nothing there executes test.md commands — `proofs --run` and
+regression stay yours (below).
+
 7. **Evidence integrity**: `scripts/audit.py evidence <spec-dir>` verifies
    the approval freeze, resolves/relates recorded lifecycle SHAs, and checks
    the durable closing-evidence record. A hex-looking marker is not proof;
@@ -699,9 +748,10 @@ answer, non-answers included (§ Authoring the spec, D-018).
     plan shipped (migrations, backfills, anything hard to roll back) so
     the ack covers them explicitly.
     Only then record `Closing-audit: approved @ <sha-or-dash>`, tick every
-    task `- [x]` with its done-note, and recompute burndown (`check.py
-    --fix-burndown`; use `scripts/tick.py` — hand-editing a dozen entries
-    guts the as-built record).
+    not-yet-ticked task `- [x]` with its done-note (per-wave ticks — §
+    Execution mode — leave only the stragglers here), and recompute
+    burndown (`check.py --fix-burndown`; use `scripts/tick.py` —
+    hand-editing a dozen entries guts the as-built record).
 14. **Implementation commit C1**: commit code + tests + ticked task.md +
     closing evidence together. This is the verified changeset referenced by
     delivery evidence.
@@ -868,7 +918,10 @@ holder) — the same anti-drift shape as merging the agent defs/briefs
 when the execution frontier first becomes eligible: verify done, before
 Execution mode ever spawns a task. It does not repeat per phase, per
 task, or per resumed session. Six gates — full contract in
-`gates/before-audit.md`:
+`gates/before-audit.md`; the mechanical half (gates 2/3/5's checks) runs
+as `scripts/audit.py pre-execute <spec-dir>` (add `--run` to execute the
+recorded baseline command; `graph.py --run` and the spec-run workflow
+print its output at the pause):
 
 1. **Preconditions** — task.md's phase/dependency order internally
    consistent (cross-phase `(after T###)` chains fail check.py
@@ -884,13 +937,19 @@ task, or per resumed session. Six gates — full contract in
 6. **Constitution gate** — every specs/CONSTITUTION.md article complied
    with; every implementer payload carries it from here on.
 
-Passing all six, record `Before-audit: passed @ <sha>` in task.md's
-header block (`passed @ -` where no git sha exists) — resume and the
-closing audit read it, graph.py reads it as the before-audit node's done
-signal; a later failure attributes to this plan only from a recorded
-green baseline. In a non-git repo the git gates degrade to explicit
-SKIPPED notes, never silent passes. Any failure here → fix the cause
-(spec, plan, or re-brief) before the execute node spawns anything.
+**One stop, gates + approval together (D-023)**: run the pre-execute
+mechanical check, judge the three semantic gates (1's real-dependency
+call, 4, 6's reading, and branch consent), record `Before-audit: passed
+@ <sha>` in task.md's header block (`passed @ -` where no git sha
+exists) — then, in the SAME session, present the spec-set digest and get
+the user's explicit approval, set spec.md `Status: approved`, and run
+`scripts/freeze.py <spec-dir> --record`. Resume and the closing audit
+read the record; a later failure attributes to this plan only from a
+recorded green baseline. In a non-git repo the git gates degrade to
+explicit SKIPPED notes, never silent passes. Any failure here → fix the
+cause (spec, plan, or re-brief) before the execute node spawns anything;
+approval withheld after a recorded pass leaves the approve gate open —
+that split case still pauses on its own.
 
 **User approval (the gate into execute)**: with verify green and the
 before-audit passed, present the spec-set digest — approach,

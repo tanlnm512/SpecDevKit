@@ -9,6 +9,7 @@ Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py evidence <spec-dir> [--repo <path>]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
        audit.py archived [--repo <path>]
+       audit.py pre-execute <spec-dir> [--repo <path>] [--run]
        audit.py -h | --help        (prints this text, exit 0)
 
 (--repo defaults to the spec dir's grandparent: specs/<name>/ -> repo
@@ -310,6 +311,100 @@ def mode_evidence(spec_dir: Path, repo: Path) -> int:
         f"({len(problems)} integrity problem(s))"
     )
     return 1 if problems else 0
+
+
+# tech-spec.md's baseline command convention (template line): the exact
+# command gate 2 runs before any task spawns.
+VERIFY_CMD = re.compile(r"Verify before implementing:\s*`([^`]+)`")
+# spec.md's branch field (gate 5): `**Branch**: `type/name``.
+BRANCH_FIELD = re.compile(r"^\*\*Branch\*\*:\s*`?([^`\n]+?)`?\s*$", re.M)
+
+
+def mode_pre_execute(spec_dir: Path, repo: Path, run: bool) -> int:
+    """The mechanical half of the before-audit's six gates (D-023): clean
+    tree, isolated branch vs spec.md's Branch: field, and the tech-spec's
+    recorded `Verify before implementing` baseline command (executed only
+    with --run, like proofs). Chains and constitution stay in verify
+    (check.py, already green before this node); dependency reality, the
+    already-done sweep, constitution semantics, and branch consent are the
+    judgment gates printed as YOURS lines. Exit 1 only on a mechanical
+    FAIL; a dry (not --run) baseline is DRY, not green."""
+    print(f"pre-execute: {spec_dir} (before-audit gates 2/3/5 mechanical)")
+    failures = 0
+    if not git_available(repo):
+        print("  SKIPPED (not a git repo) — clean tree, branch, and "
+              "baseline sha anchor unavailable; record them as skipped "
+              "notes, never silent passes")
+    else:
+        st = git(repo, "status", "--porcelain")
+        dirty = [ln for ln in st.stdout.splitlines() if ln.strip()]
+        if dirty:
+            failures += 1
+            print(f"  FAIL  gate 3 clean tree — {len(dirty)} uncommitted "
+                  "path(s):")
+            for ln in dirty[:6]:
+                print(f"        {ln}")
+        else:
+            print("  PASS  gate 3 clean tree")
+        spec_text = (spec_dir / "spec.md").read_text(
+            encoding="utf-8", errors="replace")
+        m = BRANCH_FIELD.search(spec_text)
+        cur = git(repo, "branch", "--show-current").stdout.strip()
+        if not m or "<" in m.group(1):
+            failures += 1
+            print("  FAIL  gate 5 branch — spec.md records no filled "
+                  "`**Branch**:` field")
+        elif cur == m.group(1).strip():
+            print(f"  PASS  gate 5 branch — on {cur} as the spec names")
+        elif cur in ("main", "master"):
+            failures += 1
+            print(f"  FAIL  gate 5 branch — on {cur}; implementation never "
+                  f"starts on the default branch (spec names "
+                  f"`{m.group(1).strip()}`)")
+        else:
+            failures += 1
+            print(f"  FAIL  gate 5 branch — on {cur}, spec names "
+                  f"`{m.group(1).strip()}`")
+    tech = (spec_dir / "tech-spec.md").read_text(
+        encoding="utf-8", errors="replace") \
+        if (spec_dir / "tech-spec.md").exists() else ""
+    vm = VERIFY_CMD.search(tech)
+    if not vm:
+        print("  NOTE  gate 2 baseline — tech-spec.md records no "
+              "`Verify before implementing:` command; run the project's "
+              "test command yourself and treat a red as pre-existing rot "
+              "(baseline-repair commit or a D-###)")
+    elif not run:
+        print(f"  DRY   gate 2 baseline — `{vm.group(1)}` (re-run with "
+              "--run to execute)")
+    else:
+        try:
+            r = subprocess.run(vm.group(1), shell=True, cwd=str(repo),
+                               capture_output=True, text=True, timeout=120)
+            tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
+            if r.returncode == 0:
+                print(f"  PASS  gate 2 baseline — `{vm.group(1)}` exit 0")
+            else:
+                failures += 1
+                print(f"  FAIL  gate 2 baseline — `{vm.group(1)}` exit "
+                      f"{r.returncode}")
+            for ln in tail:
+                print(f"        {ln}")
+        except (OSError, subprocess.SubprocessError) as e:
+            failures += 1
+            print(f"  FAIL  gate 2 baseline — `{vm.group(1)}` raised {e!r}")
+    print("  YOURS gate 1 — are the declared dependencies real, not just "
+          "phase-ordered?")
+    print("  YOURS gate 4 — already-done sweep: spot-check survey.md; note "
+          "satisfied tasks so execute skips them")
+    print("  YOURS gate 6 — constitution semantics (presence/fill is "
+          "check.py's; the reading is yours)")
+    verdict = "PASS" if failures == 0 else "FAIL"
+    print(f"  {verdict} pre-execute mechanical gates ({failures} "
+          "failure(s)); record `Before-audit: passed @ <sha-or-dash>` "
+          "only when every gate — mechanical and judgment — is green, "
+          "then seek the user's approval in the same session")
+    return 1 if failures else 0
 
 
 def clean_findings(repo: Path, base: str | None) -> list[tuple[str, int | None, str, str]]:
@@ -693,7 +788,8 @@ def parse_args(argv: list[str]):
         print(__doc__)
         return None
     mode = argv[0]
-    if mode not in ("scope", "clean", "proofs", "dod", "evidence", "converge", "archived"):
+    if mode not in ("scope", "clean", "proofs", "dod", "evidence", "converge",
+                    "archived", "pre-execute"):
         print(__doc__)
         return None
     repo = None
@@ -721,7 +817,8 @@ def parse_args(argv: list[str]):
         else:
             rest.append(a)
             i += 1
-    if mode in ("scope", "proofs", "dod", "evidence", "converge") and len(rest) != 1:
+    if mode in ("scope", "proofs", "dod", "evidence", "converge",
+                "pre-execute") and len(rest) != 1:
         print(__doc__)
         return None
     if mode == "archived" and rest:
@@ -767,6 +864,8 @@ def main(argv: list[str] | None = None) -> int:
         return mode_dod(spec_dir, repo, base, dry)
     if mode == "evidence":
         return mode_evidence(spec_dir, repo)
+    if mode == "pre-execute":
+        return mode_pre_execute(spec_dir, repo, run)
     if mode == "converge":
         return mode_converge(spec_dir, repo, base)
     return mode_proofs(spec_dir, repo, run)

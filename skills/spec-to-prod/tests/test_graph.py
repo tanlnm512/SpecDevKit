@@ -299,6 +299,12 @@ class Graph002SurveyWaveTests(unittest.TestCase):
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
         write(cls.spec_dir / "survey.md",
               (FIXTURE / "survey.md").read_text(encoding="utf-8"))
+        # the scaffold ships research.md as the resolved skip marker (D-025)
+        # — restore the unfilled template so `before` tests the
+        # gate:undetermined state this class exists for
+        write(cls.spec_dir / "research.md",
+              (SKILL / "templates" / "research.md").read_text(
+                  encoding="utf-8"))
         cls.before = compute(cls.spec_dir)
         write(cls.spec_dir / "research.md",
               "## Research: demo\n\n### Q1 how to name the operation\n"
@@ -578,9 +584,11 @@ class ImplementedExecuteCompletionTests(unittest.TestCase):
     def test_implemented_tasks_are_not_respawned(self):
         r = run_cli(self.impl_dir, "--emit-spawns")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("no agent payloads", r.stdout)
-        self.assertFalse((self.impl_dir / "spawns").exists(),
-                         "landed tasks are never re-spawned")
+        # no implementer payload (landed tasks are never re-spawned); the
+        # one payload prepared at execute-done is the closing reviewer's
+        # (D-023) — never an implementer
+        self.assertNotIn("implementer", r.stdout)
+        self.assertIn("reviewer-diff.md", r.stdout)
 
     def test_mixed_landing_completes_execute(self):
         n = self.mixed_state["nodes"]
@@ -2164,6 +2172,248 @@ class ExecutorCliValidationTests(unittest.TestCase):
         body = graph.strip_frontmatter(raw)
         self.assertTrue(body.lstrip().startswith("# Reviewer agent"))
         self.assertNotIn("readonly: true", body)
+
+
+class Graph019LaunchCheckTests(unittest.TestCase):
+    """GRAPH-019: --launch-check (D-022) — the spec-run launch advisory.
+    Only a heavy span (a multi-payload wave, or any execute span) says
+    launch_workflow; a pending human gate, one light doc node, complete,
+    and held are inline moves — a workflow launch there reads state once
+    and stops seconds later, deciding nothing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph019-"))
+        # research-gate pending: filled spec.md only (GRAPH-001 shape)
+        cls.gate_research = spec_only(cls._tmp / "a")
+        # clarify pending: the same spec plus an open marker
+        cls.gate_clarify = spec_only(cls._tmp / "b")
+        write(cls.gate_clarify / "spec.md",
+              (FIXTURE / "spec.md").read_text(encoding="utf-8")
+              + "\nNEEDS CLARIFICATION: how should X behave?\n")
+        # before-audit pending: the mini-spec fixture as committed
+        cls.gate_before_audit = copy_fixture(cls._tmp / "c")
+        # closing-audit due: everything landed, Status done
+        cls.gate_closing = done_fixture(cls._tmp / "d")
+        # single: research skip marker resolves the gate, survey is the
+        # whole frontier — one light doc node
+        cls.single_dir = spec_only(cls._tmp / "e")
+        write(cls.single_dir / "research.md",
+              "not applicable — no open questions at Stage 0\n")
+        # wave (execute span): approved + before-audit recorded, execute
+        # is the frontier (T001 runnable; T002 dep-chained; T003 at cap)
+        cls.execute_dir = approved_fixture(cls._tmp / "f", "demo")
+        # wave (analysis fan-out): survey done + real research →
+        # plan ∥ qa ∥ tech all READY (the GRAPH-002 shape)
+        cls.analysis_dir = scaffold(cls._tmp / "g", "demo")
+        write(cls.analysis_dir / "spec.md",
+              (FIXTURE / "spec.md").read_text(encoding="utf-8"))
+        write(cls.analysis_dir / "survey.md",
+              (FIXTURE / "survey.md").read_text(encoding="utf-8"))
+        write(cls.analysis_dir / "research.md",
+              "## Research: demo\n\n### Q1 how to name the operation\n"
+              "- **source**: https://example.com/naming — claim: plain "
+              "names\n  relevance: direct · confidence: high\n")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def advisory(self, spec_dir):
+        r = run_cli(spec_dir, "--launch-check")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_gate_weight_covers_every_pending_human_gate(self):
+        for spec_dir, gate in (
+                (self.gate_research, "research-gate"),
+                (self.gate_clarify, "clarify"),
+                (self.gate_before_audit, "before-audit"),
+                (self.gate_closing, "closing-audit")):
+            adv = self.advisory(spec_dir)
+            self.assertEqual(adv["weight"], "gate", spec_dir)
+            self.assertEqual(adv["gate"], gate)
+            self.assertFalse(adv["launch_workflow"])
+            self.assertEqual(adv["payloads"], 0)
+            self.assertTrue(adv["reason"])
+
+    def test_single_weight_for_one_light_doc_node(self):
+        adv = self.advisory(self.single_dir)
+        self.assertEqual(adv["weight"], "single")
+        self.assertFalse(adv["launch_workflow"])
+        self.assertEqual(adv["frontier_agents"], ["survey"])
+        self.assertEqual(adv["payloads"], 1)
+        self.assertIn("--emit-spawns", adv["reason"])
+
+    def test_wave_weight_for_the_execute_span(self):
+        adv = self.advisory(self.execute_dir)
+        self.assertEqual(adv["weight"], "wave")
+        self.assertTrue(adv["launch_workflow"])
+        self.assertEqual(adv["frontier_agents"], ["execute"])
+        # one runnable task (T001) — execute is heavy even as one payload
+        self.assertEqual(adv["payloads"], 1)
+
+    def test_wave_weight_for_the_analysis_fan_out(self):
+        adv = self.advisory(self.analysis_dir)
+        self.assertEqual(adv["weight"], "wave")
+        self.assertTrue(adv["launch_workflow"])
+        self.assertEqual(sorted(adv["frontier_agents"]),
+                         ["plan", "qa", "tech"])
+        self.assertEqual(adv["payloads"], 3)
+
+    def test_held_and_complete_map_inline(self):
+        st = compute(self.single_dir)
+        st["frontier"] = []
+        for name in st["nodes"]:
+            st["nodes"][name]["state"] = (
+                "done" if name == "spec" else "blocked")
+        adv = graph.launch_check(st, self.single_dir, self.single_dir)
+        self.assertEqual(adv["weight"], "held")
+        self.assertFalse(adv["launch_workflow"])
+        for name in st["nodes"]:
+            st["nodes"][name]["state"] = "done"
+        st["status"] = "done"  # else tick-commit is legitimately due
+        adv = graph.launch_check(st, self.single_dir, self.single_dir)
+        self.assertEqual(adv["weight"], "complete")
+        self.assertFalse(adv["launch_workflow"])
+
+    def test_json_shape_is_the_documented_contract(self):
+        adv = self.advisory(self.execute_dir)
+        self.assertEqual(set(adv), {"spec_dir", "launch_workflow", "gate",
+                                    "frontier_agents", "payloads",
+                                    "weight", "reason"})
+
+    def test_pure_read_nothing_written(self):
+        before = dir_checksum(self.execute_dir)
+        self.advisory(self.execute_dir)
+        self.assertEqual(dir_checksum(self.execute_dir), before)
+
+    def test_mode_exclusivity(self):
+        for flag in ("--state-json", "--emit-spawns", "--run"):
+            self.assertEqual(
+                run_cli(self.execute_dir, "--launch-check", flag).returncode,
+                2, flag)
+
+
+class Graph020PipelineShorteningTests(unittest.TestCase):
+    """GRAPH-020: the 2.11.0 pipeline shortening — mechanical effort
+    tiering (D-024), the one-stop before-audit contract + closing pre-check
+    instruments (D-023), and the scaffold's skip-marker research default
+    (D-025)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph020-"))
+
+        def analysis(tmp, effort):
+            d = scaffold(tmp, "demo")
+            write(d / "spec.md",
+                  (FIXTURE / "spec.md").read_text(encoding="utf-8")
+                  + f"\n**Effort**: {effort}\n")
+            write(d / "survey.md",
+                  (FIXTURE / "survey.md").read_text(encoding="utf-8"))
+            write(d / "research.md",
+                  "## Research: demo\n\n### Q1 how to name the operation\n"
+                  "- **source**: https://example.com/naming — claim: plain "
+                  "names\n  relevance: direct · confidence: high\n")
+            return d
+
+        cls.standard = analysis(cls._tmp / "a", "standard")
+        cls.large = analysis(cls._tmp / "b", "large")
+        cls.closing = copy_fixture(cls._tmp / "c")
+        set_status(cls.closing, "approved")
+        write(cls.closing / "task.md", IMPLEMENTED_ALL_TASKS)
+        cls.before_audit = copy_fixture(cls._tmp / "e")
+        cls.fresh = scaffold(cls._tmp / "d", "demo")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def payload_lines(self, spec_dir):
+        r = run_cli(spec_dir, "--emit-spawns")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [ln for ln in r.stdout.splitlines() if "   payload: " in ln]
+
+    def test_state_json_carries_effort_with_large_default(self):
+        self.assertEqual(compute(self.standard)["effort"], "standard")
+        self.assertEqual(compute(self.large)["effort"], "large")
+        # legacy docsets with no field keep the full-wave graph
+        self.assertEqual(compute(self.closing)["effort"], "large")
+        # a fresh scaffold reads the template's default: standard
+        self.assertEqual(compute(self.fresh)["effort"], "standard")
+
+    def test_standard_collapses_the_design_wave_into_one_payload(self):
+        lines = self.payload_lines(self.standard)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("designer.md", lines[0])
+        self.assertIn("role: designer", lines[0])
+        self.assertIn("node: design", lines[0])
+        text = next(self.standard.glob("spawns/*/designer.md")).read_text(
+            encoding="utf-8")
+        self.assertEqual(text.count("### agents/"), 4)
+        self.assertEqual(text.count("## Shared protocol"), 1)
+        self.assertIn("Tier: standard", text)
+
+    def test_large_keeps_the_three_payload_design_wave(self):
+        roles = sorted(ln.split("role: ")[1].split(",")[0]
+                       for ln in self.payload_lines(self.large))
+        self.assertEqual(roles, ["planner", "qa", "tech"])
+
+    def test_closing_due_state_prepares_the_reviewer_payload(self):
+        lines = self.payload_lines(self.closing)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("reviewer-diff.md", lines[0])
+        self.assertIn("role: reviewer", lines[0])
+        text = next(self.closing.glob("spawns/*/reviewer-diff.md")).read_text(
+            encoding="utf-8")
+        self.assertIn("implementation-diff", text)
+        self.assertIn("closing audit step 10", text)
+        # the reviewer is the one protocol-exempt role
+        self.assertNotIn("## Shared protocol", text)
+
+    def test_before_audit_pause_is_one_stop_with_preexecute(self):
+        pause = graph.find_pause(compute(self.before_audit))
+        self.assertIsNotNone(pause)
+        self.assertEqual(pause[0], "before-audit")
+        self.assertIn("ONE session", pause[1])
+        self.assertIn("pre-execute", pause[1])
+        self.assertIn("freeze.py", pause[1])
+
+    def test_closing_pause_names_the_precheck_and_reviewer(self):
+        pause = graph.find_pause(compute(self.closing))
+        self.assertIsNotNone(pause)
+        self.assertEqual(pause[0], "closing-audit")
+        self.assertIn("mechanical pre-check", pause[1])
+        self.assertIn("reviewer-diff.md", pause[1])
+
+    def test_run_prints_the_prechecks_at_both_pauses(self):
+        r = run_cli(self.before_audit, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("before-audit precheck: audit.py pre-execute", r.stdout)
+        self.assertIn("AWAITING HUMAN: before-audit", r.stdout)
+        r = run_cli(self.closing, "--run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("closing precheck: audit.py scope", r.stdout)
+        self.assertIn("closing precheck: audit.py dod --dry-run", r.stdout)
+        self.assertIn("AWAITING HUMAN: closing-audit", r.stdout)
+
+    def test_scaffold_ships_the_research_skip_marker(self):
+        # its own scaffold — this test writes spec.md, and the shared
+        # cls.fresh must stay pristine for the effort assertions
+        fresh = scaffold(self._tmp / "f", "demo")
+        self.assertEqual(
+            (fresh / "research.md").read_text(encoding="utf-8").strip(),
+            "not applicable — no open questions at Stage 0")
+        write(fresh / "spec.md",
+              (FIXTURE / "spec.md").read_text(encoding="utf-8"))
+        st = compute(fresh)
+        self.assertEqual(st["nodes"]["research-gate"]["state"], "done")
+        self.assertIn("skip", st["nodes"]["research-gate"]["reason"])
+        # no undetermined pause on a fresh authored spec: survey is the
+        # frontier immediately
+        self.assertIsNone(graph.find_pause(st))
+        self.assertEqual(st["frontier"], ["survey"])
 
 
 if __name__ == "__main__":

@@ -7,7 +7,10 @@ description: >-
   after each gate resumes from doc state.
 whenToUse: >-
   Use when the user asks to run or continue a spec-to-prod spec on zcode
-  ("run the auth spec pipeline", "continue the spec", "work the frontier").
+  ("run the auth spec pipeline", "continue the spec", "work the frontier")
+  — and only after a graph.py --launch-check preflight says the span is
+  heavy (weight "wave"); light spans (a pending human gate, one doc
+  node, held/complete) run inline, not as a workflow launch.
 args:
   spec:
     type: string
@@ -124,8 +127,14 @@ function findPause(st: GraphState): Stop | null {
       kind: "gate",
       gate: "before-audit",
       need:
-        "run the six before-audit gates (gates/before-audit.md), then record " +
-        "`Before-audit: passed @ <sha-or-dash>` in task.md",
+        "ONE session, gates + approval together (D-023): run `audit.py " +
+        "pre-execute <spec-dir>` (+ `--run` for the baseline command), " +
+        "judge the three semantic gates (gates/before-audit.md: dependency " +
+        "reality, already-done sweep, constitution semantics + branch " +
+        "consent), record `Before-audit: passed @ <sha-or-dash>` in " +
+        "task.md — then seek the user's explicit approval, set spec.md " +
+        "Status: approved, and run `freeze.py <spec-dir> --record` before " +
+        "rerunning",
     };
   }
   if (nodeState(st, "approve") === "READY") {
@@ -142,10 +151,13 @@ function findPause(st: GraphState): Stop | null {
       kind: "gate",
       gate: "closing-audit",
       need:
-        "run the closing audit: audit.py evidence, scope (from the " +
-        "before-audit SHA), clean, implementation-diff review, proofs " +
-        "--run, regression, and dod; record evidence/closing.md, surface " +
-        "every D-###, and get the user's ack",
+        "the mechanical pre-check (audit.py scope/clean/dod-dry/proofs " +
+        "listings) and the implementation-diff reviewer already ran this " +
+        "stop (D-023) — adjudicate their findings, then run `audit.py " +
+        "evidence`, `proofs <spec-dir> --run`, and regression; record " +
+        "evidence/closing.md, surface every D-###, and get the user's " +
+        "ack before recording `Closing-audit: approved @ <sha-or-dash>` " +
+        "in task.md",
     };
   }
   if (nodeState(st, "closing-audit") === "done" && st.status !== "done") {
@@ -321,8 +333,38 @@ if (!specName) {
     }
   }
 
+  // D-023: at the closing-audit stop the run has already done the
+  // mechanical precheck and spawned the implementation-diff reviewer —
+  // the ack session opens with results, never honor-system claims.
+  if (stop && stop.kind === "gate" && stop.gate === "closing-audit") {
+    phase("Closing pre-check — reviewer + read-only audits");
+    // --emit-spawns prepared reviewer-diff.md while the closing audit is
+    // due; spawn it, then the read-only audit modes
+    const closingPayloads = await emitPayloads();
+    for (const p of closingPayloads) {
+      if (p.role !== "reviewer") continue;
+      const stem = (p.path.split("/").pop() ?? "agent").replace(/\.md$/, "");
+      const d = await agent("close-" + stem).ask<WaveDigest>(askText(p));
+      allDigests.push({ wave: waves + 1, role: p.role, status: d.status, digest: d.digest });
+      log("  reviewer (implementation-diff) → " + d.status + (d.status === "done" ? "" : ": " + d.digest));
+    }
+    const auditModes: string[][] = [["scope"], ["clean"], ["dod", "--dry-run"], ["proofs"]];
+    for (const m of auditModes) {
+      const r = await world.run("python3",
+        [skillDir + "/scripts/audit.py"].concat(m).concat(["specs/" + specName]));
+      log("  closing precheck: audit.py " + m.join(" ") + " → exit " + r.exitCode);
+      if (r.exitCode !== 0 && r.stdout.trim()) {
+        const tail = r.stdout.trim().split("\n").slice(-6);
+        for (const line of tail) log("    " + line);
+      }
+    }
+  }
+
   phase("Recompute and summarize");
-  const finalSt = await graphState();
+  // reuse the last post-wave state — every stop path leaves st fresh from
+  // its most recent fetch, so the summary needs no extra graph.py run
+  // (parity with the claude dialect, D-020)
+  const finalSt = st;
   const finalStop: Stop = stop ?? { kind: "no-change", detail: "loop exited without a stop" };
   const report = {
     spec: specName,

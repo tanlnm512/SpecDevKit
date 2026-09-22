@@ -30,6 +30,7 @@ genuinely non-git workspace at CLI level).
 import contextlib
 import importlib.util
 import io
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -781,6 +782,92 @@ class MainArgvTests(unittest.TestCase):
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 code = audit.main()
+        self.assertEqual(code, 2)
+
+
+class PreExecuteTests(unittest.TestCase):
+    """audit.py pre-execute (D-023) — the mechanical half of the
+    before-audit's six gates (clean tree, branch, baseline command),
+    mocked at the git_available/git choke points like every other
+    git-facing test in this suite: no real git here."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="preexec-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        shutil.copytree(FIXTURE, self._tmp / "specs" / "demo")
+        self.spec = self._tmp / "specs" / "demo"
+
+    def run_pre(self, *extra, available=False, status="", branch=""):
+        cp = lambda rc, out="": subprocess.CompletedProcess((), rc, out, "")
+        results = {("status", "--porcelain"): cp(0, status),
+                   ("branch", "--show-current"): cp(0, branch)}
+        with unittest.mock.patch.object(audit, "git_available",
+                                        return_value=available), \
+             unittest.mock.patch.object(
+                 audit, "git",
+                 side_effect=lambda repo, *a: results.get(tuple(a), cp(1))), \
+             contextlib.redirect_stdout(io.StringIO()) as buf:
+            code = audit.main(["pre-execute", str(self.spec), *extra])
+        return code, buf.getvalue()
+
+    def test_non_git_degrades_to_skipped_and_dry_baseline(self):
+        code, out = self.run_pre()
+        self.assertEqual(code, 0)
+        self.assertIn("SKIPPED (not a git repo)", out)
+        self.assertIn("DRY   gate 2 baseline", out)
+        self.assertIn("python3 -m pytest test_calc.py", out)
+        for gate in (1, 4, 6):
+            self.assertIn(f"YOURS gate {gate}", out)
+
+    def test_clean_tree_and_matching_branch_pass(self):
+        code, out = self.run_pre(available=True, branch="feature/mini-calc")
+        self.assertEqual(code, 0)
+        self.assertIn("PASS  gate 3 clean tree", out)
+        self.assertIn("PASS  gate 5 branch — on feature/mini-calc", out)
+
+    def test_dirty_tree_fails(self):
+        code, out = self.run_pre(available=True,
+                                 status=" M repo/calc.py\n",
+                                 branch="feature/mini-calc")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  gate 3 clean tree", out)
+
+    def test_default_branch_fails_gate_5(self):
+        code, out = self.run_pre(available=True, branch="main")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  gate 5 branch — on main", out)
+
+    def test_branch_mismatch_fails_gate_5(self):
+        code, out = self.run_pre(available=True, branch="other/branch")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  gate 5 branch — on other/branch, spec names",
+                      out)
+
+    def test_run_flag_executes_the_recorded_baseline(self):
+        tech = self.spec / "tech-spec.md"
+        tech.write_text(tech.read_text().replace(
+            "python3 -m pytest test_calc.py",
+            "python3 -c \"open('canary.txt','w')\""), encoding="utf-8")
+        code, out = self.run_pre("--run", available=True,
+                                 branch="feature/mini-calc")
+        self.assertEqual(code, 0)
+        self.assertIn("PASS  gate 2 baseline", out)
+        self.assertTrue((self._tmp / "canary.txt").exists())
+
+    def test_red_baseline_fails(self):
+        tech = self.spec / "tech-spec.md"
+        tech.write_text(tech.read_text().replace(
+            "python3 -m pytest test_calc.py", "python3 -c \"exit 3\""),
+            encoding="utf-8")
+        code, out = self.run_pre("--run", available=True,
+                                 branch="feature/mini-calc")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  gate 2 baseline", out)
+        self.assertIn("exit 3", out)
+
+    def test_positional_is_required(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = audit.main(["pre-execute"])
         self.assertEqual(code, 2)
 
 

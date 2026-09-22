@@ -24,6 +24,18 @@ Modes:
   --state-json   the same state as machine-readable JSON: nodes (state+reason
                  each), edges, frontier, loops, counts, git, status. The
                  authoritative oracle for tests and validators.
+  --launch-check  the spec-run launch advisory as JSON: whether the dynamic
+                 workflow should be launched for this doc state at all.
+                 weight `wave` (a multi-payload wave or an execute span —
+                 the heavy spans the loop automation exists for) is the
+                 only launch_workflow=true; `gate` (a human gate is
+                 pending — the workflow would read state once and stop
+                 AWAITING HUMAN seconds later, deciding nothing), `single`
+                 (exactly one light doc node — the single-agent run mode),
+                 `complete`, and `held` are handled inline by the
+                 orchestrator. Pure read: payloads are counted via the
+                 same frontier enumeration --emit-spawns writes, without
+                 writing anything.
   --mermaid      the live state graph as mermaid: solid arrows are data edges,
                  dotted arrows are conditional/loop edges, node classes encode
                  the state (done/ready/blocked/undetermined/skipped).
@@ -43,7 +55,14 @@ Modes:
                  frontier — the single-agent repair-run instrument; the
                  surveyor's repair payload carries a DELTA RE-SURVEY block
                  (files changed since the survey's stale baseline) so a
-                 converge re-survey merges instead of rebuilding.
+                 converge re-survey merges instead of rebuilding. At effort
+                 tier `standard` (spec.md `**Effort**: standard`) the
+                 plan ∥ tech ∥ qa wave collapses into ONE merged designer
+                 payload authoring plan/tech-spec/test/task in a single
+                 spawn (D-024); while the closing audit is due, the
+                 reviewer-diff.md payload (implementation-diff mode) is
+                 prepared the same way the undetermined gate's researcher
+                 payload is.
   --run          the auto-trigger loop: compute the frontier; pause
                  `AWAITING HUMAN: <node>` at every judgment node (clarify,
                  an undetermined research-gate, before-audit, approve, the
@@ -55,7 +74,12 @@ Modes:
                  that exits nonzero or raises stops the loop with a
                  role/node diagnostic and exit 3, so no later wave starts;
                  recompute and repeat until a gate, workflow completion,
-                 --max-waves, or a wave that changed nothing.
+                 --max-waves, or a wave that changed nothing. The
+                 before-audit and closing-audit pauses run their
+                 mechanical prechecks into the log first (audit.py
+                 pre-execute; scope + clean + dod --dry-run + proofs dry —
+                 D-023): the human reads results, never honor-system
+                 claims.
 
 Mechanical probes: the survey node runs `check.py <spec-dir> --survey-only`
 and the verify node runs `check.py <spec-dir>` — skill-owned contract
@@ -67,7 +91,7 @@ approve, an undetermined research-gate, the closing-audit judgment,
 tick-commit) are never auto-satisfied by this script.
 
 Usage: graph.py <spec-dir> [--repo <path>] [--state-json] [--mermaid]
-                [--explain <node>] [--wave-dir <dir>]
+                [--explain <node>] [--wave-dir <dir>] [--launch-check]
                 [--emit-spawns]
                 [--run [--runner '<template>'] [--dry-run] [--max-waves N]]
 Exit:  0 = report produced (any workflow state) · 1 = unreadable spec-dir ·
@@ -674,6 +698,53 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             note = spec_dir / "notes" / f"{entry.id or 'T???'}.md"
             lines += [f"- Fix round {entry.fix_round}: prior scratch note: "
                       f"{note if note.exists() else '(none written yet)'}"]
+    elif node == "design":
+        lines = [
+            f"- spec_dir: {spec_dir} (read spec.md, survey.md, and "
+            "research.md yourself)",
+            "- Tier: standard (D-024) — ONE spawn authors the design "
+            "docset in this order: plan.md → tech-spec.md → test.md → "
+            "task.md. The multi-agent wave is collapsed at this tier; "
+            "check.py, the before-audit, and the closing audit are not.",
+            "- Team context: none recorded — assume solo, PR-per-milestone "
+            "unless the spawn digest says otherwise",
+            "- Architecture constraints: "
+            + (f"specs/CONSTITUTION.md at {constitution}"
+               if constitution.exists()
+               else "none recorded (no specs/CONSTITUTION.md)"),
+            "- Blindness trade-off (accepted at this tier, D-024): test.md "
+            "is authored by the same spawn that wrote plan/tech — derive "
+            "TCs strictly from spec.md's acceptance criteria and survey "
+            "evidence, never from what the plan found convenient to test",
+        ]
+    elif node == "closing-audit":
+        task_text = read_doc(spec_dir / "task.md") or ""
+        bm = re.search(r"Before-audit\*{0,2}\s*:\s*passed\s+@\s+(\S+)",
+                       task_text)
+        base = bm.group(1) if bm else "HEAD"
+        lines = [
+            f"- spec_dir: {spec_dir}",
+            "- Mode: implementation-diff — the required closing review "
+            "(SKILL.md closing audit step 10; findings only, edit nothing)",
+            "- Base: the recorded before-audit anchor `"
+            + (base + "`" if base != "-"
+               else "-` (non-git — anchor the review on every task's "
+                    "intended-files union instead)"),
+        ]
+        if base != "-":
+            lines += [
+                "- The complete final diff (run both, read everything):",
+                f"   git -C {repo} diff {base}      # tracked changes since base",
+                f"   git -C {repo} status --porcelain   # untracked files — read in full",
+            ]
+        lines += [
+            "- Plan-side truth: read task.md, tech-spec.md, test.md, "
+            "survey.md, and specs/CONSTITUTION.md under the spec dir's "
+            "parent",
+            "- Review for semantic/security/rollback issues and wording "
+            "drift; resolve BLOCKs, own or rule every WARN/NIT in the "
+            "digest",
+        ]
     else:
         lines = [f"- spec_dir: {spec_dir}"]
 
@@ -686,13 +757,21 @@ def frontier_payloads(state: dict, spec_dir: Path,
     """One record per payload this wave writes: one per frontier agent node,
     one per runnable task for execute (named implementer-T###.md when there
     are several, implementer.md when one), plus — while the research-gate is
-    undetermined — the researcher payload. That gate is an orchestrator
-    judgment with no run-decision artifact in doc state, so --emit-spawns
-    prepares its payload as the instrument of a `run` decision; --run still
-    pauses at the gate and never spawns it."""
+    undetermined — the researcher payload, and — while the closing audit is
+    due — the implementation-diff reviewer payload (the instruments of a
+    `run` decision and of the closing review; --run still pauses at both
+    gates and never spawns them). D-024: at effort tier `standard` the
+    plan ∥ tech ∥ qa wave (plus the tasks wave it feeds) collapses into ONE
+    merged design payload — one spawn writes plan.md, tech-spec.md,
+    test.md, and task.md; docset, check.py, and the gates are unchanged."""
     items: list[dict] = []
+    merge_design = (
+        state.get("effort") == "standard"
+        and all(x in state["frontier"] for x in ("plan", "tech", "qa")))
     for node in state["frontier"]:
         if node not in AGENT_BRIEFS:
+            continue
+        if merge_design and node in ("plan", "tech", "qa"):
             continue
         role, brief = AGENT_BRIEFS[node]
         if node == "execute":
@@ -712,10 +791,22 @@ def frontier_payloads(state: dict, spec_dir: Path,
         else:
             items.append({"node": node, "role": role, "brief": brief,
                           "filename": f"{role}.md", "entry": None})
+    if merge_design:
+        items.insert(0, {
+            "node": "design", "role": "designer", "brief": None,
+            "briefs": [AGENT_BRIEFS[n][1]
+                       for n in ("plan", "tech", "qa", "tasks")],
+            "filename": "designer.md", "entry": None,
+        })
     if state["nodes"]["research-gate"]["state"] == UNDETERMINED:
         items.append({"node": "research", "role": "researcher",
                       "brief": "spec-researcher.md",
                       "filename": "researcher.md", "entry": None})
+    if (state["nodes"]["execute"]["state"] == DONE
+            and state["nodes"]["closing-audit"]["state"] != DONE):
+        items.append({"node": "closing-audit", "role": "reviewer",
+                      "brief": "spec-reviewer.md",
+                      "filename": "reviewer-diff.md", "entry": None})
     return items
 
 
@@ -723,10 +814,27 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
     """One self-contained spawn payload: header (spec_dir / repo /
     skill_dir) + filled input payload + the frontmatter-stripped brief body
     byte-verbatim + `_shared-protocol.md` verbatim — except the reviewer,
-    the one exempt role (its brief states it needs no shared protocol)."""
-    brief_raw = read_raw(SKILL_DIR / "agents" / item["brief"])
-    if brief_raw is None:
-        return None
+    the one exempt role (its brief states it needs no shared protocol).
+    A merged-design item (D-024) carries several briefs concatenated in
+    authoring order with the protocol once."""
+    if item.get("briefs") is not None:
+        bodies = []
+        for bf in item["briefs"]:
+            raw = read_raw(SKILL_DIR / "agents" / bf)
+            if raw is None:
+                return None
+            bodies.append(f"### agents/{bf} (body; frontmatter stripped)\n\n"
+                          + strip_frontmatter(raw))
+        brief_title = ("## Briefs — the four design roles in authoring "
+                       "order (bodies; frontmatter stripped)")
+        brief_body = "\n\n".join(bodies)
+    else:
+        brief_raw = read_raw(SKILL_DIR / "agents" / item["brief"])
+        if brief_raw is None:
+            return None
+        brief_title = (f"## Brief — agents/{item['brief']} "
+                       "(body; frontmatter stripped)")
+        brief_body = strip_frontmatter(brief_raw)
     protocol = read_raw(SKILL_DIR / "agents" / "_shared-protocol.md")
     parts = [
         f"# Spawn payload — {item['role']} · node {item['node']} · "
@@ -744,9 +852,9 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
         "",
         input_payload_for(item["node"], spec_dir, repo, item["entry"]),
         "",
-        f"## Brief — agents/{item['brief']} (body; frontmatter stripped)",
+        brief_title,
         "",
-        strip_frontmatter(brief_raw),
+        brief_body,
     ]
     if protocol is not None and item["role"] != "reviewer":
         parts += ["",
@@ -819,24 +927,36 @@ def find_pause(state: dict, wave_dir: str | None = None) -> tuple[str, str] | No
                                  "researcher payload is: "
                                  f"{target / 'researcher.md'}")
     if n["before-audit"]["state"] == READY:
-        return "before-audit", ("run the six before-audit gates "
-                                "(gates/before-audit.md), then record "
+        return "before-audit", ("ONE session, gates + approval together "
+                                "(D-023): run `audit.py pre-execute "
+                                "<spec-dir>` (+ `--run` for the baseline "
+                                "command), judge the three semantic gates "
+                                "(gates/before-audit.md: dependency "
+                                "reality, already-done sweep, constitution "
+                                "semantics + branch consent), record "
                                 "`Before-audit: passed @ <sha-or-dash>` in "
-                                "task.md")
+                                "task.md — then seek the user's explicit "
+                                "approval, set spec.md Status: approved, "
+                                "and run `freeze.py <spec-dir> --record` "
+                                "before rerunning")
     if n["approve"]["state"] == READY:
         return "approve", (n["approve"]["reason"]
                            + " — after the explicit yes, run "
                            "`freeze.py <spec-dir> --record`")
     if (n["execute"]["state"] == DONE
             and n["closing-audit"]["state"] != DONE):
-        return "closing-audit", ("run `audit.py evidence`, scope from the "
-                                 "before-audit SHA, clean, the "
-                                 "implementation-diff review, `audit.py "
-                                 "proofs <spec-dir> --run`, regression, and "
-                                 "`audit.py dod`; record evidence/closing.md, "
-                                 "surface every D-###, get the user's ack, "
-                                 "then record `Closing-audit: approved "
-                                 "@ <sha-or-dash>` in task.md")
+        return "closing-audit", ("mechanical pre-check first: `audit.py "
+                                 "scope <spec-dir>`, `clean`, `dod` "
+                                 "(read-only, results in hand before the "
+                                 "ack), and spawn the implementation-diff "
+                                 "reviewer from the emitted payload "
+                                 "(--emit-spawns prepared reviewer-diff.md); "
+                                 "then `audit.py evidence`, `proofs "
+                                 "<spec-dir> --run`, regression; record "
+                                 "evidence/closing.md, surface every D-###, "
+                                 "get the user's ack, then record "
+                                 "`Closing-audit: approved @ <sha-or-dash>` "
+                                 "in task.md")
     if n["closing-audit"]["state"] == DONE and state["status"] != "done":
         commit_note = ("make implementation commit C1, then delivery-record "
                        "commit C2" if state["git"]["available"]
@@ -883,6 +1003,55 @@ def log_verify(state: dict, repo_override: str | None) -> None:
                           "    "))
 
 
+def _audit_mode_output(mode_argv: list[str]) -> tuple:
+    """audit.py's (exit code, stdout) — the run log's precheck evidence."""
+    try:
+        r = subprocess.run(
+            [sys.executable, str(_SCRIPTS_DIR / "audit.py"), *mode_argv],
+            capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    return r.returncode, r.stdout
+
+
+def log_before_audit_precheck(state: dict) -> None:
+    """D-023: at the before-audit pause --run has already run the
+    mechanical half of the six gates (audit.py pre-execute — clean tree,
+    branch, baseline dry) so the one approval session opens with results,
+    never honor-system claims. Judgment gates stay in the pause text."""
+    rc, out = _audit_mode_output(["pre-execute", str(state["spec_dir"])])
+    if rc is None:
+        return
+    print(f"before-audit precheck: audit.py pre-execute "
+          f"{state['spec_dir']} → exit {rc}")
+    if out.strip():
+        print(_indent(out.strip(), "    "))
+
+
+def log_closing_precheck(state: dict) -> None:
+    """D-023: at the closing-audit pause --run has already run the
+    read-only closing modes — scope, clean, dod (dry), proofs (dry
+    classification) — so the ack session adjudicates with the diff-facing
+    evidence in hand. Nothing here executes test.md commands: proofs and
+    dod run without --run, and evidence waits for closing.md."""
+    for mode_argv in (("scope",), ("clean",), ("dod", "--dry-run"),
+                      ("proofs",)):
+        argv = [*mode_argv, str(state["spec_dir"])]
+        if mode_argv[0] == "clean":
+            # clean resolves the repo from cwd, not the spec dir — pin it
+            argv += ["--repo", str(Path(state["spec_dir"]).parent.parent)]
+        rc, out = _audit_mode_output(argv)
+        if rc is None:
+            print(f"closing precheck: audit.py {' '.join(mode_argv)} → "
+                  "could not run")
+            continue
+        print(f"closing precheck: audit.py {' '.join(mode_argv)} "
+              f"→ exit {rc}")
+        tail = out.strip().splitlines()[-6:] if out.strip() else []
+        if tail and rc != 0:
+            print(_indent("\n".join(tail), "    "))
+
+
 def print_complete_or_held(state: dict) -> None:
     n = state["nodes"]
     if n["archive"]["state"] == READY:
@@ -895,6 +1064,55 @@ def print_complete_or_held(state: dict) -> None:
         for name in NODES:
             if n[name]["state"] == BLOCKED:
                 print(f"  {name}: {n[name]['reason']}")
+
+
+def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
+    """--launch-check: should the spec-run dynamic workflow be launched for
+    this doc state, or is the span light enough to run inline? (D-022) The
+    workflow's value is the multi-wave loop with parallel fan-out; a launch
+    on a light state reads state once and stops seconds later, deciding
+    nothing (on Claude Code that single fetch is a whole probe agent). The
+    same doc-state oracle as every other mode — find_pause first (a pending
+    human gate can never be worked past by launching), then the payload
+    count from frontier_payloads (read-only: nothing is written). Only
+    `wave` — a multi-payload wave or any execute span — says launch."""
+    n = state["nodes"]
+    advisory = {"spec_dir": str(spec_dir),
+                "launch_workflow": False, "gate": None,
+                "frontier_agents": [x for x in state["frontier"]
+                                    if x in AGENT_BRIEFS], "payloads": 0}
+    pause = find_pause(state)
+    if pause is not None:
+        gate, need = pause
+        return {**advisory, "weight": "gate", "gate": gate,
+                "reason": need + " — answer the gate inline with the user; "
+                "a workflow launch cannot work past a human gate"}
+    if not advisory["frontier_agents"]:
+        if n["archive"]["state"] == READY:
+            weight, reason = ("complete", "archive-ready — run "
+                              f"scripts/archive.sh {Path(spec_dir).name} "
+                              "inline")
+        elif all(n[x]["state"] == DONE for x in NODES):
+            weight, reason = "complete", "every node done — nothing to run"
+        else:
+            blocked = "; ".join(
+                f"{x}: {n[x]['reason']}" for x in NODES
+                if n[x]["state"] == BLOCKED)
+            weight, reason = ("held", "no agent node runnable — unblock "
+                              f"inline first: {blocked}")
+        return {**advisory, "weight": weight, "reason": reason}
+    payloads = frontier_payloads(state, spec_dir, repo)
+    advisory["payloads"] = len(payloads)
+    if len(payloads) == 1 and payloads[0]["node"] != "execute":
+        return {**advisory, "weight": "single",
+                "reason": "one light doc node ("
+                          f"{payloads[0]['node']}/{payloads[0]['role']}) — "
+                          "run it inline: --emit-spawns + one spawn "
+                          "(single-agent run mode)"}
+    return {**advisory, "weight": "wave", "launch_workflow": True,
+            "reason": f"{len(payloads)} payload(s) across "
+                      f"{', '.join(advisory['frontier_agents'])} — heavy "
+                      "span, launch the spec-run workflow"}
 
 
 def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
@@ -916,6 +1134,13 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
         log_verify(state, repo_override)
         pause = find_pause(state, wave_dir)
         if pause:
+            # D-023: the mechanical half of the pausing gate has already
+            # run by the time the human reads the stop — results, never
+            # honor-system claims (judgment stays in the pause text).
+            if pause[0] == "before-audit":
+                log_before_audit_precheck(state)
+            elif pause[0] == "closing-audit":
+                log_closing_precheck(state)
             print(f"AWAITING HUMAN: {pause[0]}: {pause[1]}")
             return 0
         frontier = state["frontier"]
@@ -1012,6 +1237,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
 
     spec_text = docs["spec.md"]
     status = specstate.spec_status(spec_text) if spec_text is not None else None
+    effort = specstate.spec_effort(spec_text)
     markers = spec_text.count("NEEDS CLARIFICATION") if spec_text else 0
     task_text = docs["task.md"]
     entries = specstate.task_entries(task_text) if task_text else []
@@ -1392,6 +1618,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     return {
         "spec_dir": str(spec_dir),
         "status": status,
+        "effort": effort,
         "git": {"available": git_ok, "head": head, "note": git_note},
         "nodes": {name: nodes[name] for name in NODES},
         "edges": edges,
@@ -1491,6 +1718,11 @@ def main(argv: list[str] | None = None) -> int:
                         "spec dir's grandparent, like check.py/audit.py)")
     p.add_argument("--state-json", action="store_true",
                    help="print the full state as machine-readable JSON")
+    p.add_argument("--launch-check", action="store_true",
+                   help="print the spec-run launch advisory as JSON — "
+                        "launch the dynamic workflow only on weight "
+                        "`wave`; `gate`/`single`/`complete`/`held` spans "
+                        "run inline (pure read, nothing written)")
     p.add_argument("--mermaid", action="store_true",
                    help="render the live state graph as mermaid (dotted = "
                         "conditional/loop edges)")
@@ -1533,6 +1765,10 @@ def main(argv: list[str] | None = None) -> int:
     if (args.runner or args.dry_run or args.max_waves is not None) \
             and not args.run:
         p.error("--runner/--dry-run/--max-waves require --run")
+    if args.launch_check and (args.state_json or args.emit_spawns
+                              or args.run):
+        p.error("--launch-check is its own mode — not combinable with "
+                "--state-json, --emit-spawns, or --run")
     if args.emit_spawns and args.run:
         p.error("--emit-spawns and --run are separate modes")
     if args.repair and not args.emit_spawns:
@@ -1563,6 +1799,12 @@ def main(argv: list[str] | None = None) -> int:
                         args.dry_run, args.max_waves, args.wave_dir)
 
     state = compute_state(spec_dir, args.repo)
+
+    if args.launch_check:
+        print(json.dumps(
+            launch_check(state, spec_dir,
+                         resolved_repo(spec_dir, args.repo)), indent=2))
+        return 0
 
     if args.explain is not None:
         print(render_explain(state, args.explain))
