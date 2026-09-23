@@ -1,4 +1,4 @@
 {
   "name": "spec-dev-kit",
-  "description": "Spec-driven multi-agent development skills — spec-to-prod: a verified, production-ready changeset from a one-paragraph idea, via a doc-state workflow graph with role agents, mechanical checks, and two audits."
+  "description": "Spec-driven multi-agent development skills — spec-to-prod: a verified, production-ready changeset from a one-paragraph idea, via a doc-state workflow graph with role agents, mechanical checks, and two audits; spec-code-review: a portable, gated code review with specialist lenses, independent confirmation of every finding, and an optional fix loop ending in a merge recommendation."
 }

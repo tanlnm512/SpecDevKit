@@ -24,6 +24,8 @@ jobs:
           python-version: "3.12"
       - name: Skill suite
         run: skills/spec-to-prod/tests/run.sh
+      - name: Review skill suite
+        run: skills/spec-code-review/tests/run.sh
       - name: Tooling suite
         run: tools/tests/run.sh
       - name: Compile Python sources

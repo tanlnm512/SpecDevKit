@@ -1,35 +1,46 @@
 /* zcode-workflow
-description: "Three-stage code review of a git change with an optional fix loop.
-  The repo's own CI checks run first as the gate; the diff is then reviewed
-  through separate lenses (correctness, security, quality & tests — or one
-  general reviewer on small diffs), triaged by one editor, and every kept
-  finding is independently confirmed. With fix_rounds > 0 an iterative loop
-  follows: an author agent fixes the confirmed findings in the working tree,
-  each fix is independently verified, the checks re-run, a fresh-eyes reviewer
-  scans the fix diff, and the run ends with a risk-gated merge recommendation
-  (merge / fix-first / human)."
-whenToUse: Use when the user asks to review a change in this repo — "review the
-  diff", "review this change", "review the last commit" — or to review and fix
-  it ("review and fix the findings"). Pass base to choose the diff (default
-  working tree; HEAD~1 for the last commit) and fix_rounds > 0 to let the
-  author-fix loop run.
+description: >-
+  Three-stage code review of a git change in any repository, with an
+  optional fix loop. Stage 1 runs the repo's own detected checks as the
+  mechanical gate (the skill's scripts/gate.sh probes Makefile, npm
+  scripts, cargo, go, pytest/unittest, and shell syntax on the diff).
+  Stage 2 reviews the diff through separate lenses — correctness,
+  security, quality & tests (one general reviewer in fast mode) — each
+  triaged by one editor, with independent confirmation of every kept
+  finding. Stage 3 synthesizes a report with risk class, test gaps and
+  residual risks. With fix_rounds > 0 an iterative loop follows: an
+  author agent fixes the confirmed findings, every fix is independently
+  verified, the gate re-runs, a fresh-eyes reviewer scans the fix diff,
+  and the run ends with a risk-gated merge recommendation.
+whenToUse: >-
+  Use when the user asks to review a change — "review the diff",
+  "review this change", "review the last commit" — or to review and fix
+  it. Works in any git repository; the gate adapts by detecting the
+  repo's own checks.
 args:
   base:
     type: string
-    description: Base ref the change is reviewed against. Default HEAD (working-tree
+    description: >-
+      Base ref the change is reviewed against. Default HEAD (working-tree
       changes). HEAD~1 reviews the last commit; any branch, tag or sha.
-  fix_rounds:
-    type: number
-    description: "0 = review only (default). N = after the review, run up to N fix
-      rounds: an author agent fixes the confirmed findings in the working tree,
-      every fix is independently verified, the repo checks re-run, and a
-      fresh-eyes reviewer scans the fix diff. Ends with a risk-gated merge
-      recommendation; fixes stay uncommitted."
   mode:
     type: string
-    description: fast = one general reviewer; full = three specialists (correctness,
-      security, quality & tests); auto (default) picks fast for small diffs
-      (<=400 added lines, <=5 files) and full otherwise.
+    description: >-
+      fast = one general reviewer; full = three specialists; auto (default)
+      picks fast for small diffs and full otherwise.
+  fix_rounds:
+    type: number
+    description: >-
+      0 = review only (default). N = after the review, run up to N fix
+      rounds: the author agent fixes confirmed findings in the working
+      tree, each fix is independently verified, the gate re-runs, and a
+      fresh-eyes reviewer scans the fix diff. Ends with a merge
+      recommendation; fixes stay uncommitted.
+  skill_dir:
+    type: string
+    description: >-
+      Absolute skill dir override (defaults to the path baked at install
+      time by tools/install-workflow.sh).
 */
 
 interface Finding {
@@ -86,7 +97,7 @@ interface Assessment {
 }
 
 interface FinalAssessment extends Assessment {
-  /** merge = every finding fixed, checks green, nothing new — recommend merging; fix-first = ordinary findings remain; human = judgment calls or residue a human must decide. */
+  /** merge = every finding fixed, gate green, nothing new — recommend merging; fix-first = ordinary findings remain; human = judgment calls or residue a human must decide. */
   recommendation: "merge" | "fix-first" | "human";
 }
 
@@ -162,6 +173,13 @@ const FIX_ROUNDS =
   typeof args.fix_rounds === "number" && Number.isInteger(args.fix_rounds) && args.fix_rounds >= 0
     ? args.fix_rounds
     : 0;
+// __SKILL_DIR__ is a placeholder; tools/install-workflow.sh bakes the
+// active skill dir into the installed copy (a runtime skill_dir arg wins).
+const SKILL_DIR_BAKED = "__SKILL_DIR__";
+const skillDir =
+  typeof args.skill_dir === "string" && args.skill_dir
+    ? args.skill_dir
+    : SKILL_DIR_BAKED;
 const FAST_MAX_LINES = 400;
 const FAST_MAX_FILES = 5;
 const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
@@ -233,51 +251,32 @@ function outTail(s: string, n: number): string {
   return t ? t.split("\n").slice(-n).join("\n") : "";
 }
 
-// The repo's own checks, mirroring CI check for check — run once before the
+// The mechanical gate: the skill's gate.sh detects and runs the repo's
+// OWN checks and reports a JSON array on stdout. Run once before the
 // review and again after every fix round.
 async function runGate(): Promise<GateResult[]> {
-  const gate: GateResult[] = [];
-  {
-    const r = await world.run("bash", ["skills/spec-to-prod/tests/run.sh"], { timeoutMs: 600000 });
-    gate.push({ name: "skill suite (skills/spec-to-prod/tests/run.sh)", exitCode: r.exitCode, tail: outTail(r.stdout + "\n" + r.stderr, 8) });
+  const r = await world.run("bash", [skillDir + "/scripts/gate.sh", "--base", BASE], { timeoutMs: 900000 });
+  try {
+    const parsed = JSON.parse(r.stdout) as { name: string; exit_code: number | null; tail: string }[];
+    return parsed.map((g) => ({ name: g.name, exitCode: g.exit_code ?? 0, tail: g.tail }));
+  } catch {
+    return [{
+      name: "gate.sh (spec-code-review)",
+      exitCode: 1,
+      tail: outTail(r.stdout + "\n" + r.stderr, 12) || "gate.sh produced no JSON report",
+    }];
   }
-  {
-    const r = await world.run("bash", ["skills/spec-code-review/tests/run.sh"], { timeoutMs: 600000 });
-    gate.push({ name: "review skill suite (skills/spec-code-review/tests/run.sh)", exitCode: r.exitCode, tail: outTail(r.stdout + "\n" + r.stderr, 8) });
-  }
-  {
-    const r = await world.run("bash", ["tools/tests/run.sh"], { timeoutMs: 600000 });
-    gate.push({ name: "tooling suite (tools/tests/run.sh)", exitCode: r.exitCode, tail: outTail(r.stdout + "\n" + r.stderr, 8) });
-  }
-  {
-    const r = await world.run("python3", ["-m", "compileall", "-q", "skills", "tools"]);
-    gate.push({ name: "compile Python sources (compileall)", exitCode: r.exitCode, tail: outTail(r.stdout + "\n" + r.stderr, 4) });
-  }
-  {
-    const shFiles = (await files.glob("**/*.sh")).filter((p) => !p.startsWith(".git/"));
-    let bad = "";
-    for (const p of shFiles) {
-      const r = await world.run("bash", ["-n", p]);
-      if (r.exitCode !== 0) bad += p + " ";
-    }
-    gate.push({
-      name: "shell syntax (bash -n, " + shFiles.length + " scripts)",
-      exitCode: bad ? 1 : 0,
-      tail: "failing: " + bad.trim(),
-    });
-  }
-  {
-    const r = await world.run("python3", ["tools/drift-check.py"]);
-    gate.push({ name: "generated-artifact drift (tools/drift-check.py)", exitCode: r.exitCode, tail: outTail(r.stdout + "\n" + r.stderr, 8) });
-  }
-  {
-    const r = await world.run("python3", ["skills/spec-to-prod/scripts/check.py", "skills/spec-to-prod/examples/mini-spec/specs/mini-spec"]);
-    gate.push({ name: "representative docset (check.py mini-spec)", exitCode: r.exitCode, tail: outTail(r.stdout + "\n" + r.stderr, 8) });
-  }
-  return gate;
 }
 
-function reviewAsk(lensDef: LensDef, files: number, lines: number, overCap: boolean): string {
+function gateNote(gate: GateResult[]): string {
+  if (gate.length === 0) {
+    return "No repo checks were detected by the gate — this review has no mechanical floor; " +
+      "the report must say so under notCovered";
+  }
+  return "The repo's own checks the gate detected (" + gate.map((g) => g.name).join("; ") + ") all passed";
+}
+
+function reviewAsk(lensDef: LensDef, files: number, lines: number, overCap: boolean, gateLine: string): string {
   const scope =
     "`git diff " + BASE + "` — " + files + " files, ~" + lines + " added lines" +
     (overCap ? " (diff over the harness size cap — page through it with git diff directly)" : "");
@@ -293,8 +292,8 @@ function reviewAsk(lensDef: LensDef, files: number, lines: number, overCap: bool
     "and intentional behavior changes.\n" +
     "Cite every finding as path:line on the new side of the diff. An empty findings list is the expected answer " +
     "for a clean diff — never invent one to seem busy.\n" +
-    "Do not edit any file. The repo's own checks all passed before you started, so do not re-run the test " +
-    "suites; spend your turn on what only a reader can see."
+    "Do not edit any file. " + gateLine + " before you started, so do not re-run the " +
+    "test suites; spend your turn on what only a reader can see."
   );
 }
 
@@ -322,13 +321,12 @@ function confirmAsk(f: Finding): string {
   );
 }
 
-function finalAsk(summary: unknown[]): string {
+function finalAsk(summary: unknown[], gateLine: string): string {
   return (
     "Every kept finding has now been through independent confirmation:\n" +
     JSON.stringify(summary, null, 2) +
-    "\nThe repo's own checks (test suites, compileall, shell syntax, drift, representative docset) all passed " +
-    "before review started. Produce the final assessment of this change. Run `git diff " + BASE + "` yourself " +
-    "wherever you need to judge it, and read the test files before claiming a test gap.\n" +
+    "\n" + gateLine + " before review started. Produce the final assessment of this change. Run `git diff " + BASE +
+    "` yourself wherever you need to judge it, and read the test files before claiming a test gap.\n" +
     "risk: low | medium | high — what merging this change as-is would risk. testGaps: behaviors this change " +
     "alters that no test covers (empty if none). residualRisks: what remains unverified after the checks and " +
     "the review. verdict: two or three sentences — should this merge, and what must the author fix first."
@@ -351,7 +349,7 @@ function fixerAsk(round: number, unresolved: TrackedFinding[], gateFeedback: str
         2,
       ) +
       "\nWork in the working tree; never commit. You may run a single targeted test file for code you touch, " +
-      "but the full suites re-run the moment you finish — do not run them yourself.\n" +
+      "but the repo's checks re-run the moment you finish — do not run them yourself.\n" +
       "Return addressed (the what-strings you fully fixed), skipped (what you deliberately left, with why), " +
       "changedPaths, and notes (one sentence per change: what was done and why it is minimal)."
     );
@@ -473,9 +471,10 @@ if (changed.length === 0) {
 }
 
 const gate = await runGate();
+const GATE_LINE = gateNote(gate);
 
 const gateFailed = gate.filter((g) => g.exitCode !== 0);
-log("repo checks: " + (gate.length - gateFailed.length) + "/" + gate.length + " passed");
+log("repo checks: " + (gate.length - gateFailed.length) + "/" + gate.length + " detected and run");
 
 for (const g of gateFailed) {
   report({
@@ -523,10 +522,10 @@ if (gateFailed.length > 0) {
   return {
     conclusion:
       "The change failed " + gateFailed.length + " of " + gate.length +
-      " repo checks (" + gateFailed.map((g) => g.name).join("; ") + "). Specialist review was skipped — " +
+      " detected repo checks (" + gateFailed.map((g) => g.name).join("; ") + "). Specialist review was skipped — " +
       "these are mechanical fixes; rerun the review after they pass.",
     findings: gateFindings,
-    verified: ["all " + gate.length + " repo checks ran (they mirror CI) — " + gateFailed.length + " failed"],
+    verified: ["the mechanical gate ran the repo's own detected checks — " + gateFailed.length + " failed"],
     notCovered: ["specialist review of the diff — skipped because the mechanical gate failed"],
   };
 }
@@ -554,7 +553,7 @@ const triage = agent("Triage editor", {
 const perLens = await Promise.all(
   panel.map(async (lensDef) => {
     const review = await agent(lensDef.name, { system: lensDef.system }).ask<LensReview>(
-      reviewAsk(lensDef, changed.length, addedLines, diffOverCap),
+      reviewAsk(lensDef, changed.length, addedLines, diffOverCap, GATE_LINE),
     );
     log(lensDef.name + ": " + review.findings.length + " finding(s)");
     if (review.findings.length === 0) {
@@ -593,8 +592,8 @@ const summary = allConfirmed.map((c) => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Option C loop: the author fixes, independent verifiers check every fix,
-// the repo's checks re-run, fresh eyes scan the fix diff. Bounded by rounds.
+// The fix loop: the author fixes, independent verifiers check every fix,
+// the gate re-runs, fresh eyes scan the fix diff. Bounded by rounds.
 const tracked: TrackedFinding[] = allConfirmed.map((f) => ({
   finding: f,
   fix: "pending",
@@ -729,7 +728,7 @@ if (roundsUsed > 0) {
   assessmentOut = fa;
   recommendation = fa.recommendation;
 } else {
-  assessmentOut = await triage.ask<Assessment>(finalAsk(summary));
+  assessmentOut = await triage.ask<Assessment>(finalAsk(summary, GATE_LINE));
   recommendation = "none";
 }
 const assessment = assessmentOut;
@@ -759,8 +758,12 @@ const reportMd = [
   "",
   assessment.verdict,
   "",
-  "## Repo checks (all " + gate.length + ", mirroring CI) — " +
-    (roundsUsed > 0 ? (gateGreen ? "green after the final fix round" : "RED after the final fix round") : "all passed"),
+  "## Mechanical gate (" + gate.length + " detected check" + (gate.length === 1 ? "" : "s") + ") — " +
+    (gate.length === 0
+      ? "nothing detected in this repo — no mechanical floor"
+      : roundsUsed > 0
+        ? (gateGreen ? "green after the final fix round" : "RED after the final fix round")
+        : "all passed"),
   "",
   ...gate.map((g) => "- pass — " + g.name),
   "",
@@ -786,12 +789,14 @@ const reportMd = [
   "",
   "## How this was checked",
   "",
-  "- The repo's own checks all ran and passed before review: " + gate.map((g) => g.name).join("; ") + ".",
+  ...(gate.length > 0
+    ? ["- The repo's own detected checks all ran and passed before review: " + gate.map((g) => g.name).join("; ") + "."]
+    : ["- The gate detected no checks in this repo — the review ran without a mechanical floor."]),
   "- Each finding was re-checked by an independent reader that did not write it (" + nVerified +
     " verified, " + nUnconfirmed + " unconfirmed).",
   ...(roundsUsed > 0
     ? [
-        "- After each fix round the repo checks re-ran" + (gateGreen ? " and finished green" : " — still failing") +
+        "- After each fix round the gate re-ran" + (gateGreen ? " and finished green" : " — still failing") +
         ", every attempted fix was verified by an independent reader, and a fresh-eyes reviewer scanned the fix diff.",
         "- The fixes are uncommitted in the working tree — inspect with `git diff` and commit when satisfied.",
       ]
@@ -803,7 +808,7 @@ try {
     title: roundsUsed > 0 ? "Code review and fix report" : "Code review report",
     description:
       tracked.length === 0
-        ? "Clean change: all repo checks passed and no findings survived review."
+        ? "Clean change: the gate passed and no findings survived review."
         : tracked.length + " confirmed finding(s), " + nFixed + " fixed — " + assessment.risk + " risk" +
           (roundsUsed > 0 ? ", recommendation " + recommendation : ""),
     primary: true,
@@ -825,16 +830,21 @@ return {
         (allDropped.length ? " (" + allDropped.length + " dropped at triage as duplicates or out of scope.)" : ""),
   findings: reportedFindings,
   verified: [
-    "all " + gate.length + " repo checks ran and passed (they mirror CI): " + gate.map((g) => g.name).join("; "),
+    ...(gate.length > 0
+      ? ["the mechanical gate ran the repo's own detected checks (all passed): " + gate.map((g) => g.name).join("; ")]
+      : []),
     "every reported finding was re-checked by an independent reader that did not write it",
     ...(roundsUsed > 0
       ? [
           "every attempted fix was verified by an independent reader, and a fresh-eyes reviewer scanned the fix diff",
-          "the repo checks re-ran after the final fix round — " + (gateGreen ? "all green" : "still failing"),
+          "the gate re-ran after the final fix round — " + (gateGreen ? "all green" : "still failing"),
         ]
       : []),
   ],
   notCovered: [
+    ...(gate.length === 0
+      ? ["no repo checks were detected by the gate — this review ran without a mechanical floor; ask the repo for its documented check command"]
+      : []),
     ...assessment.testGaps.map((t) => "test gap: " + t),
     ...assessment.residualRisks.map((r) => "residual: " + r),
     "runtime behavior beyond the repo's test suites was not exercised — this was a static review",

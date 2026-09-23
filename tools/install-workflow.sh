@@ -106,13 +106,14 @@ ledger_record() {  # <ledger> <name> <file-deployed>
 
 # The skill dir baked into the installed copy: explicit override wins,
 # then the target harness's own root, then the ~/.agents compatibility
-# root, then the remaining roots — validated by scripts/graph.py's
-# presence, so a bare dir never bakes in.
+# root, then the remaining roots — validated by SKILL.md's presence (the
+# same marker sync.sh gates skill discovery on), so a bare dir never
+# bakes in.
 resolve_skill_dir() {  # <harness> <skill-name>
   local h="$1" name="$2" d
   if [ -n "$SKILL_DIR_OVERRIDE" ]; then
-    [ -f "$SKILL_DIR_OVERRIDE/scripts/graph.py" ] && { echo "$SKILL_DIR_OVERRIDE"; return 0; }
-    echo "ERROR: --skill-dir has no scripts/graph.py: $SKILL_DIR_OVERRIDE" >&2
+    [ -f "$SKILL_DIR_OVERRIDE/SKILL.md" ] && { echo "$SKILL_DIR_OVERRIDE"; return 0; }
+    echo "ERROR: --skill-dir has no SKILL.md: $SKILL_DIR_OVERRIDE" >&2
     return 1
   fi
   local roots=()
@@ -125,7 +126,7 @@ resolve_skill_dir() {  # <harness> <skill-name>
     claude) roots+=("$HOME/.zcode/skills/$name"  "$HOME/.omp/agent/skills/$name") ;;
   esac
   for d in "${roots[@]}"; do
-    [ -f "$d/scripts/graph.py" ] && { echo "$d"; return 0; }
+    [ -f "$d/SKILL.md" ] && { echo "$d"; return 0; }
   done
   echo "ERROR: no installed copy of $name found to bake (checked the .$h, .agents, and sibling roots)" >&2
   echo "       run tools/sync.sh first, or pass --skill-dir <path>" >&2
@@ -185,6 +186,13 @@ install_master() {  # <master-file> <harness> <skill-name>
 }
 
 fail=0
+# A --skill-dir override names ONE skill: restrict the master loop to it,
+# so the override never bakes another skill's workflows with its dir.
+# any_skill tracks that the override matched something — a non-matching
+# basename must fail loudly, never silently install nothing.
+ONLY_SKILL=""
+[ -n "$SKILL_DIR_OVERRIDE" ] && ONLY_SKILL="$(basename "$SKILL_DIR_OVERRIDE")"
+any_skill=0
 for h in "${targets[@]}"; do
   # Each skill that ships a workflows/ dir contributes its dialect files
   # for this harness: *.dwf.ts belongs to zcode, *.js to claude. Other
@@ -193,6 +201,10 @@ for h in "${targets[@]}"; do
   for master in "$PKG_ROOT"/skills/*/workflows/*; do
     [ -f "$master" ] || continue
     skill="$(basename "$(dirname "$(dirname "$master")")")"
+    if [ -n "$ONLY_SKILL" ] && [ "$skill" != "$ONLY_SKILL" ]; then
+      continue
+    fi
+    any_skill=1
     case "$master" in
       *.dwf.ts) [ "$h" = zcode ] || continue ;;
       *.js)     [ "$h" = claude ] || continue ;;
@@ -205,5 +217,9 @@ for h in "${targets[@]}"; do
     echo "note  no workflow dialect files for $h under skills/*/workflows/"
   fi
 done
+if [ -n "$ONLY_SKILL" ] && [ "$any_skill" = 0 ]; then
+  echo "ERROR: --skill-dir $SKILL_DIR_OVERRIDE matches no skill under skills/*/workflows/ (expected skills/$ONLY_SKILL/workflows/*)" >&2
+  exit 1
+fi
 
 exit $fail

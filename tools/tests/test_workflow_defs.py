@@ -291,11 +291,15 @@ class InstallerBase(unittest.TestCase):
         self.home.mkdir()
 
     def stub_skill(self, harness):
-        """A minimal installed skill copy — just enough for the
-        installer's scripts/graph.py validation."""
-        d = self.home / f".{harness}" / "skills" / "spec-to-prod" / "scripts"
-        d.mkdir(parents=True)
-        (d / "graph.py").write_text("# stub\n")
+        """Minimal installed skill copies — just enough for the
+        installer's SKILL.md validation. One stub per skill present in
+        the copied repo, so a second skill changes nothing here."""
+        for skill in sorted((self.repo / "skills").iterdir()):
+            if not (skill / "SKILL.md").is_file():
+                continue
+            d = self.home / f".{harness}" / "skills" / skill.name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "SKILL.md").write_text("---\nname: stub\n---\n")
 
     def run_install(self, *argv):
         return subprocess.run(
@@ -424,10 +428,12 @@ class InstallTests(InstallerBase):
 
     def test_project_mode_installs_into_repo_roots(self):
         proj = self.tmp / "proj"
-        (proj / ".zcode" / "skills" / "spec-to-prod" / "scripts").mkdir(
-            parents=True)
-        (proj / ".zcode" / "skills" / "spec-to-prod" / "scripts" /
-         "graph.py").write_text("# stub\n")
+        for skill in sorted((self.repo / "skills").iterdir()):
+            if not (skill / "SKILL.md").is_file():
+                continue
+            d = proj / ".zcode" / "skills" / skill.name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "SKILL.md").write_text("---\nname: stub\n---\n")
         r = subprocess.run(
             ["bash", str(self.repo / "tools" / "install-workflow.sh"),
              "zcode", "--project", "--repo", str(proj)],
@@ -443,6 +449,28 @@ class InstallTests(InstallerBase):
         r = self.run_install("zcode")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("ERROR", r.stderr + r.stdout)
+
+    def test_skill_dir_override_installs_only_that_skill(self):
+        # a --skill-dir names ONE skill: its workflows bake with that dir
+        # and no other skill's workflows are touched in the same call
+        self.stub_skill("zcode")
+        override = self.home / ".zcode" / "skills" / "spec-to-prod"
+        r = self.run_install("zcode", "--skill-dir", str(override))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(
+            (self.home / ".zcode" / "workflows" / "spec-run.dwf.ts").is_file())
+        self.assertFalse(
+            (self.home / ".zcode" / "workflows" / "spec-code-review.dwf.ts").exists(),
+            "an override must scope the install loop to its own skill")
+
+    def test_skill_dir_override_for_unknown_skill_fails_loudly(self):
+        # a basename matching no skill under skills/*/workflows/ is an
+        # error, never a silent install-nothing exit 0
+        self.stub_skill("zcode")
+        r = self.run_install(
+            "zcode", "--skill-dir", str(self.home / "nope" / "not-a-skill"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("matches no skill", r.stderr + r.stdout)
 
     def test_sync_installs_and_verifies_workflows(self):
         r1 = subprocess.run(

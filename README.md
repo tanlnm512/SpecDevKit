@@ -15,8 +15,12 @@ This repo — published on GitHub as **SpecDevKit**
 every skill lives at `skills/<name>/`, and one shared, harness-neutral install
 pipeline (`tools/sync.sh`) installs every skill it finds there to every
 supported coding-agent harness in one pass. `spec-to-prod` is the first
-resident skill; § Adding a skill to this repo below is the contract a
-second one follows.
+resident skill; `spec-code-review` — the portable three-stage code review
+(the repo's own detected checks as a mechanical gate, then specialist
+lenses with triage and independent confirmation of every finding, then
+synthesis, plus an optional author-fix loop ending in a merge
+recommendation) — is the second; § Adding a skill to this repo below is
+the contract any further one follows.
 
 The single organizing rule: **the doc state under `specs/<name>/` is the
 only state.** Every workflow node's readiness is derived from it; nothing

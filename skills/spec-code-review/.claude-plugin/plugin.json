@@ -1,0 +1,11 @@
+{
+  "name": "spec-code-review",
+  "version": "0.1.0",
+  "description": "Portable three-stage code review for any git repository.",
+  "author": {
+    "name": "Stanley",
+    "email": "minhtan512@gmail.com"
+  },
+  "repository": "https://github.com/tanlnm512/SpecDevKit",
+  "license": "MIT"
+}
