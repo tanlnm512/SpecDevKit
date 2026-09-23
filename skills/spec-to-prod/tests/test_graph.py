@@ -2355,6 +2355,24 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertEqual(text.count("## Shared protocol"), 1)
         self.assertIn("Tier: standard", text)
 
+    def test_merged_missing_brief_skip_names_the_real_file(self):
+        # the merged designer item's brief field is None (it carries
+        # briefs[]): a missing brief file must be named in the skip line,
+        # never "agents/None"
+        real = graph.read_raw
+        buf = io.StringIO()
+        with unittest.mock.patch.object(
+                graph, "read_raw",
+                lambda p: None if p.name == "spec-qa.md" else real(p)), \
+             contextlib.redirect_stdout(buf):
+            written = graph.write_wave_payloads(
+                compute(self.standard), self.standard,
+                self.standard.parents[1], self._tmp / "skip-wave")
+        self.assertEqual(written, [])
+        self.assertIn("SKIPPED (brief not found: agents/spec-qa.md)",
+                      buf.getvalue())
+        self.assertNotIn("agents/None", buf.getvalue())
+
     def test_large_keeps_the_three_payload_design_wave(self):
         roles = sorted(ln.split("role: ")[1].split(",")[0]
                        for ln in self.payload_lines(self.large))

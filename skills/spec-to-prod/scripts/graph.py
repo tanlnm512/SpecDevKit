@@ -895,8 +895,15 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     for item in items:
         text = build_payload(item, spec_dir, repo, wave)
         if text is None:
+            # build_payload's None does not say which of a merged item's
+            # briefs was unreadable (its brief field is None) — re-resolve
+            # so the skip line names the real file
+            names = item.get("briefs") or [item["brief"]]
+            missing = next((b for b in names
+                            if read_raw(SKILL_DIR / "agents" / b) is None),
+                           names[0])
             print(f"   payload: SKIPPED (brief not found: "
-                  f"agents/{item['brief']})")
+                  f"agents/{missing})")
             continue
         target.mkdir(parents=True, exist_ok=True)
         path = target / item["filename"]
