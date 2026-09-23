@@ -352,7 +352,8 @@ async function main() {
         const em = body.match(/__EXIT__ (\d+)/);
         const code = em ? em[1] : "?";
         log("  closing precheck: audit.py " + m + " → exit " + code);
-        if (code !== "0" && body.trim()) {
+        // scope/clean exit 0 with findings — the tail rides on every exit
+        if (body.trim()) {
           const lines = body.trim().split("\n");
           for (const line of lines.slice(Math.max(0, lines.length - 7), lines.length - 1)) {
             log("    " + line);

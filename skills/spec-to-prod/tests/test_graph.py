@@ -2360,6 +2360,31 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
                        for ln in self.payload_lines(self.large))
         self.assertEqual(roles, ["planner", "qa", "tech"])
 
+    def test_repair_stays_single_role_at_standard_tier(self):
+        # D-024: --repair always emits single-role payloads — a repair run
+        # must never carry the merged whole-docset designer payload
+        wave = self._tmp / "repair-wave"
+        r = run_cli(self.standard, "--emit-spawns", "--repair", "plan",
+                    "--wave-dir", str(wave))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted(p.name for p in wave.glob("*.md")),
+                         ["planner.md", "qa.md", "tech.md"])
+        self.assertIn("repair: plan already in the frontier", r.stdout)
+
+    def test_standard_design_stretch_launches_as_a_wave(self):
+        # the merged designer is ONE payload but not a light node — the
+        # default tier's design stretch stays a workflow wave (D-024),
+        # never a "one light doc node" inline advisory
+        r = run_cli(self.standard, "--launch-check")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        adv = json.loads(r.stdout)
+        self.assertEqual(adv["weight"], "wave")
+        self.assertTrue(adv["launch_workflow"])
+        self.assertEqual(adv["payloads"], 1)
+        self.assertEqual(sorted(adv["frontier_agents"]),
+                         ["plan", "qa", "tech"])
+        self.assertIn("merged design payload", adv["reason"])
+
     def test_closing_due_state_prepares_the_reviewer_payload(self):
         lines = self.payload_lines(self.closing)
         self.assertEqual(len(lines), 1, lines)
@@ -2397,6 +2422,29 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertIn("closing precheck: audit.py scope", r.stdout)
         self.assertIn("closing precheck: audit.py dod --dry-run", r.stdout)
         self.assertIn("AWAITING HUMAN: closing-audit", r.stdout)
+
+    def test_prechecks_honor_the_repo_override(self):
+        # D-023: under `--repo <path> --run` the pause evidence is computed
+        # against the declared repo — every precheck argv carries the
+        # override, never audit.py's grandparent/cwd guess (check.py and
+        # the payloads in the same loop already honor it)
+        state = {"spec_dir": str(self.fresh)}
+        captured = []
+
+        def recorder(argv):
+            captured.append(argv)
+            return 0, "ok"
+
+        with unittest.mock.patch.object(graph, "_audit_mode_output",
+                                        recorder), \
+                contextlib.redirect_stdout(io.StringIO()):
+            graph.log_before_audit_precheck(state, "/declared/repo")
+            graph.log_closing_precheck(state, "/declared/repo")
+        self.assertEqual(captured[0][:2],
+                         ["pre-execute", str(self.fresh)])
+        self.assertEqual(len(captured), 5)  # pre-execute + 4 closing modes
+        for argv in captured:
+            self.assertEqual(argv[-2:], ["--repo", "/declared/repo"], argv)
 
     def test_scaffold_ships_the_research_skip_marker(self):
         # its own scaffold — this test writes spec.md, and the shared

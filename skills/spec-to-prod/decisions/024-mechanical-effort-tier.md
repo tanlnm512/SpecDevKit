@@ -17,7 +17,9 @@ authors plan.md → tech-spec.md → test.md → task.md in that order,
 carrying the four briefs concatenated with the shared protocol once; a
 partial write self-heals (a missing doc's node stays not-done and
 spawns individually next wave), and `--repair` always emits single-role
-payloads. `--state-json` carries `effort`; every gate, check.py, the
+payloads. `--launch-check` reads the merged payload as weight `wave` —
+the design stretch stays a workflow wave, only collapsed to one spawn.
+`--state-json` carries `effort`; every gate, check.py, the
 docset contract, and both audits are identical at every tier.
 
 **Why**: the artifacts and checks carry the quality; the multi-agent

@@ -347,7 +347,8 @@ def mode_pre_execute(spec_dir: Path, repo: Path, run: bool) -> int:
         else:
             print("  PASS  gate 3 clean tree")
         spec_text = (spec_dir / "spec.md").read_text(
-            encoding="utf-8", errors="replace")
+            encoding="utf-8", errors="replace") \
+            if (spec_dir / "spec.md").exists() else ""
         m = BRANCH_FIELD.search(spec_text)
         cur = git(repo, "branch", "--show-current").stdout.strip()
         if not m or "<" in m.group(1):

@@ -258,11 +258,14 @@ class ParityTests(unittest.TestCase):
 
     def test_both_carry_the_launch_weight_preflight(self):
         # D-022: the dialects' metadata points the invoker at graph.py
-        # --launch-check — only a weight "wave" span justifies a launch
+        # --launch-check — only a weight "wave" span justifies a launch.
+        # Pinned on the quoted rule sentence per dialect (the bare 'wave'
+        # substring matches dozens of unrelated wave-loop lines and could
+        # never fail)
         for path in (DWF_TS, WF_JS):
-            text = path.read_text()
-            self.assertIn("--launch-check", text, path.name)
-            self.assertIn('wave', text, path.name)
+            self.assertIn("--launch-check", path.read_text(), path.name)
+        self.assertIn('(weight "wave")', DWF_TS.read_text(), DWF_TS.name)
+        self.assertIn("weight 'wave'", WF_JS.read_text(), WF_JS.name)
 
     def test_both_precheck_the_closing_stop(self):
         # D-023: at the closing-audit stop both dialects spawn the

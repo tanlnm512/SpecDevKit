@@ -26,8 +26,9 @@ Modes:
                  authoritative oracle for tests and validators.
   --launch-check  the spec-run launch advisory as JSON: whether the dynamic
                  workflow should be launched for this doc state at all.
-                 weight `wave` (a multi-payload wave or an execute span —
-                 the heavy spans the loop automation exists for) is the
+                 weight `wave` (a multi-payload wave, an execute span, or
+                 the merged design payload — the heavy spans the loop
+                 automation exists for) is the
                  only launch_workflow=true; `gate` (a human gate is
                  pending — the workflow would read state once and stop
                  AWAITING HUMAN seconds later, deciding nothing), `single`
@@ -719,9 +720,12 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
         ]
     elif node == "closing-audit":
         task_text = read_doc(spec_dir / "task.md") or ""
-        bm = re.search(r"Before-audit\*{0,2}\s*:\s*passed\s+@\s+(\S+)",
-                       task_text)
-        base = bm.group(1) if bm else "HEAD"
+        # The same hex-validated parser audit.py's effective_base routes
+        # into its no-shell git(): a SHA or the non-git dash, never raw
+        # marker text — this value is interpolated into a git command the
+        # reviewer runs, so `HEAD~2;id`-shaped text must not survive.
+        base = (specstate.lifecycle_shas(task_text).get("before")
+                or "HEAD")
         lines = [
             f"- spec_dir: {spec_dir}",
             "- Mode: implementation-diff — the required closing review "
@@ -753,7 +757,7 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
 
 
 def frontier_payloads(state: dict, spec_dir: Path,
-                      repo: Path) -> list[dict]:
+                      repo: Path, merge: bool = True) -> list[dict]:
     """One record per payload this wave writes: one per frontier agent node,
     one per runnable task for execute (named implementer-T###.md when there
     are several, implementer.md when one), plus — while the research-gate is
@@ -763,10 +767,13 @@ def frontier_payloads(state: dict, spec_dir: Path,
     gates and never spawns them). D-024: at effort tier `standard` the
     plan ∥ tech ∥ qa wave (plus the tasks wave it feeds) collapses into ONE
     merged design payload — one spawn writes plan.md, tech-spec.md,
-    test.md, and task.md; docset, check.py, and the gates are unchanged."""
+    test.md, and task.md; docset, check.py, and the gates are unchanged.
+    `merge=False` (the --repair path) keeps every payload single-role —
+    a repair run must never re-author the whole docset."""
     items: list[dict] = []
     merge_design = (
-        state.get("effort") == "standard"
+        merge
+        and state.get("effort") == "standard"
         and all(x in state["frontier"] for x in ("plan", "tech", "qa")))
     for node in state["frontier"]:
         if node not in AGENT_BRIEFS:
@@ -874,12 +881,13 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     frontier (--emit-spawns --repair NODE, the single-agent repair-run
     instrument — e.g. a stale-survey converge re-survey, whose payload
     carries the DELTA RE-SURVEY block); already-frontier nodes are not
-    duplicated."""
+    duplicated. A repair run never emits the merged designer payload
+    (D-024: --repair always emits single-role payloads)."""
     wave = wave_number(state)
     target = Path(wave_dir) if wave_dir else (
         spec_dir / "spawns" / f"wave-{wave}")
     written: list[tuple[Path, str, str]] = []
-    items = frontier_payloads(state, spec_dir, repo)
+    items = frontier_payloads(state, spec_dir, repo, merge=not repair)
     if repair and repair not in {i["node"] for i in items}:
         role, brief = AGENT_BRIEFS[repair]
         items.append({"node": repair, "role": role, "brief": brief,
@@ -1014,12 +1022,18 @@ def _audit_mode_output(mode_argv: list[str]) -> tuple:
     return r.returncode, r.stdout
 
 
-def log_before_audit_precheck(state: dict) -> None:
+def log_before_audit_precheck(state: dict, repo_override: str | None) -> None:
     """D-023: at the before-audit pause --run has already run the
     mechanical half of the six gates (audit.py pre-execute — clean tree,
     branch, baseline dry) so the one approval session opens with results,
-    never honor-system claims. Judgment gates stay in the pause text."""
-    rc, out = _audit_mode_output(["pre-execute", str(state["spec_dir"])])
+    never honor-system claims. Judgment gates stay in the pause text.
+    The same --repo override --run itself honors (check.py, payloads) —
+    the evidence must be computed against the declared repo, never the
+    spec dir's grandparent audit.py would guess."""
+    args = ["pre-execute", str(state["spec_dir"])]
+    if repo_override is not None:
+        args += ["--repo", str(repo_override)]
+    rc, out = _audit_mode_output(args)
     if rc is None:
         return
     print(f"before-audit precheck: audit.py pre-execute "
@@ -1028,16 +1042,20 @@ def log_before_audit_precheck(state: dict) -> None:
         print(_indent(out.strip(), "    "))
 
 
-def log_closing_precheck(state: dict) -> None:
+def log_closing_precheck(state: dict, repo_override: str | None) -> None:
     """D-023: at the closing-audit pause --run has already run the
     read-only closing modes — scope, clean, dod (dry), proofs (dry
     classification) — so the ack session adjudicates with the diff-facing
     evidence in hand. Nothing here executes test.md commands: proofs and
-    dod run without --run, and evidence waits for closing.md."""
+    dod run without --run, and evidence waits for closing.md. Like the
+    before-audit precheck, every mode runs against the --repo override
+    --run itself honors."""
     for mode_argv in (("scope",), ("clean",), ("dod", "--dry-run"),
                       ("proofs",)):
         argv = [*mode_argv, str(state["spec_dir"])]
-        if mode_argv[0] == "clean":
+        if repo_override is not None:
+            argv += ["--repo", str(repo_override)]
+        elif mode_argv[0] == "clean":
             # clean resolves the repo from cwd, not the spec dir — pin it
             argv += ["--repo", str(Path(state["spec_dir"]).parent.parent)]
         rc, out = _audit_mode_output(argv)
@@ -1047,8 +1065,11 @@ def log_closing_precheck(state: dict) -> None:
             continue
         print(f"closing precheck: audit.py {' '.join(mode_argv)} "
               f"→ exit {rc}")
+        # scope/clean return 0 with findings — the file-level UNMENTIONED/
+        # SUSPECT lines reach the pause log on every exit, like the
+        # before-audit precheck prints its full output regardless of rc
         tail = out.strip().splitlines()[-6:] if out.strip() else []
-        if tail and rc != 0:
+        if tail:
             print(_indent("\n".join(tail), "    "))
 
 
@@ -1075,7 +1096,8 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     same doc-state oracle as every other mode — find_pause first (a pending
     human gate can never be worked past by launching), then the payload
     count from frontier_payloads (read-only: nothing is written). Only
-    `wave` — a multi-payload wave or any execute span — says launch."""
+    `wave` — a multi-payload wave, any execute span, or the merged design
+    payload (four briefs authoring the docset, D-024) — says launch."""
     n = state["nodes"]
     advisory = {"spec_dir": str(spec_dir),
                 "launch_workflow": False, "gate": None,
@@ -1103,6 +1125,15 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
         return {**advisory, "weight": weight, "reason": reason}
     payloads = frontier_payloads(state, spec_dir, repo)
     advisory["payloads"] = len(payloads)
+    if len(payloads) == 1 and payloads[0]["node"] == "design":
+        # the merged designer (D-024) is one payload but not a light node:
+        # four briefs + protocol authoring the whole docset — the design
+        # stretch stays a workflow wave, only collapsed to one spawn
+        return {**advisory, "weight": "wave", "launch_workflow": True,
+                "reason": "one merged design payload — four briefs "
+                          "(plan/tech/qa/tasks) authoring plan, tech-spec, "
+                          "test, and task (D-024) — heavy span, launch the "
+                          "spec-run workflow"}
     if len(payloads) == 1 and payloads[0]["node"] != "execute":
         return {**advisory, "weight": "single",
                 "reason": "one light doc node ("
@@ -1138,9 +1169,9 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
             # run by the time the human reads the stop — results, never
             # honor-system claims (judgment stays in the pause text).
             if pause[0] == "before-audit":
-                log_before_audit_precheck(state)
+                log_before_audit_precheck(state, repo_override)
             elif pause[0] == "closing-audit":
-                log_closing_precheck(state)
+                log_closing_precheck(state, repo_override)
             print(f"AWAITING HUMAN: {pause[0]}: {pause[1]}")
             return 0
         frontier = state["frontier"]
@@ -1195,10 +1226,12 @@ def emit_spawns(spec_dir: Path, repo_override: str | None,
                 wave_dir: str | None, repair: str | None = None) -> int:
     """--emit-spawns: write this wave's payloads and list them. With
     --repair NODE, the named agent node's payload is emitted even when
-    done/not in the frontier (single-agent repair run)."""
+    done/not in the frontier (single-agent repair run — always single-role
+    payloads, never the merged designer)."""
     state = compute_state(spec_dir, repo_override)
     items = frontier_payloads(state, spec_dir,
-                              resolved_repo(spec_dir, repo_override))
+                              resolved_repo(spec_dir, repo_override),
+                              merge=not repair)
     if not items and not repair:
         print("no agent payloads to emit — the frontier holds no agent "
               f"node (frontier: {', '.join(state['frontier']) or 'empty'})")

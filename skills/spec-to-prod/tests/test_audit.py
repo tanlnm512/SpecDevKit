@@ -865,6 +865,15 @@ class PreExecuteTests(unittest.TestCase):
         self.assertIn("FAIL  gate 2 baseline", out)
         self.assertIn("exit 3", out)
 
+    def test_missing_spec_md_fails_clean_not_a_traceback(self):
+        # a git-present dir without spec.md reads as a gate-5 FAIL (no
+        # Branch field to match), never a FileNotFoundError traceback
+        (self.spec / "spec.md").unlink()
+        code, out = self.run_pre(available=True, branch="feature/mini-calc")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  gate 5 branch — spec.md records no filled",
+                      out)
+
     def test_positional_is_required(self):
         with contextlib.redirect_stdout(io.StringIO()):
             code = audit.main(["pre-execute"])

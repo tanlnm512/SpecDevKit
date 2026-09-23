@@ -353,7 +353,8 @@ if (!specName) {
       const r = await world.run("python3",
         [skillDir + "/scripts/audit.py"].concat(m).concat(["specs/" + specName]));
       log("  closing precheck: audit.py " + m.join(" ") + " → exit " + r.exitCode);
-      if (r.exitCode !== 0 && r.stdout.trim()) {
+      // scope/clean exit 0 with findings — the tail rides on every exit
+      if (r.stdout.trim()) {
         const tail = r.stdout.trim().split("\n").slice(-6);
         for (const line of tail) log("    " + line);
       }
