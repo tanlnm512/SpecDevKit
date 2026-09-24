@@ -47,6 +47,32 @@ ASK_ANCHORS = [
 # the fresh authoritative gate re-run owns those.
 GATE_EXCLUSION = '.finding.lens !== "gate"'
 
+# The panel's third representation: each side of the rubric is also an
+# installable agent brief (agents/code-review-<lens>.md). The lens focus
+# strings below are asserted in BOTH workflow masters AND the matching
+# brief, so no representation can drift from the others.
+BRIEFS = SKILL / "agents"
+LENS_BRIEFS = {
+    "correctness": BRIEFS / "code-review-correctness.md",
+    "security": BRIEFS / "code-review-security.md",
+    "quality": BRIEFS / "code-review-quality.md",
+}
+FIXER_BRIEF = BRIEFS / "code-review-fixer.md"
+PANEL_PROTOCOL = BRIEFS / "_panel-protocol.md"
+LENS_FOCUS = {
+    "correctness":
+        "logic errors, broken edge cases, wrong or missing error handling, "
+        "concurrency hazards, broken contracts between caller and callee.",
+    "security":
+        "untrusted input paths, injection, secrets and token handling, "
+        "unsafe deserialization, permission changes, destructive operations.",
+    "quality":
+        "complexity the next reader pays for, over-engineering, misleading "
+        "names, comments and docs that drift from the code, and tests — "
+        "behavior this change alters with no test covering it, tests that "
+        "cannot fail.",
+}
+
 
 def read(path):
     text = path.read_text(encoding="utf-8")
@@ -54,6 +80,12 @@ def read(path):
     # line, or tools/workflow-defs.py --bake would corrupt the master
     assert 'const SKILL_DIR_BAKED = "__SKILL_DIR__";' in text, path.name
     return text
+
+
+def flat(text):
+    """Collapse all whitespace to single spaces — prose anchors must
+    match across each file's own line wrapping."""
+    return " ".join(text.split())
 
 
 class ParityTests(unittest.TestCase):
@@ -86,8 +118,8 @@ class ParityTests(unittest.TestCase):
 
     def test_ask_anchors_are_shared(self):
         for anchor in ASK_ANCHORS:
-            self.assertIn(anchor, self.ts, anchor)
-            self.assertIn(anchor, self.js, anchor)
+            self.assertIn(anchor, flat(self.ts), anchor)
+            self.assertIn(anchor, flat(self.js), anchor)
 
     def test_fix_loop_never_verifies_gate_lens_with_a_reader(self):
         self.assertIn(GATE_EXCLUSION, self.ts)
@@ -150,6 +182,62 @@ class ClaudeDialectTests(unittest.TestCase):
         self.assertIn("scope-probe", self.js)
         # the gate command reaches the probe shell-quoted, never bare
         self.assertIn('shq(skillDir + "/scripts/gate.sh")', self.js)
+
+
+class AgentBriefTests(unittest.TestCase):
+    """Each side of the rubric is materialized as an agent brief — the
+    panel's third representation after the two workflow dialects. The
+    briefs must exist, carry def-generator-compatible frontmatter, and
+    hold the same lens focus strings the workflows dispatch on."""
+
+    def test_every_rubric_side_has_a_brief(self):
+        for label, path in LENS_BRIEFS.items():
+            self.assertTrue(path.is_file(), f"{label}: {path}")
+        self.assertTrue(FIXER_BRIEF.is_file())
+        self.assertTrue(PANEL_PROTOCOL.is_file())
+        # shared prose is _-prefixed: never installed as an agent def
+        for path in BRIEFS.glob("*.md"):
+            if path.stem.startswith("_"):
+                continue
+            self.assertIn(path, list(LENS_BRIEFS.values()) + [FIXER_BRIEF],
+                          f"unpinned brief: {path.name} — add it to the tests")
+
+    def test_brief_frontmatter_is_def_generator_compatible(self):
+        # tools/omp/agent-defs parse name, description, tools (comma
+        # list), model, effort — the shape every dialect derives from
+        for path in list(LENS_BRIEFS.values()) + [FIXER_BRIEF]:
+            text = path.read_text(encoding="utf-8")
+            m = re.search(r"^name: (\S+)", text, re.M)
+            self.assertIsNotNone(m, f"name: in {path.name}")
+            self.assertEqual(m.group(1), path.stem)
+            self.assertIn("description: ", text)
+            self.assertIn("model: inherit", text)
+            self.assertIn("tools: ", text)
+            self.assertIn("disallowedTools:", text)
+
+    def test_lens_focus_strings_match_every_representation(self):
+        ts = DWF_TS.read_text(encoding="utf-8")
+        js = WF_JS.read_text(encoding="utf-8")
+        for label, focus in LENS_FOCUS.items():
+            brief = LENS_BRIEFS[label].read_text(encoding="utf-8")
+            for text, name in ((ts, "dwf.ts"), (js, "js"),
+                               (brief, f"{label} brief")):
+                self.assertIn(flat(focus), flat(text),
+                              f"{label} focus in {name}")
+
+    def test_panel_protocol_carries_the_shared_bar(self):
+        text = PANEL_PROTOCOL.read_text(encoding="utf-8")
+        for anchor in (
+            "discrete and actionable; introduced by this change",
+            "escalate and say so plainly",
+            "Zero findings is the expected answer",
+        ):
+            self.assertIn(anchor, flat(text))
+
+    def test_fixer_brief_pins_the_hard_rules(self):
+        text = FIXER_BRIEF.read_text(encoding="utf-8")
+        for anchor in ("Never commit", "pin the corrected behavior in the test"):
+            self.assertIn(anchor, flat(text))
 
 
 if __name__ == "__main__":

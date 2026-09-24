@@ -15,7 +15,7 @@ description: >-
   "review and fix" — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -73,6 +73,18 @@ parallel where you can:
   misleading names, doc drift, and tests: changed behavior with no
   covering test, tests that cannot fail.
 
+Each side of this rubric is materialized as an agent brief inside the
+skill — `agents/code-review-correctness.md`, `-security.md`,
+`-quality.md` (each carrying the full checklist for its side) over the
+shared `agents/_panel-protocol.md`; the fix loop's author role is
+`agents/code-review-fixer.md`. Where the harness supports subagent
+dispatch (Claude Code, omp, opencode, Factory Droid — sync installs
+the briefs as real subagent types), spawn one brief per lens instead
+of simulating a lens yourself: same rubric, same bar, real
+independence. Where it does not, cover the lenses inline — the briefs'
+rubric sections are the checklist, so a lens is never covered from
+memory alone.
+
 Small diffs (roughly ≤400 added lines and ≤5 files) may collapse to one
 general reviewer covering all three lenses.
 
@@ -117,7 +129,8 @@ When the user asked to fix as well, run bounded rounds (default 2):
 
 1. An **author/fixer** fixes the confirmed findings in the working
    tree: minimal, repo style, NEVER commits, never weakens a test to
-   make a finding go away (pin corrected behavior instead).
+   make a finding go away (pin corrected behavior instead). Dispatch
+   `agents/code-review-fixer.md` where the harness supports subagents.
 2. Every attempted fix is verified by an independent reader: `fixed` /
    `unfixed` / `worse`.
 3. The gate re-runs; failures become findings the fixer must clear.

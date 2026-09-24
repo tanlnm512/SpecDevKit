@@ -6,6 +6,27 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.3.0 — 2026-09-24
+
+The panel's agents, materialized. Each side of the review rubric now
+ships as an installable agent brief under `agents/`:
+`code-review-correctness`, `code-review-security`, `code-review-quality`
+(each carrying the full checklist for its side of the rubric) and
+`code-review-fixer` (the fix loop's author role), over the shared
+`_panel-protocol.md` (the flagging bar, severity ladder, citation
+format, zero-findings rule — the contract every panel member shares).
+Harnesses with subagent dispatch (Claude Code, omp, opencode, Factory
+Droid, Antigravity) get them as real subagent types from
+`tools/sync.sh`, so the inline path dispatches genuine specialists
+instead of one agent simulating every lens; SKILL.md's Stage 2 and fix
+loop now say exactly that. The three lens briefs are pinned to the
+workflow masters by their focus strings — a third representation of
+the panel that cannot drift silently (tests/test_workflow_copies.py).
+
+Migration: none required — rerun `tools/sync.sh` to install the new
+agent defs alongside the existing skills and workflows.
+
+
 ## 0.2.0 — 2026-09-24
 
 Second dialect, plus the drift guard. `workflows/spec-code-review.js`
