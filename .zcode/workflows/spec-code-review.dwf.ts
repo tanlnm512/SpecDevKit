@@ -657,14 +657,18 @@ if (FIX_ROUNDS > 0 && allConfirmed.length > 0) {
       });
     }
 
+    // A reader cannot verify a check name: gate-lens entries in the stale
+    // pre-fixer snapshot were replaced above by the fresh authoritative
+    // gate re-run, so the verify wave covers code findings only.
+    const verifiable = unresolved.filter((t) => t.finding.lens !== "gate");
     const verifications = await Promise.all(
-      unresolved.map((t, i) =>
+      verifiable.map((t, i) =>
         agent("Verify round " + round + " fix " + (i + 1)).ask<Verification>(verifyAsk(t, outcome.notes.join(" | "))),
       ),
     );
-    for (let i = 0; i < unresolved.length; i++) {
+    for (let i = 0; i < verifiable.length; i++) {
       const v = verifications[i];
-      const t = unresolved[i];
+      const t = verifiable[i];
       t.fix = v.status;
       t.fixNote = "round " + round + ": " + v.note;
       report({ where: t.finding.where, what: t.finding.what, lens: t.finding.lens, fix: v.status, note: v.note, round });
