@@ -6,6 +6,36 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.2.0 — 2026-09-24
+
+Second dialect, plus the drift guard. `workflows/spec-code-review.js`
+ports the full protocol to the Claude Code dynamic-workflow runtime, so
+`tools/install-workflow.sh claude` (and `tools/sync.sh`) deliver the
+review to Claude Code exactly as the zcode dialect reaches zcode. The
+one-shot agent model forced three documented divergences (header of the
+file): system prompts ride at the head of each ask; cross-lens dedup
+runs as one explicit merge pass instead of a shared triage
+conversation; every fixer round embeds the full finding detail instead
+of relying on conversation context. Shell work (gate.sh, git) reaches
+the runtime only through probe agents returning stdout verbatim, and
+the report returns as the run result's `markdown` field.
+
+`tests/test_workflow_copies.py` pins the two masters together — shared
+phases, tunables, panel definition, ask anchors, report contract, and
+each runtime's structural invariants — the guard the hand-maintained
+two-dialect layout demands.
+
+Fix-loop correctness fix, applied to both dialects and to the repo's
+own project-scoped copy: the post-fix verification wave no longer
+spawns reader verifiers for gate-lens findings — a reader cannot
+verify a check name, and the fresh authoritative gate re-run owns
+those.
+
+Migration: none required. The zcode dialect's behavior is unchanged;
+rerun `tools/install-workflow.sh` (or sync) to pick up the fix and the
+new claude dialect.
+
+
 ## 0.1.0 — 2026-09-23
 
 First release. The review protocol of the validated workflow, packaged

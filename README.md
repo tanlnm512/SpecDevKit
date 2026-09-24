@@ -245,9 +245,11 @@ that copies out:
   with that root's own skill dir baked in. Standalone per-agent install:
   `tools/install-workflow.sh zcode|claude|all` (`--project` for the
   repo-local `.zcode/`/`.claude/` roots, `--check` to verify — both
-  refuse foreign destination files). The masters are committed
-  regenerate-only artifacts of `tools/workflow-defs.py`; never
-  hand-edit them.
+  refuse foreign destination files). The spec-to-prod masters are
+  committed regenerate-only artifacts of `tools/workflow-defs.py`; never
+  hand-edit them. `spec-code-review` ships its own dialect pair the
+  same way (zcode + Claude Code) with hand-maintained masters pinned
+  together by `skills/spec-code-review/tests/test_workflow_copies.py`.
 - **Antigravity personas** — the repo-root `agents/` dir is a
   committed, regenerate-only byte-verbatim copy of the skill's briefs:
   `agy plugin install` copies the repo wholesale, so the personas ship

@@ -15,7 +15,7 @@ description: >-
   "review and fix" — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -137,6 +137,13 @@ commit decision and message are the user's.
   `fix_rounds`, optional `skill_dir` override). A repo may keep its own
   project-scoped copy tuned to its exact CI set; the project copy wins
   there. Without the workflow, execute the stages inline as above.
+- **Claude Code**: run the installed dynamic workflow `spec-code-review`
+  (same args) — `tools/install-workflow.sh claude` bakes
+  `workflows/spec-code-review.js` into `~/.claude/workflows/` (a
+  project-scoped `.claude/workflows/` copy wins locally, same rule).
+  Its agents are one-shot: cross-lens dedup runs as one explicit merge
+  pass instead of a shared triage conversation, and the report returns
+  as the run result's `markdown` field.
 - **Other agents**: follow the stages inline; `scripts/gate.sh` is
   plain bash + python3 and is the only script you need.
 
