@@ -149,6 +149,18 @@ class ZcodeDialectTests(unittest.TestCase):
         self.assertIn('world.run("bash"', self.ts)
         self.assertIn("scripts/gate.sh", self.ts)
 
+    def test_panel_briefs_are_injected_at_run_time(self):
+        # no user-installable agent types on zcode: the briefs are read
+        # from the skill dir at run time and appended to the inline
+        # personas; a missing brief degrades to the inline rubric
+        self.assertIn("world.run(\"cat\"", self.ts)
+        for brief in ("_panel-protocol.md",
+                      "code-review-correctness.md",
+                      "code-review-security.md",
+                      "code-review-quality.md",
+                      "code-review-fixer.md"):
+            self.assertIn(brief, self.ts, brief)
+
 
 class ClaudeDialectTests(unittest.TestCase):
     """Claude Code dynamic workflows: `export const meta` as the first

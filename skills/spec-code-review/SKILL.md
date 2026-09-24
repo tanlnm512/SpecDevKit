@@ -151,7 +151,10 @@ commit decision and message are the user's.
   `spec-code-review` (args: `base`, `mode` fast/full/auto,
   `fix_rounds`, optional `skill_dir` override). A repo may keep its own
   project-scoped copy tuned to its exact CI set; the project copy wins
-  there. Without the workflow, execute the stages inline as above.
+  there. The zcode facade has no user-installable agent types, so the
+  workflow reads the panel briefs from the skill dir at run time and
+  injects them into the reviewer, triage and fixer personas. Without
+  the workflow, execute the stages inline as above.
 - **Claude Code**: run the installed dynamic workflow `spec-code-review`
   (same args) — `tools/install-workflow.sh claude` bakes
   `workflows/spec-code-review.js` into `~/.claude/workflows/` (a

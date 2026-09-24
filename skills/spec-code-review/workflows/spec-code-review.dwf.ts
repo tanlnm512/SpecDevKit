@@ -276,6 +276,36 @@ function gateNote(gate: GateResult[]): string {
   return "The repo's own checks the gate detected (" + gate.map((g) => g.name).join("; ") + ") all passed";
 }
 
+// The zcode facade has no user-installable agent types, so the panel
+// briefs under <skillDir>/agents/ are read at run time and appended to
+// the inline personas. Briefs sit outside the workspace, so files.read
+// cannot reach them — cat through world.run is the same seam gate.sh
+// uses. A missing brief degrades to the inline rubric, never an error.
+async function readBrief(file: string): Promise<string> {
+  const r = await world.run("cat", [skillDir + "/agents/" + file]);
+  return r.exitCode === 0 ? r.stdout.trim() : "";
+}
+
+async function withBrief(system: string, files: string[]): Promise<string> {
+  const bodies = (await Promise.all(files.map(readBrief))).filter(Boolean);
+  return bodies.length
+    ? system + "\n\nFull checklist(s) from the panel briefs:\n\n" + bodies.join("\n\n---\n\n")
+    : system;
+}
+
+// Which panel briefs each persona carries. The general reviewer covers
+// all three lenses, so it reads all three lens briefs.
+const BRIEF_FILES: Record<string, string[]> = {
+  correctness: ["code-review-correctness.md"],
+  security: ["code-review-security.md"],
+  quality: ["code-review-quality.md"],
+  general: [
+    "code-review-correctness.md",
+    "code-review-security.md",
+    "code-review-quality.md",
+  ],
+};
+
 function reviewAsk(lensDef: LensDef, files: number, lines: number, overCap: boolean, gateLine: string): string {
   const scope =
     "`git diff " + BASE + "` — " + files + " files, ~" + lines + " added lines" +
@@ -543,16 +573,22 @@ const panel: LensDef[] = modeUsed === "fast" ? [GENERAL] : LENSES;
 log("review mode: " + modeUsed + (modeUsed === "fast" ? " (small diff, one general reviewer)" : " (three specialists)"));
 
 const triage = agent("Triage editor", {
-  system:
+  system: await withBrief(
     "You are the triage editor of a code review panel. Reviewers hand you their raw findings lens by lens; you " +
     "dedupe across lenses, enforce the flagging bar (real, introduced by the change, actionable), and drop style " +
     "nits, speculation and pre-existing issues with a one-line reason. You are stingy but never suppress a real " +
     "defect to keep the count down.",
+    ["_panel-protocol.md"],
+  ),
 });
 
 const perLens = await Promise.all(
   panel.map(async (lensDef) => {
-    const review = await agent(lensDef.name, { system: lensDef.system }).ask<LensReview>(
+    const system = await withBrief(
+      lensDef.system,
+      BRIEF_FILES[lensDef.label] ?? [],
+    );
+    const review = await agent(lensDef.name, { system }).ask<LensReview>(
       reviewAsk(lensDef, changed.length, addedLines, diffOverCap, GATE_LINE),
     );
     log(lensDef.name + ": " + review.findings.length + " finding(s)");
@@ -606,7 +642,9 @@ const allChangedPaths: string[] = [];
 
 if (FIX_ROUNDS > 0 && allConfirmed.length > 0) {
   phase("Fix the confirmed findings and verify every fix");
-  const fixer = agent("Author and fixer", { system: FIXER_SYSTEM });
+  const fixer = agent("Author and fixer", {
+    system: await withBrief(FIXER_SYSTEM, ["code-review-fixer.md", "_panel-protocol.md"]),
+  });
   let gateFeedback = "";
 
   for (let round = 1; round <= FIX_ROUNDS; round++) {

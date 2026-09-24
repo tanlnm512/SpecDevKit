@@ -6,6 +6,18 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.3.2 — 2026-09-24
+
+The zcode facade now carries the full panel. With no user-installable
+agent types, the zcode workflow reads the panel briefs from the skill
+dir at run time (cat through the same world.run seam gate.sh uses) and
+injects them into the reviewer, triage and fixer personas: each lens
+reviewer carries its lens brief, the triage editor and fixer carry
+`_panel-protocol.md` and the fixer brief, and the general reviewer
+carries all three lens briefs. A missing brief degrades to the inline
+rubric, never an error. SKILL.md's launch discipline documents the
+injection; ZcodeDialectTests pins every brief as wired.
+
 ## 0.3.1 — 2026-09-24
 
 The Python family resolves the repo's own pytest before falling back to
