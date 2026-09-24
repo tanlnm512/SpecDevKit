@@ -6,6 +6,16 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.3.1 — 2026-09-24
+
+The Python family resolves the repo's own pytest before falling back to
+unittest discover: PATH pytest, then `.venv/bin/pytest` /
+`venv/bin/pytest`, then `uv run pytest` when the repo carries a
+`uv.lock` (so no environment is invented), then `python3 -m pytest`
+when importable. unittest discover remains the last resort — a red tail
+beats a skipped family. A repo whose tests import pytest but whose
+pytest lives in a venv no longer gates red on 263 collection errors.
+
 ## 0.3.0 — 2026-09-24
 
 The panel's agents, materialized. Each side of the review rubric now

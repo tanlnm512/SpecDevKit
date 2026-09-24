@@ -3,7 +3,8 @@ name: spec-code-review
 description: >-
   Portable three-stage code review for any git repository. Stage 1 runs the
   repo's own detected checks as the mechanical gate (scripts/gate.sh probes
-  Makefile targets, npm scripts, cargo, go, pytest/unittest, and shell syntax
+  Makefile targets, npm scripts, cargo, go, pytest/unittest (resolving the repo's own
+  pytest via PATH, repo venv, or uv run), and shell syntax
   on the diff). Stage 2 reviews the diff through separate lenses —
   correctness, security, quality & tests (one general reviewer on small
   diffs) — triaged by one editor with independent confirmation of every kept
@@ -47,7 +48,8 @@ bash <skill-dir>/scripts/gate.sh --plan             # what it would run
 ```
 
 It detects and runs the repo's OWN checks (Makefile targets, npm
-scripts, cargo/go, pytest or unittest discover, plus `bash -n` on every
+scripts, cargo/go, pytest or unittest discover (pytest resolved via PATH,
+the repo's venv, or `uv run` when the repo is uv-locked), plus `bash -n` on every
 changed `*.sh`) and prints a JSON array — one `{name, exit_code, tail}`
 per check. Rules:
 

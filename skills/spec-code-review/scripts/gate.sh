@@ -17,8 +17,10 @@
 #   package.json scripts (test, lint, typecheck)→ npm run <script>
 #   Cargo.toml                                  → cargo test
 #   go.mod                                      → go test ./...
-#   python (pyproject/setup.py + tests)         → pytest, falling back
-#                                                to unittest discover
+#   python (pyproject/setup.py + tests)         → pytest (PATH, repo
+#                                                venv, uv run, python3
+#                                                -m), else unittest
+#                                                discover
 #   always, when git is available: bash -n on every *.sh the diff
 #   against --base touches (committed or working-tree).
 # A family is skipped when its tool is not on PATH — a check that
@@ -102,6 +104,12 @@ if [ -f "$REPO/go.mod" ] && command -v go >/dev/null 2>&1; then
 fi
 
 # --- Python ----------------------------------------------------------------
+# pytest resolution order, first hit wins: PATH pytest, a repo-local
+# venv, uv run (only when the repo is uv-locked, so no environment is
+# invented), then python3 -m pytest when importable. unittest discover
+# is the last resort — it stays in the plan even when the tests import
+# pytest (a red tail beats a skipped family), but it is never chosen
+# while a real pytest exists anywhere.
 if [ -f "$REPO/pyproject.toml" ] || [ -f "$REPO/setup.py" ] \
    || [ -f "$REPO/setup.cfg" ]; then
   # compgen -G, not ls: ls with one missing glob argument exits nonzero
@@ -110,6 +118,14 @@ if [ -f "$REPO/pyproject.toml" ] || [ -f "$REPO/setup.py" ] \
      || compgen -G "$REPO/test_*.py" >/dev/null; then
     if command -v pytest >/dev/null 2>&1; then
       run_check "pytest" pytest -q
+    elif [ -x "$REPO/.venv/bin/pytest" ]; then
+      run_check "pytest (.venv)" "$REPO/.venv/bin/pytest" -q
+    elif [ -x "$REPO/venv/bin/pytest" ]; then
+      run_check "pytest (venv)" "$REPO/venv/bin/pytest" -q
+    elif command -v uv >/dev/null 2>&1 && [ -f "$REPO/uv.lock" ]; then
+      run_check "pytest (uv run)" uv run pytest -q
+    elif python3 -c "import pytest" >/dev/null 2>&1; then
+      run_check "pytest" python3 -m pytest -q
     elif command -v python3 >/dev/null 2>&1; then
       if compgen -G "$REPO/tests/test_*.py" >/dev/null; then
         if [ -f "$REPO/tests/__init__.py" ]; then

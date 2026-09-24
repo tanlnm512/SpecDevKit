@@ -80,6 +80,40 @@ class DetectionTests(GateBase):
         else:
             self.assertTrue(any("unittest discover" in n for n in names), names)
 
+    def test_repo_venv_pytest_used_when_path_lacks_it(self):
+        if shutil.which("pytest"):
+            self.skipTest("pytest on PATH — detection prefers it, covered above")
+        (self.repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "test_ok.py").write_text(
+            "import unittest\nclass T(unittest.TestCase):\n"
+            "    def test_ok(self):\n        self.assertTrue(True)\n")
+        bindir = self.repo / ".venv" / "bin"
+        bindir.mkdir(parents=True)
+        vpytest = bindir / "pytest"
+        vpytest.write_text(
+            "#!/bin/sh\nexec python3 -m unittest discover -s tests\n")
+        vpytest.chmod(0o755)
+        self.commit_all()
+        r = self.run_on_repo()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = next(c for c in json.loads(r.stdout) if "pytest" in c["name"])
+        self.assertEqual(entry["exit_code"], 0)
+        self.assertIn(".venv", entry["name"])
+
+    def test_uv_locked_repo_detected_without_venv_or_path_pytest(self):
+        if shutil.which("pytest") or not shutil.which("uv"):
+            self.skipTest("needs uv on PATH and no global pytest")
+        (self.repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (self.repo / "uv.lock").write_text("lock = 'stub'\n")
+        (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "test_ok.py").write_text(
+            "import unittest\nclass T(unittest.TestCase):\n"
+            "    def test_ok(self):\n        pass\n")
+        self.commit_all()
+        names = self.plan_names()
+        self.assertTrue(any("pytest (uv run)" in n for n in names), names)
+
     def test_no_markers_detect_nothing(self):
         (self.repo / "README.md").write_text("nothing here\n")
         self.commit_all()
