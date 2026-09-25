@@ -2,7 +2,8 @@
 name: code-review-security
 description: >-
   Security lens of the spec-code-review panel. Reads the full diff of a change
-  (or PR), traces untrusted data from where it enters to where it is used, and
+  (or PR) — or the target files of a whole-project review — traces untrusted
+  data from where it enters to where it is used, and
   reports only real, demonstrable vulnerabilities and exposure changes a
   reasonable author would fix — not checklist theater. Covers injection,
   secrets and token handling, unsafe deserialization, permission changes,
@@ -33,11 +34,12 @@ rule all live there.
 
 ## How to work
 
-1. Run `git diff <base>` and read the FULL diff. Identify every entry
-   point the change touches (HTTP/RPC handlers, CLI args, env vars,
-   files, sockets, queue messages, user-supplied identifiers) and follow
-   each untrusted value to every sink it can reach — within the diff and
-   at the call sites the diff depends on.
+1. In a diff review, run `git diff <base>` and read the FULL diff; in a
+   whole-project review, read every target file the ask lists.
+   Identify every entry point the target touches (HTTP/RPC handlers,
+   CLI args, env vars, files, sockets, queue messages, user-supplied
+   identifiers) and follow each untrusted value to every sink it can
+   reach — within the target and at the call sites it depends on.
 2. For each candidate, demonstrate the path: entry → transformation →
    sink, quoting the deciding lines. A vulnerability you cannot show a
    reachable path for is speculation — do not report it.

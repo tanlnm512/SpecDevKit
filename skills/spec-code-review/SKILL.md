@@ -1,22 +1,24 @@
 ---
 name: spec-code-review
 description: >-
-  Portable three-stage code review for any git repository. Stage 1 runs the
-  repo's own detected checks as the mechanical gate (scripts/gate.sh probes
-  Makefile targets, npm scripts, cargo, go, pytest/unittest (resolving the repo's own
-  pytest via PATH, repo venv, or uv run), and shell syntax
-  on the diff). Stage 2 reviews the diff through separate lenses —
-  correctness, security, quality & tests (one general reviewer on small
-  diffs) — triaged by one editor with independent confirmation of every kept
+  Portable three-stage code review for any git repository — a change or the
+  whole project. Stage 1 runs the repo's own detected checks as the
+  mechanical gate (scripts/gate.sh probes Makefile targets, npm scripts,
+  cargo, go, pytest/unittest (pytest via PATH, repo venv, or uv run), and
+  shell syntax on the diff — or every tracked script in project mode).
+  Stage 2 reviews the target through separate lenses — correctness,
+  security, quality & tests (one general reviewer on small targets) —
+  triaged by one editor with independent confirmation of every kept
   finding. Stage 3 synthesizes a report with risk class, test gaps and
-  residual risks. An optional fix loop has an author agent fix the confirmed
-  findings in the working tree, verify every fix independently, re-run the
-  gate, and end with a merge / fix-first / human recommendation. Use when the
-  user asks to review a change — "review the diff", "review the last commit",
-  "review and fix" — in this or any repo.
+  residual risks. An optional fix loop has an author agent fix the
+  confirmed findings in the working tree, verify every fix independently,
+  re-run the gate, and end with a merge / fix-first / human
+  recommendation. Use when the user asks to review a change — "review the
+  diff", "review the last commit", "review and fix" — or the codebase as
+  a whole ("review the project") — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.3.2"
+  version: "0.4.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -44,14 +46,15 @@ Run `scripts/gate.sh` from this skill before any reviewer works:
 ```bash
 bash <skill-dir>/scripts/gate.sh --base HEAD        # working-tree changes
 bash <skill-dir>/scripts/gate.sh --base HEAD~1      # the last commit
+bash <skill-dir>/scripts/gate.sh --tree             # every tracked *.sh (project mode)
 bash <skill-dir>/scripts/gate.sh --plan             # what it would run
 ```
 
 It detects and runs the repo's OWN checks (Makefile targets, npm
 scripts, cargo/go, pytest or unittest discover (pytest resolved via PATH,
 the repo's venv, or `uv run` when the repo is uv-locked), plus `bash -n` on every
-changed `*.sh`) and prints a JSON array — one `{name, exit_code, tail}`
-per check. Rules:
+changed `*.sh` — every tracked `*.sh` in project mode) and prints a JSON
+array — one `{name, exit_code, tail}` per check. Rules:
 
 - A red gate ends the review: report the failing checks with their
   tails as the findings, and stop. Mechanical failures are fixed before
@@ -61,6 +64,29 @@ per check. Rules:
   config) and run that instead; say so in the report if none exists.
 - Never let a reviewer re-run the suites — the gate already decided
   them; reviewers spend their turn on what only a reader can see.
+
+### Whole-project mode (target: project)
+
+When the ask is the codebase as a whole — "review the project",
+"review the whole codebase" — the review target becomes the project
+instead of a diff:
+
+- The gate runs with `--tree` (shell syntax over every tracked
+  script); everything else about the gate is unchanged — its suites
+  were always project-wide.
+- The review target is the tracked source files: extension-filtered,
+  with lockfiles, generated code and vendored/build directories
+  excluded, largest first, capped at 30 (`PROJECT_MAX_FILES`). Narrow
+  with explicit paths on big repos; anything the cap leaves out is
+  named under `notCovered`.
+- There is no diff: reviewers read the listed files, the flagging
+  bar's "introduced by this change" becomes "present in the code as it
+  stands", and confirmation drops the introduced-by-the-change clause.
+- The fix loop is unchanged — the fixer's edits are still an
+  uncommitted diff, so fix verification and the fresh-eyes fix review
+  work identically.
+- In project mode the `merge` recommendation reads as "the code is
+  ready as it stands".
 
 ### Stage 2 — specialist review with triage and confirmation
 
@@ -92,22 +118,24 @@ general reviewer covering all three lenses.
 
 Every reviewer follows the same contract:
 
-1. Read the FULL diff; open the changed files for context; follow call
+1. Read the FULL target — the diff in change review, the listed files
+   in project mode; open the surrounding files for context; follow call
    sites when a defect depends on them.
 2. Read the repo's rules first — `AGENTS.md` / `CLAUDE.md` at the root,
    if present — and cite any rule a finding violates.
 3. The flagging bar — a finding must be ALL of: discrete and
-   actionable; introduced by this change; demonstrable from the code
-   (quote the deciding lines); something the author would reasonably
-   fix.
-4. Exclusions: speculative might-fail concerns, pre-existing problems
-   the change does not worsen, style/formatting (the gate owns those),
-   intentional behavior changes.
+   actionable; part of the target under review (in change review:
+   introduced by this change); demonstrable from the code (quote the
+   deciding lines); something the author would reasonably fix.
+4. Exclusions: speculative might-fail concerns, style/formatting (the
+   gate owns those), intentional behavior changes — and, in change
+   review, pre-existing problems the change does not worsen.
 5. Severity: `high` = data loss, crash, wrong result, security
    compromise; `medium` = a real defect the author should fix; `low` =
-   minor. Cite every finding as `path:line` on the new side.
-6. Zero findings is the expected answer for a clean diff. Never invent
-   one to seem busy.
+   minor. Cite every finding as `path:line` in the code (on the new
+   side in change review).
+6. Zero findings is the expected answer for a clean target. Never
+   invent one to seem busy.
 
 One **triage editor** dedupes across lenses and drops style nits,
 speculation and pre-existing issues (with a one-line reason each) —
@@ -148,8 +176,9 @@ commit decision and message are the user's.
 ## Launch discipline
 
 - **zcode harness**: run the installed workflow by name —
-  `spec-code-review` (args: `base`, `mode` fast/full/auto,
-  `fix_rounds`, optional `skill_dir` override). A repo may keep its own
+  `spec-code-review` (args: `base`, `target` `diff`/`project`,
+  `paths` (project mode), `mode` fast/full/auto, `fix_rounds`, optional
+  `skill_dir` override). A repo may keep its own
   project-scoped copy tuned to its exact CI set; the project copy wins
   there. The zcode facade has no user-installable agent types, so the
   workflow reads the panel briefs from the skill dir at run time and

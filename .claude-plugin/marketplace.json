@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "spec-code-review",
-      "description": "Portable three-stage code review for any git repository.",
+      "description": "Portable three-stage code review for any git repository \u2014 a change or the whole project.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"

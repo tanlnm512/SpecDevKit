@@ -5,10 +5,12 @@
 # on the per-check exit codes; the script's own exit status is 0 only
 # when every detected check passed (or none were detected).
 #
-# Usage: gate.sh [--repo <dir>] [--base <ref>] [--plan]
+# Usage: gate.sh [--repo <dir>] [--base <ref>] [--tree] [--plan]
 #   --repo   target repository (default: the working directory)
 #   --base   diff base for path-scoped checks such as bash -n
 #            (default: HEAD — the working-tree changes)
+#   --tree   whole-project mode: the bash -n family scans every tracked
+#            *.sh (git ls-files) instead of the diff against --base
 #   --plan   print the detection plan as JSON without running anything
 #            (every check carries "exit_code": null)
 #
@@ -32,13 +34,15 @@ set -uo pipefail
 
 REPO="$(pwd)"
 BASE="HEAD"
+TREE=0
 PLAN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo)  REPO="$2"; shift 2 ;;
     --base)  BASE="$2"; shift 2 ;;
+    --tree)  TREE=1; shift ;;
     --plan)  PLAN=1; shift ;;
-    *) echo "gate.sh: unknown arg: $1" >&2; exit 2 ;;
+    *) echo "gate.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 REPO="$(cd "$REPO" 2>/dev/null && pwd)" || {
@@ -144,18 +148,26 @@ if [ -f "$REPO/pyproject.toml" ] || [ -f "$REPO/setup.py" ] \
 fi
 
 # --- Shell syntax on the diff (always on, git-gated) ------------------------
+# Diff mode scans the *.sh the change touches; --tree scans every tracked
+# *.sh (whole-project review) and names the family accordingly.
 if command -v git >/dev/null 2>&1 \
    && git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  SH_FILES="$(
-    { git -C "$REPO" diff --name-only "$BASE" -- '*.sh' 2>/dev/null
-      git -C "$REPO" ls-files --others --exclude-standard -- '*.sh' \
-        2>/dev/null
-    } | sort -u
-  )"
+  if [ "$TREE" = 1 ]; then
+    SH_FILES="$(git -C "$REPO" ls-files -- '*.sh' 2>/dev/null | sort -u)"
+    SH_LABEL="tracked scripts"
+  else
+    SH_FILES="$(
+      { git -C "$REPO" diff --name-only "$BASE" -- '*.sh' 2>/dev/null
+        git -C "$REPO" ls-files --others --exclude-standard -- '*.sh' \
+          2>/dev/null
+      } | sort -u
+    )"
+    SH_LABEL="changed files"
+  fi
   if [ -n "$SH_FILES" ]; then
     if [ "$PLAN" = 1 ]; then
       record "shell syntax (bash -n, $(printf '%s\n' "$SH_FILES" \
-        | grep -c .) changed files)" "PLAN"
+        | grep -c .) $SH_LABEL)" "PLAN"
     else
       BAD=""
       n=0
@@ -168,9 +180,9 @@ $SH_FILES
 EOF
       printf 'failing: %s\n' "${BAD:-none}" > "$LAST_OUT"
       if [ -n "$BAD" ]; then
-        record "shell syntax (bash -n, ${n} changed files)" 1
+        record "shell syntax (bash -n, ${n} $SH_LABEL)" 1
       else
-        record "shell syntax (bash -n, ${n} changed files)" 0
+        record "shell syntax (bash -n, ${n} $SH_LABEL)" 0
       fi
     fi
   fi

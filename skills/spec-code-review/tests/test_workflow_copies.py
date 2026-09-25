@@ -42,6 +42,15 @@ ASK_ANCHORS = [
     "escalate and say so plainly rather than working around it",
 ]
 
+# The whole-project mode (target: project) carries its own ask family in
+# both masters — anchors that pin the project-side contract.
+PROJECT_ASK_ANCHORS = [
+    "There is no diff — the target is the file list below",
+    "present in the code as it stands",
+    "path:line in the current tree",
+    "merge means the code is ready as it stands",
+]
+
 # The fix-loop invariant: a reader verifier is never spawned for a
 # gate-lens entry (its `where` is a check name, not a file location) —
 # the fresh authoritative gate re-run owns those.
@@ -109,7 +118,18 @@ class ParityTests(unittest.TestCase):
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
             self.assertIn("FAST_MAX_LINES = 400", text, name)
             self.assertIn("FAST_MAX_FILES = 5", text, name)
+            self.assertIn("PROJECT_MAX_FILES = 30", text, name)
             self.assertIn("SEV_RANK", text, name)
+
+    def test_target_mode_branches_are_shared(self):
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            self.assertIn('TARGET === "project"', text, name)
+            self.assertIn('"--tree"', text, name)
+            # project targeting functions exist under the same names
+            self.assertIn("function reviewAskProject", text, name)
+            self.assertIn("function triageAskProject", text, name)
+            self.assertIn("function confirmAskProject", text, name)
+            self.assertIn("function finalAskProject", text, name)
 
     def test_panel_definition_matches(self):
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
@@ -117,7 +137,7 @@ class ParityTests(unittest.TestCase):
                 self.assertIn(f'label: "{label}"', text, f"{label} in {name}")
 
     def test_ask_anchors_are_shared(self):
-        for anchor in ASK_ANCHORS:
+        for anchor in ASK_ANCHORS + PROJECT_ASK_ANCHORS:
             self.assertIn(anchor, flat(self.ts), anchor)
             self.assertIn(anchor, flat(self.js), anchor)
 
@@ -192,6 +212,7 @@ class ClaudeDialectTests(unittest.TestCase):
         self.assertNotIn("subprocess", self.js)
         self.assertIn("gate-probe", self.js)
         self.assertIn("scope-probe", self.js)
+        self.assertIn("target-probe", self.js)
         # the gate command reaches the probe shell-quoted, never bare
         self.assertIn('shq(skillDir + "/scripts/gate.sh")', self.js)
 
@@ -240,7 +261,8 @@ class AgentBriefTests(unittest.TestCase):
     def test_panel_protocol_carries_the_shared_bar(self):
         text = PANEL_PROTOCOL.read_text(encoding="utf-8")
         for anchor in (
-            "discrete and actionable; introduced by this change",
+            "discrete and actionable",
+            "part of the target under review",
             "escalate and say so plainly",
             "Zero findings is the expected answer",
         ):

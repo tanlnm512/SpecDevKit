@@ -1,7 +1,7 @@
 {
   "name": "spec-code-review",
-  "version": "0.3.2",
-  "description": "Portable three-stage code review for any git repository.",
+  "version": "0.4.0",
+  "description": "Portable three-stage code review for any git repository \u2014 a change or the whole project.",
   "author": {
     "name": "Stanley",
     "email": "minhtan512@gmail.com"

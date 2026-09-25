@@ -6,6 +6,35 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.4.0 — 2026-09-25
+
+Whole-project review: the panel can now review the codebase as it
+stands, not only a change. A `target` arg picks the mode (`diff` is the
+default and unchanged; `project` reviews the repository's tracked
+source files), and a `paths` arg narrows a project review to named
+paths/directories. Project targeting: tracked files, extension-filtered
+with lockfiles, generated code (`.d.ts`, protobuf outputs, minified
+bundles) and vendored/build directories excluded, largest first, capped
+at `PROJECT_MAX_FILES` (30) — anything the cap leaves out is named
+under `notCovered`. gate.sh gains `--tree`: the bash -n family scans
+every tracked `*.sh` instead of the diff (its suites were always
+project-wide). The ask family branches per mode: no diff to read, the
+flagging bar's "introduced by this change" becomes "present in the code
+as it stands", confirmation drops the introduced-by clause, and the
+`merge` recommendation reads as ready-as-is. The fix loop is unchanged —
+fixes are still an uncommitted diff, so verification and fresh-eyes fix
+review work in both modes. The panel briefs (protocol + three lens
+briefs) are reworded target-agnostic so agents installed as real
+subagent types serve both modes. Parity tests pin the project ask
+anchors, the new tunable, and the `--tree` wiring in both dialects;
+gate tests cover `--tree` green and red.
+
+Migration: none required — `target` defaults to `diff` and every
+existing invocation behaves exactly as before; pass `target: "project"`
+(optionally with `paths`) for a whole-project review, and re-run
+`tools/sync.sh` to pick up the regenerated workflow dialects, gate.sh
+`--tree`, and the reworded panel briefs.
+
 ## 0.3.2 — 2026-09-24
 
 The zcode facade now carries the full panel. With no user-installable

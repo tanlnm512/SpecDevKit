@@ -169,6 +169,25 @@ class ExecutionTests(GateBase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertFalse(any("bash -n" in c["name"] for c in json.loads(r.stdout)))
 
+    def test_tree_mode_scans_all_tracked_scripts(self):
+        (self.repo / "broken.sh").write_text("if true then\n")
+        self.commit_all("committed, not in the working diff")
+        r = run_gate("--repo", str(self.repo), "--tree")
+        self.assertNotEqual(r.returncode, 0)
+        entry = next(c for c in json.loads(r.stdout) if "bash -n" in c["name"])
+        self.assertEqual(entry["exit_code"], 1)
+        self.assertIn("broken.sh", entry["tail"])
+        self.assertIn("tracked scripts", entry["name"])
+
+    def test_tree_mode_green_on_valid_tracked_scripts(self):
+        (self.repo / "ok.sh").write_text("echo fine\n")
+        self.commit_all()
+        r = run_gate("--repo", str(self.repo), "--tree")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = next(c for c in json.loads(r.stdout) if "bash -n" in c["name"])
+        self.assertEqual(entry["exit_code"], 0)
+        self.assertIn("tracked scripts", entry["name"])
+
     def test_python_unittest_path_actually_runs_tests(self):
         (self.repo / "pyproject.toml").write_text("[project]\nname='x'\n")
         (self.repo / "tests").mkdir()
