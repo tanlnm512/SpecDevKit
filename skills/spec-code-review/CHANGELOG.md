@@ -18,6 +18,10 @@ carries all three lens briefs. A missing brief degrades to the inline
 rubric, never an error. SKILL.md's launch discipline documents the
 injection; ZcodeDialectTests pins every brief as wired.
 
+Migration: none required — the injection is additive and degrades to
+the inline rubric when a brief is absent; re-run `tools/sync.sh` to
+pick up the regenerated workflow dialect.
+
 ## 0.3.1 — 2026-09-24
 
 The Python family resolves the repo's own pytest before falling back to
