@@ -16,7 +16,7 @@ description: >-
   "review and fix" — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.3.0"
+  version: "0.3.2"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
