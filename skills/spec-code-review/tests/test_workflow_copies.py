@@ -51,6 +51,24 @@ PROJECT_ASK_ANCHORS = [
     "merge means the code is ready as it stands",
 ]
 
+# The pr and branch targets (0.5.0) resolve to a merge-base diff before
+# the panel machinery runs, so the ask family is shared with diff mode.
+# These anchors pin the resolution contract in both dialects: the gh pr
+# fields, the merge-base/rev-list mechanics, the default-branch
+# detection, and the checkout safety rule (never check out over a dirty
+# tree; always announce the checkout with the previous HEAD).
+PR_TARGET_ANCHORS = [
+    "baseRefOid",
+    "headRefOid",
+    "refs/remotes/origin/HEAD",
+    "merge-base",
+    "rev-list",
+    "needs a pr arg",
+    "the working tree is dirty",
+    "common ancestor",
+    "switch back when done reviewing",
+]
+
 # The fix-loop invariant: a reader verifier is never spawned for a
 # gate-lens entry (its `where` is a check name, not a file location) —
 # the fresh authoritative gate re-run owns those.
@@ -130,6 +148,14 @@ class ParityTests(unittest.TestCase):
             self.assertIn("function triageAskProject", text, name)
             self.assertIn("function confirmAskProject", text, name)
             self.assertIn("function finalAskProject", text, name)
+
+    def test_pr_and_branch_targets_are_shared(self):
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            self.assertIn('TARGET === "branch"', text, name)
+            self.assertIn('TARGET === "pr"', text, name)
+            self.assertIn("const TARGETS", text, name)
+            for anchor in PR_TARGET_ANCHORS:
+                self.assertIn(anchor, flat(text), f"{anchor} in {name}")
 
     def test_panel_definition_matches(self):
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
@@ -213,6 +239,13 @@ class ClaudeDialectTests(unittest.TestCase):
         self.assertIn("gate-probe", self.js)
         self.assertIn("scope-probe", self.js)
         self.assertIn("target-probe", self.js)
+        # pr/branch resolution probes (0.5.0): pr metadata, head/dirty
+        # state, checkout, merge-base, base-branch detection
+        self.assertIn("pr-meta-probe", self.js)
+        self.assertIn("pr-head-probe", self.js)
+        self.assertIn("pr-checkout-probe", self.js)
+        self.assertIn("merge-base-probe", self.js)
+        self.assertIn("base-ref-probe", self.js)
         # the gate command reaches the probe shell-quoted, never bare
         self.assertIn('shq(skillDir + "/scripts/gate.sh")', self.js)
 

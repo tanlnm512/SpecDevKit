@@ -1,38 +1,53 @@
 /* zcode-workflow
 description: >-
   Three-stage code review in any repository, with an optional fix loop,
-  over either a change or the whole project. Stage 1 runs the repo's own
-  detected checks as the mechanical gate (the skill's scripts/gate.sh
-  probes Makefile, npm scripts, cargo, go, pytest/unittest, and shell
-  syntax — on the diff, or on every tracked script in project mode).
-  Stage 2 reviews the target through separate lenses — correctness,
-  security, quality & tests (one general reviewer in fast mode) — each
-  triaged by one editor, with independent confirmation of every kept
-  finding. Stage 3 synthesizes a report with risk class, test gaps and
-  residual risks. With fix_rounds > 0 an iterative loop follows: an
-  author agent fixes the confirmed findings, every fix is independently
-  verified, the gate re-runs, a fresh-eyes reviewer scans the fix diff,
-  and the run ends with a risk-gated merge recommendation.
+  over a change, a pull request, a branch's recent changes, or the whole
+  project. Stage 1 runs the repo's own detected checks as the mechanical
+  gate (the skill's scripts/gate.sh probes Makefile, npm scripts, cargo,
+  go, pytest/unittest, and shell syntax — on the diff, or on every
+  tracked script in project mode). Stage 2 reviews the target through
+  separate lenses — correctness, security, quality & tests (one general
+  reviewer in fast mode) — each triaged by one editor, with independent
+  confirmation of every kept finding. Stage 3 synthesizes a report with
+  risk class, test gaps and residual risks. With fix_rounds > 0 an
+  iterative loop follows: an author agent fixes the confirmed findings,
+  every fix is independently verified, the gate re-runs, a fresh-eyes
+  reviewer scans the fix diff, and the run ends with a risk-gated merge
+  recommendation.
 whenToUse: >-
   Use when the user asks to review a change — "review the diff",
-  "review this change", "review the last commit" — or the project's
-  code as a whole — "review the project", "review the whole codebase" —
-  or to review and fix it. Works in any git repository; the gate adapts
-  by detecting the repo's own checks.
+  "review this change", "review the last commit" — a pull request —
+  "review PR 12", "review this pull request" — a branch's recent
+  changes — "review what's on this branch", "review the recent changes
+  on this branch" — or the project's code as a whole — "review the
+  project", "review the whole codebase" — or to review and fix any of
+  them. Works in any git repository; the gate adapts by detecting the
+  repo's own checks.
 args:
   base:
     type: string
     description: >-
-      Base ref the change is reviewed against (diff mode). Default HEAD
-      (working-tree changes). HEAD~1 reviews the last commit; any
-      branch, tag or sha. Ignored in project mode.
+      Diff mode: the base ref the change is reviewed against (default
+      HEAD — working-tree changes; HEAD~1 reviews the last commit; any
+      branch, tag or sha). Branch mode: the base branch the current
+      branch is diffed against (default: the remote's default branch —
+      origin/HEAD, else main/master). Ignored in pr and project mode.
   target:
     type: string
     description: >-
-      diff (default) reviews the change against base; project reviews
-      the repository's tracked source files as they stand — the target
-      list is capped at PROJECT_MAX_FILES largest files, so pass paths
-      for full coverage of big repos.
+      diff (default) reviews the change against base; branch reviews the
+      current branch's recent changes — the merge-base diff against the
+      base branch, uncommitted work included; pr reviews a GitHub pull
+      request (needs the gh CLI; the PR head is checked out
+      automatically on a clean tree, refused on a dirty one); project
+      reviews the repository's tracked source files as they stand — the
+      target list is capped at PROJECT_MAX_FILES largest files, so pass
+      paths for full coverage of big repos.
+  pr:
+    type: string
+    description: >-
+      Pr mode only: the pull request to review — a number, URL or
+      owner/repo#N, resolved with the gh CLI.
   paths:
     type: string
     description: >-
@@ -124,6 +139,20 @@ interface GateResult {
   tail: string;
 }
 
+// Pr mode metadata from `gh pr view` — carried into the scope log and
+// the report header so the review names what it reviewed.
+interface PrMeta {
+  number: number;
+  title: string;
+  author: string;
+  state: string;
+  url: string;
+  baseRefName: string;
+  baseRefOid: string;
+  headRefName: string;
+  headRefOid: string;
+}
+
 interface ReportedFinding {
   /** "path:line" with the problem, or the check name for gate findings. */
   where: string;
@@ -184,9 +213,19 @@ interface TrackedFinding {
 }
 
 // Tunables live here, in control flow only — never inside ask text.
-const BASE = typeof args.base === "string" && args.base.trim() ? args.base.trim() : "HEAD";
+const TARGETS = ["diff", "branch", "pr", "project"];
 const TARGET = typeof args.target === "string" && args.target.trim() ? args.target.trim().toLowerCase() : "diff";
 const PROJECT = TARGET === "project";
+const PR = TARGET === "pr";
+const BRANCH_MODE = TARGET === "branch";
+const PR_ARG = typeof args.pr === "string" && args.pr.trim() ? args.pr.trim() : "";
+const HAS_BASE = typeof args.base === "string" && args.base.trim() ? true : false;
+const BASE_ARG = HAS_BASE ? args.base.trim() : "";
+// BASE starts at the diff default and is resolved in the scope phase:
+// args.base in diff mode (default HEAD), the merge-base with the base
+// branch in branch mode, the merge-base with the PR's base commit in
+// pr mode — every diff-mode ask and the gate then work unchanged.
+let BASE = HAS_BASE ? BASE_ARG : "HEAD";
 const PATHS_ARG = typeof args.paths === "string" && args.paths.trim() ? args.paths.trim() : "";
 const MODE = typeof args.mode === "string" && args.mode.trim() ? args.mode.trim().toLowerCase() : "auto";
 const FIX_ROUNDS =
@@ -381,6 +420,70 @@ function gateNote(gate: GateResult[]): string {
       "the report must say so under notCovered";
   }
   return "The repo's own checks the gate detected (" + gate.map((g) => g.name).join("; ") + ") all passed";
+}
+
+// --- pr and branch target resolution ----------------------------------------
+// Both collapse to a diff review against a resolved base — the merge-base
+// with the base branch — so the panel machinery, the gate and the fix loop
+// run unchanged underneath. The panel and any fix loop work in the working
+// tree, so pr mode requires the PR head to be checked out: on a clean tree
+// the workflow checks it out itself (announced, with the previous HEAD in
+// the log); on a dirty tree it refuses rather than hide uncommitted work.
+
+async function gitOut(argv: string[]): Promise<string> {
+  const r = await world.run("git", argv);
+  return r.exitCode === 0 ? r.stdout.trim() : "";
+}
+
+function prMetaFromJson(raw: string): PrMeta | null {
+  let j: any;
+  try {
+    j = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!j || typeof j.headRefOid !== "string" || !j.headRefOid) return null;
+  return {
+    number: typeof j.number === "number" ? j.number : 0,
+    title: typeof j.title === "string" ? j.title.replace(/\s+/g, " ").trim() : "",
+    author: j.author && typeof j.author.login === "string" ? j.author.login : "unknown",
+    state: typeof j.state === "string" ? j.state : "UNKNOWN",
+    url: typeof j.url === "string" ? j.url : "",
+    baseRefName: typeof j.baseRefName === "string" ? j.baseRefName : "",
+    baseRefOid: typeof j.baseRefOid === "string" ? j.baseRefOid : "",
+    headRefName: typeof j.headRefName === "string" ? j.headRefName : "",
+    headRefOid: j.headRefOid,
+  };
+}
+
+async function resolvePrMeta(pr: string): Promise<PrMeta | null> {
+  try {
+    const r = await world.run("gh", ["pr", "view", pr, "--json",
+      "number,title,author,baseRefName,baseRefOid,headRefName,headRefOid,state,url"]);
+    if (r.exitCode !== 0) return null;
+    return prMetaFromJson(r.stdout);
+  } catch {
+    return null;
+  }
+}
+
+// Branch-mode base resolution: explicit base first (remote form, then
+// local), else the remote's default branch (origin/HEAD dereferenced to
+// the branch it points at), else main/master — local or remote — first
+// resolvable wins. Empty means nothing resolved; the caller fails loudly.
+async function detectBaseBranch(): Promise<string> {
+  const candidates: string[] = [];
+  if (HAS_BASE) {
+    candidates.push("origin/" + BASE_ARG, BASE_ARG);
+  } else {
+    const head = await gitOut(["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]);
+    if (head) candidates.push(head);
+    candidates.push("origin/main", "main", "origin/master", "master");
+  }
+  for (const c of candidates) {
+    if (await gitOut(["rev-parse", "-q", "--verify", c])) return c;
+  }
+  return "";
 }
 
 // The zcode facade has no user-installable agent types, so the panel
@@ -664,6 +767,116 @@ let targetOverCap = false;
 let changed: string[] = [];
 let addedLines = 0;
 let diffOverCap = false;
+let prMeta: PrMeta | null = null;
+let branchBaseRef = "";
+let branchName = "";
+let commitCount = 0;
+
+if (TARGETS.indexOf(TARGET) === -1) {
+  return {
+    conclusion: "Unknown target \"" + TARGET + "\" — valid targets: diff (a change against a base ref), " +
+      "branch (the current branch's changes against its base), pr (a GitHub pull request), " +
+      "project (the whole codebase).",
+    findings: [],
+    verified: [],
+    notCovered: ["the review target — unknown target value \"" + TARGET + "\""],
+  };
+}
+if (PR && !PR_ARG) {
+  return {
+    conclusion: "target pr needs a pr arg — the pull request number, URL or owner/repo#N.",
+    findings: [],
+    verified: [],
+    notCovered: ["the review target — pr target without a pr arg"],
+  };
+}
+
+if (PR) {
+  const meta = await resolvePrMeta(PR_ARG);
+  if (!meta || !meta.baseRefOid) {
+    return {
+      conclusion: "gh pr view failed for \"" + PR_ARG + "\" — is the gh CLI installed and authenticated, " +
+        "and is that a valid pull request in this repo's remote?",
+      findings: [],
+      verified: [],
+      notCovered: ["the pull request — gh pr view returned nothing usable"],
+    };
+  }
+  prMeta = meta;
+  const head = await gitOut(["rev-parse", "HEAD"]);
+  if (head !== meta.headRefOid) {
+    const statusOut = await world.run("git", ["status", "--porcelain"]);
+    const dirty = statusOut.stdout.trim() !== "";
+    if (dirty) {
+      return {
+        conclusion: "PR #" + meta.number + " is not checked out and the working tree is dirty — the panel " +
+          "reads the working tree, so checking out would hide uncommitted work. Commit or stash, then rerun; " +
+          "on a clean tree the review checks the PR out itself.",
+        findings: [],
+        verified: [],
+        notCovered: ["the pull request — head not checked out, refused to touch a dirty working tree"],
+      };
+    }
+    const prev = head || "(unknown)";
+    let co;
+    try {
+      co = await world.run("gh", ["pr", "checkout", PR_ARG]);
+    } catch {
+      co = { exitCode: 1, stdout: "", stderr: "" };
+    }
+    const head2 = await gitOut(["rev-parse", "HEAD"]);
+    if (co.exitCode !== 0 || head2 !== meta.headRefOid) {
+      return {
+        conclusion: "Could not check out PR #" + meta.number + " (gh pr checkout failed, or HEAD does not " +
+          "match the PR head afterward) — check the PR out manually and rerun.",
+        findings: [],
+        verified: [],
+        notCovered: ["the pull request — automatic checkout failed"],
+      };
+    }
+    log("checked out PR #" + meta.number + " (previous HEAD " + prev.slice(0, 12) +
+      ") — switch back when done reviewing");
+  }
+  const mb = await world.run("git", ["merge-base", "HEAD", meta.baseRefOid]);
+  if (mb.exitCode !== 0 || !mb.stdout.trim()) {
+    return {
+      conclusion: "No common ancestor between HEAD and the PR's base commit (" + meta.baseRefOid.slice(0, 12) +
+        ") — cannot compute the PR diff.",
+      findings: [],
+      verified: [],
+      notCovered: ["the pull request — merge-base with the base commit failed"],
+    };
+  }
+  BASE = mb.stdout.trim();
+  log("review target: PR #" + meta.number + " " + meta.title + " (" + meta.state + ", by " + meta.author +
+    ", base " + meta.baseRefName + ") — diff vs merge-base " + BASE.slice(0, 12));
+} else if (BRANCH_MODE) {
+  branchName = (await gitOut(["branch", "--show-current"])) || "(detached HEAD)";
+  branchBaseRef = await detectBaseBranch();
+  if (!branchBaseRef) {
+    return {
+      conclusion: "Could not detect a base branch for the branch review — pass base explicitly " +
+        "(e.g. base: \"main\").",
+      findings: [],
+      verified: [],
+      notCovered: ["the branch review — no base branch resolved"],
+    };
+  }
+  const mb = await world.run("git", ["merge-base", "HEAD", branchBaseRef]);
+  if (mb.exitCode !== 0 || !mb.stdout.trim()) {
+    return {
+      conclusion: "No common ancestor between HEAD and " + branchBaseRef + " — cannot compute the branch diff.",
+      findings: [],
+      verified: [],
+      notCovered: ["the branch review — merge-base with " + branchBaseRef + " failed"],
+    };
+  }
+  BASE = mb.stdout.trim();
+  const cnt = await gitOut(["rev-list", "--count", BASE + "..HEAD"]);
+  commitCount = parseInt(cnt, 10) || 0;
+  log("review target: branch " + branchName + " vs " + branchBaseRef + " — merge-base " + BASE.slice(0, 12) +
+    ", " + commitCount + " commit(s)");
+}
 
 if (PROJECT) {
   const sel = await selectProjectFiles();
@@ -694,15 +907,24 @@ if (PROJECT) {
     diffOverCap = true;
   }
   log(
-    "change under review: git diff " + BASE + " — " + changed.length + " files, ~" + addedLines + " added lines" +
+    "change under review: " +
+    (PR ? "PR #" + (prMeta as PrMeta).number + " (diff vs merge-base " + BASE.slice(0, 12) + ")"
+      : BRANCH_MODE ? "branch " + branchName + " (diff vs merge-base " + BASE.slice(0, 12) + ")"
+      : "git diff " + BASE) +
+    " — " + changed.length + " files, ~" + addedLines + " added lines" +
     (scope.clean ? " (clean tree)" : " (uncommitted work present)")
   );
 
   if (changed.length === 0) {
     return {
-      conclusion: "No changes against " + BASE + " — nothing to review.",
+      conclusion: PR
+        ? "PR #" + (prMeta as PrMeta).number + " has no changes against " + (prMeta as PrMeta).baseRefName +
+          " — nothing to review."
+        : BRANCH_MODE
+          ? "Branch " + branchName + " has no changes against " + branchBaseRef + " — nothing to review."
+          : "No changes against " + BASE + " — nothing to review.",
       findings: [],
-      verified: ["change scope: git diff " + BASE + " is empty"],
+      verified: ["change scope: the review target resolved to an empty diff"],
       notCovered: [],
     };
   }
@@ -737,7 +959,11 @@ if (gateFailed.length > 0) {
   }));
   const scopeLine = PROJECT
     ? "The project (" + targetFiles.length + " target files) failed the repo's own checks, so the "
-    : "The change (`git diff " + BASE + "` — " + changed.length + " files) failed the repo's own checks, so the ";
+    : PR
+      ? "PR #" + (prMeta as PrMeta).number + " (" + changed.length + " files) failed the repo's own checks, so the "
+      : BRANCH_MODE
+        ? "Branch " + branchName + " (" + changed.length + " files) failed the repo's own checks, so the "
+        : "The change (`git diff " + BASE + "` — " + changed.length + " files) failed the repo's own checks, so the ";
   const gateMd = [
     "# Code review — checks failed, review stopped",
     "",
@@ -762,7 +988,8 @@ if (gateFailed.length > 0) {
   }
   return {
     conclusion:
-      (PROJECT ? "The project" : "The change") + " failed " + gateFailed.length + " of " + gate.length +
+      (PROJECT ? "The project" : PR ? "PR #" + (prMeta as PrMeta).number : BRANCH_MODE ? "Branch " + branchName : "The change") +
+      " failed " + gateFailed.length + " of " + gate.length +
       " detected repo checks (" + gateFailed.map((g) => g.name).join("; ") + "). Specialist review was skipped — " +
       "these are mechanical fixes; rerun the review after they pass.",
     findings: gateFindings,
@@ -1016,11 +1243,26 @@ const reportedFindings: ReportedFinding[] = tracked.map((t) => ({
 const reportMd = [
   PROJECT
     ? "# Code review — project (" + finalChangedN + " files)"
-    : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
+    : PR
+      ? "# Code review — PR #" + (prMeta as PrMeta).number + ": " + (prMeta as PrMeta).title +
+        " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+      : BRANCH_MODE
+        ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
+          " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+        : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
   "",
   "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
     " · every kept finding confirmed by an independent reader." +
-    (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : ""),
+    (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
+    (PR
+      ? " Target: pull request #" + (prMeta as PrMeta).number + " by " + (prMeta as PrMeta).author + " → " +
+        (prMeta as PrMeta).baseRefName + ((prMeta as PrMeta).url ? " — " + (prMeta as PrMeta).url : "") +
+        " — \"merge\" reads as the PR is ready."
+      : "") +
+    (BRANCH_MODE
+      ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
+        "branch is ready to merge."
+      : ""),
   roundsUsed > 0
     ? "Fix loop: " + roundsUsed + " round(s) — " + nFixed + "/" + tracked.length + " findings fixed, checks " +
       (gateGreen ? "green" : "RED") + ". Fixes sit uncommitted in the working tree."
@@ -1110,6 +1352,12 @@ return {
   verified: [
     ...(PROJECT
       ? ["review target: the project's tracked source files — " + targetFiles.length + " of " + targetCandidates + " matched"]
+      : []),
+    ...(PR
+      ? ["review target: PR #" + (prMeta as PrMeta).number + " (" + (prMeta as PrMeta).state + ") — the merge-base diff against " + (prMeta as PrMeta).baseRefName]
+      : []),
+    ...(BRANCH_MODE
+      ? ["review target: branch " + branchName + " vs " + branchBaseRef + " — the merge-base diff (" + commitCount + " commit(s))"]
       : []),
     ...(gate.length > 0
       ? ["the mechanical gate ran the repo's own detected checks (all passed): " + gate.map((g) => g.name).join("; ")]

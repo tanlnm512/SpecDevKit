@@ -2,19 +2,20 @@ export const meta = {
   name: "spec-code-review",
   description:
     "Three-stage code review in any repository, with an optional fix " +
-    "loop, over either a change or the whole project. Stage 1 runs the " +
-    "repo's own detected checks as the mechanical gate (the skill's " +
-    "scripts/gate.sh). Stage 2 reviews the target through separate " +
-    "lenses — correctness, security, quality & tests (one general " +
-    "reviewer in fast mode) — triaged by one editor, with independent " +
-    "confirmation of every kept finding. Stage 3 synthesizes a report " +
-    "with risk class, test gaps and residual risks. With fix_rounds > 0 " +
-    "an iterative loop follows: an author agent fixes the confirmed " +
-    "findings, every fix is independently verified, the gate re-runs, a " +
-    "fresh-eyes reviewer scans the fix diff, and the run ends with a " +
-    "merge / fix-first / human recommendation. Use when the user asks to " +
-    "review a change — or the whole project's code — or to review and " +
-    "fix it, in any git repository.",
+    "loop, over a change, a pull request, a branch's recent changes, or " +
+    "the whole project. Stage 1 runs the repo's own detected checks as " +
+    "the mechanical gate (the skill's scripts/gate.sh). Stage 2 reviews " +
+    "the target through separate lenses — correctness, security, quality " +
+    "& tests (one general reviewer in fast mode) — triaged by one " +
+    "editor, with independent confirmation of every kept finding. Stage " +
+    "3 synthesizes a report with risk class, test gaps and residual " +
+    "risks. With fix_rounds > 0 an iterative loop follows: an author " +
+    "agent fixes the confirmed findings, every fix is independently " +
+    "verified, the gate re-runs, a fresh-eyes reviewer scans the fix " +
+    "diff, and the run ends with a merge / fix-first / human " +
+    "recommendation. Use when the user asks to review a change, a pull " +
+    "request, a branch's recent changes, or the whole project — or to " +
+    "review and fix any of them, in any git repository.",
 }
 
 // ---------------------------------------------------------------------------
@@ -37,15 +38,28 @@ export const meta = {
 //     primitive) and live finding events degrade to log() lines.
 // ---------------------------------------------------------------------------
 
-const BASE =
-  typeof args !== "undefined" && args && typeof args.base === "string" && args.base.trim()
-    ? args.base.trim()
-    : "HEAD";
+const TARGETS = ["diff", "branch", "pr", "project"];
 const TARGET =
   typeof args !== "undefined" && args && typeof args.target === "string" && args.target.trim()
     ? args.target.trim().toLowerCase()
     : "diff";
 const PROJECT = TARGET === "project";
+const PR = TARGET === "pr";
+const BRANCH_MODE = TARGET === "branch";
+const PR_ARG =
+  typeof args !== "undefined" && args && typeof args.pr === "string" && args.pr.trim()
+    ? args.pr.trim()
+    : "";
+const HAS_BASE =
+  typeof args !== "undefined" && args && typeof args.base === "string" && args.base.trim()
+    ? true
+    : false;
+const BASE_ARG = HAS_BASE ? args.base.trim() : "";
+// BASE starts at the diff default and is resolved in the scope phase:
+// args.base in diff mode (default HEAD), the merge-base with the base
+// branch in branch mode, the merge-base with the PR's base commit in
+// pr mode — every diff-mode ask and the gate then work unchanged.
+let BASE = HAS_BASE ? BASE_ARG : "HEAD";
 const PATHS_ARG =
   typeof args !== "undefined" && args && typeof args.paths === "string" && args.paths.trim()
     ? args.paths.trim()
@@ -467,6 +481,112 @@ async function gitScope() {
   return { clean: porcelain === "", files: files, added: added };
 }
 
+// --- pr and branch target resolution (probe dialect) -------------------------
+// Both collapse to a diff review against a resolved base — the merge-base
+// with the base branch — so the panel machinery, the gate and the fix loop
+// run unchanged underneath. The panel and any fix loop work in the working
+// tree, so pr mode requires the PR head to be checked out: on a clean tree
+// the workflow checks it out itself (announced, with the previous HEAD in
+// the log); on a dirty tree it refuses rather than hide uncommitted work.
+
+function prMetaFromJson(raw) {
+  let j;
+  try {
+    j = JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+  if (!j || typeof j.headRefOid !== "string" || !j.headRefOid) return null;
+  return {
+    number: typeof j.number === "number" ? j.number : 0,
+    title: typeof j.title === "string" ? j.title.replace(/\s+/g, " ").trim() : "",
+    author: j.author && typeof j.author.login === "string" ? j.author.login : "unknown",
+    state: typeof j.state === "string" ? j.state : "UNKNOWN",
+    url: typeof j.url === "string" ? j.url : "",
+    baseRefName: typeof j.baseRefName === "string" ? j.baseRefName : "",
+    baseRefOid: typeof j.baseRefOid === "string" ? j.baseRefOid : "",
+    headRefName: typeof j.headRefName === "string" ? j.headRefName : "",
+    headRefOid: j.headRefOid,
+  };
+}
+
+// pr metadata + head/dirty state + checkout + merge-base, each through one
+// probe (the script's only seam to the shell). The base-branch probe folds
+// base detection and the current branch name into one output separated by
+// SCOPE_SPLIT: parts[0] is the resolved base ref (possibly empty), parts[1]
+// the current branch name.
+async function probePrMeta() {
+  const out = await probe(
+    "pr-meta-probe",
+    "gh pr view " + shq(PR_ARG) + " --json number,title,author,baseRefName,baseRefOid,headRefName,headRefOid,state,url"
+  );
+  return out !== null ? prMetaFromJson(out) : null;
+}
+
+async function probeHeadState() {
+  const out = await probe(
+    "pr-head-probe",
+    "git rev-parse HEAD && echo " + SCOPE_SPLIT + " && git status --porcelain"
+  );
+  if (out === null) return null;
+  const parts = out.split(SCOPE_SPLIT);
+  return {
+    head: (parts[0] || "").trim(),
+    dirty: (parts.length > 1 ? parts[1] : "").trim() !== "",
+  };
+}
+
+async function probeCheckoutPr() {
+  const out = await probe(
+    "pr-checkout-probe",
+    "gh pr checkout " + shq(PR_ARG) + " && git rev-parse HEAD"
+  );
+  return out !== null ? out.trim() : "";
+}
+
+async function probeMergeBase(ref) {
+  const out = await probe("merge-base-probe", "git merge-base HEAD " + shq(ref));
+  return out !== null ? out.trim() : "";
+}
+
+// merge-base + commit count in one probe: parts[0] the merge-base sha,
+// parts[1] the commit count on the branch side.
+async function probeMergeBaseWithCount(ref) {
+  const out = await probe(
+    "merge-base-probe",
+    "mb=$(git merge-base HEAD " + shq(ref) + ') && printf "%s" "$mb" && echo ' + SCOPE_SPLIT +
+    ' && git rev-list --count "$mb..HEAD"'
+  );
+  if (out === null) return null;
+  const parts = out.split(SCOPE_SPLIT);
+  const sha = (parts[0] || "").trim();
+  if (!sha) return null;
+  const count = parseInt((parts.length > 1 ? parts[1] : "").trim(), 10);
+  return { sha: sha, count: isNaN(count) ? 0 : count };
+}
+
+// base-branch detection, one probe: explicit base first (remote form, then
+// local), else the remote's default branch (origin/HEAD dereferenced to the
+// branch it points at), else main/master — local or remote — first
+// resolvable wins. An empty first part means nothing resolved.
+async function probeBaseBranchAndName() {
+  const candidates = HAS_BASE
+    ? [shq("origin/" + BASE_ARG), shq(BASE_ARG)]
+    : ['"$h"', shq("origin/main"), shq("main"), shq("origin/master"), shq("master")];
+  const cmd =
+    "h=$(git symbolic-ref -q --short refs/remotes/origin/HEAD || true); " +
+    "for r in " + candidates.join(" ") + '; do [ -n "$r" ] || continue; ' +
+    'if git rev-parse -q --verify "$r" >/dev/null 2>&1; then printf "%s" "$r"; break; fi; done; ' +
+    "echo " + SCOPE_SPLIT + '; bn=$(git branch --show-current || true); printf "%s" "$bn"';
+  const out = await probe("base-ref-probe", cmd);
+  if (out === null) return null;
+  const parts = out.split(SCOPE_SPLIT);
+  return {
+    baseRef: (parts[0] || "").trim(),
+    branchName: (parts.length > 1 ? parts[1] : "").trim() || "(detached HEAD)",
+  };
+}
+
 // --- asks (verbatim from the zcode master unless a one-shot divergence
 // is called out in the header) ----------------------------------------------
 
@@ -758,6 +878,134 @@ async function main() {
   let changed = [];
   let addedLines = 0;
   const diffOverCap = false; // numstat cannot overflow; kept for ask parity
+  let prMeta = null;
+  let branchBaseRef = "";
+  let branchName = "";
+  let commitCount = 0;
+
+  function failReturn(conclusion, notCovered, mdTitle, mdBody) {
+    return {
+      conclusion: conclusion,
+      findings: [],
+      verified: [],
+      notCovered: notCovered,
+      title: mdTitle,
+      markdown: mdBody,
+    };
+  }
+
+  if (TARGETS.indexOf(TARGET) === -1) {
+    return failReturn(
+      "Unknown target \"" + TARGET + "\" — valid targets: diff (a change against a base ref), " +
+      "branch (the current branch's changes against its base), pr (a GitHub pull request), " +
+      "project (the whole codebase).",
+      ["the review target — unknown target value \"" + TARGET + "\""],
+      "Code review — target unknown",
+      "# Code review — target unknown\n\nUnknown target \"" + TARGET + "\" — nothing was reviewed.\n",
+    );
+  }
+  if (PR && !PR_ARG) {
+    return failReturn(
+      "target pr needs a pr arg — the pull request number, URL or owner/repo#N.",
+      ["the review target — pr target without a pr arg"],
+      "Code review — target unknown",
+      "# Code review — target unknown\n\ntarget pr needs a pr arg — nothing was reviewed.\n",
+    );
+  }
+
+  if (PR) {
+    const meta = await probePrMeta();
+    if (!meta || !meta.baseRefOid) {
+      return failReturn(
+        "gh pr view failed for \"" + PR_ARG + "\" — is the gh CLI installed and authenticated, " +
+        "and is that a valid pull request in this repo's remote?",
+        ["the pull request — gh pr view returned nothing usable"],
+        "Code review — PR unknown",
+        "# Code review — PR unknown\n\ngh pr view returned nothing usable; nothing was reviewed.\n",
+      );
+    }
+    prMeta = meta;
+    const headState = await probeHeadState();
+    if (headState === null || !headState.head) {
+      return failReturn(
+        "The review cannot see the git state (rev-parse/status probe returned nothing) — rerun the workflow.",
+        ["the pull request — git state probe failed"],
+        "Code review — state unknown",
+        "# Code review — state unknown\n\nThe git state probe returned nothing; nothing was reviewed.\n",
+      );
+    }
+    if (headState.head !== meta.headRefOid) {
+      if (headState.dirty) {
+        return failReturn(
+          "PR #" + meta.number + " is not checked out and the working tree is dirty — the panel " +
+          "reads the working tree, so checking out would hide uncommitted work. Commit or stash, then rerun; " +
+          "on a clean tree the review checks the PR out itself.",
+          ["the pull request — head not checked out, refused to touch a dirty working tree"],
+          "Code review — PR not checked out",
+          "# Code review — PR not checked out\n\nThe working tree is dirty and the PR head is not checked out; nothing was reviewed.\n",
+        );
+      }
+      const prev = headState.head || "(unknown)";
+      const head2 = await probeCheckoutPr();
+      if (head2 !== meta.headRefOid) {
+        return failReturn(
+          "Could not check out PR #" + meta.number + " (gh pr checkout failed, or HEAD does not " +
+          "match the PR head afterward) — check the PR out manually and rerun.",
+          ["the pull request — automatic checkout failed"],
+          "Code review — PR checkout failed",
+          "# Code review — PR checkout failed\n\nAutomatic checkout failed; nothing was reviewed.\n",
+        );
+      }
+      log("checked out PR #" + meta.number + " (previous HEAD " + prev.slice(0, 12) +
+        ") — switch back when done reviewing");
+    }
+    const mbSha = await probeMergeBase(meta.baseRefOid);
+    if (!mbSha) {
+      return failReturn(
+        "No common ancestor between HEAD and the PR's base commit (" + meta.baseRefOid.slice(0, 12) +
+        ") — cannot compute the PR diff.",
+        ["the pull request — merge-base with the base commit failed"],
+        "Code review — PR diff unknown",
+        "# Code review — PR diff unknown\n\nNo common ancestor with the PR's base commit; nothing was reviewed.\n",
+      );
+    }
+    BASE = mbSha;
+    log("review target: PR #" + meta.number + " " + meta.title + " (" + meta.state + ", by " + meta.author +
+      ", base " + meta.baseRefName + ") — diff vs merge-base " + BASE.slice(0, 12));
+  } else if (BRANCH_MODE) {
+    const detected = await probeBaseBranchAndName();
+    if (detected === null) {
+      return failReturn(
+        "The base-branch probe returned no result — the branch review cannot resolve its base. Rerun the workflow.",
+        ["the branch review — base-branch probe failed"],
+        "Code review — base unknown",
+        "# Code review — base unknown\n\nThe base-branch probe returned nothing; nothing was reviewed.\n",
+      );
+    }
+    branchName = detected.branchName;
+    branchBaseRef = detected.baseRef;
+    if (!branchBaseRef) {
+      return failReturn(
+        "Could not detect a base branch for the branch review — pass base explicitly (e.g. base: \"main\").",
+        ["the branch review — no base branch resolved"],
+        "Code review — base unknown",
+        "# Code review — base unknown\n\nNo base branch resolved; nothing was reviewed.\n",
+      );
+    }
+    const mb = await probeMergeBaseWithCount(branchBaseRef);
+    if (mb === null) {
+      return failReturn(
+        "No common ancestor between HEAD and " + branchBaseRef + " — cannot compute the branch diff.",
+        ["the branch review — merge-base with " + branchBaseRef + " failed"],
+        "Code review — branch diff unknown",
+        "# Code review — branch diff unknown\n\nNo common ancestor with " + branchBaseRef + "; nothing was reviewed.\n",
+      );
+    }
+    BASE = mb.sha;
+    commitCount = mb.count;
+    log("review target: branch " + branchName + " vs " + branchBaseRef + " — merge-base " + BASE.slice(0, 12) +
+      ", " + commitCount + " commit(s)");
+  }
 
   if (PROJECT) {
     const sel = await selectProjectFiles();
@@ -805,18 +1053,28 @@ async function main() {
     changed = scope.files;
     addedLines = scope.added;
     log(
-      "change under review: git diff " + BASE + " — " + changed.length + " files, ~" + addedLines + " added lines" +
+      "change under review: " +
+      (PR ? "PR #" + prMeta.number + " (diff vs merge-base " + BASE.slice(0, 12) + ")"
+        : BRANCH_MODE ? "branch " + branchName + " (diff vs merge-base " + BASE.slice(0, 12) + ")"
+        : "git diff " + BASE) +
+      " — " + changed.length + " files, ~" + addedLines + " added lines" +
       (scope.clean ? " (clean tree)" : " (uncommitted work present)")
     );
 
     if (changed.length === 0) {
+      const nothing =
+        PR
+          ? "PR #" + prMeta.number + " has no changes against " + prMeta.baseRefName + " — nothing to review."
+          : BRANCH_MODE
+            ? "Branch " + branchName + " has no changes against " + branchBaseRef + " — nothing to review."
+            : "No changes against " + BASE + " — nothing to review.";
       return {
-        conclusion: "No changes against " + BASE + " — nothing to review.",
+        conclusion: nothing,
         findings: [],
-        verified: ["change scope: git diff " + BASE + " is empty"],
+        verified: ["change scope: the review target resolved to an empty diff"],
         notCovered: [],
         title: "Code review — nothing to review",
-        markdown: "# Code review — nothing to review\n\n`git diff " + BASE + "` is empty.\n",
+        markdown: "# Code review — nothing to review\n\n" + nothing + "\n",
       };
     }
   }
@@ -843,7 +1101,11 @@ async function main() {
       "",
       PROJECT
         ? "The project (" + targetFiles.length + " target files) failed the repo's own checks, so the "
-        : "The change (`git diff " + BASE + "` — " + changed.length + " files) failed the repo's own checks, so the ",
+        : PR
+          ? "PR #" + prMeta.number + " (" + changed.length + " files) failed the repo's own checks, so the "
+          : BRANCH_MODE
+            ? "Branch " + branchName + " (" + changed.length + " files) failed the repo's own checks, so the "
+            : "The change (`git diff " + BASE + "` — " + changed.length + " files) failed the repo's own checks, so the ",
       "specialist reviewers were not spent on it. Fix these first, then rerun the review.",
       "",
       "## Failed checks",
@@ -856,7 +1118,8 @@ async function main() {
     ).join("\n");
     return {
       conclusion:
-        (PROJECT ? "The project" : "The change") + " failed " + gateFailed.length + " of " + gate.length +
+        (PROJECT ? "The project" : PR ? "PR #" + prMeta.number : BRANCH_MODE ? "Branch " + branchName : "The change") +
+        " failed " + gateFailed.length + " of " + gate.length +
         " detected repo checks (" + gateFailed.map(function (g) { return g.name; }).join("; ") + "). Specialist review was skipped — " +
         "these are mechanical fixes; rerun the review after they pass.",
       findings: gateFindings,
@@ -1164,11 +1427,26 @@ async function main() {
   const reportMd = [
     PROJECT
       ? "# Code review — project (" + finalChangedN + " files)"
-      : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
+      : PR
+        ? "# Code review — PR #" + prMeta.number + ": " + prMeta.title +
+          " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+        : BRANCH_MODE
+          ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
+            " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+          : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
     "",
     "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
       " · every kept finding confirmed by an independent reader." +
-      (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : ""),
+      (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
+      (PR
+        ? " Target: pull request #" + prMeta.number + " by " + prMeta.author + " → " +
+          prMeta.baseRefName + (prMeta.url ? " — " + prMeta.url : "") +
+          " — \"merge\" reads as the PR is ready."
+        : "") +
+      (BRANCH_MODE
+        ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
+          "branch is ready to merge."
+        : ""),
     roundsUsed > 0
       ? "Fix loop: " + roundsUsed + " round(s) — " + nFixed + "/" + tracked.length + " findings fixed, checks " +
         (gateGreen ? "green" : "RED") + ". Fixes sit uncommitted in the working tree."
@@ -1271,6 +1549,12 @@ async function main() {
     verified: [].concat(
       PROJECT
         ? ["review target: the project's tracked source files — " + targetFiles.length + " of " + targetCandidates + " matched"]
+        : [],
+      PR
+        ? ["review target: PR #" + prMeta.number + " (" + prMeta.state + ") — the merge-base diff against " + prMeta.baseRefName]
+        : [],
+      BRANCH_MODE
+        ? ["review target: branch " + branchName + " vs " + branchBaseRef + " — the merge-base diff (" + commitCount + " commit(s))"]
         : [],
       gate.length > 0
         ? ["the mechanical gate ran the repo's own detected checks (all passed): " + gate.map(function (g) { return g.name; }).join("; ")]

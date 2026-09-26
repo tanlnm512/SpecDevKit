@@ -6,6 +6,46 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.5.0 — 2026-09-26
+
+Pull-request and branch targets: the panel can now review a GitHub pull
+request or a branch's recent changes, completing the target set —
+diff (default), branch, pr, project. Both new targets resolve to a
+merge-base diff before any panel machinery runs, so the ask family, the
+gate, the confirmation step and the fix loop are unchanged underneath.
+Branch mode diffs the current branch against an explicit `base` or the
+remote's default branch (origin/HEAD, then main/master), uncommitted
+work included and noted. Pr mode resolves the PR with the gh CLI
+(`pr` arg: number, URL or owner/repo#N); because the panel and the fix
+loop read the working tree, the PR head must be checked out — on a clean
+tree the workflow checks it out itself (announced, previous HEAD in the
+log), on a dirty tree it refuses rather than hide uncommitted work. The
+PR diff is the merge-base against the PR's base commit — GitHub's own
+PR-diff semantics — and the report names the PR (number, title, author,
+base, URL), with "merge" reading as the PR is ready; branch mode's
+"merge" reads as the branch is ready to merge. Unknown target values now
+fail with the valid set instead of silently reviewing as diff mode. The
+zcode master resolves pr/branch through world.run git/gh calls; the
+Claude dialect routes the same resolution through five new probe agents
+(pr-meta, pr-head, pr-checkout, merge-base, base-ref). Parity tests pin
+the new target modes, the resolution anchors (merge-base, origin/HEAD
+detection, the dirty-tree refusal, the checkout announcement) and the
+probe labels in both dialects.
+
+Adopted from a phased AI-code-review rollout proposal: the pr target's
+report header carries the pull-request summary (title, author, base) and
+stays advisory-only; test-gap and security feedback were already first
+class. Deliberately NOT adopted: a hard cap on findings (conflicts with
+"never suppress a real defect" — findings stay severity-ordered instead)
+and an AI-owned hard gate (the only blocking gate remains the repo's own
+mechanical checks).
+
+Migration: none required — `target` still defaults to `diff` and every
+existing invocation behaves exactly as before; pass `target: "branch"`
+(optionally with `base`) or `target: "pr"` with a `pr` arg for the new
+targets, and re-run `tools/sync.sh` to pick up the regenerated workflow
+dialects.
+
 ## 0.4.0 — 2026-09-25
 
 Whole-project review: the panel can now review the codebase as it

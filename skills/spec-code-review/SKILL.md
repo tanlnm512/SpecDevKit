@@ -1,24 +1,24 @@
 ---
 name: spec-code-review
 description: >-
-  Portable three-stage code review for any git repository — a change or the
-  whole project. Stage 1 runs the repo's own detected checks as the
-  mechanical gate (scripts/gate.sh probes Makefile targets, npm scripts,
-  cargo, go, pytest/unittest (pytest via PATH, repo venv, or uv run), and
-  shell syntax on the diff — or every tracked script in project mode).
-  Stage 2 reviews the target through separate lenses — correctness,
-  security, quality & tests (one general reviewer on small targets) —
-  triaged by one editor with independent confirmation of every kept
-  finding. Stage 3 synthesizes a report with risk class, test gaps and
-  residual risks. An optional fix loop has an author agent fix the
-  confirmed findings in the working tree, verify every fix independently,
-  re-run the gate, and end with a merge / fix-first / human
-  recommendation. Use when the user asks to review a change — "review the
-  diff", "review the last commit", "review and fix" — or the codebase as
-  a whole ("review the project") — in this or any repo.
+  Portable three-stage code review for any git repository — a change, a
+  pull request, a branch's recent changes, or the whole project. Stage 1
+  runs the repo's own detected checks as the mechanical gate (Makefile
+  targets, npm scripts, cargo, go, pytest/unittest, shell syntax on the
+  diff). Stage 2 reviews the target through separate lenses —
+  correctness, security, quality & tests (one general reviewer on small
+  targets) — triaged by one editor with independent confirmation of
+  every kept finding. Stage 3 synthesizes a report with risk class,
+  test gaps and residual risks. An optional fix loop has an author agent
+  fix the confirmed findings in the working tree, verify every fix
+  independently, re-run the gate, and end with a merge / fix-first /
+  human recommendation. Use when the user asks to review a change —
+  "review the diff", "review and fix" — a pull request ("review PR 12"),
+  a branch's recent changes ("review what's on this branch") — or the
+  codebase as a whole ("review the project") — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -33,9 +33,37 @@ confirmed, with every fix re-verified.
 
 The user asks to review a change: "review the diff", "review this
 change", "review the last commit", "look over my working tree before I
-commit" — or to review AND fix: "review and fix the findings". The change
-scope is a diff base: the working tree (default), `HEAD~1` for the last
-commit, or any ref/branch.
+commit" — a pull request: "review PR 12", "review this pull request" —
+a branch's recent changes: "review what's on this branch", "review the
+recent changes on this branch" — or to review AND fix any of these:
+"review and fix the findings". The default change scope is a diff base:
+the working tree (default), `HEAD~1` for the last commit, or any
+ref/branch.
+
+## Review targets
+
+One `target` picks what the panel reviews. The first three all resolve
+to a diff, so the panel machinery, the gate and the fix loop run
+identically underneath — only the resolution differs:
+
+- **diff** (default) — the change against a base ref: the working tree
+  (`base: HEAD`), the last commit (`HEAD~1`), or any ref/branch.
+- **branch** — the current branch's recent changes: the merge-base diff
+  against a base branch (explicit `base`, else the remote's default —
+  `origin/HEAD`, then main/master). Uncommitted work on the branch is
+  included and noted in the report.
+- **pr** — a GitHub pull request (`pr`: number, URL or owner/repo#N,
+  resolved with the gh CLI). The panel reads the working tree, so the PR
+  head must be checked out: on a clean tree the review checks it out
+  itself (announced, with the previous HEAD in the log); on a dirty tree
+  it refuses rather than hide uncommitted work. The diff is the
+  merge-base against the PR's base commit — the same PR-diff semantics
+  GitHub uses — and the report names the PR (number, title, author,
+  base, URL).
+- **project** — the codebase as it stands (see below).
+
+Stage 1 always runs first with the resolved base: `--base <merge-base>`
+in diff/branch/pr mode, `--tree` in project mode.
 
 ## The three stages (and the optional fourth)
 
@@ -46,6 +74,7 @@ Run `scripts/gate.sh` from this skill before any reviewer works:
 ```bash
 bash <skill-dir>/scripts/gate.sh --base HEAD        # working-tree changes
 bash <skill-dir>/scripts/gate.sh --base HEAD~1      # the last commit
+bash <skill-dir>/scripts/gate.sh --base <merge-base>  # branch / PR mode (resolved first)
 bash <skill-dir>/scripts/gate.sh --tree             # every tracked *.sh (project mode)
 bash <skill-dir>/scripts/gate.sh --plan             # what it would run
 ```
@@ -176,9 +205,10 @@ commit decision and message are the user's.
 ## Launch discipline
 
 - **zcode harness**: run the installed workflow by name —
-  `spec-code-review` (args: `base`, `target` `diff`/`project`,
-  `paths` (project mode), `mode` fast/full/auto, `fix_rounds`, optional
-  `skill_dir` override). A repo may keep its own
+  `spec-code-review` (args: `base`, `target` `diff`/`branch`/`pr`/
+  `project`, `pr` (the pull request, pr mode), `paths` (project mode),
+  `mode` fast/full/auto, `fix_rounds`, optional `skill_dir` override).
+  A repo may keep its own
   project-scoped copy tuned to its exact CI set; the project copy wins
   there. The zcode facade has no user-installable agent types, so the
   workflow reads the panel briefs from the skill dir at run time and
@@ -200,4 +230,6 @@ Findings carry `path:line`, evidence, severity, lens, and a
 verified/unconfirmed status (or fixed/unfixed/worse after a fix round).
 Triage drops are listed with reasons — "dropped at triage" means judged
 out of scope, not missed. `notCovered` distinguishes "found nothing"
-from "looked nowhere": read it before trusting a clean report.
+from "looked nowhere": read it before trusting a clean report. In pr
+mode the `merge` recommendation reads as the PR is ready; in branch
+mode, as the branch is ready to merge.
