@@ -69,6 +69,17 @@ PR_TARGET_ANCHORS = [
     "switch back when done reviewing",
 ]
 
+# The stated-intent channel and the split recommendation (0.6.0): intent
+# (the arg, else the PR description) rides into the reviewer, triage,
+# final and fixer asks in both dialects, with the intent-blind
+# confirmation rule preserved; oversized changes earn a split line in
+# the report. Anchors pin the load-bearing sentences and tunables.
+INTENT_SPLIT_ANCHORS = [
+    "the author's stated intent",
+    "stated intent never waives a demonstrable defect",
+    "consider splitting into smaller",
+]
+
 # The fix-loop invariant: a reader verifier is never spawned for a
 # gate-lens entry (its `where` is a check name, not a file location) —
 # the fresh authoritative gate re-run owns those.
@@ -97,7 +108,9 @@ LENS_FOCUS = {
         "complexity the next reader pays for, over-engineering, misleading "
         "names, comments and docs that drift from the code, and tests — "
         "behavior this change alters with no test covering it, tests that "
-        "cannot fail.",
+        "cannot fail, and design fit — whether the change follows the "
+        "patterns the surrounding code already establishes instead of "
+        "inventing a parallel way.",
 }
 
 
@@ -137,6 +150,8 @@ class ParityTests(unittest.TestCase):
             self.assertIn("FAST_MAX_LINES = 400", text, name)
             self.assertIn("FAST_MAX_FILES = 5", text, name)
             self.assertIn("PROJECT_MAX_FILES = 30", text, name)
+            self.assertIn("SUGGEST_SPLIT_LINES = 1000", text, name)
+            self.assertIn("SUGGEST_SPLIT_FILES = 20", text, name)
             self.assertIn("SEV_RANK", text, name)
 
     def test_target_mode_branches_are_shared(self):
@@ -166,6 +181,18 @@ class ParityTests(unittest.TestCase):
         for anchor in ASK_ANCHORS + PROJECT_ASK_ANCHORS:
             self.assertIn(anchor, flat(self.ts), anchor)
             self.assertIn(anchor, flat(self.js), anchor)
+
+    def test_intent_channel_and_split_advice_are_shared(self):
+        # intent rides into reviewer/triage/final/fixer asks in both
+        # dialects (4 intentBlock calls each); confirmation stays
+        # intent-blind — the confirm asks never see it
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            for anchor in INTENT_SPLIT_ANCHORS:
+                self.assertIn(anchor, flat(text), f"{anchor} in {name}")
+            # 4 call sites (reviewer, triage, final, fixer) + 1 definition
+            self.assertEqual(text.count("intentBlock()"), 5, name)
+            self.assertIn("INTENT_ARG", text, name)
+            self.assertIn("SUGGEST_SPLIT_LINES", text, name)
 
     def test_fix_loop_never_verifies_gate_lens_with_a_reader(self):
         self.assertIn(GATE_EXCLUSION, self.ts)

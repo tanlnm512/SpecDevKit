@@ -50,6 +50,10 @@ const PR_ARG =
   typeof args !== "undefined" && args && typeof args.pr === "string" && args.pr.trim()
     ? args.pr.trim()
     : "";
+const INTENT_ARG =
+  typeof args !== "undefined" && args && typeof args.intent === "string" && args.intent.trim()
+    ? args.intent.trim()
+    : "";
 const HAS_BASE =
   typeof args !== "undefined" && args && typeof args.base === "string" && args.base.trim()
     ? true
@@ -60,6 +64,9 @@ const BASE_ARG = HAS_BASE ? args.base.trim() : "";
 // branch in branch mode, the merge-base with the PR's base commit in
 // pr mode — every diff-mode ask and the gate then work unchanged.
 let BASE = HAS_BASE ? BASE_ARG : "HEAD";
+// The change's stated intent: the intent arg, else the PR description.
+// Resolved in the scope phase so every ask can quote it verbatim.
+let intentText = INTENT_ARG;
 const PATHS_ARG =
   typeof args !== "undefined" && args && typeof args.paths === "string" && args.paths.trim()
     ? args.paths.trim()
@@ -80,6 +87,11 @@ const skillDir =
     : SKILL_DIR_BAKED;
 const FAST_MAX_LINES = 400;
 const FAST_MAX_FILES = 5;
+// A change over these bounds still gets a full review, but the report
+// adds a split recommendation: reviewers read whole targets, and
+// coverage thins as the change grows.
+const SUGGEST_SPLIT_LINES = 1000;
+const SUGGEST_SPLIT_FILES = 20;
 // Whole-project reviews read files, not diffs: the target list is the
 // tracked source files, largest first, capped so a reviewer's turn can
 // actually cover it. paths narrows the list on big repos.
@@ -171,10 +183,11 @@ const LENSES = [
     system:
       "You are the quality-and-tests reviewer on a code review panel. You read whole diffs and judge what the next " +
       "reader pays for. You report complexity that obscures, over-engineering, misleading names, comments and docs " +
-      "that drift from the code, and test problems — changed behavior with no test covering it, tests that cannot " +
-      "fail. Never pure style or formatting; the repo's checks own those." + HONESTY,
+      "that drift from the code, test problems — changed behavior with no test covering it, tests that cannot " +
+      "fail — and design fit: whether the change follows the patterns the surrounding code already establishes. " +
+      "Never pure style or formatting; the repo's checks own those." + HONESTY,
     focus:
-      "complexity the next reader pays for, over-engineering, misleading names, comments and docs that drift from the code, and tests — behavior this change alters with no test covering it, tests that cannot fail.",
+      "complexity the next reader pays for, over-engineering, misleading names, comments and docs that drift from the code, and tests — behavior this change alters with no test covering it, tests that cannot fail, and design fit — whether the change follows the patterns the surrounding code already establishes instead of inventing a parallel way.",
   },
 ];
 
@@ -184,10 +197,11 @@ const GENERAL = {
   system:
     "You are the sole reviewer on a small change. You combine three lenses — correctness (logic, edge cases, " +
     "error handling), security (untrusted input, secrets, permissions), and quality (complexity, tests that fail " +
-    "to cover changed behavior) — and report only defects a reasonable author would fix. Never style, never " +
-    "speculation, never pre-existing issues the change does not touch." + HONESTY,
+    "to cover changed behavior, design fit with the patterns the surrounding code establishes) — and report only " +
+    "defects a reasonable author would fix. Never style, never speculation, never pre-existing issues the change " +
+    "does not touch." + HONESTY,
   focus:
-    "correctness (logic, edge cases, error handling), security (untrusted input, secrets, permissions), and quality (complexity, tests that fail to cover changed behavior).",
+    "correctness (logic, edge cases, error handling), security (untrusted input, secrets, permissions), and quality (complexity, tests that fail to cover changed behavior, design fit with the patterns the surrounding code establishes).",
 };
 
 const TRIAGE_SYSTEM =
@@ -497,6 +511,7 @@ function prMetaFromJson(raw) {
     return null;
   }
   if (!j || typeof j.headRefOid !== "string" || !j.headRefOid) return null;
+  const body = typeof j.body === "string" ? j.body.replace(/\s+/g, " ").trim() : "";
   return {
     number: typeof j.number === "number" ? j.number : 0,
     title: typeof j.title === "string" ? j.title.replace(/\s+/g, " ").trim() : "",
@@ -507,6 +522,7 @@ function prMetaFromJson(raw) {
     baseRefOid: typeof j.baseRefOid === "string" ? j.baseRefOid : "",
     headRefName: typeof j.headRefName === "string" ? j.headRefName : "",
     headRefOid: j.headRefOid,
+    body: body.length > 1200 ? body.slice(0, 1200) + "..." : body,
   };
 }
 
@@ -518,7 +534,7 @@ function prMetaFromJson(raw) {
 async function probePrMeta() {
   const out = await probe(
     "pr-meta-probe",
-    "gh pr view " + shq(PR_ARG) + " --json number,title,author,baseRefName,baseRefOid,headRefName,headRefOid,state,url"
+    "gh pr view " + shq(PR_ARG) + " --json number,title,author,baseRefName,baseRefOid,headRefName,headRefOid,state,url,body"
   );
   return out !== null ? prMetaFromJson(out) : null;
 }
@@ -590,6 +606,19 @@ async function probeBaseBranchAndName() {
 // --- asks (verbatim from the zcode master unless a one-shot divergence
 // is called out in the header) ----------------------------------------------
 
+// The author's stated intent — the rebuttal channel for unattended runs:
+// it lets reviewers and triage apply the intentional-behavior-change
+// exclusion with knowledge instead of guesswork, while never waiving a
+// demonstrable defect. Confirmation stays intent-blind on purpose: the
+// confirmer verifies from the code alone.
+function intentBlock() {
+  return intentText
+    ? "What this change is supposed to do (the author's stated intent):\n" + intentText + "\n" +
+      "Judge the change against that intent: a deliberate choice the intent states up front is an " +
+      "intentional behavior change, not a finding — but stated intent never waives a demonstrable defect.\n"
+    : "";
+}
+
 function reviewAsk(lensDef, files, lines, overCap, gateLine) {
   const scope =
     "`git diff " + BASE + "` — " + files + " files, ~" + lines + " added lines" +
@@ -600,6 +629,7 @@ function reviewAsk(lensDef, files, lines, overCap, gateLine) {
     "files for context wherever the diff alone is ambiguous; check call sites when a defect depends on them.\n" +
     "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n" +
     "3. Report only findings from your lens: " + lensDef.focus + "\n" +
+    intentBlock() +
     "A finding must be: discrete and actionable; introduced by this change; demonstrable from the code (quote the " +
     "deciding lines in evidence); something the author would reasonably fix. Exclude: speculative might-fail " +
     "concerns, pre-existing problems the change does not worsen, style/formatting (the repo's checks own those), " +
@@ -641,7 +671,8 @@ function triageAsk(lensLabel, review) {
   return (
     "Raw findings from the " + lensLabel + " reviewer for the change under review (`git diff " + BASE + "`):\n" +
     JSON.stringify(review.findings, null, 2) +
-    "\nYou are the triage editor. For each finding, keep it or drop it. Keep = it meets the bar — real, " +
+    "\n" + intentBlock() +
+    "You are the triage editor. For each finding, keep it or drop it. Keep = it meets the bar — real, " +
     "introduced by this change, actionable, worth the author's attention. Drop = a duplicate of another finding " +
     "in this same list, a style nit, speculation, or a pre-existing issue. Never drop something " +
     "merely because it is inconvenient, and never keep what the repo's own checks already decide (they all " +
@@ -705,6 +736,7 @@ function finalAsk(summary, gateLine) {
     JSON.stringify(summary, null, 2) +
     "\n" + gateLine + " before review started. Produce the final assessment of this change. Run `git diff " + BASE +
     "` yourself wherever you need to judge it, and read the test files before claiming a test gap.\n" +
+    intentBlock() +
     "risk: low | medium | high — what merging this change as-is would risk. testGaps: behaviors this change " +
     "alters that no test covers (empty if none). residualRisks: what remains unverified after the checks and " +
     "the review. verdict: two or three sentences — should this merge, and what must the author fix first."
@@ -746,6 +778,7 @@ function fixerAsk(round, unresolved, gateFeedback) {
       ) +
       "\nWork in the working tree; never commit. You may run a single targeted test file for code you touch, " +
       "but the repo's checks re-run the moment you finish — do not run them yourself.\n" +
+      intentBlock() +
       "Return addressed (the what-strings you fully fixed), skipped (what you deliberately left, with why), " +
       "changedPaths, and notes (one sentence per change: what was done and why it is minimal)."
     );
@@ -925,6 +958,7 @@ async function main() {
       );
     }
     prMeta = meta;
+    if (!intentText && meta.body) intentText = meta.body;
     const headState = await probeHeadState();
     if (headState === null || !headState.head) {
       return failReturn(
@@ -1058,7 +1092,10 @@ async function main() {
         : BRANCH_MODE ? "branch " + branchName + " (diff vs merge-base " + BASE.slice(0, 12) + ")"
         : "git diff " + BASE) +
       " — " + changed.length + " files, ~" + addedLines + " added lines" +
-      (scope.clean ? " (clean tree)" : " (uncommitted work present)")
+      (scope.clean ? " (clean tree)" : " (uncommitted work present)") +
+      ((addedLines > SUGGEST_SPLIT_LINES || changed.length > SUGGEST_SPLIT_FILES)
+        ? " — large change: the report will recommend splitting"
+        : "")
     );
 
     if (changed.length === 0) {
@@ -1447,6 +1484,11 @@ async function main() {
         ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
           "branch is ready to merge."
         : ""),
+      (!PROJECT && (finalAdded > SUGGEST_SPLIT_LINES || finalChangedN > SUGGEST_SPLIT_FILES))
+        ? "Large change: ~" + finalAdded + " added lines across " + finalChangedN +
+          " files — consider splitting into smaller, independently reviewable chunks; reviewers read whole " +
+          "targets, and coverage thins as size grows."
+        : "",
     roundsUsed > 0
       ? "Fix loop: " + roundsUsed + " round(s) — " + nFixed + "/" + tracked.length + " findings fixed, checks " +
         (gateGreen ? "green" : "RED") + ". Fixes sit uncommitted in the working tree."

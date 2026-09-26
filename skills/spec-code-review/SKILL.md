@@ -18,7 +18,7 @@ description: >-
   codebase as a whole ("review the project") — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.5.0"
+  version: "0.6.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -127,8 +127,10 @@ parallel where you can:
 - **security** — untrusted input paths, injection, secrets and tokens,
   permissions, destructive operations;
 - **quality & tests** — complexity the next reader pays for,
-  misleading names, doc drift, and tests: changed behavior with no
-  covering test, tests that cannot fail.
+  misleading names, doc drift, design fit (whether the change follows
+  the patterns the surrounding code establishes instead of inventing a
+  parallel way), and tests: changed behavior with no covering test,
+  tests that cannot fail.
 
 Each side of this rubric is materialized as an agent brief inside the
 skill — `agents/code-review-correctness.md`, `-security.md`,
@@ -166,6 +168,15 @@ Every reviewer follows the same contract:
 6. Zero findings is the expected answer for a clean target. Never
    invent one to seem busy.
 
+**Stated intent.** When the author's intent is available — the
+`intent` arg, or the PR description in pr mode — reviewers, triage and
+the final assessment receive it verbatim and judge against it: a
+deliberate choice the intent states up front is an intentional
+behavior change, not a finding. This is the author's rebuttal channel
+for unattended runs, and it never waives a demonstrable defect.
+Confirmation stays intent-blind on purpose: the confirmer verifies
+from the code alone.
+
 One **triage editor** dedupes across lenses and drops style nits,
 speculation and pre-existing issues (with a one-line reason each) —
 stingy, but never suppressing a real defect. Then every KEPT finding is
@@ -180,7 +191,11 @@ One assessment (the triage editor, for a consistent scale) produces:
 overall **risk** (low/medium/high), **test gaps** (changed behavior no
 test covers), **residual risks** (what remains unverified), and a
 verdict. Report what was checked (the gate's commands) and what was
-not.
+not. A change over the split bounds (`SUGGEST_SPLIT_LINES` 1000 added
+lines / `SUGGEST_SPLIT_FILES` 20 files) also earns a one-line
+recommendation to split it into smaller, independently reviewable
+chunks — reviewers read whole targets, and coverage thins as size
+grows.
 
 ### Stage 4 (optional) — the fix loop
 
@@ -206,8 +221,10 @@ commit decision and message are the user's.
 
 - **zcode harness**: run the installed workflow by name —
   `spec-code-review` (args: `base`, `target` `diff`/`branch`/`pr`/
-  `project`, `pr` (the pull request, pr mode), `paths` (project mode),
-  `mode` fast/full/auto, `fix_rounds`, optional `skill_dir` override).
+  `project`, `pr` (the pull request, pr mode), `intent` (what the
+  change is supposed to do — the author's stated intent), `paths`
+  (project mode), `mode` fast/full/auto, `fix_rounds`, optional
+  `skill_dir` override).
   A repo may keep its own
   project-scoped copy tuned to its exact CI set; the project copy wins
   there. The zcode facade has no user-installable agent types, so the

@@ -6,6 +6,32 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.6.0 — 2026-09-26
+
+Stated intent, split advice, design fit — closing the gaps against
+classic human-review principles. (1) An `intent` arg (change modes)
+carries what the change is supposed to do, in the author's words, into
+the reviewer, triage, final-assessment and fixer asks; in pr mode the
+PR description (whitespace-collapsed, capped at 1200 chars) is used
+when no intent arg is passed. Intent is the author's rebuttal channel
+for unattended runs — a deliberate choice the intent states up front is
+an intentional behavior change, not a finding, but stated intent never
+waives a demonstrable defect; confirmation stays intent-blind on
+purpose so the confirmer verifies from the code alone. (2) Changes over
+SUGGEST_SPLIT_LINES (1000 added lines) or SUGGEST_SPLIT_FILES (20 files)
+earn a one-line split recommendation in the report — reviewers read
+whole targets, and coverage thins as size grows. (3) The quality lens
+gains design fit: whether the change follows the patterns the
+surrounding code already establishes instead of inventing a parallel
+way — focus string updated in both workflow dialects and the quality
+brief (pinned together). Parity tests pin the intent wiring (exactly
+four intentBlock call sites per dialect, confirm asks excluded), the
+split tunables and anchors, and the new focus string.
+
+Migration: none required — the arg is optional and every existing
+invocation behaves exactly as before; re-run tools/sync.sh to pick up
+the regenerated workflow dialects, briefs and the root agents/ copies.
+
 ## 0.5.0 — 2026-09-26
 
 Pull-request and branch targets: the panel can now review a GitHub pull
