@@ -75,11 +75,21 @@ const MODE =
   typeof args !== "undefined" && args && typeof args.mode === "string" && args.mode.trim()
     ? args.mode.trim().toLowerCase()
     : "auto";
+const FIX_FROM_ARG =
+  typeof args !== "undefined" && args && typeof args.fix_from === "string" && args.fix_from.trim()
+    ? args.fix_from.trim()
+    : "";
+// Fix-only continuation: findings carried from a previous review's
+// report; the review stages are skipped and the fix loop runs directly.
+const FIX_FROM = FIX_FROM_ARG !== "";
 const FIX_ROUNDS =
   typeof args !== "undefined" && args && typeof args.fix_rounds === "number" &&
   Number.isInteger(args.fix_rounds) && args.fix_rounds >= 0
     ? args.fix_rounds
     : 0;
+// A fix_from run is a fix run: without an explicit round count it gets
+// the default bounded loop rather than a review-only no-op.
+if (FIX_FROM && FIX_ROUNDS === 0) FIX_ROUNDS = 2;
 const SKILL_DIR_BAKED = "__SKILL_DIR__";
 const skillDir =
   typeof args !== "undefined" && args && typeof args.skill_dir === "string" && args.skill_dir
@@ -238,6 +248,7 @@ const FINDING_ITEM = {
     what: { type: "string" },
     evidence: { type: "string" },
     severity: { type: "string", enum: ["low", "medium", "high"] },
+    impact: { type: "string" },
   },
   required: ["where", "what", "evidence", "severity"],
   additionalProperties: false,
@@ -280,6 +291,7 @@ const TAGGED_FINDING_ITEM = {
     evidence: { type: "string" },
     severity: { type: "string", enum: ["low", "medium", "high"] },
     lens: { type: "string" },
+    impact: { type: "string" },
   },
   required: ["where", "what", "evidence", "severity", "lens"],
   additionalProperties: false,
@@ -603,6 +615,65 @@ async function probeBaseBranchAndName() {
   };
 }
 
+// fix_from loader: findings JSON from a previous review — inline (starts
+// with [ or {) or a file path read through a probe. Accepts a bare
+// array of finding items or an object with a findings array; each item
+// needs where and what, everything else defaults sensibly. Entries the
+// previous run already marked fixed are dropped; the rest return as
+// pending tracked findings, highest severity first. A string return is
+// a user-facing error.
+async function loadFixFromFindings() {
+  let text = FIX_FROM_ARG;
+  if (!/^\s*[\[{]/.test(text)) {
+    const out = await probe("fix-from-probe", "cat " + shq(FIX_FROM_ARG));
+    if (out === null || !out.trim()) {
+      return "fix_from: could not read \"" + FIX_FROM_ARG + "\" — pass a findings JSON file path (workspace-relative or absolute) or inline JSON.";
+    }
+    text = out;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return "fix_from: the findings payload is not valid JSON — expected the findings array of a previous review report.";
+  }
+  const items = Array.isArray(parsed)
+    ? parsed
+    : (parsed && Array.isArray(parsed.findings) ? parsed.findings : []);
+  const trackedOut = [];
+  for (const it of items) {
+    if (!it || typeof it.where !== "string" || !it.where || typeof it.what !== "string" || !it.what) {
+      log("fix_from: skipping an item without where/what");
+      continue;
+    }
+    if (it.fixStatus === "fixed") continue; // already resolved in the previous run
+    trackedOut.push({
+      finding: {
+        where: it.where,
+        what: it.what,
+        evidence: typeof it.evidence === "string" ? it.evidence : "",
+        severity: it.severity === "high" || it.severity === "medium" || it.severity === "low" ? it.severity : "medium",
+        lens: typeof it.lens === "string" && it.lens ? it.lens : "general",
+        impact: typeof it.impact === "string" ? it.impact : "",
+        confirmation: {
+          status: it.status === "unconfirmed" ? "unconfirmed" : "verified",
+          note: "carried from the previous review's report",
+        },
+      },
+      fix: "pending",
+      fixNote: "carried from the previous review",
+    });
+  }
+  if (trackedOut.length === 0) {
+    return "fix_from: the payload carried no actionable findings — every item was invalid or already marked fixed.";
+  }
+  trackedOut.sort(function (a, b) {
+    return (SEV_RANK[a.finding.severity] !== undefined ? SEV_RANK[a.finding.severity] : 3) -
+           (SEV_RANK[b.finding.severity] !== undefined ? SEV_RANK[b.finding.severity] : 3);
+  });
+  return trackedOut;
+}
+
 // --- asks (verbatim from the zcode master unless a one-shot divergence
 // is called out in the header) ----------------------------------------------
 
@@ -630,6 +701,8 @@ function reviewAsk(lensDef, files, lines, overCap, gateLine) {
     "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n" +
     "3. Report only findings from your lens: " + lensDef.focus + "\n" +
     intentBlock() +
+    "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, " +
+    "what data is at risk). Omit it only for minor, low-severity items.\n" +
     "A finding must be: discrete and actionable; introduced by this change; demonstrable from the code (quote the " +
     "deciding lines in evidence); something the author would reasonably fix. Exclude: speculative might-fail " +
     "concerns, pre-existing problems the change does not worsen, style/formatting (the repo's checks own those), " +
@@ -656,6 +729,8 @@ function reviewAskProject(lensDef, files, candidates, overCap, gateLine) {
     "whenever a defect depends on them.\n" +
     "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n" +
     "3. Report only findings from your lens: " + lensDef.focus + "\n" +
+    "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, " +
+    "what data is at risk). Omit it only for minor, low-severity items.\n" +
     "A finding must be: discrete and actionable; present in the code as it stands; demonstrable from the code " +
     "(quote the deciding lines in evidence); something the author would reasonably fix. Exclude: speculative " +
     "might-fail concerns, style/formatting (the repo's checks own those), and deliberate design choices the " +
@@ -771,6 +846,7 @@ function fixerAsk(round, unresolved, gateFeedback) {
             evidence: t.finding.evidence,
             severity: t.finding.severity,
             lens: t.finding.lens,
+            impact: typeof t.finding.impact === "string" ? t.finding.impact : "",
           };
         }),
         null,
@@ -881,6 +957,7 @@ function findingsMd(items) {
     );
     lines.push("- where: `" + f.where + "`");
     lines.push("- evidence: " + f.evidence);
+    if (f.impact) lines.push("- impact: " + f.impact);
     lines.push("");
   }
   return lines;
@@ -903,8 +980,8 @@ function fallbackAssessment(tracked, gateGreen, roundsUsed) {
 // --- the run ----------------------------------------------------------------
 
 async function main() {
-  phase("Scope the change and run the repo's checks");
-
+  // Shared panel state: a fix_from run populates it from the previous
+  // review's report; a fresh run populates it through the phases below.
   let targetFiles = [];
   let targetCandidates = 0;
   let targetOverCap = false;
@@ -915,6 +992,13 @@ async function main() {
   let branchBaseRef = "";
   let branchName = "";
   let commitCount = 0;
+  let gate = [];
+  let GATE_LINE = "";
+  let modeUsed = "fix-only";
+  let tracked = [];
+  let allConfirmed = [];
+  let allDropped = [];
+  let summary = [];
 
   function failReturn(conclusion, notCovered, mdTitle, mdBody) {
     return {
@@ -926,6 +1010,36 @@ async function main() {
       markdown: mdBody,
     };
   }
+
+  if (FIX_FROM) {
+    phase("Load the findings from the previous review");
+    const loaded = await loadFixFromFindings();
+    if (typeof loaded === "string") {
+      return failReturn(
+        loaded,
+        ["the fix loop — fix_from payload unusable"],
+        "Code review — fix_from unusable",
+        "# Code review — fix_from unusable\n\n" + loaded + "\n",
+      );
+    }
+    tracked = loaded;
+    allConfirmed = tracked.map(function (t) { return t.finding; });
+    summary = tracked.map(function (t) {
+      return {
+        where: t.finding.where,
+        what: t.finding.what,
+        severity: t.finding.severity,
+        lens: t.finding.lens,
+        status: t.finding.confirmation.status,
+      };
+    });
+    gate = await runGate();
+    GATE_LINE = gateNote(gate);
+    const preBad = gate.filter(function (g) { return g.exitCode !== 0; }).length;
+    log("fix loop: " + tracked.length + " finding(s) carried from the previous review — pre-fix gate: " +
+      (gate.length - preBad) + "/" + gate.length + " checks passing");
+  } else {
+  phase("Scope the change and run the repo's checks");
 
   if (TARGETS.indexOf(TARGET) === -1) {
     return failReturn(
@@ -1116,8 +1230,8 @@ async function main() {
     }
   }
 
-  const gate = await runGate();
-  const GATE_LINE = gateNote(gate);
+  gate = await runGate();
+  GATE_LINE = gateNote(gate);
   const gateFailed = gate.filter(function (g) { return g.exitCode !== 0; });
   log("repo checks: " + (gate.length - gateFailed.length) + "/" + gate.length + " detected and run");
 
@@ -1173,7 +1287,6 @@ async function main() {
 
   phase("Review the change through separate lenses and confirm every finding");
 
-  let modeUsed;
   if (MODE === "fast" || MODE === "full") {
     modeUsed = MODE;
   } else {
@@ -1226,7 +1339,7 @@ async function main() {
   for (const f of lensFailures) log("lens failed: " + f.lens + " reviewer returned no result");
 
   let keptAll = perLens.reduce(function (a, r) { return a.concat(r.kept); }, []);
-  let allDropped = perLens.reduce(function (a, r) { return a.concat(r.dropped); }, []);
+  allDropped = perLens.reduce(function (a, r) { return a.concat(r.dropped); }, []);
 
   // cross-lens merge: the one-shot replacement for the shared triage
   // conversation (never suppress on failure — keep everything kept so far)
@@ -1247,7 +1360,7 @@ async function main() {
     keptAll,
     function (kf) { return agent(PROJECT ? confirmAskProject(kf.finding) : confirmAsk(kf.finding), { label: "confirm-" + kf.lens, schema: CONFIRM_SCHEMA }); }
   );
-  const allConfirmed = [];
+  allConfirmed = [];
   for (let i = 0; i < keptAll.length; i++) {
     const c = confirmations[i];
     const confirmation = c
@@ -1267,16 +1380,18 @@ async function main() {
     return (SEV_RANK[a.severity] !== undefined ? SEV_RANK[a.severity] : 3) -
            (SEV_RANK[b.severity] !== undefined ? SEV_RANK[b.severity] : 3);
   });
-  const summary = allConfirmed.map(function (c) {
+  summary = allConfirmed.map(function (c) {
     return { where: c.where, what: c.what, severity: c.severity, lens: c.lens, status: c.confirmation.status };
   });
 
   // -------------------------------------------------------------------------
   // The fix loop: the author fixes, independent verifiers check every fix,
   // the gate re-runs, fresh eyes scan the fix diff. Bounded by rounds.
-  const tracked = allConfirmed.map(function (f) {
+  tracked = allConfirmed.map(function (f) {
     return { finding: f, fix: "pending", fixNote: "not yet attempted" };
   });
+  }
+
   let roundsUsed = 0;
   let gateGreen = true;
   const fixerNotes = [];
@@ -1457,34 +1572,39 @@ async function main() {
       status: t.finding.confirmation.status,
       severity: t.finding.severity,
       lens: t.finding.lens,
+      impact: typeof t.finding.impact === "string" ? t.finding.impact : "",
       fixStatus: t.fix,
     };
   });
 
   const reportMd = [
-    PROJECT
-      ? "# Code review — project (" + finalChangedN + " files)"
-      : PR
-        ? "# Code review — PR #" + prMeta.number + ": " + prMeta.title +
-          " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
-        : BRANCH_MODE
-          ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
+    FIX_FROM
+      ? "# Code review — fix loop (" + tracked.length + " finding(s) carried from the previous review)"
+      : PROJECT
+        ? "# Code review — project (" + finalChangedN + " files)"
+        : PR
+          ? "# Code review — PR #" + prMeta.number + ": " + prMeta.title +
             " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
-          : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
+          : BRANCH_MODE
+            ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
+              " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+            : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
     "",
-    "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
-      " · every kept finding confirmed by an independent reader." +
-      (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
-      (PR
-        ? " Target: pull request #" + prMeta.number + " by " + prMeta.author + " → " +
-          prMeta.baseRefName + (prMeta.url ? " — " + prMeta.url : "") +
-          " — \"merge\" reads as the PR is ready."
-        : "") +
-      (BRANCH_MODE
-        ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
-          "branch is ready to merge."
-        : ""),
-      (!PROJECT && (finalAdded > SUGGEST_SPLIT_LINES || finalChangedN > SUGGEST_SPLIT_FILES))
+    FIX_FROM
+      ? "Mode: fix-only — the review stages were skipped; findings carried from the previous review's report. fix_rounds: " + FIX_ROUNDS + "."
+      : "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
+        " · every kept finding confirmed by an independent reader." +
+        (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
+        (PR
+          ? " Target: pull request #" + prMeta.number + " by " + prMeta.author + " → " +
+            prMeta.baseRefName + (prMeta.url ? " — " + prMeta.url : "") +
+            " — \"merge\" reads as the PR is ready."
+          : "") +
+        (BRANCH_MODE
+          ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
+            "branch is ready to merge."
+          : ""),
+      (!FIX_FROM && !PROJECT && (finalAdded > SUGGEST_SPLIT_LINES || finalChangedN > SUGGEST_SPLIT_FILES))
         ? "Large change: ~" + finalAdded + " added lines across " + finalChangedN +
           " files — consider splitting into smaller, independently reviewable chunks; reviewers read whole " +
           "targets, and coverage thins as size grows."
@@ -1550,6 +1670,9 @@ async function main() {
   ).join("\n");
 
   const notCovered = [];
+  if (FIX_FROM) {
+    notCovered.push("the review stages were skipped (fix_from) — coverage inherits the previous report's notCovered; anything it missed stays missed");
+  }
   if (PROJECT && targetOverCap) {
     notCovered.push("the project review covered " + targetFiles.length + " of " + targetCandidates + " tracked source files " +
       "(cap " + PROJECT_MAX_FILES + ", largest first) — rerun with paths to target the rest");
@@ -1589,6 +1712,9 @@ async function main() {
           (allDropped.length ? " (" + allDropped.length + " dropped at triage as duplicates or out of scope.)" : ""),
     findings: reportedFindings,
     verified: [].concat(
+      FIX_FROM
+        ? ["fix loop continuation — findings carried from the previous review's report; review stages skipped"]
+        : [],
       PROJECT
         ? ["review target: the project's tracked source files — " + targetFiles.length + " of " + targetCandidates + " matched"]
         : [],

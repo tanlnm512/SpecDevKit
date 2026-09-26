@@ -6,6 +6,32 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.7.0 — 2026-09-26
+
+Fix continuation and impact. (1) A `fix_from` arg turns the workflow
+into a fix-only second run: it takes the findings JSON of a previous
+review — inline, or a file path read with cat / a probe agent; a bare
+array or an object with a findings array — skips the review stages,
+and runs the fix loop directly on the carried findings (items already
+marked fixed are dropped, severities are re-sorted, the gate runs once
+pre-fix and again after every round). This makes the decision gate a
+real step: run a review, present the findings with severity and
+impact, let the user decide, then fix from the report without paying
+for a second review. `fix_rounds` defaults to 2 in fix_from mode; a
+new "Load the findings from the previous review" phase opens the run,
+and the report/verified/notCovered fields state that coverage
+inherits the previous report. (2) Findings gain an optional `impact`
+field — one sentence on what the defect breaks and when it bites
+(callee/caller exposure, data at risk) — requested in every reviewer
+ask (diff and project), carried through triage, the fixer brief and
+both report renderings. Parity tests pin the new phase, the
+fix_from/impact anchors, the fix_rounds default, the probe label and
+the schema shapes.
+
+Migration: none required — both changes are additive; existing
+invocations behave exactly as before, and re-run tools/sync.sh to pick
+up the regenerated dialects.
+
 ## 0.6.0 — 2026-09-26
 
 Stated intent, split advice, design fit — closing the gaps against

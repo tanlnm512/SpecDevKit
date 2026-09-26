@@ -23,8 +23,12 @@ SKILL = Path(__file__).resolve().parents[1]
 DWF_TS = SKILL / "workflows" / "spec-code-review.dwf.ts"
 WF_JS = SKILL / "workflows" / "spec-code-review.js"
 
-# The protocol spine both dialects must carry, phase for phase.
+# The protocol spine both dialects must carry, phase for phase. The
+# fix_from loader phase runs first in source order (its phase() call is
+# emitted before the scope phase's, though only executed in fix_from
+# mode).
 PHASES = [
+    "Load the findings from the previous review",
     "Scope the change and run the repo's checks",
     "Review the change through separate lenses and confirm every finding",
     "Fix the confirmed findings and verify every fix",
@@ -79,6 +83,18 @@ INTENT_SPLIT_ANCHORS = [
     "stated intent never waives a demonstrable defect",
     "consider splitting into smaller",
 ]
+
+# The fix_from continuation and the impact field (0.7.0): a fix-only run
+# skips the review stages and carries the previous report's findings into
+# the fix loop; every reviewer ask asks for a one-line impact. Anchors
+# pin the shared sentences and the loader/probe wiring.
+FIX_CONTINUATION_ANCHORS = [
+    "fix_from",
+    "findings carried from the previous review",
+    "the review stages were skipped (fix_from)",
+    "what the defect breaks and when it bites",
+]
+FIX_FROM_PROBE = "fix-from-probe"
 
 # The fix-loop invariant: a reader verifier is never spawned for a
 # gate-lens entry (its `where` is a check name, not a file location) —
@@ -184,8 +200,8 @@ class ParityTests(unittest.TestCase):
 
     def test_intent_channel_and_split_advice_are_shared(self):
         # intent rides into reviewer/triage/final/fixer asks in both
-        # dialects (4 intentBlock calls each); confirmation stays
-        # intent-blind — the confirm asks never see it
+        # dialects (4 intentBlock call sites + 1 definition each);
+        # confirmation stays intent-blind — the confirm asks never see it
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
             for anchor in INTENT_SPLIT_ANCHORS:
                 self.assertIn(anchor, flat(text), f"{anchor} in {name}")
@@ -193,6 +209,19 @@ class ParityTests(unittest.TestCase):
             self.assertEqual(text.count("intentBlock()"), 5, name)
             self.assertIn("INTENT_ARG", text, name)
             self.assertIn("SUGGEST_SPLIT_LINES", text, name)
+
+    def test_fix_from_continuation_and_impact_are_shared(self):
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            for anchor in FIX_CONTINUATION_ANCHORS:
+                self.assertIn(anchor, flat(text), f"{anchor} in {name}")
+            # fix-only defaults the loop to 2 rounds instead of a no-op
+            self.assertIn("if (FIX_FROM && FIX_ROUNDS === 0) FIX_ROUNDS = 2;", text, name)
+        # the impact field rides each dialect's finding schema: optional
+        # in the zcode interface, schema-declared in the claude master
+        # with the required list left unchanged (impact is optional)
+        self.assertIn("impact?: string", self.ts)
+        self.assertIn('impact: { type: "string" }', self.js)
+        self.assertIn('required: ["where", "what", "evidence", "severity"],', self.js)
 
     def test_fix_loop_never_verifies_gate_lens_with_a_reader(self):
         self.assertIn(GATE_EXCLUSION, self.ts)
@@ -273,6 +302,8 @@ class ClaudeDialectTests(unittest.TestCase):
         self.assertIn("pr-checkout-probe", self.js)
         self.assertIn("merge-base-probe", self.js)
         self.assertIn("base-ref-probe", self.js)
+        # fix_from continuation probe (0.7.0): reads the carried findings
+        self.assertIn(FIX_FROM_PROBE, self.js)
         # the gate command reaches the probe shell-quoted, never bare
         self.assertIn('shq(skillDir + "/scripts/gate.sh")', self.js)
 

@@ -18,7 +18,7 @@ description: >-
   codebase as a whole ("review the project") — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.6.0"
+  version: "0.7.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -158,14 +158,17 @@ Every reviewer follows the same contract:
    actionable; part of the target under review (in change review:
    introduced by this change); demonstrable from the code (quote the
    deciding lines); something the author would reasonably fix.
-4. Exclusions: speculative might-fail concerns, style/formatting (the
+4. Impact — one sentence on what the defect breaks and when it bites
+   (which callers, what data is at risk), on every finding above the
+   minor level.
+5. Exclusions: speculative might-fail concerns, style/formatting (the
    gate owns those), intentional behavior changes — and, in change
    review, pre-existing problems the change does not worsen.
-5. Severity: `high` = data loss, crash, wrong result, security
+6. Severity: `high` = data loss, crash, wrong result, security
    compromise; `medium` = a real defect the author should fix; `low` =
    minor. Cite every finding as `path:line` in the code (on the new
    side in change review).
-6. Zero findings is the expected answer for a clean target. Never
+7. Zero findings is the expected answer for a clean target. Never
    invent one to seem busy.
 
 **Stated intent.** When the author's intent is available — the
@@ -212,6 +215,18 @@ When the user asked to fix as well, run bounded rounds (default 2):
    touched, for NEW defects the fixes introduce.
 5. Loop until everything is fixed or rounds run out.
 
+**The review-then-ask flow.** A dynamic workflow cannot pause mid-run
+to ask the user, so the decision gate is a second run, and `fix_from`
+makes it cheap: run a review first (`fix_rounds: 0`), present the
+findings with their severity and impact, and let the user decide. If
+they fix, run the workflow again with `fix_from` — the findings JSON
+from the previous report, inline or as a file path (each item
+`{where, what, evidence, severity, lens, status, impact, fixStatus}`;
+items already marked fixed are dropped) — plus `fix_rounds`. That run
+skips the review stages entirely: it loads the carried findings, runs
+the fix loop on them, and ends with the recommendation. `fix_rounds`
+defaults to 2 in this mode.
+
 End with a **recommendation**: `merge` (everything fixed, gate green,
 nothing new), `fix-first` (ordinary findings remain), or `human`
 (judgment calls or unconfirmed residue). Fixes stay uncommitted — the
@@ -222,8 +237,9 @@ commit decision and message are the user's.
 - **zcode harness**: run the installed workflow by name —
   `spec-code-review` (args: `base`, `target` `diff`/`branch`/`pr`/
   `project`, `pr` (the pull request, pr mode), `intent` (what the
-  change is supposed to do — the author's stated intent), `paths`
-  (project mode), `mode` fast/full/auto, `fix_rounds`, optional
+  change is supposed to do — the author's stated intent), `fix_from`
+  (findings JSON from a previous report — fix-only continuation),
+  `paths` (project mode), `mode` fast/full/auto, `fix_rounds`, optional
   `skill_dir` override).
   A repo may keep its own
   project-scoped copy tuned to its exact CI set; the project copy wins

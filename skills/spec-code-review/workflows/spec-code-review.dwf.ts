@@ -55,6 +55,16 @@ args:
       in the author's words — the intent the reviewers judge against and
       the author's rebuttal channel for deliberate choices. In pr mode
       the PR description is used when this is absent.
+  fix_from:
+    type: string
+    description: >-
+      Fix-only continuation: findings JSON from a previous review — a
+      file path (workspace-relative or absolute) or inline JSON, either
+      a bare array of {where, what, evidence, severity, lens, status,
+      impact} items or an object with a findings array. Skips the review
+      stages and runs the fix loop on the carried findings; fix_rounds
+      defaults to 2 in this mode. The user-facing flow: run a review
+      first, present the report, ask the user, then fix from it.
   paths:
     type: string
     description: >-
@@ -74,7 +84,8 @@ args:
       rounds: the author agent fixes confirmed findings in the working
       tree, each fix is independently verified, the gate re-runs, and a
       fresh-eyes reviewer scans the fix diff. Ends with a merge
-      recommendation; fixes stay uncommitted.
+      recommendation; fixes stay uncommitted. In fix_from mode N
+      defaults to 2 when omitted.
   skill_dir:
     type: string
     description: >-
@@ -91,6 +102,8 @@ interface Finding {
   evidence: string;
   /** high = data loss, crash, wrong result or security compromise; medium = a real defect the author should fix; low = minor. */
   severity: "low" | "medium" | "high";
+  /** One sentence: what the defect breaks and when it bites (callers, data at risk). Optional — reviewers supply it for high/medium findings. */
+  impact?: string;
 }
 
 interface LensReview {
@@ -176,6 +189,8 @@ interface ReportedFinding {
   severity: "low" | "medium" | "high";
   /** Which review lens found it (correctness, security, quality, general, fix-review, or gate). */
   lens: string;
+  /** One sentence: what the defect breaks and when it bites. Empty for gate findings. */
+  impact: string;
   /** After a fix round: latest fix verification (fixed | unfixed | worse | pending when no round ran). */
   fixStatus: "fixed" | "unfixed" | "worse" | "pending";
 }
@@ -239,10 +254,17 @@ const BASE_ARG = HAS_BASE ? args.base.trim() : "";
 let BASE = HAS_BASE ? BASE_ARG : "HEAD";
 const PATHS_ARG = typeof args.paths === "string" && args.paths.trim() ? args.paths.trim() : "";
 const MODE = typeof args.mode === "string" && args.mode.trim() ? args.mode.trim().toLowerCase() : "auto";
+const FIX_FROM_ARG = typeof args.fix_from === "string" && args.fix_from.trim() ? args.fix_from.trim() : "";
+// Fix-only continuation: findings carried from a previous review's
+// report; the review stages are skipped and the fix loop runs directly.
+const FIX_FROM = FIX_FROM_ARG !== "";
 const FIX_ROUNDS =
   typeof args.fix_rounds === "number" && Number.isInteger(args.fix_rounds) && args.fix_rounds >= 0
     ? args.fix_rounds
     : 0;
+// A fix_from run is a fix run: without an explicit round count it gets
+// the default bounded loop rather than a review-only no-op.
+if (FIX_FROM && FIX_ROUNDS === 0) FIX_ROUNDS = 2;
 // __SKILL_DIR__ is a placeholder; tools/install-workflow.sh bakes the
 // active skill dir into the installed copy (a runtime skill_dir arg wins).
 const SKILL_DIR_BAKED = "__SKILL_DIR__";
@@ -506,6 +528,62 @@ async function detectBaseBranch(): Promise<string> {
   return "";
 }
 
+// fix_from loader: findings JSON from a previous review — inline (starts
+// with [ or {) or a file path read with cat. Accepts a bare array of
+// finding items or an object with a findings array; each item needs
+// where and what, everything else defaults sensibly. Entries the
+// previous run already marked fixed are dropped; the rest return as
+// pending tracked findings, highest severity first. A string return is
+// a user-facing error.
+async function loadFindingsFromFixFrom(): Promise<TrackedFinding[] | string> {
+  let text = FIX_FROM_ARG;
+  if (!/^\s*[\[{]/.test(text)) {
+    const r = await world.run("cat", [FIX_FROM_ARG]);
+    if (r.exitCode !== 0) {
+      return "fix_from: could not read \"" + FIX_FROM_ARG + "\" — pass a findings JSON file path (workspace-relative or absolute) or inline JSON.";
+    }
+    text = r.stdout;
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return "fix_from: the findings payload is not valid JSON — expected the findings array of a previous review report.";
+  }
+  const items: any[] = Array.isArray(parsed)
+    ? parsed
+    : parsed && Array.isArray(parsed.findings) ? parsed.findings : [];
+  const tracked: TrackedFinding[] = [];
+  for (const it of items) {
+    if (!it || typeof it.where !== "string" || !it.where || typeof it.what !== "string" || !it.what) {
+      log("fix_from: skipping an item without where/what");
+      continue;
+    }
+    if (it.fixStatus === "fixed") continue; // already resolved in the previous run
+    tracked.push({
+      finding: {
+        where: it.where,
+        what: it.what,
+        evidence: typeof it.evidence === "string" ? it.evidence : "",
+        severity: it.severity === "high" || it.severity === "medium" || it.severity === "low" ? it.severity : "medium",
+        lens: typeof it.lens === "string" && it.lens ? it.lens : "general",
+        impact: typeof it.impact === "string" ? it.impact : "",
+        confirmation: {
+          status: it.status === "unconfirmed" ? "unconfirmed" : "verified",
+          note: "carried from the previous review's report",
+        },
+      },
+      fix: "pending",
+      fixNote: "carried from the previous review",
+    });
+  }
+  if (tracked.length === 0) {
+    return "fix_from: the payload carried no actionable findings — every item was invalid or already marked fixed.";
+  }
+  tracked.sort((a, b) => (SEV_RANK[a.finding.severity] ?? 3) - (SEV_RANK[b.finding.severity] ?? 3));
+  return tracked;
+}
+
 // The zcode facade has no user-installable agent types, so the panel
 // briefs under <skillDir>/agents/ are read at run time and appended to
 // the inline personas. Briefs sit outside the workspace, so files.read
@@ -560,6 +638,8 @@ function reviewAsk(lensDef: LensDef, files: number, lines: number, overCap: bool
     "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n" +
     "3. Report only findings from your lens: " + lensDef.focus + "\n" +
     intentBlock() +
+    "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, " +
+    "what data is at risk). Omit it only for minor, low-severity items.\n" +
     "A finding must be: discrete and actionable; introduced by this change; demonstrable from the code (quote the " +
     "deciding lines in evidence); something the author would reasonably fix. Exclude: speculative might-fail " +
     "concerns, pre-existing problems the change does not worsen, style/formatting (the repo's checks own those), " +
@@ -586,6 +666,8 @@ function reviewAskProject(lensDef: LensDef, files: string[], candidates: number,
     "whenever a defect depends on them.\n" +
     "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n" +
     "3. Report only findings from your lens: " + lensDef.focus + "\n" +
+    "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, " +
+    "what data is at risk). Omit it only for minor, low-severity items.\n" +
     "A finding must be: discrete and actionable; present in the code as it stands; demonstrable from the code " +
     "(quote the deciding lines in evidence); something the author would reasonably fix. Exclude: speculative " +
     "might-fail concerns, style/formatting (the repo's checks own those), and deliberate design choices the " +
@@ -687,6 +769,7 @@ function fixerAsk(round: number, unresolved: TrackedFinding[], gateFeedback: str
           evidence: t.finding.evidence,
           severity: t.finding.severity,
           lens: t.finding.lens,
+          impact: typeof t.finding.impact === "string" ? t.finding.impact : "",
         })),
         null,
         2,
@@ -790,14 +873,15 @@ function findingsMd(items: ReportedFinding[]): string[] {
     );
     lines.push("- where: `" + f.where + "`");
     lines.push("- evidence: " + f.evidence);
+    if (f.impact) lines.push("- impact: " + f.impact);
     lines.push("");
   }
   return lines;
 }
 
 // ---------------------------------------------------------------------------
-phase("Scope the change and run the repo's checks");
-
+// Shared panel state: a fix_from run populates it from the previous
+// review's report; a fresh run populates it through the phases below.
 let targetFiles: string[] = [];
 let targetCandidates = 0;
 let targetOverCap = false;
@@ -809,8 +893,54 @@ let branchBaseRef = "";
 let branchName = "";
 let commitCount = 0;
 // The change's stated intent: the intent arg, else the PR description.
-// Resolved here so every ask in the phases below can quote it verbatim.
 let intentText = INTENT_ARG;
+let gate: GateResult[] = [];
+let GATE_LINE = "";
+let modeUsed = "fix-only";
+let tracked: TrackedFinding[] = [];
+let allConfirmed: ConfirmedFinding[] = [];
+let allDropped: DroppedFinding[] = [];
+let summary: { where: string; what: string; severity: "low" | "medium" | "high"; lens: string; status: "verified" | "unconfirmed" }[] = [];
+
+// The triage editor exists in both flows: it runs the cross-lens dedup
+// and the final assessment on a fresh review, and the fix-review triage
+// plus the closing assessment on a fix_from continuation.
+const triage = agent("Triage editor", {
+  system: await withBrief(
+    "You are the triage editor of a code review panel. Reviewers hand you their raw findings lens by lens; you " +
+    "dedupe across lenses, enforce the flagging bar (real, introduced by the change, actionable), and drop style " +
+    "nits, speculation and pre-existing issues with a one-line reason. You are stingy but never suppress a real " +
+    "defect to keep the count down.",
+    ["_panel-protocol.md"],
+  ),
+});
+
+if (FIX_FROM) {
+  phase("Load the findings from the previous review");
+  const loaded = await loadFindingsFromFixFrom();
+  if (typeof loaded === "string") {
+    return {
+      conclusion: loaded,
+      findings: [],
+      verified: [],
+      notCovered: ["the fix loop — fix_from payload unusable"],
+    };
+  }
+  tracked = loaded;
+  allConfirmed = tracked.map((t) => t.finding);
+  summary = tracked.map((t) => ({
+    where: t.finding.where,
+    what: t.finding.what,
+    severity: t.finding.severity,
+    lens: t.finding.lens,
+    status: t.finding.confirmation.status,
+  }));
+  gate = await runGate();
+  GATE_LINE = gateNote(gate);
+  log("fix loop: " + tracked.length + " finding(s) carried from the previous review — pre-fix gate: " +
+    (gate.length - gate.filter((g) => g.exitCode !== 0).length) + "/" + gate.length + " checks passing");
+} else {
+phase("Scope the change and run the repo's checks");
 
 if (TARGETS.indexOf(TARGET) === -1) {
   return {
@@ -974,8 +1104,8 @@ if (PROJECT) {
   }
 }
 
-const gate = await runGate();
-const GATE_LINE = gateNote(gate);
+gate = await runGate();
+GATE_LINE = gateNote(gate);
 
 const gateFailed = gate.filter((g) => g.exitCode !== 0);
 log("repo checks: " + (gate.length - gateFailed.length) + "/" + gate.length + " detected and run");
@@ -1049,7 +1179,6 @@ if (gateFailed.length > 0) {
 // ---------------------------------------------------------------------------
 phase("Review the change through separate lenses and confirm every finding");
 
-let modeUsed: string;
 if (MODE === "fast" || MODE === "full") {
   modeUsed = MODE;
 } else {
@@ -1059,16 +1188,6 @@ if (MODE === "fast" || MODE === "full") {
 }
 const panel: LensDef[] = modeUsed === "fast" ? [GENERAL] : LENSES;
 log("review mode: " + modeUsed + (modeUsed === "fast" ? " (small diff, one general reviewer)" : " (three specialists)"));
-
-const triage = agent("Triage editor", {
-  system: await withBrief(
-    "You are the triage editor of a code review panel. Reviewers hand you their raw findings lens by lens; you " +
-    "dedupe across lenses, enforce the flagging bar (real, introduced by the change, actionable), and drop style " +
-    "nits, speculation and pre-existing issues with a one-line reason. You are stingy but never suppress a real " +
-    "defect to keep the count down.",
-    ["_panel-protocol.md"],
-  ),
-});
 
 const perLens = await Promise.all(
   panel.map(async (lensDef) => {
@@ -1109,11 +1228,11 @@ const perLens = await Promise.all(
   }),
 );
 
-const allConfirmed = perLens
+allConfirmed = perLens
   .flatMap((p) => p.confirmed)
   .sort((a, b) => (SEV_RANK[a.severity] ?? 3) - (SEV_RANK[b.severity] ?? 3));
-const allDropped = perLens.flatMap((p) => p.dropped);
-const summary = allConfirmed.map((c) => ({
+allDropped = perLens.flatMap((p) => p.dropped);
+summary = allConfirmed.map((c) => ({
   where: c.where,
   what: c.what,
   severity: c.severity,
@@ -1121,14 +1240,16 @@ const summary = allConfirmed.map((c) => ({
   status: c.confirmation.status,
 }));
 
-// ---------------------------------------------------------------------------
-// The fix loop: the author fixes, independent verifiers check every fix,
-// the gate re-runs, fresh eyes scan the fix diff. Bounded by rounds.
-const tracked: TrackedFinding[] = allConfirmed.map((f) => ({
+tracked = allConfirmed.map((f) => ({
   finding: f,
   fix: "pending",
   fixNote: "not yet attempted",
 }));
+}
+
+// ---------------------------------------------------------------------------
+// The fix loop: the author fixes, independent verifiers check every fix,
+// the gate re-runs, fresh eyes scan the fix diff. Bounded by rounds.
 let roundsUsed = 0;
 let gateGreen = true;
 const fixerNotes: string[] = [];
@@ -1281,33 +1402,38 @@ const reportedFindings: ReportedFinding[] = tracked.map((t) => ({
   status: t.finding.confirmation.status,
   severity: t.finding.severity,
   lens: t.finding.lens,
+  impact: typeof t.finding.impact === "string" ? t.finding.impact : "",
   fixStatus: t.fix,
 }));
 
 const reportMd = [
-  PROJECT
-    ? "# Code review — project (" + finalChangedN + " files)"
-    : PR
-      ? "# Code review — PR #" + (prMeta as PrMeta).number + ": " + (prMeta as PrMeta).title +
-        " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
-      : BRANCH_MODE
-        ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
+  FIX_FROM
+    ? "# Code review — fix loop (" + tracked.length + " finding(s) carried from the previous review)"
+    : PROJECT
+      ? "# Code review — project (" + finalChangedN + " files)"
+      : PR
+        ? "# Code review — PR #" + (prMeta as PrMeta).number + ": " + (prMeta as PrMeta).title +
           " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
-        : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
+        : BRANCH_MODE
+          ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
+            " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+          : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
   "",
-  "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
-    " · every kept finding confirmed by an independent reader." +
-    (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
-    (PR
-      ? " Target: pull request #" + (prMeta as PrMeta).number + " by " + (prMeta as PrMeta).author + " → " +
-        (prMeta as PrMeta).baseRefName + ((prMeta as PrMeta).url ? " — " + (prMeta as PrMeta).url : "") +
-        " — \"merge\" reads as the PR is ready."
-      : "") +
-    (BRANCH_MODE
-      ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
-        "branch is ready to merge."
-      : ""),
-    (!PROJECT && (finalAdded > SUGGEST_SPLIT_LINES || finalChangedN > SUGGEST_SPLIT_FILES))
+  FIX_FROM
+    ? "Mode: fix-only — the review stages were skipped; findings carried from the previous review's report. fix_rounds: " + FIX_ROUNDS + "."
+    : "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
+      " · every kept finding confirmed by an independent reader." +
+      (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
+      (PR
+        ? " Target: pull request #" + (prMeta as PrMeta).number + " by " + (prMeta as PrMeta).author + " → " +
+          (prMeta as PrMeta).baseRefName + ((prMeta as PrMeta).url ? " — " + (prMeta as PrMeta).url : "") +
+          " — \"merge\" reads as the PR is ready."
+        : "") +
+      (BRANCH_MODE
+        ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
+          "branch is ready to merge."
+        : ""),
+    (!FIX_FROM && !PROJECT && (finalAdded > SUGGEST_SPLIT_LINES || finalChangedN > SUGGEST_SPLIT_FILES))
       ? "Large change: ~" + finalAdded + " added lines across " + finalChangedN +
         " files — consider splitting into smaller, independently reviewable chunks; reviewers read whole " +
         "targets, and coverage thins as size grows."
@@ -1399,6 +1525,9 @@ return {
         (allDropped.length ? " (" + allDropped.length + " dropped at triage as duplicates or out of scope.)" : ""),
   findings: reportedFindings,
   verified: [
+    ...(FIX_FROM
+      ? ["fix loop continuation — findings carried from the previous review's report; review stages skipped"]
+      : []),
     ...(PROJECT
       ? ["review target: the project's tracked source files — " + targetFiles.length + " of " + targetCandidates + " matched"]
       : []),
@@ -1420,6 +1549,9 @@ return {
       : []),
   ],
   notCovered: [
+    ...(FIX_FROM
+      ? ["the review stages were skipped (fix_from) — coverage inherits the previous report's notCovered; anything it missed stays missed"]
+      : []),
     ...(PROJECT && targetOverCap
       ? ["the project review covered " + targetFiles.length + " of " + targetCandidates + " tracked source files " +
           "(cap " + PROJECT_MAX_FILES + ", largest first) — rerun with paths to target the rest"]
