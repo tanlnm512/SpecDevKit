@@ -1,0 +1,35 @@
+flowchart TD
+    START([Ask: review a target]) --> RESOLVE{Resolve target<br/>diff · branch · pr · project}
+    RESOLVE -- "diff" --> BASE["base arg (default HEAD)"]
+    RESOLVE -- "branch" --> MB1["merge-base with base branch<br/>origin/HEAD → main/master"]
+    RESOLVE -- "pr" --> PR["gh pr view · head check:<br/>dirty tree → refuse · clean → auto-checkout"]
+    RESOLVE -- "project" --> FILES["tracked source files<br/>largest-first, cap 30"]
+    BASE --> GATE
+    MB1 --> GATE
+    PR --> MB2["merge-base with PR base"] --> GATE
+    FILES --> GATE
+
+    GATE["Stage 1 — mechanical gate<br/>repo's own checks + bash -n + secret shapes"]
+    GATE -- red --> STOP([Report: failing checks are the findings<br/>review ends])
+    GATE -- green --> PANEL
+
+    subgraph STAGE2["Stage 2 — panel, triage, confirmation"]
+        PANEL["Reviewers ∥<br/>correctness · security · quality<br/>(one general reviewer when fast)"]
+        PANEL --> TRIAGE["Triage editor<br/>dedupe · drop with reasons"]
+        TRIAGE --> CONF["Independent confirmer per finding<br/>verified / unconfirmed (intent-blind)"]
+    end
+    CONF --> EMPTY{zero findings?}
+    EMPTY -- yes --> SYNTH
+    EMPTY -- no --> FIXQ{fix_rounds > 0<br/>or fix_from?}
+
+    FIXQ -- no --> SYNTH
+    FIXQ -- yes --> subgraph LOOP["Fix loop (bounded, default 2)"]
+        FIXER["Fixer — working tree,<br/>never commits, never weakens a test"]
+        VERIFY["Independent verify per fix<br/>fixed / unfixed / worse"]
+        REGATE["Gate re-runs<br/>failures become findings"]
+        FRESH["Fresh-eyes review<br/>NEW defects only"]
+        FIXER --> VERIFY --> REGATE --> FRESH -- unresolved & rounds left --> FIXER
+    end
+    LOOP --> SYNTH["Stage 3 — synthesis<br/>risk · testGaps · residualRisks"]
+
+    SYNTH --> VERDICT([Recommendation:<br/>merge · fix-first · human<br/>fixes uncommitted — the commit is the user's])

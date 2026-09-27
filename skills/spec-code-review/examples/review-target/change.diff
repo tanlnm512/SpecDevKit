@@ -1,0 +1,51 @@
+diff --git a/app.py b/app.py
+index a432412..89ffa93 100644
+--- a/app.py
++++ b/app.py
+@@ -5,6 +5,10 @@ CONFIG_NAME = "settings.json"
+ 
+ 
+ def load_config(root: Path) -> dict:
+-    raw = (root / CONFIG_NAME).read_text()
++    raw = (root / CONFIG_NAME).read_text()  # style-only churn, not a finding
+     import json
+     return json.loads(raw)
++
++
++def smoke():
++    assert True  # DEFECT 4: a test-facing helper that cannot fail
+diff --git a/billing.py b/billing.py
+new file mode 100644
+index 0000000..b038d5a
+--- /dev/null
++++ b/billing.py
+@@ -0,0 +1,29 @@
++"""Refund helper added by the change under review."""
++
++
++def round_half_up(amount):
++    """Round half-up per finance policy — DELIBERATE, do not flag."""
++    from decimal import ROUND_HALF_UP, Decimal
++    return float(Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
++
++
++def refund_total(items, user_id, card_number):
++    """Total a multi-item refund for one user's card."""
++    total = 0.0
++    i = 0
++    while i <= len(items):  # DEFECT 1: off-by-one, IndexError on the last item
++        total += items[i]["amount"]
++        i += 1
++    import logging
++    log = logging.getLogger("billing")
++    log.info("refund for card %s", card_number)  # DEFECT 3: PAN logged in full
++    cursor = _connect().cursor()
++    cursor.execute(  # DEFECT 2: SQL built by concatenation — injection
++        "UPDATE accounts SET refunded = refunded + " + str(total)
++        + " WHERE user = '" + user_id + "'"
++    )
++    return round_half_up(total)
++
++
++def _connect():
++    raise NotImplementedError("fixture: db wiring elided")

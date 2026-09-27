@@ -188,6 +188,49 @@ EOF
   fi
 fi
 
+# --- High-signal secrets on the change (always on, git-gated) --------------
+# Precision over recall: token SHAPES that have no legitimate place in
+# added lines or untracked files. Diff mode only — project mode has no
+# change and fixture files with fake keys would false-positive there;
+# the AI security lens owns whole-project secret reading.
+# Escape hatch (gitleaks-style): a line carrying the inline marker
+# "spec-review:allow" is skipped, so tests for this very family can
+# commit fixture tokens without weakening the patterns.
+SECRET_PATTERNS='(AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|npm_[A-Za-z0-9]{36}|sk-ant-[A-Za-z0-9_-]{32,}|-----BEGIN (RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----)'
+if [ "$TREE" = 0 ] && command -v git >/dev/null 2>&1 \
+   && git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # the family runs only when there IS a change to scan — a clean tree
+  # reports nothing, same contract as the bash -n family
+  CHANGED_FILES="$(git -C "$REPO" diff --name-only "$BASE" 2>/dev/null)"
+  UNTRACKED="$(git -C "$REPO" ls-files --others --exclude-standard 2>/dev/null)"
+  if [ -n "$CHANGED_FILES" ] || [ -n "$UNTRACKED" ]; then
+    if [ "$PLAN" = 1 ]; then
+      record "secrets (token patterns on the change)" "PLAN"
+    else
+      HITS="$(
+        git -C "$REPO" diff "$BASE" 2>/dev/null | grep '^+' | grep -v '^+++' \
+          | grep -E "$SECRET_PATTERNS" | grep -v 'spec-review:allow'
+        if [ -n "$UNTRACKED" ]; then
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            grep -IHn -E "$SECRET_PATTERNS" -- "$REPO/$f" 2>/dev/null || true
+          done <<EOF
+$UNTRACKED
+EOF
+        fi
+      )"
+      HITS="$(printf '%s\n' "$HITS" | grep -v 'spec-review:allow')"
+      if [ -n "$HITS" ]; then
+        printf '%s\n' "$HITS" | head -5 > "$LAST_OUT"
+        record "secrets (token patterns on the change)" 1
+      else
+        printf 'no secret-shaped tokens in the change\n' > "$LAST_OUT"
+        record "secrets (token patterns on the change)" 0
+      fi
+    fi
+  fi
+fi
+
 # --- JSON report on stdout, progress already on stderr ----------------------
 python3 - "$TALLY" "$TAILDIR" <<'PY'
 import json, sys, pathlib

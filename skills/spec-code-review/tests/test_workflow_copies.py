@@ -96,6 +96,85 @@ FIX_CONTINUATION_ANCHORS = [
 ]
 FIX_FROM_PROBE = "fix-from-probe"
 
+# The 0.7.1 repair pins: every panel-confirmed defect from the 0.7.0
+# review gets an anchor here so it cannot silently regress.
+FIXES_071 = {
+    "ts": [
+        "let FIX_ROUNDS",                       # F1: const assignment crashed both dialects
+        "!FIX_FROM && PR",                      # F2: fix_from + target pr null-crashed the verified render
+        "!FIX_FROM && BRANCH_MODE",             # F2: target branch rendered a bogus entry
+        "The refusal is unconditional",         # F4: pr dirty refusal moved out of the checkout branch
+        "refused to review a PR target over a dirty working tree",  # F4: the refusal's notCovered line
+        "function mdSafe",                      # F5: PR metadata escaped in report markdown
+        "let scopeDirty",                       # F6: uncommitted-work note surfaced in the report
+        "included in the reviewed diff",        # F6: the note line itself
+    ],
+    "js": [
+        "let FIX_ROUNDS",
+        "!FIX_FROM && PR",
+        "!FIX_FROM && BRANCH_MODE",
+        "The refusal is unconditional",
+        "refused to review a PR target over a dirty working tree",
+        "function mdSafe",
+        "let scopeDirty",
+        "included in the reviewed diff",
+        # F3: the confirmation wave and fix-review push rebuild
+        # field-by-field in this dialect — impact must be carried
+        'impact: typeof keptAll[i].finding.impact',
+        'impact: typeof fixKept[i].impact',
+    ],
+}
+
+# The 0.9.0 dogfood-review repairs (the first live workflow run found
+# seven defects in this very stack; all fixed before commit).
+FIXES_DOGFOOD = [
+    "Repo check failed before the fixes",   # a red pre-fix gate enters tracked instead of rendering green
+    "let finalGate",                        # renders read the authoritative last gate run
+    "indistinguishable from omission",      # explicit fix_rounds: 0 is bumped too — comments state it
+]
+
+# A plain/compound assignment to a const-declared name is a TS2588
+# compile error (and a runtime TypeError in the js dialect). The 0.7.0
+# release shipped exactly that — `FIX_ROUNDS = 2` under a const — while
+# every suite stayed green because the tests are text anchors, not
+# execution. This scanner is the deterministic guard for that class.
+CONST_DECL = re.compile(r"^[ \t]*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=", re.M)
+LET_VAR_DECL = re.compile(r"^[ \t]*(?:export\s+)?(?:let|var)\s+([A-Za-z_$][\w$]*)", re.M)
+DECL_LINE = re.compile(r"^[ \t]*(?:export\s+)?(?:const|let|var)\s")
+
+
+def const_reassignments(text):
+    """[(name, line)] for every assignment to a const-declared
+    identifier. A name that is ALSO declared let/var anywhere is skipped
+    entirely — without scope analysis the two declarations cannot be
+    told apart, and the guard stays conservative (no false positives).
+    Declarations are never assignments; for(...) heads are skipped
+    (loop-scoped); property writes (obj.name =) never match; a match
+    sitting inside a double-quoted string on its line (shell snippets
+    embedded in probe commands) is skipped by odd-quote parity."""
+    let_or_var = set(LET_VAR_DECL.findall(text))
+    bad = []
+    for m in CONST_DECL.finditer(text):
+        name = m.group(1)
+        if name in let_or_var:
+            continue
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        if "for (" in text[line_start:m.start()] or "for(" in text[line_start:m.start()]:
+            continue
+        assign = re.compile(
+            r"(?<![\w$.])" + re.escape(name) +
+            r"\s*(?:=(?!=)|\+\+|--|\+=|-=|\*=|/=|%=|\|\|=|&&=|\?\?=)")
+        for a in assign.finditer(text):
+            a_line_start = text.rfind("\n", 0, a.start()) + 1
+            a_line_end = text.find("\n", a.start())
+            a_line = text[a_line_start:a_line_end if a_line_end != -1 else len(text)]
+            if DECL_LINE.match(a_line):
+                continue  # a declaration of that name — its own scope
+            if text[a_line_start:a.start()].count('"') % 2 == 1:
+                continue  # inside a string literal (embedded shell)
+            bad.append((name, text.count("\n", 0, a.start()) + 1))
+    return bad
+
 # The fix-loop invariant: a reader verifier is never spawned for a
 # gate-lens entry (its `where` is a check name, not a file location) —
 # the fresh authoritative gate re-run owns those.
@@ -222,6 +301,50 @@ class ParityTests(unittest.TestCase):
         self.assertIn("impact?: string", self.ts)
         self.assertIn('impact: { type: "string" }', self.js)
         self.assertIn('required: ["where", "what", "evidence", "severity"],', self.js)
+
+    def test_zero_seven_one_fixes_are_shared(self):
+        for text, name in ((self.ts, "ts"), (self.js, "js")):
+            for anchor in FIXES_071["ts"]:
+                self.assertIn(anchor, text, f"{anchor} in {name}")
+        for anchor in FIXES_071["js"]:
+            self.assertIn(anchor, self.js, f"{anchor} in js")
+
+    def test_dynamic_workflow_contract_pieces(self):
+        # 0.9.0: the zcode master is checked against the real
+        # dynamic-workflow compiler facade — pinned here are the pieces
+        # that audit added. The findings board (live dashboard, §10) and
+        # its report tag are zcode-only: the claude runtime has neither
+        # an artifact primitive nor report() calls, so js carries none
+        # of the board machinery (no stage field either).
+        self.assertIn('artifact.board("findings"', self.ts)
+        self.assertIn('columns: ["verified", "unconfirmed", "fixed", "unfixed", "worse", "gate"]', self.ts)
+        self.assertEqual(self.ts.count(', "findings");'), 6, "6 report sites tagged findings")
+        # unknown-narrowing fix: args.* is unknown on the facade, so a
+        # narrowed value cannot cross a boolean flag variable
+        for text, name in ((self.ts, "ts"), (self.js, "js")):
+            self.assertIn("String(args.base).trim()", text, name)
+        # gate findings carry the required impact field in both dialects
+        for text, name in ((self.ts, "ts"), (self.js, "js")):
+            self.assertIn('lens: "gate", impact: "",', flat(text), name)
+
+    def test_dogfood_review_repairs_are_shared(self):
+        # the first live workflow run (dogfooding this stack) found the
+        # fix_from pre-fix gate rendering red as green — both dialects
+        # now failure-handle it and render from the authoritative gate
+        for text, name in ((self.ts, "ts"), (self.js, "js")):
+            for anchor in FIXES_DOGFOOD:
+                self.assertIn(anchor, flat(text), f"{anchor} in {name}")
+
+    def test_no_assignment_to_const_declared_names(self):
+        # deterministic guard for the TS2588 class the 0.7.0 release
+        # shipped: the scanner must be clean on both dialects...
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            self.assertEqual(const_reassignments(text), [], name)
+        # ...and must actually fire on the 0.7.0 bug shape
+        self.assertEqual(
+            const_reassignments("const FIX_ROUNDS = 0;\nif (f && FIX_ROUNDS === 0) FIX_ROUNDS = 2;\n"),
+            [("FIX_ROUNDS", 2)],
+        )
 
     def test_fix_loop_never_verifies_gate_lens_with_a_reader(self):
         self.assertIn(GATE_EXCLUSION, self.ts)

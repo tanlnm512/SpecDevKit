@@ -1,0 +1,24 @@
+{
+  "_readme": "fix_from payload — findings carried from a previous review's report into the fix-only continuation (D-005). Copy the findings array of the previous report (or a bare array of items) and edit it before passing as the fix_from arg (file path or inline JSON). Rules the loader applies: items need where and what; evidence/severity/lens/impact/status default sensibly when absent; an item already marked fixStatus 'fixed' is dropped; items are re-sorted by severity. The two items below are examples of each case.",
+  "findings": [
+    {
+      "where": "src/pay.py:42",
+      "what": "Refund amount is computed before the currency conversion, so refunds in non-USD accounts are off by the conversion rate.",
+      "evidence": "amount = base * qty  # line 42 — conversion applied at line 55, after the refund object is built",
+      "severity": "high",
+      "lens": "correctness",
+      "status": "verified",
+      "impact": "Every non-USD refund returns the wrong amount; finance reconciliation fails daily until fixed.",
+      "fixStatus": "pending"
+    },
+    {
+      "where": "src/legacy.py:10",
+      "what": "Dead legacy import block slows startup by 200ms.",
+      "evidence": "import six, collections  # line 10 — six unused elsewhere in the file",
+      "severity": "low",
+      "lens": "quality",
+      "status": "verified",
+      "fixStatus": "fixed"
+    }
+  ]
+}

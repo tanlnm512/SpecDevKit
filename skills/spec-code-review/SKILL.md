@@ -4,11 +4,11 @@ description: >-
   Portable three-stage code review for any git repository — a change, a
   pull request, a branch's recent changes, or the whole project. Stage 1
   runs the repo's own detected checks as the mechanical gate (Makefile
-  targets, npm scripts, cargo, go, pytest/unittest, shell syntax on the
-  diff). Stage 2 reviews the target through separate lenses —
+  targets, npm scripts, cargo, go, pytest/unittest, shell syntax and
+  secret shapes on the diff). Stage 2 reviews the target through separate lenses —
   correctness, security, quality & tests (one general reviewer on small
   targets) — triaged by one editor with independent confirmation of
-  every kept finding. Stage 3 synthesizes a report with risk class,
+  every kept finding. Stage 3 synthesizes risk class,
   test gaps and residual risks. An optional fix loop has an author agent
   fix the confirmed findings in the working tree, verify every fix
   independently, re-run the gate, and end with a merge / fix-first /
@@ -18,7 +18,7 @@ description: >-
   codebase as a whole ("review the project") — in this or any repo.
 metadata:
   owner: platform-core
-  version: "0.7.0"
+  version: "0.9.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -39,6 +39,41 @@ recent changes on this branch" — or to review AND fix any of these:
 "review and fix the findings". The default change scope is a diff base:
 the working tree (default), `HEAD~1` for the last commit, or any
 ref/branch.
+
+## Principles
+
+The panel's contract, in priority order. When two rules collide, the
+higher number wins; when a change would violate any of them, the
+change is wrong — not the rule.
+
+1. **Machine-decidable before human attention.** Everything a
+   deterministic check can decide (tests, syntax, secret shapes) is
+   decided by the gate before a reviewer spends a turn; reviewers own
+   only what requires reading.
+2. **Evidence or it does not exist.** Every finding carries `path:line`
+   and the quoted lines that demonstrate it. A finding a reader cannot
+   re-derive from its evidence is not a finding.
+3. **Independence beats volume.** The reviewer, the confirmer, the
+   fixer and the fresh-eyes fix reviewer are different agents. One
+   verified finding is worth five unverified ones — the industry's
+   2026 lesson: precision, not recall, is what makes an AI reviewer
+   trustworthy.
+4. **Zero findings is success.** Clean targets get empty lists; noise
+   is never manufactured to seem busy, and style/formatting is never a
+   finding (the repo's checks own it).
+5. **Stated intent is context, not a waiver.** The author's words steer
+   triage of deliberate choices; they never excuse a demonstrable
+   defect.
+6. **AI advises, the human decides.** The run ends in a recommendation
+   and uncommitted fixes; judgment calls route to `human`, and the
+   commit is always the user's.
+7. **Honesty about coverage.** `notCovered` separates "looked and
+   clean" from "never looked"; unconfirmed findings are labelled, never
+   dropped; triage drops come with reasons.
+8. **The repo owns its standards.** The gate runs the repo's OWN
+   checks; rules live in `AGENTS.md`/`CLAUDE.md`; fixes follow the
+   repo's style. The panel imposes nothing of its own beyond this
+   contract.
 
 ## Review targets
 
@@ -81,9 +116,16 @@ bash <skill-dir>/scripts/gate.sh --plan             # what it would run
 
 It detects and runs the repo's OWN checks (Makefile targets, npm
 scripts, cargo/go, pytest or unittest discover (pytest resolved via PATH,
-the repo's venv, or `uv run` when the repo is uv-locked), plus `bash -n` on every
-changed `*.sh` — every tracked `*.sh` in project mode) and prints a JSON
-array — one `{name, exit_code, tail}` per check. Rules:
+the repo's venv, or `uv run` when the repo is uv-locked), plus two
+always-on families when git is available: `bash -n` on every changed
+`*.sh` — every tracked `*.sh` in project mode — and a high-precision
+secret-shape scan (AWS/GitHub/GitLab/Stripe/Slack/Google/npm/Anthropic
+key shapes, private-key headers) over the change's added lines and
+untracked files; project mode skips the secret family to avoid
+false-positive fixtures; a line carrying the inline marker
+`spec-review:allow` is skipped — the gitleaks-style escape hatch that
+lets tests for this family hold fixture tokens) and prints a JSON array — one
+`{name, exit_code, tail}` per check. Rules:
 
 - A red gate ends the review: report the failing checks with their
   tails as the findings, and stop. Mechanical failures are fixed before
@@ -234,6 +276,10 @@ commit decision and message are the user's.
 
 ## Launch discipline
 
+- **Any harness**: the `/spec-code-review` router command
+  (`commands/spec-code-review.md`, installed by tools/sync.sh) routes
+  review/fix/gate/plan asks into this skill; `scripts/skill-dir.sh`
+  prints the active skill dir per this priority order.
 - **zcode harness**: run the installed workflow by name —
   `spec-code-review` (args: `base`, `target` `diff`/`branch`/`pr`/
   `project`, `pr` (the pull request, pr mode), `intent` (what the
@@ -266,3 +312,19 @@ out of scope, not missed. `notCovered` distinguishes "found nothing"
 from "looked nowhere": read it before trusting a clean report. In pr
 mode the `merge` recommendation reads as the PR is ready; in branch
 mode, as the branch is ready to merge.
+
+## Resource map
+
+`contracts/panel.md` is the canonical contract (this file summarizes;
+it arbitrates). `gates/recommendation.md` arbitrates stop conditions
+and recommendation criteria. `decisions/` holds the panel's ADRs
+(D-001…D-007 — gate-first, independent confirmation, advisory-only,
+targets-collapse-to-diffs, the fix loop, dialect parity,
+precision-over-recall). `references/quickstart.md` is navigation, not
+a second contract. `evals/cases.md` + `examples/review-target/` are
+the standing live-eval scenarios with a seeded-bug answer key;
+`templates/fix-from-findings.json` is the continuation payload
+template; `diagrams/` holds the flow graph (.mmd canonical + an HTML
+render); `observations/open-items.md` is the living open-items list;
+`scripts/skill-dir.sh` prints the active skill dir per the launch
+priority order.

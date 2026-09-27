@@ -203,5 +203,80 @@ class ExecutionTests(GateBase):
         self.assertEqual(entry["exit_code"], 0)
 
 
+class SecretsTests(GateBase):
+    """The secrets family: high-precision token shapes on the change —
+    added diff lines plus untracked files. Diff mode only; --tree skips
+    it (fixtures with fake keys would false-positive in project mode)."""
+
+    def secret_entry(self, r):
+        return next(c for c in json.loads(r.stdout) if "secrets" in c["name"])
+
+    def test_secret_in_added_diff_line_fails_the_gate(self):
+        (self.repo / "config.py").write_text("THRESHOLD = 1\n")
+        self.commit_all()
+        (self.repo / "config.py").write_text(
+            "THRESHOLD = 1\nAWS_KEY = 'AKIAIOSFODNN7EXAMPLE'\n")  # spec-review:allow
+        r = self.run_on_repo()
+        self.assertNotEqual(r.returncode, 0)
+        entry = self.secret_entry(r)
+        self.assertEqual(entry["exit_code"], 1)
+        self.assertIn("AKIAIOSFODNN7EXAMPLE", entry["tail"])  # spec-review:allow
+
+    def test_allow_marker_line_is_skipped(self):
+        # the gitleaks-style escape hatch: a line carrying the inline
+        # marker is skipped, so tests for this family can hold fixture
+        # tokens without weakening the patterns
+        (self.repo / "config.py").write_text("THRESHOLD = 1\n")
+        self.commit_all()
+        (self.repo / "config.py").write_text(
+            "THRESHOLD = 1\n"
+            "AWS_KEY = 'AKIAIOSFODNN7EXAMPLE'  # spec-review:allow\n")
+        r = self.run_on_repo()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.secret_entry(r)["exit_code"], 0)
+
+    def test_secret_in_untracked_file_fails_the_gate(self):
+        (self.repo / "README.md").write_text("proj\n")
+        self.commit_all()
+        # a brand-new untracked file is the classic leak vector; the
+        # diff alone would miss it, so the family scans untracked too
+        (self.repo / "local.sh").write_text(
+            "PAT=ghp_" + "a" * 36 + "\n")
+        r = self.run_on_repo()
+        self.assertNotEqual(r.returncode, 0)
+        entry = self.secret_entry(r)
+        self.assertEqual(entry["exit_code"], 1)
+        self.assertIn("local.sh", entry["tail"])
+
+    def test_clean_change_passes_and_lists_the_family(self):
+        (self.repo / "app.py").write_text("x = 1\n")
+        self.commit_all()
+        (self.repo / "app.py").write_text("x = 2\n")
+        r = self.run_on_repo()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = self.secret_entry(r)
+        self.assertEqual(entry["exit_code"], 0)
+
+    def test_fixture_shaped_text_does_not_trip_the_patterns(self):
+        # precision over recall: prose about keys, short placeholders
+        # and example-ish fragments must not fail the gate
+        (self.repo / "docs.md").write_text("docs\n")
+        self.commit_all()
+        (self.repo / "docs.md").write_text(
+            "docs\nNever commit your ghp_ token or sk_live_ keys; "
+            "AKIA keys are 20 chars. Use `deadbeef` placeholders.\n")
+        r = self.run_on_repo()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.secret_entry(r)["exit_code"], 0)
+
+    def test_tree_mode_has_no_secrets_family(self):
+        (self.repo / "ok.sh").write_text("echo fine\n")
+        self.commit_all()
+        r = run_gate("--repo", str(self.repo), "--tree", "--plan")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        names = [c["name"] for c in json.loads(r.stdout)]
+        self.assertFalse(any("secrets" in n for n in names), names)
+
+
 if __name__ == "__main__":
     unittest.main()

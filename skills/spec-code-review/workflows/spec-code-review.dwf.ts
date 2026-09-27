@@ -246,7 +246,7 @@ const BRANCH_MODE = TARGET === "branch";
 const PR_ARG = typeof args.pr === "string" && args.pr.trim() ? args.pr.trim() : "";
 const INTENT_ARG = typeof args.intent === "string" && args.intent.trim() ? args.intent.trim() : "";
 const HAS_BASE = typeof args.base === "string" && args.base.trim() ? true : false;
-const BASE_ARG = HAS_BASE ? args.base.trim() : "";
+const BASE_ARG = HAS_BASE ? String(args.base).trim() : "";
 // BASE starts at the diff default and is resolved in the scope phase:
 // args.base in diff mode (default HEAD), the merge-base with the base
 // branch in branch mode, the merge-base with the PR's base commit in
@@ -258,12 +258,16 @@ const FIX_FROM_ARG = typeof args.fix_from === "string" && args.fix_from.trim() ?
 // Fix-only continuation: findings carried from a previous review's
 // report; the review stages are skipped and the fix loop runs directly.
 const FIX_FROM = FIX_FROM_ARG !== "";
-const FIX_ROUNDS =
+// let, not const: the fix_from default below bumps it to 2 — note an
+// explicit fix_rounds: 0 cannot be distinguished from omission and is
+// bumped too: a fix_from run is always a fix run.
+let FIX_ROUNDS =
   typeof args.fix_rounds === "number" && Number.isInteger(args.fix_rounds) && args.fix_rounds >= 0
     ? args.fix_rounds
     : 0;
-// A fix_from run is a fix run: without an explicit round count it gets
-// the default bounded loop rather than a review-only no-op.
+// A fix_from run is a fix run: with no round count — or an explicit 0,
+// indistinguishable from omission — it gets the default bounded loop
+// rather than a review-only no-op.
 if (FIX_FROM && FIX_ROUNDS === 0) FIX_ROUNDS = 2;
 // __SKILL_DIR__ is a placeholder; tools/install-workflow.sh bakes the
 // active skill dir into the installed copy (a runtime skill_dir arg wins).
@@ -284,6 +288,22 @@ const SUGGEST_SPLIT_FILES = 20;
 // actually cover it. paths narrows the list on big repos.
 const PROJECT_MAX_FILES = 30;
 const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
+// The findings board: the live view for whoever watches the run — every
+// reported finding is a card that moves to its stage column (verified,
+// unconfirmed, then fixed/unfixed/worse as fix rounds land). Declared
+// once at the top level; report(item, "findings") feeds it.
+artifact.board("findings", {
+  title: "Findings",
+  key: "where",
+  status: "stage",
+  columns: ["verified", "unconfirmed", "fixed", "unfixed", "worse", "gate"],
+  cardTitle: "what",
+  detail: [
+    { field: "severity", label: "Severity" },
+    { field: "lens", label: "Lens" },
+  ],
+});
 
 // Source-file targeting for project mode: an extension whitelist plus a
 // few well-known build files, minus lockfiles, generated code and the
@@ -408,6 +428,15 @@ const FIX_REVIEW_SYSTEM =
 function outTail(s: string, n: number): string {
   const t = s.trim();
   return t ? t.split("\n").slice(-n).join("\n") : "";
+}
+
+// PR-author-controlled fields (title, author, base, url) render inside
+// the trusted report artifact: escape the markdown-active characters so
+// a crafted PR cannot plant links, images or emphasis in the report the
+// reader merges from. Logs and asks stay raw — only report markdown is
+// escaped.
+function mdSafe(s: string): string {
+  return s.replace(/[\\`*_[\]()!<>]/g, (ch) => "\\" + ch);
 }
 
 // The mechanical gate: the skill's gate.sh detects and runs the repo's
@@ -894,6 +923,9 @@ let branchName = "";
 let commitCount = 0;
 // The change's stated intent: the intent arg, else the PR description.
 let intentText = INTENT_ARG;
+// Set in the scope phase: the reviewed diff includes uncommitted work.
+// Branch mode promises this in the report, not just the log.
+let scopeDirty = false;
 let gate: GateResult[] = [];
 let GATE_LINE = "";
 let modeUsed = "fix-only";
@@ -937,8 +969,36 @@ if (FIX_FROM) {
   }));
   gate = await runGate();
   GATE_LINE = gateNote(gate);
+  // A red pre-fix gate does NOT stop a fix_from run — clearing it is
+  // the fixer's job — but it must never render as green: failing checks
+  // enter tracked as gate findings the fixer must clear, and every
+  // report surface reads the authoritative final gate state below.
+  const preFixFailed = gate.filter((g) => g.exitCode !== 0);
+  for (const g of preFixFailed) {
+    tracked.push({
+      finding: {
+        where: g.name,
+        what: "Repo check failed before the fixes: " + g.name,
+        evidence: g.tail || "(no output)",
+        severity: "high",
+        lens: "gate",
+        impact: "",
+        confirmation: { status: "verified", note: "exit code nonzero before fix round 1" },
+      },
+      fix: "unfixed",
+      fixNote: "pre-fix: check failing",
+    });
+    report({
+      where: g.name,
+      what: "Repo check failed before the fixes: " + g.name,
+      severity: "high",
+      lens: "gate",
+      stage: "gate",
+    }, "findings");
+  }
   log("fix loop: " + tracked.length + " finding(s) carried from the previous review — pre-fix gate: " +
-    (gate.length - gate.filter((g) => g.exitCode !== 0).length) + "/" + gate.length + " checks passing");
+    (gate.length - preFixFailed.length) + "/" + gate.length + " checks passing" +
+    (preFixFailed.length > 0 ? " — RED, the fixer must clear " + preFixFailed.length + " check(s)" : ""));
 } else {
 phase("Scope the change and run the repo's checks");
 
@@ -975,19 +1035,25 @@ if (PR) {
   prMeta = meta;
   if (!intentText && meta.body) intentText = meta.body;
   const head = await gitOut(["rev-parse", "HEAD"]);
+  // The refusal is unconditional: a dirty tree misattributes uncommitted
+  // work to the PR either way — the diff would fold it in when the head
+  // is already checked out, and a checkout would hide it when it is not.
+  const statusOut = await world.run("git", ["status", "--porcelain"]);
+  const dirty = statusOut.stdout.trim() !== "";
+  if (dirty) {
+    return {
+      conclusion: "PR #" + meta.number + (head === meta.headRefOid
+        ? " is checked out but the working tree is dirty — the PR diff would fold uncommitted local work " +
+          "into code attributed to the PR. Commit or stash, then rerun."
+        : " is not checked out and the working tree is dirty — the panel reads the working tree, so checking " +
+          "out would hide uncommitted work. Commit or stash, then rerun; on a clean tree the review checks " +
+          "the PR out itself."),
+      findings: [],
+      verified: [],
+      notCovered: ["the pull request — refused to review a PR target over a dirty working tree"],
+    };
+  }
   if (head !== meta.headRefOid) {
-    const statusOut = await world.run("git", ["status", "--porcelain"]);
-    const dirty = statusOut.stdout.trim() !== "";
-    if (dirty) {
-      return {
-        conclusion: "PR #" + meta.number + " is not checked out and the working tree is dirty — the panel " +
-          "reads the working tree, so checking out would hide uncommitted work. Commit or stash, then rerun; " +
-          "on a clean tree the review checks the PR out itself.",
-        findings: [],
-        verified: [],
-        notCovered: ["the pull request — head not checked out, refused to touch a dirty working tree"],
-      };
-    }
     const prev = head || "(unknown)";
     let co;
     try {
@@ -1088,6 +1154,7 @@ if (PROJECT) {
       ? " — large change: the report will recommend splitting"
       : "")
   );
+  scopeDirty = !scope.clean;
 
   if (changed.length === 0) {
     return {
@@ -1118,7 +1185,8 @@ for (const g of gateFailed) {
     status: "verified",
     severity: "high",
     lens: "gate",
-  });
+    stage: "gate",
+  }, "findings");
 }
 
 if (gateFailed.length > 0) {
@@ -1129,6 +1197,7 @@ if (gateFailed.length > 0) {
     status: "verified",
     severity: "high",
     lens: "gate",
+    impact: "",
     fixStatus: "pending",
   }));
   const scopeLine = PROJECT
@@ -1222,7 +1291,8 @@ const perLens = await Promise.all(
         severity: c.severity,
         lens: c.lens,
         status: c.confirmation.status,
-      });
+        stage: c.confirmation.status,
+      }, "findings");
     }
     return { lens: lensDef.label, confirmed, dropped: triaged.dropped };
   }),
@@ -1251,7 +1321,11 @@ tracked = allConfirmed.map((f) => ({
 // The fix loop: the author fixes, independent verifiers check every fix,
 // the gate re-runs, fresh eyes scan the fix diff. Bounded by rounds.
 let roundsUsed = 0;
-let gateGreen = true;
+// The authoritative last gate run: the pre-fix gate now, replaced by
+// each fix round's re-run. Every report surface reads this, never the
+// stale pre-fix array, so a red gate can never render as green.
+let finalGate: GateResult[] = gate;
+let gateGreen = gate.every((g) => g.exitCode === 0);
 const fixerNotes: string[] = [];
 const allChangedPaths: string[] = [];
 
@@ -1277,6 +1351,7 @@ if (FIX_ROUNDS > 0 && allConfirmed.length > 0) {
     );
 
     const roundGate = await runGate();
+    finalGate = roundGate;
     const gateBad = roundGate.filter((g) => g.exitCode !== 0);
     gateGreen = gateBad.length === 0;
     gateFeedback = gateBad.map((g) => g.name + ":\n" + g.tail).join("\n\n");
@@ -1304,9 +1379,10 @@ if (FIX_ROUNDS > 0 && allConfirmed.length > 0) {
         what: "Repo check failed after the fixes: " + g.name,
         severity: "high",
         lens: "gate",
+        stage: "gate",
         fix: "unfixed",
         round,
-      });
+      }, "findings");
     }
 
     // A reader cannot verify a check name: gate-lens entries in the stale
@@ -1323,7 +1399,7 @@ if (FIX_ROUNDS > 0 && allConfirmed.length > 0) {
       const t = verifiable[i];
       t.fix = v.status;
       t.fixNote = "round " + round + ": " + v.note;
-      report({ where: t.finding.where, what: t.finding.what, lens: t.finding.lens, fix: v.status, note: v.note, round });
+      report({ where: t.finding.where, what: t.finding.what, severity: t.finding.severity, lens: t.finding.lens, fix: v.status, note: v.note, round, stage: v.status }, "findings");
     }
 
     if (outcome.changedPaths.length > 0) {
@@ -1346,8 +1422,9 @@ if (FIX_ROUNDS > 0 && allConfirmed.length > 0) {
             severity: c.severity,
             lens: "fix-review",
             status: c.confirmation.status,
+            stage: c.confirmation.status,
             round,
-          });
+          }, "findings");
         }
       }
     }
@@ -1411,9 +1488,9 @@ const reportMd = [
     ? "# Code review — fix loop (" + tracked.length + " finding(s) carried from the previous review)"
     : PROJECT
       ? "# Code review — project (" + finalChangedN + " files)"
-      : PR
-        ? "# Code review — PR #" + (prMeta as PrMeta).number + ": " + (prMeta as PrMeta).title +
-          " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+    : PR
+      ? "# Code review — PR #" + (prMeta as PrMeta).number + ": " + mdSafe((prMeta as PrMeta).title) +
+        " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
         : BRANCH_MODE
           ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
             " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
@@ -1424,15 +1501,16 @@ const reportMd = [
     : "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
       " · every kept finding confirmed by an independent reader." +
       (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
-      (PR
-        ? " Target: pull request #" + (prMeta as PrMeta).number + " by " + (prMeta as PrMeta).author + " → " +
-          (prMeta as PrMeta).baseRefName + ((prMeta as PrMeta).url ? " — " + (prMeta as PrMeta).url : "") +
-          " — \"merge\" reads as the PR is ready."
-        : "") +
-      (BRANCH_MODE
-        ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
-          "branch is ready to merge."
-        : ""),
+    (PR
+      ? " Target: pull request #" + (prMeta as PrMeta).number + " by " + mdSafe((prMeta as PrMeta).author) + " → " +
+        mdSafe((prMeta as PrMeta).baseRefName) + ((prMeta as PrMeta).url ? " — " + mdSafe((prMeta as PrMeta).url) : "") +
+        " — \"merge\" reads as the PR is ready."
+      : "") +
+    (BRANCH_MODE
+      ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
+        "branch is ready to merge." +
+        (scopeDirty ? " Uncommitted work present in the working tree is included in the reviewed diff." : "")
+      : ""),
     (!FIX_FROM && !PROJECT && (finalAdded > SUGGEST_SPLIT_LINES || finalChangedN > SUGGEST_SPLIT_FILES))
       ? "Large change: ~" + finalAdded + " added lines across " + finalChangedN +
         " files — consider splitting into smaller, independently reviewable chunks; reviewers read whole " +
@@ -1448,14 +1526,19 @@ const reportMd = [
   "",
   assessment.verdict,
   "",
-  "## Mechanical gate (" + gate.length + " detected check" + (gate.length === 1 ? "" : "s") + ") — " +
-    (gate.length === 0
+  "## Mechanical gate (" + finalGate.length + " detected check" + (finalGate.length === 1 ? "" : "s") + ") — " +
+    (finalGate.length === 0
       ? "nothing detected in this repo — no mechanical floor"
-      : roundsUsed > 0
-        ? (gateGreen ? "green after the final fix round" : "RED after the final fix round")
-        : "all passed"),
+      : gateGreen
+        ? (roundsUsed > 0 ? "green after the final fix round" : "all passed")
+        : roundsUsed > 0
+          ? "RED after the final fix round"
+          : "RED"),
   "",
-  ...gate.map((g) => "- pass — " + g.name),
+  ...finalGate.map((g) =>
+    g.exitCode === 0
+      ? "- pass — " + g.name
+      : "- **FAIL** — " + g.name + "\n\n  ```\n  " + g.tail + "\n  ```"),
   "",
   "## Findings (" + tracked.length + " confirmed · " + nHigh + " high · " + nFixed + " fixed)",
   "",
@@ -1484,9 +1567,13 @@ const reportMd = [
         "largest first (cap " + PROJECT_MAX_FILES + "); lockfiles, generated and vendored files are excluded " +
         "by type" + (PATHS_ARG ? "; paths filter: " + PATHS_ARG : "") + "."]
     : []),
-  ...(gate.length > 0
-    ? ["- The repo's own detected checks all ran and passed before review: " + gate.map((g) => g.name).join("; ") + "."]
-    : ["- The gate detected no checks in this repo — the review ran without a mechanical floor."]),
+  ...(finalGate.length > 0
+    ? (gateGreen
+      ? ["- The repo's own detected checks all ran and passed: " + finalGate.map((g) => g.name).join("; ") + "."]
+      : ["- The repo's own detected checks: " + finalGate.filter((g) => g.exitCode === 0).length + " of " +
+          finalGate.length + " passed — failing: " +
+          finalGate.filter((g) => g.exitCode !== 0).map((g) => g.name).join("; ") + " (see FAIL rows above)."])
+    : []),
   "- Each finding was re-checked by an independent reader that did not write it (" + nVerified +
     " verified, " + nUnconfirmed + " unconfirmed).",
   ...(roundsUsed > 0
@@ -1531,14 +1618,18 @@ return {
     ...(PROJECT
       ? ["review target: the project's tracked source files — " + targetFiles.length + " of " + targetCandidates + " matched"]
       : []),
-    ...(PR
+    ...(!FIX_FROM && PR
       ? ["review target: PR #" + (prMeta as PrMeta).number + " (" + (prMeta as PrMeta).state + ") — the merge-base diff against " + (prMeta as PrMeta).baseRefName]
       : []),
-    ...(BRANCH_MODE
+    ...(!FIX_FROM && BRANCH_MODE
       ? ["review target: branch " + branchName + " vs " + branchBaseRef + " — the merge-base diff (" + commitCount + " commit(s))"]
       : []),
-    ...(gate.length > 0
-      ? ["the mechanical gate ran the repo's own detected checks (all passed): " + gate.map((g) => g.name).join("; ")]
+    ...(finalGate.length > 0
+      ? (gateGreen
+        ? ["the mechanical gate ran the repo's own detected checks (all passed): " + finalGate.map((g) => g.name).join("; ")]
+        : ["the mechanical gate ran the repo's own detected checks — " +
+            finalGate.filter((g) => g.exitCode !== 0).length + " of " + finalGate.length + " FAILED: " +
+            finalGate.filter((g) => g.exitCode !== 0).map((g) => g.name).join("; ")])
       : []),
     "every reported finding was re-checked by an independent reader that did not write it",
     ...(roundsUsed > 0
@@ -1556,7 +1647,7 @@ return {
       ? ["the project review covered " + targetFiles.length + " of " + targetCandidates + " tracked source files " +
           "(cap " + PROJECT_MAX_FILES + ", largest first) — rerun with paths to target the rest"]
       : []),
-    ...(gate.length === 0
+    ...(finalGate.length === 0
       ? ["no repo checks were detected by the gate — this review ran without a mechanical floor; ask the repo for its documented check command"]
       : []),
     ...assessment.testGaps.map((t) => "test gap: " + t),

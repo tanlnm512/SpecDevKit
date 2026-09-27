@@ -6,6 +6,132 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.9.0 — 2026-09-27
+
+Directory structure aligned with spec-to-prod's resource distribution:
+every directory now has a canonical job. contracts/panel.md is the
+canonical panel contract (targets, gate rows, finding/report schemas,
+role-independence matrix) — SKILL.md summarizes, it arbitrates.
+decisions/ carries the skill's first seven ADRs (D-001 gate-first,
+D-002 independent confirmation, D-003 advisory-only, D-004
+targets-collapse-to-diffs, D-005 fix loop and fix_from continuation,
+D-006 dialect parity, D-007 precision-over-recall) in the repo's
+Why/Cost-if-wrong shape, converting living CHANGELOG folklore into
+addressable records. commands/spec-code-review.md is the router
+(/spec-code-review review|fix|gate|plan) installed by sync to every
+commands root; scripts/skill-dir.sh prints the active skill dir per
+the launch priority order (spec-to-prod's pattern).
+gates/recommendation.md arbitrates stop conditions and the
+merge/fix-first/human criteria. references/quickstart.md is
+navigation, not a second contract. evals/cases.md defines four
+standing live-eval scenarios (clean-diff precision, seeded-bug recall,
+PR flow, fix_from continuation) backed by examples/review-target/ — a
+fixture base plus a git-generated change.diff with four seeded defects
+and three must-not-flag traps, answered by EXPECTED.md.
+templates/fix-from-findings.json is the continuation payload template.
+diagrams/ adds the flow graph (.mmd canonical + hand-crafted HTML
+render in the spec-to-prod style). observations/open-items.md is the
+living open-items list (suggestion sketches, config file, incremental
+re-review, PR posting, never-run evals, accepted limitations). SKILL.md
+gains a Resource map section pointing at all of it; behavior,
+workflows, and tests are unchanged.
+
+The same release aligns the zcode master with the dynamic-workflow
+authoring contract, verified by compiling it against the compiler's
+actual facade (strict, no-DOM) instead of a type-stripping esbuild
+pass. That check caught and fixed two real compile errors esbuild had
+been silently accepting: args.base losing its unknown-narrowing across
+the HAS_BASE flag (TS18046) and gate findings missing the required
+impact field (TS2322) — both dialects fixed, both pinned in parity
+tests. The run also gains a live findings board (artifact.board, fed
+by the five report sites now tagged "findings" with a stage field):
+every confirmed finding is a card that moves verified → unconfirmed →
+fixed/unfixed/worse as fix rounds land — the dashboard §10 of the
+authoring contract asks for, absent from the claude dialect which has
+no artifact primitive. The pure helpers (mdSafe, prMetaFromJson) were
+verified through EvalWorkflowSnippet against the same compiler path.
+
+The first live workflow run (dogfooding this very stack, twice) also
+changed the release: run one was gate-stopped by the new secrets
+family flagging its own test fixtures — exactly as designed — which
+added the spec-review:allow inline escape hatch to 0.8.0's family;
+run two put the full panel over the stack and found seven defects,
+all fixed in-place before commit: the fix_from pre-fix gate now
+failure-handles (a red gate enters the tracked findings instead of
+rendering as all-pass; every report surface reads the authoritative
+last gate run via finalGate), the 0.7.1 pr dirty-refusal repair
+gained its missing anchor, and five doc/comment drifts were synced
+(js stage-field comment, quickstart recommendation promise, SKILL.md
+npm shape, the fix_rounds explicit-0 comments, the gates gate-red
+fix_from carve-out).
+
+Migration: none required — the new tree is additive; re-run
+tools/sync.sh so the router command and the expanded skill tree reach
+every harness root.
+
+## 0.8.0 — 2026-09-27
+
+Principles and secret scanning — aligning the panel with where AI code
+review stood in 2026 (precision as the trust metric; deterministic
+security checks before reviewer attention; explicit human ownership).
+(1) SKILL.md gains a Principles section: the panel's contract in
+priority order — machine-decidable before human attention; evidence or
+it does not exist; independence beats volume; zero findings is success;
+stated intent is context, not a waiver; AI advises, the human decides;
+honesty about coverage; the repo owns its standards. Collisions resolve
+toward the lower-numbered rule, giving future edits a compass instead
+of folklore. (2) The gate gains an always-on secrets family (diff
+mode): a high-precision token-shape scan — AWS access keys, GitHub
+PATs (classic and fine-grained), GitLab PATs, Stripe live keys, Slack
+tokens, Google API keys, npm tokens, Anthropic keys, private-key
+headers — over the change's added diff lines AND untracked files (a
+brand-new untracked file is the classic leak vector the diff alone
+misses). Precision over recall by design: curated shapes only, prose
+about keys never trips it, project mode skips the family (fixtures
+with fake keys would false-positive there — the security lens owns
+whole-project reading). Five new gate tests cover red/green, the
+untracked path, fixture-shaped prose, tree-mode exclusion, and the
+escape hatch. Found the hard way by the first live workflow run
+(dogfooding this very stack): the family flagged its own test
+fixtures, exactly as designed — a line carrying the inline marker
+"spec-review:allow" (gitleaks-style) is now skipped, so tests for the
+family can hold fixture tokens without weakening the patterns.
+
+Migration: none required — the secrets family is additive; a change
+that adds a secret-shaped token now fails the gate where before it
+passed, which is the point. Re-run tools/sync.sh to pick up the new
+gate and the Principles section.
+
+## 0.7.1 — 2026-09-27
+
+Repairs every panel-confirmed defect from the 0.7.0 review (three
+independent lenses, triage, independent confirmation — six findings, all
+verified). (1) The fix_from default `FIX_ROUNDS = 2` assigned a const:
+the zcode dialect could not compile (TS2588) and the claude dialect
+threw at startup on the documented default flow — now a let in both.
+(2) A fix_from continuation with `target: pr` dereferenced a null
+prMeta in the shared verified render (and `target: branch` rendered a
+bogus empty entry) — the pr/branch verified lines are now guarded by
+`!FIX_FROM` in both dialects. (3) The claude dialect's confirmation
+wave and fix-review push rebuilt findings field-by-field and dropped
+the new impact field — both now carry it, restoring parity with the
+zcode spread. (4) The pr-mode dirty-tree refusal now applies
+unconditionally: a dirty tree misattributes uncommitted work to the PR
+whether or not the head is already checked out (distinct refusal
+messages per case). (5) PR-author-controlled metadata (title, author,
+base, url) is markdown-escaped via mdSafe before rendering into the
+report artifact, closing the report-markdown injection surface. (6)
+Branch mode now surfaces "uncommitted work included in the reviewed
+diff" in the report itself (scopeDirty), matching SKILL.md's promise.
+Root cause guarded: a new parity test scans both dialects for any
+assignment to a const-declared name (the TS2588 class) — deterministic,
+self-tested against the exact 0.7.0 bug shape, so the suite can no
+longer stay green over a crashing workflow. All six repairs are pinned
+by new anchors in test_workflow_copies.py.
+
+Migration: none required — every change is a repair of 0.7.0 behavior;
+rerun tools/sync.sh to replace the broken 0.7.0 workflow installs.
+
 ## 0.7.0 — 2026-09-26
 
 Fix continuation and impact. (1) A `fix_from` arg turns the workflow
