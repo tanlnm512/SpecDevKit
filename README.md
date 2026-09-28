@@ -5,9 +5,9 @@ session) plus eight role agents produce an execution-ready, grounded doc
 set per feature under `specs/<name>/` — `spec.md`, `plan.md`, `task.md`
 (the status holder), `tech-spec.md`, `test.md`, with `survey.md` and
 `research.md` as evidence — with FR/NFR → task → test traceability, an
-approval freeze, durable closing evidence, and an implementation-diff
-review. Every artifact is mechanically verified by `scripts/check.py`
-and scheduled by a **dynamic state graph**
+approval freeze, durable tick/delivery evidence, and an
+implementation-diff review. Every artifact is mechanically verified by
+`scripts/check.py` and scheduled by a **dynamic state graph**
 (`scripts/graph.py`), not a fixed stage ladder.
 
 This repo — published on GitHub as **SpecDevKit**
@@ -30,10 +30,9 @@ New-user entry point: `skills/spec-to-prod/references/quickstart.md`.
 
 ## How the workflow works
 
-Scheduling is a frontier computation over a graph of sixteen nodes (the
+Scheduling is a frontier computation over a graph of fourteen nodes (the
 eight role agents plus orchestrator/mechanical nodes: spec, clarify,
-research-gate, verify, before-audit, approve, execute, closing-audit,
-tick-commit, archive):
+research-gate, verify, approve, execute, tick-commit, archive):
 
 1. **Compute the frontier** — `python3 scripts/graph.py specs/<name>`
    prints every node's state (`done` / `READY` / `blocked(reason)` /
@@ -52,16 +51,16 @@ re-survey → `audit.py converge` → appended tasks re-enter execute).
 
 **Human gates are never auto-satisfied** — by any script: clarify, the
 researcher run/skip gate (an orchestrator judgment), user approval
-(spec.md `Status: approved`), the closing-audit judgment (including
-rulings), and tick-commit. `graph.py --run` pauses with
-`AWAITING HUMAN: <node>` at each and waits; the auto-trigger loop runs
-only the mechanical verify node (check.py) itself and hands agent waves
-to a configurable `--runner`.
+(spec.md `Status: approved`), and tick-commit. `graph.py --run` pauses
+with `AWAITING HUMAN: <node>` at each and waits; the auto-trigger loop
+runs only the mechanical verify node (check.py) itself and hands agent
+waves to a configurable `--runner`.
 
-Audits run exactly twice per plan: the **before-audit** once, when the
-execution frontier first becomes eligible, and the **closing audit**
-once, after every task is implemented. Nothing is ticked or committed in
-between.
+One proof-and-delivery pass runs per plan, after every task is
+implemented: proofs, regression, and the review instruments (scope
+diff, cleanliness sweep, DoD scorecard, implementation-diff reviewer)
+feed the ticks' proof notes — then the implementation commit C1 and
+delivery record C2. Nothing is committed before it.
 
 Right-sizing is explicit: tiny changes keep the artifacts and gates but
 avoid unnecessary spawns; large/high-risk changes add NFR triage, threat
@@ -118,7 +117,7 @@ readable and report a compatibility warning instead.
 
 **Safe commands**: read-only on any docset — `check.py` (without
 `--fix-burndown`), `graph.py --state-json|--mermaid|--explain`,
-`audit.py scope|clean|evidence|converge|archived`, `freeze.py --verify`,
+`audit.py scope|clean|converge|archived`, `freeze.py --verify`,
 `skill-dir.sh`. Everything else
 writes: `scaffold.sh`, `archive.sh`, `tick.py`, `check.py
 --fix-burndown`, `freeze.py --record` (docsets); `sync.sh`,
@@ -128,7 +127,7 @@ homes under `$HOME`); `plugin-manifest.py`, `workflow-defs.py`,
 `graph.py --run|--emit-spawns` (spawn agents, write payloads);
 `audit.py proofs --run` and `audit.py dod` execute the commands embedded
 in test.md — read them first. Agents themselves never commit: the human
-gates (approval, closing audit, tick-commit) are the only path to a
+gates (approval, tick-commit) are the only path to a
 commit, and push/publish stay human/CI gates.
 
 ## Install as a plugin
@@ -280,14 +279,14 @@ Two invocation surfaces:
 | Command | Lands on |
 |---|---|
 | `/spec <name>` | the spec node + clarify loop (alias: the `scaffold` verb; a bug takes `bugfix`) |
-| `/plan <spec>` | waves from current doc state through verify + before-audit to the approve gate |
+| `/plan <spec>` | waves from current doc state through verify to the approve gate |
 | `/build <spec> [T###]` | the execute node — implementer waves; nothing ticked or committed |
-| `/test <spec>` | closing-audit proof half: every TC pass condition green + regression gate |
-| `/review <spec>` | evidence integrity, scope diff, cleanliness sweep, implementation review, DoD scorecard |
-| `/ship <spec>` | durable closing evidence, rulings ack, tick, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
+| `/test <spec>` | the proof pass: every TC pass condition green + regression gate |
+| `/review <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
+| `/ship <spec>` | tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
 
-`/test`, `/review`, `/ship` are three portions of the ONE closing
-audit, never three audits. "Prod" means production-READY (ADR-014):
+`/test`, `/review`, `/ship` are three steps of the ONE delivery pass,
+never three gates. "Prod" means production-READY (ADR-014):
 the flow ends at a verified single commit; push/deploy/publish stay
 human/CI gates. On omp the entry is `/skill:spec-to-prod`; the router
 verb space below keeps its own meanings (`plan`/`tech`/`qa` are
@@ -308,16 +307,16 @@ single-agent repair runs, `review` is the docs reviewer — ADR-013).
 | `survey` `research` `plan` `tech` `qa` `tasks` `review` | single-agent runs of one node (repair/refresh; `check.py` after) |
 | `check <spec>` | `scripts/check.py specs/<spec>` and triage the output |
 | `converge <spec>` | re-survey, then `scripts/audit.py converge specs/<spec> --repo <path>` (`--repo` defaults to the spec dir's grandparent); append a task per NEW GAP/REGRESSED |
-| `implement <spec> [T###]` | the execute node: waves of implementer agents; nothing ticks or commits until the plan-wide closing audit passes |
+| `implement <spec> [T###]` | the execute node: waves of implementer agents; nothing commits until the plan-wide delivery pass proves every task |
 | `archive <spec>` | after `Status: done`: `scripts/archive.sh <spec>` moves the dir to `specs/archive/<date>-<name>/` and repoints INDEX |
 
 A typical pass: `scaffold` → author spec.md with the user → resolve the
 researcher gate → wave 1 (survey ∥ research) → wave 2 (plan ∥ tech ∥ qa)
-→ tasks → verify (`check.py` green) → before-audit (six gates, record
-`Before-audit: passed @ <sha>` or `@ -` in a non-git repo) → user
+→ tasks → verify (`check.py` green) → pre-flight (baseline green on the
+spec's branch) → user
 approval → approval freeze (`freeze.py --record`) → execute (implementer
-waves) → closing audit (evidence, scope, hygiene, implementation review,
-proofs, regression, DoD) → one tick → implementation commit C1 →
+waves) → delivery pass (proofs, regression, review instruments) →
+ticks → implementation commit C1 →
 delivery-record commit C2 → `archive`.
 
 ### Dynamic workflow runs (zcode · claude code)
@@ -331,10 +330,10 @@ session keeps every judgment. The recommended shape alternates the two —
 | Step | Surface | What happens |
 |---|---|---|
 | 1 | session — `/spec <name>` | author spec.md with the user (clarify loop), decide the researcher gate: `skip` → write the not-applicable marker line yourself; `run` → spawn the researcher here (the workflow pauses at an undetermined gate, so resolve it first) |
-| 2 | workflow — run `spec-run` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: before-audit`** |
-| 3 | session | run the six before-audit gates, record `Before-audit: passed @ <sha>`, present the docset, get approval → `Status: approved` + `freeze.py --record` |
-| 4 | workflow — rerun `spec-run` | execute waves hands-off: one implementer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: closing-audit`** |
-| 5 | session — `/test` `/review` `/ship` | the closing audit portions, rulings ack, durable closing evidence, then tick + C1/C2 |
+| 2 | workflow — run `spec-run` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
+| 3 | session | pre-flight (baseline green on the spec's branch), present the docset, get approval → `Status: approved` + `freeze.py --record` |
+| 4 | workflow — rerun `spec-run` | execute waves hands-off: one implementer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
+| 5 | session — `/test` `/review` `/ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
 
 Rules of thumb: the workflow stops `AWAITING HUMAN` at every judgment
 gate — resolve the gate in-session, rerun, and the loop resumes from doc
@@ -344,7 +343,7 @@ Small specs (≤3 FRs) are usually faster fully in-session; the workflow
 earns its keep on execute-heavy plans. Cost levers (zcode): launch the
 analysis waves with the run's subagent model on a cheap tier and execute
 waves at the default; schedule post-approve runs off-peak — they park at
-the closing-audit ack by design. Invocation: on Claude Code `spec-run`
+the tick-commit gate by design. Invocation: on Claude Code `spec-run`
 is a `/spec-run` command; on zcode ask in natural language ("run the
 spec-run workflow for spec X").
 
@@ -355,9 +354,9 @@ All under `skills/spec-to-prod/scripts/`, run from a workspace root:
 | Script | Purpose |
 |---|---|
 | `scaffold.sh <name> [root]` | create `specs/<name>/` from templates, register in INDEX; refuses overwrite, requires kebab-case |
-| `check.py <spec-dir>` | the doc-set validator: 7 files, FR/NFR→T→TC traceability, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze/evidence integrity, constitution; `--survey-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
+| `check.py <spec-dir>` | the doc-set validator: 7 files, FR/NFR→T→TC traceability, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze integrity, constitution; `--survey-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
 | `freeze.py <spec-dir>` | approval freeze: `--record` writes the approved-doc hash manifest after explicit sign-off (existing manifests refuse overwrite; `--record --force` represents a fresh approval); `--verify` is read-only |
-| `audit.py <sub> <spec-dir>` | closing-audit halves: `evidence`, `scope` (defaults to the before-audit SHA), `clean`, `proofs --run`, `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
+| `audit.py <sub> <spec-dir>` | review instruments: `scope` (defaults to the approval-freeze SHA), `clean`, `proofs --run`, `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
 | `graph.py <spec-dir>` | the workflow engine: frontier report, `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads), `--run [--runner] [--dry-run] [--max-waves N]` |
 | `archive.sh <name> [root]` | move a `Status: done` spec to `specs/archive/<date>-<name>/`, repoint INDEX |
 | `skill-dir.sh` | print the active skill directory (spawn-payload `skill_dir`) |
@@ -424,7 +423,7 @@ skills/
     ├── commands/            # router (spec-to-prod.md) + 6 lifecycle wrappers (spec/plan/build/test/review/ship)
     ├── agents/spec-*.md    # 8 role briefs = harness defs (frontmatter + body) + _shared-protocol.md
     ├── contracts/docset.md # canonical doc-set/ownership/payload contract
-    ├── gates/              # before-audit (6 gates) + dod (10-gate scorecard)
+    ├── gates/              # dod (the 10-gate DoD scorecard)
     ├── templates/          # 7 scaffolded doc templates + assurance/release records
     ├── scripts/            # scaffold.sh · check.py · audit.py · graph.py · freeze.py · archive.sh · skill-dir.sh · specstate.py
     ├── decisions/           # this skill's own ADRs (D-001…D-021)

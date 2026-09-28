@@ -25,8 +25,7 @@ DWF_TS = WORKFLOWS / "spec-run.dwf.ts"
 WF_JS = WORKFLOWS / "spec-run.js"
 LEDGER = ".spec-dev-kit-deployed"
 
-HUMAN_GATES = ["clarify", "research-gate", "before-audit", "approve",
-               "closing-audit", "tick-commit"]
+HUMAN_GATES = ["clarify", "research-gate", "approve", "tick-commit"]
 AGENT_NODES = ["survey", "research", "plan", "tech", "qa", "tasks",
                "execute"]
 STOP_TOKENS = ["max-waves", "no doc-state change", "AWAITING HUMAN",
@@ -152,7 +151,6 @@ class ZcodeDialectTests(unittest.TestCase):
         self.assertEqual(phases, [
             "Read doc state and check the human gates",
             "Run the ready wave",
-            "Closing pre-check — reviewer + read-only audits",
             "Recompute and summarize",
         ])
         self.assertFalse(re.search(r"phase\((?!\"|\))", re.sub(
@@ -214,7 +212,7 @@ class ClaudeDialectTests(unittest.TestCase):
 
 
 class ParityTests(unittest.TestCase):
-    """Both dialects mirror the same loop contract: the six human gates,
+    """Both dialects mirror the same loop contract: the four human gates,
     the agent-node set, the graph.py invocations, and the stop
     conditions — the mechanical guarantee that the two runtimes behave
     identically (FR-003)."""
@@ -261,22 +259,24 @@ class ParityTests(unittest.TestCase):
         # --launch-check — only a weight "wave" span justifies a launch.
         # Pinned on the quoted rule sentence per dialect (the bare 'wave'
         # substring matches dozens of unrelated wave-loop lines and could
-        # never fail)
+        # never fail); the two dialects word the sentence differently, so
+        # each pins its own contiguous phrasing.
         for path in (DWF_TS, WF_JS):
             self.assertIn("--launch-check", path.read_text(), path.name)
         self.assertIn('(weight "wave")', DWF_TS.read_text(), DWF_TS.name)
-        self.assertIn("weight 'wave'", WF_JS.read_text(), WF_JS.name)
+        self.assertIn("--launch-check says weight", WF_JS.read_text(),
+                      WF_JS.name)
 
-    def test_both_precheck_the_closing_stop(self):
-        # D-023: at the closing-audit stop both dialects spawn the
-        # implementation-diff reviewer and run the read-only audit modes
-        # before returning — the ack session opens with results
+    def test_both_demand_proof_at_the_tick_commit_stop(self):
+        # D-026: the closing-audit stop and its read-only precheck are
+        # gone — the one proof-and-delivery pass lives at the tick-commit
+        # gate, so both dialects must state the proof requirement in the
+        # gate's need text (the orchestrator's re-brief reads it verbatim)
         for path in (DWF_TS, WF_JS):
             text = path.read_text()
-            self.assertIn("reviewer-diff", text, path.name)
-            self.assertIn("closing precheck", text, path.name)
-            self.assertIn("--dry-run", text, path.name)
-            self.assertIn("implementation-diff", text, path.name)
+            self.assertIn(
+                "prove and tick: run `audit.py proofs <spec-dir> --run` "
+                "+ regression", text, path.name)
 
 
 class InstallerBase(unittest.TestCase):

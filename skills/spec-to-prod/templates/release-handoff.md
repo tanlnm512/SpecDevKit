@@ -13,7 +13,7 @@ does not deploy; it gives the human/CI release owner the irreversible facts.
 - <migration/backfill/deletion, forward plan, rollback plan, or “none”>
 
 ## Verification already completed
-- <DoD and closing-evidence summary with links>
+- <DoD and delivery summary with links>
 
 ## Release verification
 - <command or observation to run after deployment>

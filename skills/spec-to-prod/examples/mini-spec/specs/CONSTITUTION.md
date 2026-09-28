@@ -1,6 +1,6 @@
 # Constitution — mini-calc example repo
 
-Articles bind every spec in this repo. The before-audit gates on them.
+Articles bind every spec in this repo. Approval and every implementer payload carry them.
 
 1. Pure functions only — no classes, no module-level mutable state.
 2. Integer arithmetic only; floating point is out of scope until a spec

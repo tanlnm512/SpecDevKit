@@ -18,11 +18,12 @@ This is navigation, not a second contract. `SKILL.md`,
 3. Resolve the research gate; run or skip explicitly.
 4. Produce survey, plan, tech-spec, test, tasks.
 5. `python3 scripts/check.py specs/<name>`
-6. Run before-audit; record its SHA.
+6. Pre-flight: baseline commands green on a clean tree, on the spec's branch.
 7. Get explicit user approval; run `scripts/freeze.py specs/<name> --record`.
 8. Execute the task frontier; append D-### rulings only.
-9. Closing audit: evidence, scope, hygiene, implementation review, proofs, regression, DoD.
-10. Record `evidence/closing.md`; tick once; commit C1, then delivery-record C2.
+9. Delivery pass: proofs, regression, review instruments (scope, hygiene,
+   DoD, implementation-diff reviewer), then tick every task with its proof.
+10. Commit C1, then delivery-record C2 (`Delivered`, `Status: done`, INDEX).
 
 ## One-command state
 

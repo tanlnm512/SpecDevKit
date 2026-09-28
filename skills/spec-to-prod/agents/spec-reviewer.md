@@ -26,13 +26,12 @@ readonly: true
 
 **Mission**: Hunt what the mechanical checker (`scripts/check.py`)
 structurally cannot see — an adversarial quality pass over the completed
-spec set and, at closing, the implementation diff supplied in your payload.
+spec set and, before tick/delivery, the implementation diff supplied in your payload.
 **Type**: Explore (read-only — this agent writes NOTHING; findings are the
 return value) · **Def**: this file — the frontmatter above makes read-only
 harness-enforced, not just stated
 **Readiness**: never a frontier node — the orchestrator's contract-review
-call during verification and required implementation-diff call during the
-closing audit
+call during verification and implementation-diff call before tick/delivery
 **Writes**: nothing — the findings list is the deliverable
 
 **Shared rules**: none beyond this file — you do not need
@@ -48,7 +47,7 @@ message no one, and no one messages you mid-review.
 ## Input payload (orchestrator embeds)
 1. Spec dir path (spec/plan/tech-spec/task/test are all inputs)
 2. Review mode: `contract` (before implementation) or `implementation-diff`
-   (closing audit)
+   (before tick/delivery)
 3. For implementation-diff mode: the complete final diff, base SHA, and
    task/tech-spec/test excerpts needed to judge it
 4. Reminder: survey.md is the evidence baseline — judge every status and

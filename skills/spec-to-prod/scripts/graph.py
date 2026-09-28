@@ -11,8 +11,8 @@ The node model (names and ready/done conditions) is contractual — see
 architecture.md §2.1/§2.2 and the READY_WHEN/DONE_WHEN tables below. In sum:
 
   spec → clarify? → research-gate? → (research) → survey → plan ∥ tech ∥ qa
-       → tasks → verify → before-audit → approve(HUMAN) → execute (per-task
-       frontier, fix-round loops ≤5) → closing-audit → tick-commit → archive,
+       → tasks → verify → approve(HUMAN) → execute (per-task frontier,
+       fix-round loops ≤5) → tick-commit → archive,
   with loop edges: clarify, fix-round, re-brief, converge (survey staleness).
 
 Modes:
@@ -60,36 +60,29 @@ Modes:
                  tier `standard` (spec.md `**Effort**: standard`) the
                  plan ∥ tech ∥ qa wave collapses into ONE merged designer
                  payload authoring plan/tech-spec/test/task in a single
-                 spawn (D-024); while the closing audit is due, the
-                 reviewer-diff.md payload (implementation-diff mode) is
-                 prepared the same way the undetermined gate's researcher
-                 payload is.
+                 spawn (D-024); while delivery is pending (execute done,
+                 delivery not yet recorded), the reviewer-diff.md payload
+                 (implementation-diff mode) is prepared the same way the
+                 undetermined gate's researcher payload is.
   --run          the auto-trigger loop: compute the frontier; pause
                  `AWAITING HUMAN: <node>` at every judgment node (clarify,
-                 an undetermined research-gate, before-audit, approve, the
-                 closing-audit judgment, tick-commit — human gates are never
-                 auto-satisfied and this loop mutates no doc state of its
-                 own); run the mechanical verify node (check.py) directly;
-                 emit payloads for the ready agent wave; invoke --runner per
-                 payload (default `print`: echo the invocation) — a runner
-                 that exits nonzero or raises stops the loop with a
-                 role/node diagnostic and exit 3, so no later wave starts;
-                 recompute and repeat until a gate, workflow completion,
-                 --max-waves, or a wave that changed nothing. The
-                 before-audit and closing-audit pauses run their
-                 mechanical prechecks into the log first (audit.py
-                 pre-execute; scope + clean + dod --dry-run + proofs dry —
-                 D-023): the human reads results, never honor-system
-                 claims.
+                 an undetermined research-gate, approve, tick-commit —
+                 human gates are never auto-satisfied and this loop mutates
+                 no doc state of its own); run the mechanical verify node
+                 (check.py) directly; emit payloads for the ready agent
+                 wave; invoke --runner per payload (default `print`: echo
+                 the invocation) — a runner that exits nonzero or raises
+                 stops the loop with a role/node diagnostic and exit 3, so
+                 no later wave starts; recompute and repeat until a gate,
+                 workflow completion, --max-waves, or a wave that changed
+                 nothing.
 
 Mechanical probes: the survey node runs `check.py <spec-dir> --survey-only`
 and the verify node runs `check.py <spec-dir>` — skill-owned contract
 checkers, each only once its inputs are in place. No inspection mode ever
-executes repository or `test.md` commands: the closing-audit node classifies
-test.md's pass conditions dry (`audit.classify_proofs` — nothing runs), and
-proofs execute only on the explicit audit.py CLI. Human gates (clarify,
-approve, an undetermined research-gate, the closing-audit judgment,
-tick-commit) are never auto-satisfied by this script.
+executes repository or `test.md` commands, and proofs execute only on the
+explicit audit.py CLI. Human gates (clarify, approve, an undetermined
+research-gate, tick-commit) are never auto-satisfied by this script.
 
 Usage: graph.py <spec-dir> [--repo <path>] [--state-json] [--mermaid]
                 [--explain <node>] [--wave-dir <dir>] [--launch-check]
@@ -118,15 +111,13 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from check import CODE_SPAN, HTML_COMMENT, INVISIBLE, PLACEHOLDER  # noqa: E402
-import audit  # noqa: E402
 import specstate  # noqa: E402
 
 # The workflow graph's nodes, in canonical (dependency) order. Names are
 # contractual: CROSS-001 compares them against SKILL.md's table.
 NODES = [
     "spec", "clarify", "research-gate", "research", "survey", "plan", "tech",
-    "qa", "tasks", "verify", "before-audit", "approve", "execute",
-    "closing-audit", "tick-commit", "archive",
+    "qa", "tasks", "verify", "approve", "execute", "tick-commit", "archive",
 ]
 
 DOC_FILES = ["spec.md", "survey.md", "research.md", "plan.md",
@@ -152,9 +143,8 @@ DATA_EDGES = [
     ("plan", "tasks"), ("tech", "tasks"), ("survey", "tasks"),
     ("survey", "verify"), ("plan", "verify"), ("tech", "verify"),
     ("qa", "verify"), ("tasks", "verify"),
-    ("verify", "before-audit"), ("before-audit", "approve"),
-    ("before-audit", "execute"), ("approve", "execute"),
-    ("execute", "closing-audit"), ("closing-audit", "tick-commit"),
+    ("verify", "approve"), ("approve", "execute"),
+    ("execute", "tick-commit"),
     ("tick-commit", "archive"),
 ]
 
@@ -186,11 +176,9 @@ READY_WHEN = {
     "qa": "spec + survey done (never reads plan/tech — parallel-safe)",
     "tasks": "plan + tech + survey done",
     "verify": "plan, tech, qa, tasks, survey all done",
-    "before-audit": "verify done",
-    "approve": "before-audit done (HUMAN gate)",
-    "execute": "approved + before-audit recorded",
-    "closing-audit": "execute done — every task implemented/ticked/struck (0 todo; digests are orchestrator-confirmed)",
-    "tick-commit": "closing-audit done (HUMAN gate: the tick, then the delivery)",
+    "approve": "verify done (HUMAN gate)",
+    "execute": "approved",
+    "tick-commit": "execute done (HUMAN gate: the tick, then the delivery)",
     "archive": "tick-commit done AND spec Status: done",
 }
 DONE_WHEN = {
@@ -204,12 +192,8 @@ DONE_WHEN = {
     "qa": "test.md exists, non-empty, filled",
     "tasks": "task.md exists, non-empty, filled",
     "verify": "`check.py <spec-dir>` exits 0",
-    "before-audit": "`Before-audit: passed @ <sha-or-dash>` recorded in task.md",
     "approve": "spec.md Status: approved (or later)",
     "execute": "every task entry implemented, ticked [x], or struck ~~",
-    "closing-audit": "`Closing-audit: approved @ <sha-or-dash>` recorded "
-                    "in task.md — the human gates (proof, review, rulings, "
-                    "regression, sign-off) on top of the mechanical ones",
     "tick-commit": "durable task-tick evidence (every task ticked/struck, every tick with its proof note) plus the delivery record — `Delivered: commit @ <sha>` in task.md, or the explicit non-git skip",
     "archive": "dir moved to specs/archive/<date>-<name>/, INDEX repointed",
 }
@@ -220,7 +204,7 @@ DONE, READY, BLOCKED, UNDETERMINED, SKIPPED = (
 
 # Frontier agent nodes → (spawn role, brief file under agents/). Payloads are
 # named <role>.md (execute: one per runnable task). The reviewer is never a
-# frontier node — it rides the before-audit orchestrator judgment — but the
+# frontier node — it rides the tick-commit orchestrator judgment — but the
 # payload builder still knows its protocol exemption (C1).
 AGENT_BRIEFS = {
     "survey": ("surveyor", "spec-surveyor.md"),
@@ -337,7 +321,7 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
         elif e.implemented:
             state, why = "implemented", (
                 "landed unticked — the plan-wide tick follows the "
-                "closing audit")
+                "pre-tick proof pass")
         elif e.claimed:
             state, why = "claimed", "marked (in-progress) — an implementer holds it"
         elif e.id is None:
@@ -692,7 +676,7 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             + (str(constitution) if constitution.exists()
                else "not present — report its absence in your digest"),
             "- Acceptance commands (always for code tasks — run them while "
-            "implementing; the closing audit re-runs them):",
+            "implementing; the pre-tick proof pass re-runs them):",
         ]
         lines += [_indent(c) for c in acceptance_for(entry.block, test_text)]
         if entry.fix_round:
@@ -706,7 +690,7 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             "- Tier: standard (D-024) — ONE spawn authors the design "
             "docset in this order: plan.md → tech-spec.md → test.md → "
             "task.md. The multi-agent wave is collapsed at this tier; "
-            "check.py, the before-audit, and the closing audit are not.",
+            "check.py and the approve gate are not.",
             "- Team context: none recorded — assume solo, PR-per-milestone "
             "unless the spawn digest says otherwise",
             "- Architecture constraints: "
@@ -718,30 +702,20 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             "TCs strictly from spec.md's acceptance criteria and survey "
             "evidence, never from what the plan found convenient to test",
         ]
-    elif node == "closing-audit":
-        task_text = read_doc(spec_dir / "task.md") or ""
-        # The same hex-validated parser audit.py's effective_base routes
-        # into its no-shell git(): a SHA or the non-git dash, never raw
-        # marker text — this value is interpolated into a git command the
-        # reviewer runs, so `HEAD~2;id`-shaped text must not survive.
-        base = (specstate.lifecycle_shas(task_text).get("before")
-                or "HEAD")
+    elif node == "tick-commit":
+        # The reviewer's diff anchor: the approval freeze's Approved-at
+        # commit — a real SHA read from approvals/approval.md, never raw
+        # marker text, because it is interpolated into a git command the
+        # reviewer runs (`HEAD~2;id`-shaped text must not survive).
+        base = specstate.approval_sha(spec_dir) or "HEAD"
         lines = [
             f"- spec_dir: {spec_dir}",
-            "- Mode: implementation-diff — the required closing review "
-            "(SKILL.md closing audit step 10; findings only, edit nothing)",
-            "- Base: the recorded before-audit anchor `"
-            + (base + "`" if base != "-"
-               else "-` (non-git — anchor the review on every task's "
-                    "intended-files union instead)"),
-        ]
-        if base != "-":
-            lines += [
-                "- The complete final diff (run both, read everything):",
-                f"   git -C {repo} diff {base}      # tracked changes since base",
-                f"   git -C {repo} status --porcelain   # untracked files — read in full",
-            ]
-        lines += [
+            "- Mode: implementation-diff — the pre-tick implementation "
+            "review (findings only, edit nothing)",
+            f"- Base: the approval-freeze anchor `{base}`",
+            "- The complete final diff (run both, read everything):",
+            f"   git -C {repo} diff {base}      # tracked changes since base",
+            f"   git -C {repo} status --porcelain   # untracked files — read in full",
             "- Plan-side truth: read task.md, tech-spec.md, test.md, "
             "survey.md, and specs/CONSTITUTION.md under the spec dir's "
             "parent",
@@ -761,10 +735,11 @@ def frontier_payloads(state: dict, spec_dir: Path,
     """One record per payload this wave writes: one per frontier agent node,
     one per runnable task for execute (named implementer-T###.md when there
     are several, implementer.md when one), plus — while the research-gate is
-    undetermined — the researcher payload, and — while the closing audit is
-    due — the implementation-diff reviewer payload (the instruments of a
-    `run` decision and of the closing review; --run still pauses at both
-    gates and never spawns them). D-024: at effort tier `standard` the
+    undetermined — the researcher payload, and — while delivery is pending
+    (execute done, delivery not yet recorded) — the implementation-diff
+    reviewer payload (the instruments of a `run` decision and of the
+    pre-tick review; --run still pauses at the tick-commit gate and never
+    spawns them). D-024: at effort tier `standard` the
     plan ∥ tech ∥ qa wave (plus the tasks wave it feeds) collapses into ONE
     merged design payload — one spawn writes plan.md, tech-spec.md,
     test.md, and task.md; docset, check.py, and the gates are unchanged.
@@ -810,8 +785,8 @@ def frontier_payloads(state: dict, spec_dir: Path,
                       "brief": "spec-researcher.md",
                       "filename": "researcher.md", "entry": None})
     if (state["nodes"]["execute"]["state"] == DONE
-            and state["nodes"]["closing-audit"]["state"] != DONE):
-        items.append({"node": "closing-audit", "role": "reviewer",
+            and state["nodes"]["tick-commit"]["state"] != DONE):
+        items.append({"node": "tick-commit", "role": "reviewer",
                       "brief": "spec-reviewer.md",
                       "filename": "reviewer-diff.md", "entry": None})
     return items
@@ -926,10 +901,9 @@ def substitute(template: str, prompt_file: Path, role: str,
 
 def find_pause(state: dict, wave_dir: str | None = None) -> tuple[str, str] | None:
     """The first judgment node --run must stop at, as (node, what is needed).
-    The human gates (clarify, an undetermined research-gate, approve, the
-    closing-audit judgment, tick-commit) are never auto-satisfied;
-    before-audit — the orchestrator's six-gate judgment — pauses the same
-    way. Order is the canonical node order; at most one applies per state."""
+    The human gates (clarify, an undetermined research-gate, approve,
+    tick-commit) are never auto-satisfied. Order is the canonical node
+    order; at most one applies per state."""
     n = state["nodes"]
     if n["clarify"]["state"] == READY:
         return "clarify", n["clarify"]["reason"]
@@ -941,42 +915,18 @@ def find_pause(state: dict, wave_dir: str | None = None) -> tuple[str, str] | No
                                  + " — if the decision is run, the prepared "
                                  "researcher payload is: "
                                  f"{target / 'researcher.md'}")
-    if n["before-audit"]["state"] == READY:
-        return "before-audit", ("ONE session, gates + approval together "
-                                "(D-023): run `audit.py pre-execute "
-                                "<spec-dir>` (+ `--run` for the baseline "
-                                "command), judge the three semantic gates "
-                                "(gates/before-audit.md: dependency "
-                                "reality, already-done sweep, constitution "
-                                "semantics + branch consent), record "
-                                "`Before-audit: passed @ <sha-or-dash>` in "
-                                "task.md — then seek the user's explicit "
-                                "approval, set spec.md Status: approved, "
-                                "and run `freeze.py <spec-dir> --record` "
-                                "before rerunning")
     if n["approve"]["state"] == READY:
         return "approve", (n["approve"]["reason"]
                            + " — after the explicit yes, run "
                            "`freeze.py <spec-dir> --record`")
-    if (n["execute"]["state"] == DONE
-            and n["closing-audit"]["state"] != DONE):
-        return "closing-audit", ("mechanical pre-check first: `audit.py "
-                                 "scope <spec-dir>`, `clean`, `dod` "
-                                 "(read-only, results in hand before the "
-                                 "ack), and spawn the implementation-diff "
-                                 "reviewer from the emitted payload "
-                                 "(--emit-spawns prepared reviewer-diff.md); "
-                                 "then `audit.py evidence`, `proofs "
-                                 "<spec-dir> --run`, regression; record "
-                                 "evidence/closing.md, surface every D-###, "
-                                 "get the user's ack, then record "
-                                 "`Closing-audit: approved @ <sha-or-dash>` "
-                                 "in task.md")
-    if n["closing-audit"]["state"] == DONE and state["status"] != "done":
+    if n["execute"]["state"] == DONE and state["status"] != "done":
         commit_note = ("make implementation commit C1, then delivery-record "
                        "commit C2" if state["git"]["available"]
                        else "commit SKIPPED (not a git repo)")
-        return "tick-commit", ("tick every task `- [x]` with its proof "
+        return "tick-commit", ("prove and tick: run `audit.py proofs "
+                               "<spec-dir> --run` + regression so every "
+                               "tick's proof note is fresh evidence, then "
+                               "tick every task `- [x]` with its proof "
                                "note, recompute the burndown "
                                "(`check.py --fix-burndown`), " + commit_note
                                + ", then set spec.md Status: done and "
@@ -1016,68 +966,6 @@ def log_verify(state: dict, repo_override: str | None) -> None:
             print("  check.py output (tail):")
             print(_indent("\n".join(output.strip().splitlines()[-12:]),
                           "    "))
-
-
-def _audit_mode_output(mode_argv: list[str]) -> tuple:
-    """audit.py's (exit code, stdout) — the run log's precheck evidence."""
-    try:
-        r = subprocess.run(
-            [sys.executable, str(_SCRIPTS_DIR / "audit.py"), *mode_argv],
-            capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.SubprocessError):
-        return None, ""
-    return r.returncode, r.stdout
-
-
-def log_before_audit_precheck(state: dict, repo_override: str | None) -> None:
-    """D-023: at the before-audit pause --run has already run the
-    mechanical half of the six gates (audit.py pre-execute — clean tree,
-    branch, baseline dry) so the one approval session opens with results,
-    never honor-system claims. Judgment gates stay in the pause text.
-    The same --repo override --run itself honors (check.py, payloads) —
-    the evidence must be computed against the declared repo, never the
-    spec dir's grandparent audit.py would guess."""
-    args = ["pre-execute", str(state["spec_dir"])]
-    if repo_override is not None:
-        args += ["--repo", str(repo_override)]
-    rc, out = _audit_mode_output(args)
-    if rc is None:
-        return
-    print(f"before-audit precheck: audit.py pre-execute "
-          f"{state['spec_dir']} → exit {rc}")
-    if out.strip():
-        print(_indent(out.strip(), "    "))
-
-
-def log_closing_precheck(state: dict, repo_override: str | None) -> None:
-    """D-023: at the closing-audit pause --run has already run the
-    read-only closing modes — scope, clean, dod (dry), proofs (dry
-    classification) — so the ack session adjudicates with the diff-facing
-    evidence in hand. Nothing here executes test.md commands: proofs and
-    dod run without --run, and evidence waits for closing.md. Like the
-    before-audit precheck, every mode runs against the --repo override
-    --run itself honors."""
-    for mode_argv in (("scope",), ("clean",), ("dod", "--dry-run"),
-                      ("proofs",)):
-        argv = [*mode_argv, str(state["spec_dir"])]
-        if repo_override is not None:
-            argv += ["--repo", str(repo_override)]
-        elif mode_argv[0] == "clean":
-            # clean resolves the repo from cwd, not the spec dir — pin it
-            argv += ["--repo", str(Path(state["spec_dir"]).parent.parent)]
-        rc, out = _audit_mode_output(argv)
-        if rc is None:
-            print(f"closing precheck: audit.py {' '.join(mode_argv)} → "
-                  "could not run")
-            continue
-        print(f"closing precheck: audit.py {' '.join(mode_argv)} "
-              f"→ exit {rc}")
-        # scope/clean return 0 with findings — the file-level UNMENTIONED/
-        # SUSPECT lines reach the pause log on every exit, like the
-        # before-audit precheck prints its full output regardless of rc
-        tail = out.strip().splitlines()[-6:] if out.strip() else []
-        if tail:
-            print(_indent("\n".join(tail), "    "))
 
 
 def print_complete_or_held(state: dict) -> None:
@@ -1172,13 +1060,6 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
         log_verify(state, repo_override)
         pause = find_pause(state, wave_dir)
         if pause:
-            # D-023: the mechanical half of the pausing gate has already
-            # run by the time the human reads the stop — results, never
-            # honor-system claims (judgment stays in the pause text).
-            if pause[0] == "before-audit":
-                log_before_audit_precheck(state, repo_override)
-            elif pause[0] == "closing-audit":
-                log_closing_precheck(state, repo_override)
             print(f"AWAITING HUMAN: {pause[0]}: {pause[1]}")
             return 0
         frontier = state["frontier"]
@@ -1264,8 +1145,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     """Derive the full workflow-graph state from doc state alone — the same
     dict --state-json serializes. Pure reads: no doc file is ever written and
     no repository or test.md command ever executes — the check.py probes run
-    only once their node's inputs are in place, and the closing-audit gate
-    classifies test.md dry (audit.classify_proofs) instead of running it."""
+    only once their node's inputs are in place."""
     spec_dir = Path(spec_dir)
     repo = Path(repo_override) if repo_override else spec_dir.parent.parent
     docs = {f: read_doc(spec_dir / f) for f in DOC_FILES}
@@ -1281,8 +1161,6 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     markers = spec_text.count("NEEDS CLARIFICATION") if spec_text else 0
     task_text = docs["task.md"]
     entries = specstate.task_entries(task_text) if task_text else []
-    ba = (specstate.before_audit_state(task_text)
-          if task_text is not None else "missing")
     rstate = specstate.research_state(spec_dir / "research.md")
 
     nodes: dict[str, dict] = {}
@@ -1430,29 +1308,10 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
         nodes["verify"]["check_rc"] = rc
     verify_done = nodes["verify"]["state"] == DONE
 
-    # -- before-audit ------------------------------------------------------
-    if not verify_done:
-        nodes["before-audit"] = {"state": BLOCKED,
-                                 "reason": "waiting on: verify"}
-    elif ba == "passed":
-        nodes["before-audit"] = {"state": DONE, "reason":
-                                 "Before-audit: passed recorded in task.md"}
-    elif ba == "pending":
-        nodes["before-audit"] = {"state": READY, "reason":
-                                 "run the before-audit gates "
-                                 "(gates/before-audit.md), then record "
-                                 "`Before-audit: passed @ <sha>` (or "
-                                 "`passed @ -` in a non-git repo) in task.md"}
-    else:
-        nodes["before-audit"] = {"state": READY, "reason":
-                                 "no Before-audit line in task.md — run the "
-                                 "gates and record the result"}
-    ba_done = nodes["before-audit"]["state"] == DONE
-
     # -- approve (HUMAN) ---------------------------------------------------
-    if not ba_done:
+    if not verify_done:
         nodes["approve"] = {"state": BLOCKED,
-                            "reason": "waiting on: before-audit"}
+                            "reason": "waiting on: verify"}
     elif status in APPROVED_AND_LATER:
         nodes["approve"] = {"state": DONE, "reason": f"Status: {status}"}
     else:
@@ -1464,10 +1323,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
 
     # -- execute (per-task frontier) ---------------------------------------
     per_task: list[dict] = []
-    if not ba_done:
-        nodes["execute"] = {"state": BLOCKED,
-                            "reason": "waiting on: before-audit"}
-    elif not approve_done:
+    if not approve_done:
         nodes["execute"] = {"state": BLOCKED, "reason":
                             f"waiting on: approve (spec Status: "
                             f"{status or 'none'} — approval is a human gate)"}
@@ -1514,52 +1370,18 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                           and e.fix_round >= FIX_CAP),
     }
 
-    # -- closing-audit (HUMAN gate: nothing executes here — the dry
-    #    classification surfaces what the explicit audit.py run will prove,
-    #    and done reads only the durable task.md approval record, never a
-    #    mechanical score) --
-    approval = (specstate.closing_audit_state(task_text)
-                if task_text is not None else "missing")
-    if not execute_done:
-        n_open = (len(entries) - counts["ticked"] - counts["struck"]
-                  - counts["implemented"])
-        nodes["closing-audit"] = {"state": BLOCKED, "reason":
-                                  f"waiting on: execute ({counts['todo']} "
-                                  f"todo, {n_open} task(s) not landed)"}
-    elif approval == "approved":
-        nodes["closing-audit"] = {"state": DONE, "reason":
-                                  "Closing-audit: approved recorded in "
-                                  "task.md — the human gates (proof, review, "
-                                  "rulings, regression, sign-off) are in"}
-    else:
-        proofs = audit.classify_proofs(spec_dir)
-        nodes["closing-audit"] = {"state": READY, "reason":
-                                  "HUMAN GATE — state inspection executes "
-                                  "nothing: "
-                                  f"{len(proofs['auto'])} auto + "
-                                  f"{len(proofs['manual'])} manual TC(s) "
-                                  "classified from test.md, not executed — "
-                                  "run the closing audit explicitly "
-                                  "(`audit.py evidence`, scope/clean, "
-                                  "implementation review, `audit.py proofs "
-                                  "<spec-dir> --run`, regression, "
-                                  "`audit.py dod <spec-dir>`), record "
-                                  "evidence/closing.md, and record "
-                                  "`Closing-audit: approved @ <sha-or-dash>` "
-                                  "in task.md"}
-    closing_done = nodes["closing-audit"]["state"] == DONE
-
     # -- tick-commit ---------------------------------------------------------
-    if not closing_done:
+    if not execute_done:
         nodes["tick-commit"] = {"state": BLOCKED,
-                                "reason": "waiting on: closing-audit"}
+                                "reason": "waiting on: execute"}
     else:
         ticks = specstate.tick_evidence(task_text or "")
         if ticks.unticked:
             nodes["tick-commit"] = {"state": READY, "reason":
-                                    "HUMAN GATE — the closing audit "
-                                    "approved ticking: tick every task "
-                                    "`- [x]` with its proof note "
+                                    "HUMAN GATE — every task landed: prove "
+                                    "green (audit.py proofs --run + "
+                                    "regression), tick every task `- [x]` "
+                                    "with its proof note "
                                     f"({len(ticks.unticked)} unticked: "
                                     f"{', '.join(ticks.unticked)}), then "
                                     "recompute the burndown"}
@@ -1586,7 +1408,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                                         f"{delivery[1]} recorded in task.md"}
             else:
                 nodes["tick-commit"] = {"state": READY, "reason":
-                                        f"approved tick transition consumed — "
+                                        "tick transition due — "
                                         f"task.md cites {ticks.ticked} ticked "
                                         f"+ {ticks.struck} struck of "
                                         f"{ticks.total}, every tick with its "

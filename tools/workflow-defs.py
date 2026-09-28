@@ -22,8 +22,8 @@ committed, regenerate-only artifacts under the skill's workflows/ dir:
 Neither dialect re-implements a single readiness rule: graph.py's
 --state-json is the only oracle both parse, --emit-spawns writes the
 payloads both spawn, and the human-gate pause set mirrors graph.py's
-find_pause exactly (clarify, an undetermined research-gate, before-audit,
-approve, the closing-audit judgment, tick-commit — never auto-satisfied;
+find_pause exactly (clarify, an undetermined research-gate, approve,
+tick-commit — never auto-satisfied;
 the run stops AWAITING HUMAN and a later rerun resumes from doc state).
 Stop conditions mirror graph.py --run: a gate, workflow completion, a
 held frontier, the wave cap (default 12), or a wave that changed no doc
@@ -65,8 +65,8 @@ WORKFLOWS_DIR = PKG_ROOT / "skills" / "spec-to-prod" / "workflows"
 CONTRACT_NOTE = """\
 Loop contract (mirrors scripts/graph.py --run; graph.py is the only oracle):
   1. state   = graph.py <spec-dir> --state-json
-  2. gates   = clarify READY | research-gate undetermined | before-audit
-               READY | approve READY | closing-audit due | tick-commit due
+  2. gates   = clarify READY | research-gate undetermined | approve READY
+               | tick-commit due
                -> STOP: AWAITING HUMAN <gate> (never auto-satisfied; rerun
                after the human answers — doc state is the only state)
   3. wave    = frontier agent nodes (survey research plan tech qa tasks
@@ -97,9 +97,8 @@ DWF_TS = r'''/* zcode-workflow
 description: >-
   Run the spec-to-prod frontier loop for one spec: compute the ready wave
   from doc state, spawn it as subagents, recompute — until a human gate
-  (clarify, research-gate, before-audit, approve, closing-audit,
-  tick-commit) or completion. graph.py is the only oracle; rerunning
-  after each gate resumes from doc state.
+  (clarify, research-gate, approve, tick-commit) or completion. graph.py
+  is the only oracle; rerunning after each gate resumes from doc state.
 whenToUse: >-
   Use when the user asks to run or continue a spec-to-prod spec on zcode
   ("run the auth spec pipeline", "continue the spec", "work the frontier")
@@ -198,21 +197,6 @@ function findPause(st: GraphState): Stop | null {
         "or skip (write the not-applicable marker line to research.md), then rerun",
     };
   }
-  if (nodeState(st, "before-audit") === "READY") {
-    return {
-      kind: "gate",
-      gate: "before-audit",
-      need:
-        "ONE session, gates + approval together (D-023): run `audit.py " +
-        "pre-execute <spec-dir>` (+ `--run` for the baseline command), " +
-        "judge the three semantic gates (gates/before-audit.md: dependency " +
-        "reality, already-done sweep, constitution semantics + branch " +
-        "consent), record `Before-audit: passed @ <sha-or-dash>` in " +
-        "task.md — then seek the user's explicit approval, set spec.md " +
-        "Status: approved, and run `freeze.py <spec-dir> --record` before " +
-        "rerunning",
-    };
-  }
   if (nodeState(st, "approve") === "READY") {
     return {
       kind: "gate",
@@ -222,27 +206,15 @@ function findPause(st: GraphState): Stop | null {
         " — after the explicit yes, run freeze.py <spec-dir> --record",
     };
   }
-  if (nodeState(st, "execute") === "done" && nodeState(st, "closing-audit") !== "done") {
-    return {
-      kind: "gate",
-      gate: "closing-audit",
-      need:
-        "the mechanical pre-check (audit.py scope/clean/dod-dry/proofs " +
-        "listings) and the implementation-diff reviewer already ran this " +
-        "stop (D-023) — adjudicate their findings, then run `audit.py " +
-        "evidence`, `proofs <spec-dir> --run`, and regression; record " +
-        "evidence/closing.md, surface every D-###, and get the user's " +
-        "ack before recording `Closing-audit: approved @ <sha-or-dash>` " +
-        "in task.md",
-    };
-  }
-  if (nodeState(st, "closing-audit") === "done" && st.status !== "done") {
+  if (nodeState(st, "execute") === "done" && st.status !== "done") {
     return {
       kind: "gate",
       gate: "tick-commit",
       need:
-        "tick every task with its proof (scripts/tick.py), fix the burndown, " +
-        "make implementation commit C1, then delivery-record commit C2 with " +
+        "prove and tick: run `audit.py proofs <spec-dir> --run` + regression " +
+        "so every tick's proof note is fresh evidence, then tick every task " +
+        "with its proof (scripts/tick.py), fix the burndown, make " +
+        "implementation commit C1, then delivery-record commit C2 with " +
         "Delivered: commit @ C1, Status: done, and INDEX repointed",
     };
   }
@@ -409,34 +381,6 @@ if (!specName) {
     }
   }
 
-  // D-023: at the closing-audit stop the run has already done the
-  // mechanical precheck and spawned the implementation-diff reviewer —
-  // the ack session opens with results, never honor-system claims.
-  if (stop && stop.kind === "gate" && stop.gate === "closing-audit") {
-    phase("Closing pre-check — reviewer + read-only audits");
-    // --emit-spawns prepared reviewer-diff.md while the closing audit is
-    // due; spawn it, then the read-only audit modes
-    const closingPayloads = await emitPayloads();
-    for (const p of closingPayloads) {
-      if (p.role !== "reviewer") continue;
-      const stem = (p.path.split("/").pop() ?? "agent").replace(/\.md$/, "");
-      const d = await agent("close-" + stem).ask<WaveDigest>(askText(p));
-      allDigests.push({ wave: waves + 1, role: p.role, status: d.status, digest: d.digest });
-      log("  reviewer (implementation-diff) → " + d.status + (d.status === "done" ? "" : ": " + d.digest));
-    }
-    const auditModes: string[][] = [["scope"], ["clean"], ["dod", "--dry-run"], ["proofs"]];
-    for (const m of auditModes) {
-      const r = await world.run("python3",
-        [skillDir + "/scripts/audit.py"].concat(m).concat(["specs/" + specName]));
-      log("  closing precheck: audit.py " + m.join(" ") + " → exit " + r.exitCode);
-      // scope/clean exit 0 with findings — the tail rides on every exit
-      if (r.stdout.trim()) {
-        const tail = r.stdout.trim().split("\n").slice(-6);
-        for (const line of tail) log("    " + line);
-      }
-    }
-  }
-
   phase("Recompute and summarize");
   // reuse the last post-wave state — every stop path leaves st fresh from
   // its most recent fetch, so the summary needs no extra graph.py run
@@ -502,11 +446,11 @@ WF_JS = r'''export const meta = {
   description:
     "Run the spec-to-prod frontier loop for one spec: compute the ready " +
     "wave from doc state, spawn it as subagents, recompute — until a human " +
-    "gate (clarify, research-gate, before-audit, approve, closing-audit, " +
-    "tick-commit) or completion. graph.py is the only oracle; rerunning " +
-    "after each gate resumes from doc state. Launch only when graph.py " +
-    "--launch-check says weight 'wave' — light spans (a pending gate, one " +
-    "doc node, held/complete) run inline.",
+    "gate (clarify, research-gate, approve, tick-commit) or completion. " +
+    "graph.py is the only oracle; rerunning after each gate resumes from " +
+    "doc state. Launch only when graph.py --launch-check says weight " +
+    "'wave' — light spans (a pending gate, one doc node, held/complete) " +
+    "run inline.",
 }
 
 // ---------------------------------------------------------------------------
@@ -578,21 +522,6 @@ function findPause(st) {
         "or skip (write the not-applicable marker line to research.md), then rerun",
     };
   }
-  if (nodeState(st, "before-audit") === "READY") {
-    return {
-      kind: "gate",
-      gate: "before-audit",
-      need:
-        "ONE session, gates + approval together (D-023): run `audit.py " +
-        "pre-execute <spec-dir>` (+ `--run` for the baseline command), " +
-        "judge the three semantic gates (gates/before-audit.md: dependency " +
-        "reality, already-done sweep, constitution semantics + branch " +
-        "consent), record `Before-audit: passed @ <sha-or-dash>` in " +
-        "task.md — then seek the user's explicit approval, set spec.md " +
-        "Status: approved, and run `freeze.py <spec-dir> --record` before " +
-        "rerunning",
-    };
-  }
   if (nodeState(st, "approve") === "READY") {
     return {
       kind: "gate",
@@ -602,27 +531,15 @@ function findPause(st) {
         " — after the explicit yes, run freeze.py <spec-dir> --record",
     };
   }
-  if (nodeState(st, "execute") === "done" && nodeState(st, "closing-audit") !== "done") {
-    return {
-      kind: "gate",
-      gate: "closing-audit",
-      need:
-        "the mechanical pre-check (audit.py scope/clean/dod-dry/proofs " +
-        "listings) and the implementation-diff reviewer already ran this " +
-        "stop (D-023) — adjudicate their findings, then run `audit.py " +
-        "evidence`, `proofs <spec-dir> --run`, and regression; record " +
-        "evidence/closing.md, surface every D-###, and get the user's " +
-        "ack before recording `Closing-audit: approved @ <sha-or-dash>` " +
-        "in task.md",
-    };
-  }
-  if (nodeState(st, "closing-audit") === "done" && st.status !== "done") {
+  if (nodeState(st, "execute") === "done" && st.status !== "done") {
     return {
       kind: "gate",
       gate: "tick-commit",
       need:
-        "tick every task with its proof (scripts/tick.py), fix the burndown, " +
-        "make implementation commit C1, then delivery-record commit C2 with " +
+        "prove and tick: run `audit.py proofs <spec-dir> --run` + regression " +
+        "so every tick's proof note is fresh evidence, then tick every task " +
+        "with its proof (scripts/tick.py), fix the burndown, make " +
+        "implementation commit C1, then delivery-record commit C2 with " +
         "Delivered: commit @ C1, Status: done, and INDEX repointed",
     };
   }
@@ -792,54 +709,6 @@ async function main() {
     if (waves >= MAX_WAVES) {
       stop = { kind: "max-waves", detail: "wave cap " + MAX_WAVES + " reached" };
       break;
-    }
-  }
-
-  // D-023: at the closing-audit stop the run has already done the
-  // mechanical precheck and spawned the implementation-diff reviewer —
-  // the ack session opens with results, never honor-system claims.
-  if (stop && stop.kind === "gate" && stop.gate === "closing-audit") {
-    phase("Closing pre-check — reviewer + read-only audits");
-    // the reviewer payload rode the last fetch (--emit-spawns prepared
-    // reviewer-diff.md while the closing audit is due)
-    const reviewers = cycle.payloads.filter((p) => p.role === "reviewer");
-    const rd = await pipeline(reviewers, (p) =>
-      agent(askText(p), { label: "reviewer-diff", schema: DIGEST_SCHEMA })
-    );
-    for (let i = 0; i < reviewers.length; i++) {
-      const d = rd[i];
-      if (!d) continue;
-      allDigests.push({ wave: waves + 1, role: reviewers[i].role, status: d.status, digest: d.digest });
-      log("  reviewer (implementation-diff) → " + d.status + (d.status === "done" ? "" : ": " + d.digest));
-    }
-    // ONE probe for the four read-only audit modes, marker-split per mode
-    const precheckCmd =
-      'for m in "scope" "clean" "dod --dry-run" "proofs"; do echo __MODE__ $m; ' +
-      "python3 " + skillDir + "/scripts/audit.py $m specs/" + specName + " 2>&1; " +
-      "echo __EXIT__ $?; done";
-    const pre = await agent(
-      "Run this exact shell command from the repo root and return ONLY its " +
-      "combined stdout verbatim in the stdout field (empty string if none):\n" +
-      "  " + precheckCmd,
-      { label: "closing-precheck", schema: PROBE_SCHEMA }
-    );
-    if (pre && pre.stdout) {
-      const sections = pre.stdout.split("__MODE__ ").slice(1);
-      for (const sec of sections) {
-        const nl = sec.indexOf("\n");
-        const m = (nl < 0 ? sec : sec.slice(0, nl)).trim();
-        const body = nl < 0 ? "" : sec.slice(nl + 1);
-        const em = body.match(/__EXIT__ (\d+)/);
-        const code = em ? em[1] : "?";
-        log("  closing precheck: audit.py " + m + " → exit " + code);
-        // scope/clean exit 0 with findings — the tail rides on every exit
-        if (body.trim()) {
-          const lines = body.trim().split("\n");
-          for (const line of lines.slice(Math.max(0, lines.length - 7), lines.length - 1)) {
-            log("    " + line);
-          }
-        }
-      }
     }
   }
 

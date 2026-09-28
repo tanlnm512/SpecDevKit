@@ -41,7 +41,8 @@ if ! grep -qF "($name/spec.md)" "$index"; then
 fi
 
 # Shared project constitution (cross-spec non-negotiables). Created once
-# per repo; filled WITH the user — checked at the before-audit.
+# per repo; filled WITH the user — read at approval, carried in every
+# implementer payload.
 constitution="$root/specs/CONSTITUTION.md"
 if [[ ! -e "$constitution" ]]; then
   cp "$skill_dir/templates/constitution.md" "$constitution"

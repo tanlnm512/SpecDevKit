@@ -117,14 +117,28 @@ class EvidenceIntegrityTests(unittest.TestCase):
         spec = fixture_copy()
         self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
         task = spec / "task.md"
-        task.write_text(task.read_text(encoding="utf-8").replace(
-            "**Before-audit**: pending — the orchestrator writes "
-            "`passed @ <sha>` here",
-            "**Before-audit**: passed @ deadbeef",
-        ), encoding="utf-8")
+        task.write_text(
+            "**Delivered**: commit @ deadbeef\n" + task.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
         code, out = run_check(str(spec), "--repo", str(Path.cwd()))
         self.assertEqual(code, 1)
-        self.assertIn("before: commit 'deadbeef' not found", out)
+        self.assertIn("delivered: commit 'deadbeef' not found", out)
+
+    def test_non_git_dash_inside_a_git_repo_fails(self):
+        # the Delivered record's `-` skip form is the explicit non-git
+        # escape hatch — recording it while --repo names a working git
+        # repository is a lie the integrity check must catch
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        task = spec / "task.md"
+        task.write_text(
+            "**Delivered**: commit @ -\n" + task.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        code, out = run_check(str(spec), "--repo", str(Path.cwd()))
+        self.assertEqual(code, 1)
+        self.assertIn("delivered: explicit non-git dash recorded inside a git repo", out)
 
     def test_approved_v2_freeze_detects_contract_mutation(self):
         spec = fixture_copy()
@@ -149,54 +163,6 @@ class EvidenceIntegrityTests(unittest.TestCase):
         code, out = run_check(str(spec), "--repo", str(Path.cwd()))
         self.assertEqual(code, 1)
         self.assertIn("test.md changed after approval", out)
-
-    def test_approved_closing_requires_durable_evidence(self):
-        spec = fixture_copy()
-        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
-        set_text = spec / "spec.md"
-        set_text.write_text(set_text.read_text(encoding="utf-8").replace(
-            "**Status**: draft", "**Status**: approved"), encoding="utf-8")
-        task = spec / "task.md"
-        text = task.read_text(encoding="utf-8")
-        text = "**Lifecycle**: v2\n" + text.replace(
-            "**Before-audit**: pending — the orchestrator writes "
-            "`passed @ <sha>` here",
-            "**Before-audit**: passed @ -\n"
-            "**Closing-audit**: approved @ -",
-        )
-        task.write_text(text, encoding="utf-8")
-        # The temp fixture is non-git, but the current repo is git. Pointing
-        # --repo at the temp root makes the explicit dash forms valid.
-        code, out = run_check(str(spec), "--repo", str(spec.parents[1]))
-        self.assertEqual(code, 1)
-        self.assertIn("evidence/closing.md is missing", out)
-
-    def test_closing_evidence_hash_must_match_task_record(self):
-        spec = fixture_copy()
-        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
-        set_text = spec / "spec.md"
-        set_text.write_text(set_text.read_text(encoding="utf-8").replace(
-            "**Status**: draft", "**Status**: approved"), encoding="utf-8")
-        task = spec / "task.md"
-        text = task.read_text(encoding="utf-8")
-        text = "**Lifecycle**: v2\n" + text.replace(
-            "**Before-audit**: pending — the orchestrator writes "
-            "`passed @ <sha>` here",
-            "**Before-audit**: passed @ -\n"
-            "**Closing-audit**: approved @ -",
-        )
-        task.write_text(text, encoding="utf-8")
-        evidence = spec / "evidence" / "closing.md"
-        evidence.parent.mkdir()
-        evidence.write_text(
-            "# Closing evidence\n\n## Mechanical DoD\n## Manual test cases\n"
-            "## Regression\n## Review findings\n## Rulings surfaced\n"
-            "## Irreversible or state-mutating changes\n## User sign-off\n",
-            encoding="utf-8",
-        )
-        code, out = run_check(str(spec), "--repo", str(spec.parents[1]))
-        self.assertEqual(code, 1)
-        self.assertIn("does not match the Closing-evidence sha256", out)
 
 
 class QualityRequirementTests(unittest.TestCase):

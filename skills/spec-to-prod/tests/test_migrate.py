@@ -68,8 +68,6 @@ def tree_digest(root: Path) -> str:
 
 def assert_no_evidence_invented(testcase, lines):
     for line in lines:
-        testcase.assertFalse(specstate.BEFORE_AUDIT_PASSED.search(line), line)
-        testcase.assertFalse(specstate.CLOSING_AUDIT_APPROVED.search(line), line)
         testcase.assertFalse(specstate.DELIVERED_COMMIT.search(line), line)
 
 
@@ -88,11 +86,10 @@ class MigrateTests(unittest.TestCase):
 
     def test_template_declares_contract_v2_header_shape(self):
         # the migration target must be the contract's shape: the lifecycle
-        # declaration plus the three header evidence records
+        # declaration plus the Delivered evidence record (D-026 removed the
+        # before/closing audit header lines)
         names = set(template_field_lines())
-        self.assertEqual(
-            names, {"Spec", "Lifecycle", "Before-audit", "Closing-audit",
-                    "Closing-evidence", "Delivered"})
+        self.assertEqual(names, {"Spec", "Lifecycle", "Delivered"})
         self.assertEqual(template_field_lines()["Lifecycle"], "**Lifecycle**: v2")
 
     def test_dry_run_previews_exactly_and_writes_nothing(self):
@@ -100,9 +97,7 @@ class MigrateTests(unittest.TestCase):
         rc, out = run_migrate(str(self.spec), "--template", self.tpl, "--dry-run")
         self.assertEqual(rc, 0, out)
         inserted = preview_lines(out)
-        self.assertEqual(field_names(inserted),
-                         ["Lifecycle", "Closing-audit", "Closing-evidence",
-                          "Delivered"])
+        self.assertEqual(field_names(inserted), ["Lifecycle", "Delivered"])
         by_name = template_field_lines()
         for line in inserted:
             self.assertEqual(line, by_name[migrate.FIELD_LINE.match(line).group(1)])
@@ -130,8 +125,9 @@ class MigrateTests(unittest.TestCase):
         assert_no_evidence_invented(self, inserted)
         after = self._task()
         # the fixture's own v1 evidence survives byte-identical, unclaimed
+        # (D-026: the legacy Before-audit line is simply no longer read)
         self.assertIn("**Before-audit**: passed @ abc1234", after)
-        self.assertEqual(len(specstate.BEFORE_AUDIT_PASSED.findall(after)), 1)
+        self.assertEqual(specstate.DELIVERED_COMMIT.findall(after), [])
         # insertions land in the preamble, ahead of the first section
         self.assertLess(after.index("**Lifecycle**: v2"), after.index("## Burndown"))
 
@@ -151,8 +147,7 @@ class MigrateTests(unittest.TestCase):
         rc, out = run_migrate(str(spec), "--template", self.tpl)
         self.assertEqual(rc, 0, out)
         self.assertEqual(field_names(preview_lines(out)),
-                         ["Lifecycle", "Before-audit", "Closing-audit",
-                          "Closing-evidence", "Delivered"])
+                         ["Lifecycle", "Delivered"])
         assert_no_evidence_invented(self, preview_lines(out))
         rc, out = run_migrate(str(spec), "--template", self.tpl)
         self.assertEqual(rc, 0, out)

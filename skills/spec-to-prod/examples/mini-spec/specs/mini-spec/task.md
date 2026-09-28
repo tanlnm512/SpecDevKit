@@ -2,7 +2,6 @@
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 Status reflects code state per [survey.md](survey.md), not intent.
-**Before-audit**: pending — the orchestrator writes `passed @ <sha>` here
 
 ## Burndown
 | Phase | Total | Done |

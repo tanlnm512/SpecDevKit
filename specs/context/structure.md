@@ -13,7 +13,7 @@ read this first and re-survey only the delta.
     agent defs where a harness reads them.
   - `scripts/` — the mechanical core, stdlib-only: `graph.py` (the
     workflow engine: state oracle, `--emit-spawns`, `--run`),
-    `check.py` (verify-node checks), `audit.py` (closing-audit helpers:
+    `check.py` (verify-node checks), `audit.py` (review instruments:
     scope/clean/proofs/dod/converge), `specstate.py` (shared doc-state
     parsers), `tick.py` (task ticker), `scaffold.sh`, `archive.sh`,
     `skill-dir.sh`.
@@ -21,7 +21,7 @@ read this first and re-survey only the delta.
     verification; `scripts/specstate.py` also exposes lifecycle SHA values
     and conservative task-touch overlap.
   - `templates/` — the seven doc templates plus constitution,
-    closing-evidence, release-handoff, and post-delivery templates.
+    release-handoff, and post-delivery templates.
   - `commands/` — the router + six lifecycle commands (+ `extra.txt`).
   - `workflows/` — generated dynamic-workflow dialects
     (regenerate-only; see tools/workflow-defs.py).

@@ -18,10 +18,9 @@ zero matches), directory/glob-aware parallel-file overlap between [P] tasks, TC 
 shape, spec-status ↔ task/INDEX consistency, EARS-shaped FRs (every FR
 line says 'shall'), constitution presence, context-baseline presence, and
 stage gating (progress requires Status ≥ approved; NEEDS CLARIFICATION
-resolved before tasks exist; before-audit recorded once implementation
-starts), lifecycle-v2 approval-freeze/closing-evidence presence, and git
-existence/ancestry for recorded lifecycle SHAs. Test quality itself stays
-a human/LLM check.
+resolved before tasks exist), lifecycle-v2 approval-freeze presence, and
+git existence/ancestry for recorded lifecycle SHAs. Test quality itself
+stays a human/LLM check.
 --fix-burndown repairs the burndown table from the actual task entries
 before checking; --next-ids prints the next free ID per family
 (append-scope helper) and exits; --survey-only runs just the evidence-
@@ -30,7 +29,7 @@ contract files need not exist yet) — the surveyor agent's own self-check,
 meant to be run right after writing survey.md and before returning its
 digest, so a bad survey fails here instead of flowing into tech/plan/qa.
 --constitution runs only the repo-level specs/CONSTITUTION.md presence/fill
-check and exits — a scriptable form of before-audit gate 6's presence half,
+check and exits — a scriptable form of the constitution-presence gate,
 usable standalone (no spec dir contract files needed) as a pre-flight or CI
 hook; the full check (no flag) also runs this check inline and escalates it
 from WARN to FAIL once a second spec exists in the repo, closing the gap
@@ -50,7 +49,6 @@ Exit:  0 = pass (warnings allowed) · 1 = at least one FAIL · 2 = usage error
 """
 from __future__ import annotations
 
-import hashlib
 import re
 import subprocess
 import sys
@@ -70,9 +68,6 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     HTML_COMMENT,
     PLACEHOLDER,
     TaskEntry,
-    before_audit_state,
-    closing_audit_state,
-    closing_evidence_hash,
     defined_ids,
     lifecycle_shas,
     next_ids,
@@ -576,7 +571,6 @@ def lifecycle_integrity_problems(task: str, repo: Path) -> list[str]:
     values = lifecycle_shas(task)
     git_ok = _git_probe(repo, "rev-parse", "--git-dir")
     problems: list[str] = []
-    resolved: dict[str, str] = {}
     for label, value in values.items():
         if value is None:
             continue
@@ -594,19 +588,6 @@ def lifecycle_integrity_problems(task: str, repo: Path) -> list[str]:
             continue
         if not _git_probe(repo, "merge-base", "--is-ancestor", value, "HEAD"):
             problems.append(f"{label}: commit {value!r} is not an ancestor of HEAD")
-        resolved[label] = value
-    if ("before" in resolved and "closing" in resolved
-            and not _git_probe(
-                repo, "merge-base", "--is-ancestor",
-                resolved["before"], resolved["closing"],
-            )):
-        problems.append("before-audit SHA is not an ancestor of the closing-audit SHA")
-    if ("closing" in resolved and "delivered" in resolved
-            and not _git_probe(
-                repo, "merge-base", "--is-ancestor",
-                resolved["closing"], resolved["delivered"],
-            )):
-        problems.append("closing-audit SHA is not an ancestor of the delivered commit")
     return problems
 
 
@@ -813,7 +794,7 @@ def main(argv: list[str] | None = None) -> int:
     for ref in sorted(set(re.findall(r"\(after\s+(T\d{3})\)", task)) - tsks):
         warns.append(f"dangling: (after {ref}) references a task that doesn't exist")
     # Cross-phase chains: a task depending on a task in a LATER phase can
-    # never be scheduled — before-audit precondition 1 in mechanical form.
+    # never be scheduled — phase-order preconditions in mechanical form.
     for e in entries:
         if not e.id or e.id not in task_phase:
             continue
@@ -930,8 +911,8 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             warns.append(f"{tc}: missing {'/'.join(missing)} label(s) — incomplete case?")
     # Stage gates — skipped steps become mechanical failures: progress
-    # requires an approved spec, clarifications are resolved before tasks
-    # exist, and the before-audit is recorded once implementation starts.
+    # requires an approved spec, and clarifications are resolved before
+    # tasks exist.
     status = spec_status(spec)
     for problem in lifecycle_integrity_problems(task, repo_root):
         fails.append(f"evidence: {problem}")
@@ -945,37 +926,6 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for problem in freeze.verify(spec_dir, repo_root):
                 fails.append(f"evidence: {problem}")
-    if lifecycle_v2 and closing_audit_state(task) == "approved":
-        evidence = spec_dir / "evidence" / "closing.md"
-        if not evidence.exists():
-            fails.append(
-                "evidence: Closing-audit approved but evidence/closing.md is missing"
-            )
-        else:
-            evidence_text = evidence.read_text(
-                encoding="utf-8", errors="replace"
-            )
-            digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
-            if closing_evidence_hash(task) != digest:
-                fails.append(
-                    "evidence: closing evidence does not match the "
-                    "Closing-evidence sha256 recorded in task.md"
-                )
-            missing = [
-                section for section in (
-                    "Mechanical DoD", "Manual test cases", "Regression",
-                    "Review findings", "Rulings surfaced",
-                    "Irreversible or state-mutating changes", "User sign-off",
-                )
-                if section not in evidence_text
-            ]
-            if missing:
-                fails.append(
-                    "evidence: closing evidence missing "
-                    + "/".join(missing)
-                )
-            if re.search(r"<[^>\n]+>|YYYY-MM-DD", evidence_text):
-                fails.append("evidence: closing evidence still contains placeholders")
     if status == "draft" and (done or in_progress):
         fails.append(
             f"gate: implementation progress ({done} ticked, {in_progress} in-progress) "
@@ -986,13 +936,8 @@ def main(argv: list[str] | None = None) -> int:
             "clarify: spec.md still holds NEEDS CLARIFICATION markers but task.md "
             "has tasks — answers are due before Stage 3"
         )
-    if (done or in_progress) and before_audit_state(task) == "missing":
-        warns.append(
-            "before-audit: implementation started but task.md has no 'Before-audit:' "
-            "line — record 'Before-audit: passed @ <sha>'"
-        )
     # spec.md Status ↔ task.md reality ↔ specs/INDEX.md. WARN: the state
-    # machine is real (Resuming depends on it) but a closing audit may
+    # machine is real (Resuming depends on it) but delivery may
     # legitimately sit between "all ticked" and "Status: done", and
     # "approved" is indistinguishable from draft by task state alone —
     # approved-with-no-progress stays silent by design.

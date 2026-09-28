@@ -2,8 +2,8 @@
 
 specstate.py is the extraction of every doc-state parser check.py's
 monolithic main() and audit.py used to inline: spec Status, task entries
-(including the implemented marker), the Before-audit, Closing-audit, and
-Delivered header lines, the survey baseline/items, the researcher-skip
+(including the implemented marker), the Delivered header line, the
+approval-freeze anchor, the survey baseline/items, the researcher-skip
 marker, next-free-ID allocation, ID definitions, and the git availability
 probes. Pure functions, stdlib only, no CLI: importing the module must
 produce no output and write nothing (asserted here, SPECSTATE-001), and
@@ -41,7 +41,7 @@ def write(tmp, name, text):
 TASK_SAMPLE = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-**Before-audit**: pending — the orchestrator writes `passed @ <sha>` here
+**Delivered**: pending — the orchestrator writes `commit @ <sha>` here
 
 ## Burndown
 | Phase | Total | Done |
@@ -181,43 +181,47 @@ class ImplementedMarkerTests(unittest.TestCase):
         self.assertFalse(entry.implemented)
 
 
-class BeforeAuditStateTests(unittest.TestCase):
-    def test_passed_with_sha_and_with_non_git_dash(self):
-        self.assertEqual(
-            specstate.before_audit_state("**Before-audit**: passed @ 3fa9c21\n"),
-            "passed")
-        self.assertEqual(
-            specstate.before_audit_state("Before-audit: passed @ -\n"), "passed")
+class ApprovalShaTests(unittest.TestCase):
+    """The approval freeze's anchor (D-026): approval_sha reads the
+    `**Approved-at**` commit freeze.py recorded in approvals/approval.md —
+    the default diff base for the post-execute review instruments. No
+    freeze (pre-approval), an unreadable file, or the dash form reads
+    None — a non-git freeze names no diff base."""
 
-    def test_template_pending_line_is_not_passed(self):
-        pending = "**Before-audit**: pending — the orchestrator writes `passed @ <sha>` here\n"
-        self.assertEqual(specstate.before_audit_state(pending), "pending")
+    @staticmethod
+    def approval_dir(tmp, approval_md=None):
+        spec = Path(tmp)
+        if approval_md is not None:
+            d = spec / "approvals"
+            d.mkdir(parents=True)
+            (d / "approval.md").write_text(approval_md, encoding="utf-8")
+        return spec
 
-    def test_missing_line(self):
-        self.assertEqual(specstate.before_audit_state("no audit line here\n"), "missing")
-        self.assertEqual(specstate.before_audit_state(""), "missing")
+    def test_reads_the_frozen_anchor_with_or_without_backticks(self):
+        for text in ("# Approval freeze\n\n**Approved-at**: `3fa9c21`\n",
+                     "# Approval freeze\n\n**Approved-at**: 3fa9c21\n"):
+            with tempfile.TemporaryDirectory() as td:
+                spec = self.approval_dir(td, text)
+                self.assertEqual(specstate.approval_sha(spec), "3fa9c21")
 
+    def test_no_freeze_yet_reads_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(specstate.approval_sha(Path(td)))
 
-class ClosingAuditStateTests(unittest.TestCase):
-    def test_approved_with_sha_and_with_non_git_dash(self):
-        self.assertEqual(
-            specstate.closing_audit_state(
-                "**Closing-audit**: approved @ 3fa9c21\n"),
-            "approved")
-        self.assertEqual(
-            specstate.closing_audit_state("Closing-audit: approved @ -\n"),
-            "approved")
+    def test_freeze_without_an_anchor_line_reads_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec = self.approval_dir(td, "# Approval freeze\n\nno anchor yet\n")
+            self.assertIsNone(specstate.approval_sha(spec))
 
-    def test_placeholder_and_example_text_do_not_read_approved(self):
-        pending = ("**Closing-audit**: pending — the orchestrator writes "
-                   "`approved @ <sha>` here\n")
-        self.assertEqual(specstate.closing_audit_state(pending), "pending")
+    def test_dash_form_is_not_a_diff_base(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec = self.approval_dir(
+                td, "**Approved-at**: `-`\n")
+            self.assertIsNone(specstate.approval_sha(spec))
 
-    def test_missing_line(self):
-        self.assertEqual(
-            specstate.closing_audit_state("no closing record here\n"),
-            "missing")
-        self.assertEqual(specstate.closing_audit_state(""), "missing")
+    def test_missing_spec_dir_reads_none(self):
+        self.assertIsNone(
+            specstate.approval_sha(Path("/nonexistent/spec-dir")))
 
 
 class DeliveryStateTests(unittest.TestCase):
@@ -496,21 +500,22 @@ class LifecycleValueTests(unittest.TestCase):
             "**Closing-audit**: approved @ def5678\n"
             "**Delivered**: commit @ 90abcdef\n"
         )
-        self.assertEqual(specstate.lifecycle_shas(text), {
-            "before": "abc1234",
-            "closing": "def5678",
-            "delivered": "90abcdef",
-        })
+        # D-026: the audit markers are gone — Delivered is the only
+        # lifecycle value left, and legacy lines read as nothing.
+        self.assertEqual(specstate.lifecycle_shas(text),
+                         {"delivered": "90abcdef"})
+
+    def test_dash_is_the_explicit_non_git_value(self):
+        self.assertEqual(specstate.lifecycle_shas("Delivered: commit @ -\n"),
+                         {"delivered": "-"})
 
     def test_pending_markers_are_not_values(self):
         text = (
-            "**Before-audit**: pending\n"
-            "**Closing-audit**: pending\n"
-            "**Delivered**: pending\n"
+            "**Delivered**: pending — the orchestrator writes "
+            "`commit @ <sha>` here\n"
         )
         self.assertEqual(specstate.lifecycle_shas(text),
-                         {"before": None, "closing": None,
-                          "delivered": None})
+                         {"delivered": None})
 
 
 class TaskTouchTests(unittest.TestCase):

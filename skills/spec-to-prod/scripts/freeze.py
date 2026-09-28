@@ -13,8 +13,8 @@ execution and delivery:
   tech-spec.md prefix hash/length (only appended D-### decisions may drift)
 
 task.md is deliberately not frozen: it is the lifecycle's status holder.
-Its contract-shape protections are traceability checks, the task-body
-scope gate, and the closing evidence record.
+Its contract-shape protections are traceability checks and the task-body
+scope gate.
 
 Usage:
   freeze.py <spec-dir> --record [--repo <path>]

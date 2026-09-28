@@ -4,6 +4,40 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.12.0 — 2026-09-28
+
+Audit gates removed (D-026): the pipeline is now `verify → approve →
+execute → tick-commit` — 14 nodes, four human gates (clarify ·
+undetermined research-gate · approve · tick-commit). (1) The
+`before-audit` node, its six gates, `gates/before-audit.md`, the
+`Before-audit:` marker, and `audit.py pre-execute` are gone; the
+approval session keeps a one-line prose pre-flight (baseline green,
+clean tree, the spec's branch, already-done sweep) with no marker and
+no extra stop. (2) The `closing-audit` node, its marker,
+`Closing-evidence:` digest, `evidence/closing.md` (template deleted),
+and `audit.py evidence` are gone; ONE proof-and-delivery pass at the
+tick-commit gate replaces them — `audit.py proofs --run` + regression
+make every tick's proof note fresh evidence, the review instruments
+(`scope` — default base now the approval freeze's Approved-at SHA via
+the new `specstate.approval_sha`, `clean`, `dod`, and the
+implementation-diff reviewer whose `reviewer-diff.md` payload
+`--emit-spawns` prepares while delivery is pending) gather findings for
+adjudication, then tick (tick.py) → C1 → C2. check.py drops the marker
+enforcement and closing-evidence validation; specstate drops the two
+marker parsers. (3) `gates/dod.md` is now the delivery checklist
+("between Status: active and done", rulings surfaced in the delivery
+summary). (4) Both spec-run workflow dialects regenerated from the new
+gate set (no closing pre-check block); `--run`, `--launch-check`, and
+find_pause mirror the four-gate graph; diagram model + overview render
+updated, audits render deleted. (5) Lifecycle commands re-anchored:
+`/test` = proofs + regression, `/review` = the review instruments,
+`/ship` = tick + C1/C2 + `Status: done` — steps of the ONE delivery
+pass, never three gates.
+
+Migration: none required — legacy docsets' `Before-audit:`/
+`Closing-audit:` lines are simply no longer read.
+
+
 ## 2.11.0 — 2026-09-22
 
 Pipeline shortening (SDLC-aligned, quality anchors intact). (1) ONE

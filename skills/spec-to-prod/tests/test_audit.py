@@ -30,7 +30,6 @@ genuinely non-git workspace at CLI level).
 import contextlib
 import importlib.util
 import io
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -348,7 +347,7 @@ class GitMockedDegradationTests(unittest.TestCase):
 
 
 class ScopeIntegrityTests(unittest.TestCase):
-    def test_uses_before_audit_base_and_flags_foreign_spec_path(self):
+    def test_uses_approval_freeze_base_and_flags_foreign_spec_path(self):
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             spec = repo / "specs" / "demo"
@@ -373,11 +372,16 @@ class ScopeIntegrityTests(unittest.TestCase):
                 ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
                 capture_output=True, text=True, check=True,
             ).stdout.strip()
+            # the approval freeze's Approved-at anchor is the default diff
+            # base (D-026): effective_base falls back to specstate.approval_sha
+            approvals = spec / "approvals"
+            approvals.mkdir()
+            (approvals / "approval.md").write_text(
+                f"**Approved-at**: `{base}`\n", encoding="utf-8")
+            # the implementation then edits the plan's file and adds code
             task.write_text(
-                task.read_text(encoding="utf-8").replace(
-                    "# Tasks\n",
-                    f"# Tasks\n\n**Before-audit**: passed @ {base}\n",
-                ),
+                task.read_text(encoding="utf-8")
+                + "\nResumed post-approval: T001 in progress.\n",
                 encoding="utf-8",
             )
             (repo / "src").mkdir()
@@ -393,16 +397,30 @@ class ScopeIntegrityTests(unittest.TestCase):
             self.assertNotIn("src/app.py", unmentioned)
             self.assertNotIn("specs/demo/task.md", unmentioned)
 
-
-class EvidenceModeTests(unittest.TestCase):
-    def test_missing_freeze_fails_without_running_tests(self):
+    def test_explicit_base_overrides_the_freeze_anchor(self):
         with tempfile.TemporaryDirectory() as td:
-            spec = make_spec(Path(td), {
-                "task.md": "**Before-audit**: passed @ -\n",
-            })
-            code, out = run_audit("evidence", str(spec), "--repo", str(Path(td)))
-            self.assertEqual(code, 1)
-            self.assertIn("approval freeze missing", out)
+            spec = Path(td) / "specs" / "demo"
+            spec.mkdir(parents=True)
+            self.assertIsNone(audit.effective_base(spec, None))  # no freeze yet
+            self.assertEqual(audit.effective_base(spec, "abc1234"), "abc1234")
+
+
+class RemovedModesTests(unittest.TestCase):
+    """D-026 removed the pre-execute and evidence modes: parse_args now
+    rejects both as usage errors (exit 2, doc printed) — no dispatch, no
+    partial execution."""
+
+    def test_pre_execute_is_a_usage_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            code, out = run_audit("pre-execute", str(td))
+        self.assertEqual(code, 2)
+        self.assertIn("Usage: audit.py scope", out)
+
+    def test_evidence_is_a_usage_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            code, out = run_audit("evidence", str(td))
+        self.assertEqual(code, 2)
+        self.assertIn("Usage: audit.py scope", out)
 
 
 class ProofsClassificationTests(unittest.TestCase):
@@ -782,101 +800,6 @@ class MainArgvTests(unittest.TestCase):
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 code = audit.main()
-        self.assertEqual(code, 2)
-
-
-class PreExecuteTests(unittest.TestCase):
-    """audit.py pre-execute (D-023) — the mechanical half of the
-    before-audit's six gates (clean tree, branch, baseline command),
-    mocked at the git_available/git choke points like every other
-    git-facing test in this suite: no real git here."""
-
-    def setUp(self):
-        self._tmp = Path(tempfile.mkdtemp(prefix="preexec-"))
-        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
-        shutil.copytree(FIXTURE, self._tmp / "specs" / "demo")
-        self.spec = self._tmp / "specs" / "demo"
-
-    def run_pre(self, *extra, available=False, status="", branch=""):
-        cp = lambda rc, out="": subprocess.CompletedProcess((), rc, out, "")
-        results = {("status", "--porcelain"): cp(0, status),
-                   ("branch", "--show-current"): cp(0, branch)}
-        with unittest.mock.patch.object(audit, "git_available",
-                                        return_value=available), \
-             unittest.mock.patch.object(
-                 audit, "git",
-                 side_effect=lambda repo, *a: results.get(tuple(a), cp(1))), \
-             contextlib.redirect_stdout(io.StringIO()) as buf:
-            code = audit.main(["pre-execute", str(self.spec), *extra])
-        return code, buf.getvalue()
-
-    def test_non_git_degrades_to_skipped_and_dry_baseline(self):
-        code, out = self.run_pre()
-        self.assertEqual(code, 0)
-        self.assertIn("SKIPPED (not a git repo)", out)
-        self.assertIn("DRY   gate 2 baseline", out)
-        self.assertIn("python3 -m pytest test_calc.py", out)
-        for gate in (1, 4, 6):
-            self.assertIn(f"YOURS gate {gate}", out)
-
-    def test_clean_tree_and_matching_branch_pass(self):
-        code, out = self.run_pre(available=True, branch="feature/mini-calc")
-        self.assertEqual(code, 0)
-        self.assertIn("PASS  gate 3 clean tree", out)
-        self.assertIn("PASS  gate 5 branch — on feature/mini-calc", out)
-
-    def test_dirty_tree_fails(self):
-        code, out = self.run_pre(available=True,
-                                 status=" M repo/calc.py\n",
-                                 branch="feature/mini-calc")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL  gate 3 clean tree", out)
-
-    def test_default_branch_fails_gate_5(self):
-        code, out = self.run_pre(available=True, branch="main")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL  gate 5 branch — on main", out)
-
-    def test_branch_mismatch_fails_gate_5(self):
-        code, out = self.run_pre(available=True, branch="other/branch")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL  gate 5 branch — on other/branch, spec names",
-                      out)
-
-    def test_run_flag_executes_the_recorded_baseline(self):
-        tech = self.spec / "tech-spec.md"
-        tech.write_text(tech.read_text().replace(
-            "python3 -m pytest test_calc.py",
-            "python3 -c \"open('canary.txt','w')\""), encoding="utf-8")
-        code, out = self.run_pre("--run", available=True,
-                                 branch="feature/mini-calc")
-        self.assertEqual(code, 0)
-        self.assertIn("PASS  gate 2 baseline", out)
-        self.assertTrue((self._tmp / "canary.txt").exists())
-
-    def test_red_baseline_fails(self):
-        tech = self.spec / "tech-spec.md"
-        tech.write_text(tech.read_text().replace(
-            "python3 -m pytest test_calc.py", "python3 -c \"exit 3\""),
-            encoding="utf-8")
-        code, out = self.run_pre("--run", available=True,
-                                 branch="feature/mini-calc")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL  gate 2 baseline", out)
-        self.assertIn("exit 3", out)
-
-    def test_missing_spec_md_fails_clean_not_a_traceback(self):
-        # a git-present dir without spec.md reads as a gate-5 FAIL (no
-        # Branch field to match), never a FileNotFoundError traceback
-        (self.spec / "spec.md").unlink()
-        code, out = self.run_pre(available=True, branch="feature/mini-calc")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL  gate 5 branch — spec.md records no filled",
-                      out)
-
-    def test_positional_is_required(self):
-        with contextlib.redirect_stdout(io.StringIO()):
-            code = audit.main(["pre-execute"])
         self.assertEqual(code, 2)
 
 

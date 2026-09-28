@@ -3,9 +3,6 @@
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 **Lifecycle**: v2
 Status reflects code state per [survey.md](survey.md), not intent.
-**Before-audit**: pending — mechanical-audit evidence; the orchestrator writes `passed @ <sha>` here
-**Closing-audit**: pending — human-acknowledgement evidence; the orchestrator writes `approved @ <sha>` here
-**Closing-evidence**: pending — the orchestrator writes `sha256:<digest of evidence/closing.md>` here
 **Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
 
 ## Burndown

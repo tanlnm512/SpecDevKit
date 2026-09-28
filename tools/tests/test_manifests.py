@@ -80,8 +80,8 @@ class ChangelogAlignmentTests(unittest.TestCase):
                 self.assertRegex(
                     body, r"(?m)^Migration:",
                     f"{skill.name}: newest CHANGELOG.md entry has no "
-                    f"'Migration:' note (start a paragraph with 'Migration:' "
-                    f"— the upgrade path, or 'none required')")
+                    f"'Migration:' note as its own paragraph (state the "
+                    f"upgrade path, or 'none required')")
 
 
 class MarketplaceCatalogTests(unittest.TestCase):

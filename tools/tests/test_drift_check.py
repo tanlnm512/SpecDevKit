@@ -136,7 +136,7 @@ class DriftTests(unittest.TestCase):
         victim.unlink()
         r = self.run_drift_check(repo)
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("appears in no HTML render", r.stdout)
+        self.assertIn("no HTML render of the model exists", r.stdout)
         victim.write_text(original)
         self.assertEqual(self.run_drift_check(repo).returncode, 0)
 

@@ -21,21 +21,21 @@ Full mode mapping: `references/droid-modes.md`.
 - **M2 — Authoring waves**: per spec — survey ∥ research, then
   plan ∥ tech ∥ qa, then tasks. Done when: `check.py` exit 0
   (the verify node).
-- **M3 — Audits & approval**: before-audit gates recorded
-  (`Before-audit: passed @ <sha>`); the user approves each spec
+- **M3 — Approval**: pre-flight (baseline commands green on the spec's
+  branch); the user approves each spec
   (`Status: approved`), then `freeze.py --record` writes the approval
   manifest. **MISSION PAUSES HERE.**
 - **M4 — Execute**: implementer waves per spec; fix rounds ≤5 per
   task; specs with disjoint files may run in parallel.
-- **M5 — Close**: closing audit per spec (evidence integrity, scope,
-  clean, implementation review, proofs, regression, DoD scorecard,
-  rulings report), durable closing evidence, tick-commit, implementation
+- **M5 — Close**: delivery pass per spec (proofs, regression, review
+  instruments — scope, clean, implementation review, DoD scorecard —
+  then tick-commit), implementation
   commit C1 + delivery-record C2; archive on request.
 
 ## Pause ledger (the mission parks at every one)
 
 clarify (Spec Mode) · research-gate · approve (`Status: approved`) ·
-closing-audit judgment · tick-commit
+tick-commit
 
 ## Validation settings
 
@@ -43,7 +43,7 @@ closing-audit judgment · tick-commit
 { "missionModelSettings": { "skipScrutiny": true, "skipUserTesting": true } }
 ```
 
-Reason: the closing audit + DoD scorecard govern verification; mission
+Reason: the delivery pass + DoD scorecard govern verification; mission
 QA has no FR traceability or TC pass conditions (droid-modes.md).
 
 ## Spawning

@@ -3,7 +3,7 @@
 <!-- Non-negotiable principles every spec and task in this repo obeys.
      Created by scaffold.sh on the repo's first spec; fill it WITH the
      user. Amending is deliberate and appending — never silently weaken
-     an article. Checked at the before-audit; carried in every
+     an article. Read at approval; carried in every
      implementer payload. One principle per article, MUST-strength. -->
 
 ## Articles

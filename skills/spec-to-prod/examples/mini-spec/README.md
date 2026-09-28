@@ -9,7 +9,7 @@ belongs in the changelog.
 ## Layout
 
 - `specs/mini-spec/` — the 7 files (5 contract + survey/research), at the
-  `Status: draft`, tasks-open stage this side of the before-audit.
+  `Status: draft`, tasks-open stage this side of approval.
   research.md carries the exact `not applicable — no open questions at
   Stage 0` line, the record of a deliberately gated-off researcher.
 - `specs/INDEX.md`, `specs/CONSTITUTION.md`, `specs/context/` — the

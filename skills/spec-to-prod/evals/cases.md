@@ -24,12 +24,13 @@ part of the evidence — the frontier is the only scheduler being judged.
   after the gate decision → the analysis wave (surveyor ∥ researcher,
   or a solo surveyor on skip) in ONE message; then plan ∥ tech ∥ qa in
   ONE message; clarify works in batched frontier-first rounds and every
-  question closes answered, deferred, or a named assumption; before-audit
-  recorded `passed @ <sha-or-dash>`; `AWAITING HUMAN: approve` observed
+  question closes answered, deferred, or a named assumption;
+  `AWAITING HUMAN: approve` observed
   before any implementer spawns; execute works the per-task frontier
   with `(fix <n>/5)` loop annotations where a retry fires; every digest
-  matches its brief's shape; the closing audit gates the single
-  end-of-plan tick; graph.py never auto-satisfies a gate.
+  matches its brief's shape; the tick-commit gate holds the single
+  end-of-plan proof pass until every proof is green; graph.py never
+  auto-satisfies a gate.
 
 ## E2 — Bugfix spec
 
@@ -38,8 +39,8 @@ part of the evidence — the frontier is the only scheduler being judged.
 - **Pass criteria**: bug narrative + unchanged-behavior FRs in spec.md;
   researcher gated off (skip marker in research.md); the repro test
   runs red inside plan.md's first phase — the regression milestone —
-  before any fix work; one regression TC per unchanged FR; closing
-  audit includes the revert-proof (revert → repro TC fails → restore →
+  before any fix work; one regression TC per unchanged FR; the delivery
+  pass includes the revert-proof (revert → repro TC fails → restore →
   passes).
 
 ## E3 — Researcher gate, negative branch
@@ -60,8 +61,7 @@ part of the evidence — the frontier is the only scheduler being judged.
 - **Pass criteria**: the frontier is recomputed from doc state alone
   via `graph.py` (no memory claims); `git status`/`git diff` read
   before spawning (SKIPPED-noted where no git exists); already-
-  implemented work not redone; before-audit NOT re-run (its
-  `passed @` line already in task.md); interrupted tasks resumed or
+  implemented work not redone; interrupted tasks resumed or
   respawned per their `(in-progress)` marks.
 
 ## E5 — Single-agent repair run
@@ -72,12 +72,12 @@ part of the evidence — the frontier is the only scheduler being judged.
   matching single agent is re-briefed (not the whole wave); IDs not
   renumbered; the frontier and check.py green afterward.
 
-## E6 — Closing audit, red
+## E6 — Delivery pass, red
 
 - **Setup**: E1 run, but one implementer briefed to leave a debug print
   and touch an out-of-scope file.
 - **Pass criteria**: `audit.py scope` flags the UNMENTIONED file;
   `audit.py clean` flags the debris; nothing ticked, nothing committed;
   fix round annotated `(fix 1/5)` in task.md (the loop edge the graph
-  surfaces); full closing audit re-run passes before the single commit
-  lands.
+  surfaces); the full delivery pass re-runs green before the single
+  commit lands.

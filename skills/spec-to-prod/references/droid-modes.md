@@ -63,9 +63,9 @@ spec: intent is human, never generated):
 - On approval, in Normal mode: `scripts/scaffold.sh <name>`, write the
   drafted spec.md exactly as approved, write research.md, then run the
   graph from the frontier (survey ∥ research, then plan ∥ tech ∥ qa,
-  then tasks, verify, before-audit).
+  then tasks, verify).
 - The two approvals stay distinct. ExitSpecMode approves *authoring*;
-  the pipeline's own approve gate (after the before-audit) still gates
+  the pipeline's own approve gate (after verify) still gates
   *execution*. Never let a Spec Mode approval write `Status: approved`.
 
 ## Mission Mode = the orchestrator session runs the graph
@@ -85,13 +85,13 @@ ever. Only the session holding Task can: the mission orchestrator.
   playbook schedules — delegating a feature to one silently degrades
   it to playbook-less solo work.
 - Human gates are mission pause points: clarify (in Spec Mode),
-  research-gate, approve, closing-audit judgment, tick-commit. In an
+  research-gate, approve, tick-commit. In an
   interactive Mission Control session, unblock by conversation. Under
   headless `droid exec --mission` the pipeline parks at the gate by
   design — doc state is the only state, so any later session resumes
   from the frontier losslessly.
 - Mission validation: set `missionModelSettings.skipScrutiny` and
-  `skipUserTesting` for spec-to-prod features. The closing audit + DoD
+  `skipUserTesting` for spec-to-prod features. The delivery pass + DoD
   scorecard already govern verification, and mission QA carries no FR
   traceability or TC pass conditions — running it on top double-pays
   for weaker evidence. Keeping them as an outer check is the

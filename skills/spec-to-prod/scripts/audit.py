@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Closing-audit helpers for a spec-to-prod spec: the diff-facing halves of
-SKILL.md's closing audit — scope diff, cleanliness sweep, TC proofs.
+"""Diff-facing review instruments for a spec-to-prod spec: scope diff,
+cleanliness sweep, TC proofs, DoD scorecard — the evidence-gathering
+tools the orchestrator runs after execute lands (no pipeline gates of
+their own; findings are adjudicated by the orchestrator).
 
 Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py clean    [<spec-dir>] [--repo <path>] [--base <rev>]
        audit.py proofs   <spec-dir> [--repo <path>] [--run]
        audit.py dod      <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
-       audit.py evidence <spec-dir> [--repo <path>]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
        audit.py archived [--repo <path>]
-       audit.py pre-execute <spec-dir> [--repo <path>] [--run]
        audit.py -h | --help        (prints this text, exit 0)
 
 (--repo defaults to the spec dir's grandparent: specs/<name>/ -> repo
 root; clean, whose optional spec-dir positional is accepted and ignored,
 defaults to ., as does archived, which takes no positional)
 
-scope  — every file changed vs base (default: the recorded before-audit
-         SHA, falling back to HEAD; explicit --base overrides) is grep'd
-         against the spec dir's task.md,
+scope  — every file changed vs base (default: the approval freeze's
+         Approved-at SHA, falling back to HEAD; explicit --base
+         overrides) is grep'd against the spec dir's task.md,
          tech-spec.md and plan.md. A changed path no doc mentions (full
          path, then bare filename) is listed as UNMENTIONED — a scope-creep
          candidate for the orchestrator to adjudicate, not a verdict:
@@ -33,9 +33,9 @@ proofs — each TC's Pass condition in test.md is classified auto (a
          runnable command) or manual (human observation) and listed; with
          --run, auto commands execute (cwd = repo root, 120s timeout
          each) and report PASS/FAIL with the command line for pasting
-         into the audit. --run executes commands embedded in test.md —
-         opt-in for the same reason you'd read a command before pasting
-         it into a shell.
+         into the tick evidence. --run executes commands embedded in
+         test.md — opt-in for the same reason you'd read a command
+         before pasting it into a shell.
 dod    — the Definition-of-Done scorecard (gates/dod.md): runs
          check.py, live TC proofs, and the scope/hygiene counts in one
          pass; mechanical gates print PASS/FAIL, judgment gates print
@@ -47,9 +47,6 @@ dod    — the Definition-of-Done scorecard (gates/dod.md): runs
          the gate table. --dry-run keeps the scorecard inert: auto TCs
          are classified, gate 1 reads DRY, and no test.md command
          executes — the state-inspection path.
-evidence — verifies the approval freeze, resolves and relates recorded
-         lifecycle SHAs, and checks evidence/closing.md. Pure inspection:
-         no test command runs and nothing is written.
 converge — diffs specs/<name>/survey.md against its last committed
          version (default: HEAD; --base overrides) to surface what a
          fresh re-survey found that the previous one didn't: run this
@@ -70,10 +67,9 @@ archived — the archive gate (OpenSpec validate --archived semantics):
          enough for a pre-push or pre-archive hook.
 
 Exit:  0 = report produced (scope/clean/converge always; proofs without
-      --run) · proofs --run / dod / evidence / archived: 0 = every
-      mechanical gate green, 1 = any FAILED or errored (dod --dry-run: gate 1
-       reads DRY — classified, not executed — and is not a failure) ·
-       2 = usage error.
+      --run) · proofs --run / dod / archived: 0 = every mechanical gate
+      green, 1 = any FAILED or errored (dod --dry-run: gate 1 reads DRY —
+      classified, not executed — and is not a failure) · 2 = usage error.
 
 Non-git repos: git-derived output degrades explicitly, never silently —
 scope/clean print `SKIPPED (not a git repo)` instead of a false all-clear
@@ -83,7 +79,6 @@ read SKIPPED.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 import shutil
 import subprocess
@@ -98,9 +93,7 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from specstate import closing_audit_state, closing_evidence_hash, lifecycle_shas, survey_items, task_entries  # noqa: E402 - the sys.path setup above runs first
-import check  # noqa: E402 - sibling module through scripts/
-import freeze  # noqa: E402 - sibling module through scripts/
+from specstate import approval_sha, survey_items, task_entries  # noqa: E402 - the sys.path setup above runs first
 
 # Debug prints across common languages. printf( is deliberately absent —
 # ordinary C output; WARN heuristics err toward recall, the orchestrator
@@ -159,7 +152,7 @@ def git_available(repo: Path) -> bool:
 def changed_paths(repo: Path, base: str | None) -> list[str]:
     """All changed paths: tracked diff vs base (default HEAD) plus every
     untracked file — git diff alone is blind to new files, and a whole
-    plan's work sits uncommitted until the closing audit's single commit."""
+    plan's work sits uncommitted until delivery's implementation commit."""
     paths: set[str] = set()
     diff_arg = base if base else "HEAD"
     r = git(repo, "diff", "--name-only", diff_arg)
@@ -209,16 +202,12 @@ def added_lines(repo: Path, base: str | None):
 
 
 def effective_base(spec_dir: Path, base: str | None) -> str | None:
-    """Closing-audit diff base: explicit override, else recorded before-audit."""
+    """Diff base for the review instruments: explicit override, else the
+    approval freeze's Approved-at anchor (the commit the docset was
+    approved against — what "the implementation changed" means)."""
     if base:
         return base
-    task = spec_dir / "task.md"
-    if not task.exists():
-        return None
-    value = lifecycle_shas(
-        task.read_text(encoding="utf-8", errors="replace")
-    ).get("before")
-    return value if value not in (None, "-") else None
+    return approval_sha(spec_dir)
 
 
 def scope_data(spec_dir: Path, repo: Path, base: str | None) -> tuple[list[str], list[str]]:
@@ -267,145 +256,6 @@ def mode_scope(spec_dir: Path, repo: Path, base: str | None) -> int:
     if not unmentioned:
         print("  every changed file is named in task/tech-spec/plan")
     return 0
-
-
-def evidence_data(spec_dir: Path, repo: Path) -> list[str]:
-    """Integrity problems for freeze, lifecycle SHAs, and durable evidence."""
-    problems = freeze.verify(spec_dir, repo)
-    task_p = spec_dir / "task.md"
-    task = task_p.read_text(encoding="utf-8", errors="replace") if task_p.exists() else ""
-    problems.extend(check.lifecycle_integrity_problems(task, repo))
-    if closing_audit_state(task) == "approved":
-        evidence = spec_dir / "evidence" / "closing.md"
-        if not evidence.exists():
-            problems.append("closing evidence missing: evidence/closing.md")
-        else:
-            text = evidence.read_text(encoding="utf-8", errors="replace")
-            digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
-            if closing_evidence_hash(task) != digest:
-                problems.append(
-                    "closing evidence does not match Closing-evidence sha256"
-                )
-            required = (
-                "Mechanical DoD", "Manual test cases", "Regression",
-                "Review findings", "Rulings surfaced",
-                "Irreversible or state-mutating changes", "User sign-off",
-            )
-            missing = [section for section in required if section not in text]
-            if missing:
-                problems.append(
-                    "closing evidence missing sections: " + ", ".join(missing)
-                )
-            if re.search(r"<[^>\n]+>|YYYY-MM-DD", text):
-                problems.append("closing evidence contains unfilled placeholders")
-    return problems
-
-
-def mode_evidence(spec_dir: Path, repo: Path) -> int:
-    problems = evidence_data(spec_dir, repo)
-    print(f"evidence: {spec_dir}")
-    for problem in problems:
-        print(f"  FAIL  {problem}")
-    print(
-        f"  {'PASS' if not problems else 'FAIL'} "
-        f"({len(problems)} integrity problem(s))"
-    )
-    return 1 if problems else 0
-
-
-# tech-spec.md's baseline command convention (template line): the exact
-# command gate 2 runs before any task spawns.
-VERIFY_CMD = re.compile(r"Verify before implementing:\s*`([^`]+)`")
-# spec.md's branch field (gate 5): `**Branch**: `type/name``.
-BRANCH_FIELD = re.compile(r"^\*\*Branch\*\*:\s*`?([^`\n]+?)`?\s*$", re.M)
-
-
-def mode_pre_execute(spec_dir: Path, repo: Path, run: bool) -> int:
-    """The mechanical half of the before-audit's six gates (D-023): clean
-    tree, isolated branch vs spec.md's Branch: field, and the tech-spec's
-    recorded `Verify before implementing` baseline command (executed only
-    with --run, like proofs). Chains and constitution stay in verify
-    (check.py, already green before this node); dependency reality, the
-    already-done sweep, constitution semantics, and branch consent are the
-    judgment gates printed as YOURS lines. Exit 1 only on a mechanical
-    FAIL; a dry (not --run) baseline is DRY, not green."""
-    print(f"pre-execute: {spec_dir} (before-audit gates 2/3/5 mechanical)")
-    failures = 0
-    if not git_available(repo):
-        print("  SKIPPED (not a git repo) — clean tree, branch, and "
-              "baseline sha anchor unavailable; record them as skipped "
-              "notes, never silent passes")
-    else:
-        st = git(repo, "status", "--porcelain")
-        dirty = [ln for ln in st.stdout.splitlines() if ln.strip()]
-        if dirty:
-            failures += 1
-            print(f"  FAIL  gate 3 clean tree — {len(dirty)} uncommitted "
-                  "path(s):")
-            for ln in dirty[:6]:
-                print(f"        {ln}")
-        else:
-            print("  PASS  gate 3 clean tree")
-        spec_text = (spec_dir / "spec.md").read_text(
-            encoding="utf-8", errors="replace") \
-            if (spec_dir / "spec.md").exists() else ""
-        m = BRANCH_FIELD.search(spec_text)
-        cur = git(repo, "branch", "--show-current").stdout.strip()
-        if not m or "<" in m.group(1):
-            failures += 1
-            print("  FAIL  gate 5 branch — spec.md records no filled "
-                  "`**Branch**:` field")
-        elif cur == m.group(1).strip():
-            print(f"  PASS  gate 5 branch — on {cur} as the spec names")
-        elif cur in ("main", "master"):
-            failures += 1
-            print(f"  FAIL  gate 5 branch — on {cur}; implementation never "
-                  f"starts on the default branch (spec names "
-                  f"`{m.group(1).strip()}`)")
-        else:
-            failures += 1
-            print(f"  FAIL  gate 5 branch — on {cur}, spec names "
-                  f"`{m.group(1).strip()}`")
-    tech = (spec_dir / "tech-spec.md").read_text(
-        encoding="utf-8", errors="replace") \
-        if (spec_dir / "tech-spec.md").exists() else ""
-    vm = VERIFY_CMD.search(tech)
-    if not vm:
-        print("  NOTE  gate 2 baseline — tech-spec.md records no "
-              "`Verify before implementing:` command; run the project's "
-              "test command yourself and treat a red as pre-existing rot "
-              "(baseline-repair commit or a D-###)")
-    elif not run:
-        print(f"  DRY   gate 2 baseline — `{vm.group(1)}` (re-run with "
-              "--run to execute)")
-    else:
-        try:
-            r = subprocess.run(vm.group(1), shell=True, cwd=str(repo),
-                               capture_output=True, text=True, timeout=120)
-            tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
-            if r.returncode == 0:
-                print(f"  PASS  gate 2 baseline — `{vm.group(1)}` exit 0")
-            else:
-                failures += 1
-                print(f"  FAIL  gate 2 baseline — `{vm.group(1)}` exit "
-                      f"{r.returncode}")
-            for ln in tail:
-                print(f"        {ln}")
-        except (OSError, subprocess.SubprocessError) as e:
-            failures += 1
-            print(f"  FAIL  gate 2 baseline — `{vm.group(1)}` raised {e!r}")
-    print("  YOURS gate 1 — are the declared dependencies real, not just "
-          "phase-ordered?")
-    print("  YOURS gate 4 — already-done sweep: spot-check survey.md; note "
-          "satisfied tasks so execute skips them")
-    print("  YOURS gate 6 — constitution semantics (presence/fill is "
-          "check.py's; the reading is yours)")
-    verdict = "PASS" if failures == 0 else "FAIL"
-    print(f"  {verdict} pre-execute mechanical gates ({failures} "
-          "failure(s)); record `Before-audit: passed @ <sha-or-dash>` "
-          "only when every gate — mechanical and judgment — is green, "
-          "then seek the user's approval in the same session")
-    return 1 if failures else 0
 
 
 def clean_findings(repo: Path, base: str | None) -> list[tuple[str, int | None, str, str]]:
@@ -564,7 +414,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
              dry: bool = False) -> int:
     """The DoD scorecard: mechanical gates measured, judgment gates MANUAL.
     Runs check.py, live proofs, and the scope/hygiene counts — the same
-    trust level as the closing audit itself (it executes TC commands).
+    trust level as the delivery pass itself (it executes TC commands).
     Every checker subprocess fails closed: one that cannot start, times
     out, or delivers no verdict fails its gate with a diagnostic, and
     failed proofs are named under the gate table. dry classifies the
@@ -665,7 +515,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
         (8, "REVIEW", "MANUAL",
          "reviewer BLOCKs = 0; WARN/NIT fixed or parked-with-ruling"),
         (9, "RULINGS", "MANUAL",
-         "every D-### surfaced in the closing report"),
+         "every D-### surfaced in the delivery summary"),
         (10, "SIGN-OFF", "MANUAL", "user acks the rulings report"),
     ]
     print(f"dod: {spec_dir} — gate table in gates/dod.md"
@@ -789,8 +639,8 @@ def parse_args(argv: list[str]):
         print(__doc__)
         return None
     mode = argv[0]
-    if mode not in ("scope", "clean", "proofs", "dod", "evidence", "converge",
-                    "archived", "pre-execute"):
+    if mode not in ("scope", "clean", "proofs", "dod", "converge",
+                    "archived"):
         print(__doc__)
         return None
     repo = None
@@ -818,8 +668,7 @@ def parse_args(argv: list[str]):
         else:
             rest.append(a)
             i += 1
-    if mode in ("scope", "proofs", "dod", "evidence", "converge",
-                "pre-execute") and len(rest) != 1:
+    if mode in ("scope", "proofs", "dod", "converge") and len(rest) != 1:
         print(__doc__)
         return None
     if mode == "archived" and rest:
@@ -863,10 +712,6 @@ def main(argv: list[str] | None = None) -> int:
         return mode_archived(repo)
     if mode == "dod":
         return mode_dod(spec_dir, repo, base, dry)
-    if mode == "evidence":
-        return mode_evidence(spec_dir, repo)
-    if mode == "pre-execute":
-        return mode_pre_execute(spec_dir, repo, run)
     if mode == "converge":
         return mode_converge(spec_dir, repo, base)
     return mode_proofs(spec_dir, repo, run)

@@ -82,7 +82,7 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
   FAILs a TC whose section never mentions either and WARNs stories no TC mentions;
   standing regression guards trace to their FR too.
 - **Every auto TC's pass-condition command must finish in well under two
-  minutes** — the closing audit's proofs runner caps each TC at 120 s and
+  minutes** — the proofs runner caps each TC at 120 s and
   reports TIMEOUT as a failure. Size the corpus to the contract, not the
   production tree: a bounded workspace (seconds) pins the same observable
   as an at-scale run (minutes). WHERE the real contract only shows at

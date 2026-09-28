@@ -3,7 +3,7 @@
 Every scheduling-relevant signal the tooling layer reads out of the docset
 lives here as a pure function: spec Status, task entries (checkboxes,
 phases, parallel markers, dependency chains, fix rounds, implemented
-markers), the Before-audit, Closing-audit, and Delivered header lines, the
+markers), the Delivered header line and the approval-freeze anchor, the
 survey baseline header and item list, the researcher-skip marker,
 next-free-ID allocation, ID definitions, and the git availability probes.
 check.py, audit.py, and graph.py import from this module instead
@@ -58,8 +58,8 @@ EFFORT_TIERS = ("tiny", "standard", "large")
 # normative wording): `- [x]` done, `(in-progress)` claimed, `~~T###~~`
 # struck/dropped, `[P]` parallelizable, `(after T###)` dependency chain,
 # `(fix <n>/5)` fix-round counter. `(implemented)` records landed work on
-# an unticked entry — durable before the closing audit's one all-at-once
-# tick, and read independently of claimed/done/struck.
+# an unticked entry — durable before the delivery step's ticks, and read
+# independently of claimed/done/struck.
 TASK_ID = re.compile(r"- \[[ x]\]\s*(T\d{3})")
 TASK_DONE = re.compile(r"- \[x\]")
 AFTER_REF = re.compile(r"\(after\s+(T\d{3})")
@@ -72,45 +72,26 @@ STRIKETHROUGH = re.compile(r"~~[^~]*~~")
 # durable evidence.
 DONE_NOTE = re.compile(r"^\s*(?:-\s*)?done \d{4}-\d{2}-\d{2} \u2014", re.M)
 
-# task.md header: the before-audit recording line. `passed @ <sha>` after a
-# real audit, `passed @ -` in a non-git repo (nothing to hash); the
-# scaffold's `pending` placeholder — and its backticked `passed @ <sha>`
-# example text — must not read as passed.
-BEFORE_AUDIT_PASSED = re.compile(r"Before-audit\*{0,2}\s*:\s*passed\s+@")
-
-# task.md header: the closing-audit approval record — `approved @ <sha>`
-# after the closing audit's human gates pass, `approved @ -` in a non-git
-# repo (the same dash form Before-audit accepts). The record is the durable
-# human sign-off that proof, review, rulings, regression, and sign-off were
-# ruled green under; the word must sit directly after the colon, so a
-# `pending` placeholder — or its backticked `approved @ <sha>` example
-# text — cannot read as approved.
-CLOSING_AUDIT_APPROVED = re.compile(
-    r"Closing-audit\*{0,2}\s*:\s*approved\s+@")
-
 # task.md header: the delivery record — `commit @ <sha>` once the plan's
-# end-of-spec commit exists, `commit @ -` the explicit non-git skip (the
-# same dash form Before-audit accepts). The record must name `commit`
-# directly after the colon, so the scaffold's `pending` placeholder — and
-# its backticked example text — cannot read as delivered.
+# end-of-spec commit exists, `commit @ -` the explicit non-git skip. The
+# record must name `commit` directly after the colon, so the scaffold's
+# `pending` placeholder — and its backticked example text — cannot read
+# as delivered.
 DELIVERED_COMMIT = re.compile(
-    r"Delivered\*{0,2}\s*:\s*commit\s+@\s*`?([0-9a-f]{7,40}|-)")
-
-CLOSING_EVIDENCE_SHA = re.compile(
-    r"Closing-evidence\*{0,2}\s*:\s*sha256:([0-9a-f]{64})"
+    r"Delivered\*{0,2}\s*:\s*commit\s+@\s*`?([0-9a-f]{7,40}|-)"
 )
+
+# approvals/approval.md: the `**Approved-at**: <sha>` anchor freeze.py
+# records at approval — the commit the approved docset was signed against,
+# and the default diff base for the post-execute review instruments.
+APPROVED_AT = re.compile(
+    r"\*\*Approved-at\*\*\s*:\s*`?([0-9a-f]{7,40})`?", re.I)
 
 # Exact lifecycle evidence values. The older state helpers intentionally
 # answer only "was this marker recorded?"; these parsers expose the SHA (or
 # explicit non-git dash) so integrity checks can prove it exists and belongs
 # to the repository instead of trusting any hex-looking text.
 LIFECYCLE_VALUES = {
-    "before": re.compile(
-        r"Before-audit\*{0,2}\s*:\s*passed\s+@\s*`?([0-9a-f]{7,40}|-)"
-    ),
-    "closing": re.compile(
-        r"Closing-audit\*{0,2}\s*:\s*approved\s+@\s*`?([0-9a-f]{7,40}|-)"
-    ),
     "delivered": DELIVERED_COMMIT,
 }
 
@@ -247,36 +228,6 @@ def task_entries(task_md: str) -> list[TaskEntry]:
     return entries
 
 
-def before_audit_state(task_md: str) -> str:
-    """'passed' | 'pending' | 'missing' for task.md's Before-audit line.
-
-    passed = the audit was recorded (`passed @ <sha>`, or `passed @ -` in a
-    non-git repo); pending = a line exists but no passed record (the
-    scaffold's placeholder reads pending, never passed); missing = no
-    Before-audit line at all."""
-    if "Before-audit" not in task_md:
-        return "missing"
-    if BEFORE_AUDIT_PASSED.search(task_md):
-        return "passed"
-    return "pending"
-
-
-def closing_audit_state(task_md: str) -> str:
-    """'approved' | 'pending' | 'missing' for task.md's Closing-audit line.
-
-    approved = the closing audit's human record exists (`approved @ <sha>`,
-    or `approved @ -` in a non-git repo) — the durable sign-off under which
-    proof, review, rulings, regression, and sign-off were ruled green;
-    pending = a line exists but records no approval; missing = no
-    Closing-audit line at all. Mechanical pass conditions never imply this
-    record: only the line the orchestrator writes does."""
-    if "Closing-audit" not in task_md:
-        return "missing"
-    if CLOSING_AUDIT_APPROVED.search(task_md):
-        return "approved"
-    return "pending"
-
-
 def delivery_state(task_md: str) -> tuple[str, str | None]:
     """(state, evidence) for task.md's Delivered header line.
 
@@ -294,7 +245,7 @@ def delivery_state(task_md: str) -> tuple[str, str | None]:
 
 
 def lifecycle_shas(task_md: str) -> dict[str, str | None]:
-    """Exact recorded values for passed/approved/delivered evidence.
+    """Exact recorded values for delivered evidence.
 
     A value is a commit SHA or the explicit non-git dash. None means the
     marker has not been recorded yet. These values are inputs to integrity
@@ -307,17 +258,27 @@ def lifecycle_shas(task_md: str) -> dict[str, str | None]:
     return out
 
 
-def closing_evidence_hash(task_md: str) -> str | None:
-    """SHA-256 recorded for evidence/closing.md, when Closing-audit wrote it."""
-    m = CLOSING_EVIDENCE_SHA.search(task_md)
+def approval_sha(spec_dir: Path) -> str | None:
+    """The `**Approved-at**` commit freeze.py recorded at approval —
+    approvals/approval.md's anchor for the approved docset. None when no
+    freeze exists yet (pre-approval) or the file is unreadable; never the
+    dash form (a non-git freeze records `-`, which names no diff base)."""
+    try:
+        text = (Path(spec_dir) / "approvals" / "approval.md").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not text:
+        return None
+    m = APPROVED_AT.search(text)
     return m.group(1) if m else None
 
 
 def tick_evidence(task_md: str) -> TickEvidence:
-    """The durable task-tick evidence for the tick-commit transition: an
-    approved tick transition is fully evidenced only when `unticked` and
-    `noteless` are both empty — every task ticked or struck, every tick
-    carrying its `done <date> — <proof>` sub-line."""
+    """The durable task-tick evidence for the tick-commit transition: the
+    transition is fully evidenced only when `unticked` and `noteless` are
+    both empty — every task ticked or struck, every tick carrying its
+    `done <date> — <proof>` sub-line."""
     entries = task_entries(task_md)
     return TickEvidence(
         total=len(entries),

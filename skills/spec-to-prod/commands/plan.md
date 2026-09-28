@@ -1,5 +1,5 @@
 ---
-description: Spec-driven development, PLAN phase - run graph waves from the current doc state through verify, before-audit, and user approval
+description: Spec-driven development, PLAN phase - run graph waves from the current doc state through verify to user approval
 argument-hint: <spec-name>
 skills: spec-to-prod
 ---
@@ -9,7 +9,7 @@ Run the spec-to-prod skill (auto-mounted) for this request: $ARGUMENTS
 PLAN entry of the lifecycle: continue the workflow graph from the spec's
 current doc state until the approve gate — research-gate (yours to
 decide) → survey ∥ research → plan ∥ tech ∥ qa → tasks → verify
-(`scripts/check.py`) → before-audit → user approval (`Status: approved`).
+(`scripts/check.py`) → user approval (`Status: approved`).
 After the explicit approval, record the contract freeze with
 `scripts/freeze.py <spec-dir> --record`.
 `scripts/graph.py specs/<spec>` is the mechanical truth — run the ready

@@ -23,11 +23,9 @@ flowchart TD
 
     Tasks["tasks<br/>task-breaker → task.md<br/>(the only status holder)"]
     Verify["verify<br/>mechanical: check.py on the spec dir,<br/>exit 0 = done"]
-    BA["before-audit<br/>six gates, once — runs when the<br/>execution frontier first becomes eligible<br/>(git gates SKIPPED-noted in non-git repos)"]
     Approve["approve<br/>HUMAN GATE<br/>spec.md Status: approved<br/>(never auto-satisfied)"]
     Exec["execute<br/>per-task frontier: deps ticked/struck,<br/>files disjoint from wave-mates,<br/>below the fix-round cap"]
-    CA["closing-audit<br/>once, all tasks implemented:<br/>scope · clean · proofs · regression ·<br/>DoD scorecard (audit.py dod)"]
-    Tick["tick-commit<br/>one tick + one commit for the whole plan<br/>(commit SKIPPED-noted in non-git repos)"]
+    Tick["tick-commit<br/>proof pass → ticks → one commit for the whole plan<br/>(commit SKIPPED-noted in non-git repos)"]
     Archive["archive<br/>specs/archive/ · dated · INDEX repointed"]
 
     Spec --> Survey
@@ -42,12 +40,9 @@ flowchart TD
     Tech --> Verify
     QA --> Verify
     Tasks --> Verify
-    Verify --> BA
-    BA --> Approve
-    BA --> Exec
+    Verify --> Approve
     Approve --> Exec
-    Exec --> CA
-    CA --> Tick
+    Exec --> Tick
     Tick --> Archive
 
     Spec -.->|clarify loop| Clarify

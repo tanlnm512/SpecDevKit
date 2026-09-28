@@ -1,12 +1,12 @@
 ---
-description: Spec-driven development, VERIFY phase - closing-audit proof half: every TC pass condition green plus the regression gate
+description: Spec-driven development, VERIFY phase - the proof pass: every TC pass condition green plus the regression gate
 argument-hint: <spec-name>
 skills: spec-to-prod
 ---
 
 Run the spec-to-prod skill (auto-mounted) for this request: $ARGUMENTS
 
-VERIFY entry of the lifecycle — closing-audit steps 11–12 (proof +
+VERIFY entry of the lifecycle — delivery-pass steps 7–8 (proof +
 regression). Requires the execute node done: every task implemented and
 every digest orchestrator-confirmed — otherwise the entry point is
 /build.
@@ -16,6 +16,6 @@ every digest orchestrator-confirmed — otherwise the entry point is
   to verify
 - regression gate: the repo's broader check per conventions
 
-A failure is a fix round (≤5/task), and the whole closing audit re-runs
-from step 7 — never a partial green. /test, /review, /ship are three
-portions of the ONE closing audit, never three audits.
+A failure is a fix round (≤5/task), and the whole delivery pass re-runs
+from its proof step — never a partial green. /test, /review, /ship are
+three steps of the ONE delivery pass, never three gates.
