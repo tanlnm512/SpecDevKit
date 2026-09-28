@@ -48,6 +48,30 @@ but the failing checks enter the tracked findings and every report
 surface renders the authoritative last gate run, never a stale green.
 Reviewers never re-run the suites.
 
+## Preflight (the scout map)
+
+After a green gate and before the first reviewer — never on a fix_from
+run, whose review stages are skipped — one read-only scout explores
+the codebase and the modules the target touches and returns:
+
+- `modules` — `{name, path, role}`, the target's modules plus close
+  neighbors (within two hops), at most 8;
+- `conventions` — the repo patterns design fit is judged against
+  (error-handling idiom, test layout, naming, module boundaries —
+  AGENTS.md/CLAUDE.md folded in), at most 6;
+- `riskAreas` — one-line paths deserving extra reviewer attention, at
+  most 6.
+
+Injection rules: the map rides the reviewer asks and the final
+assessments as context — never as evidence, since a finding still
+quotes the code; triage, confirmers and the fixer do not receive it,
+so an independent confirmation inherits no scout claim. The scout
+reports no findings — a suspicion travels only as a riskAreas line
+with a path, and the reviewers must still find and evidence it. A
+failed scout degrades to the raw target with a `notCovered` line; it
+never stops the run. The step runs in fast mode too: one bounded turn
+buys every reviewer the same starting ground.
+
 ## Findings
 
 Every finding, in any representation (agent output, triage, report,
@@ -76,6 +100,7 @@ expected answer for a clean target.
 
 | Role | Edits files | Writes findings | Confirms | Fixes |
 |---|---|---|---|---|
+| Preflight scout | never | no — the map, never findings | no | no |
 | Lens reviewer | never | yes (own lens) | no | no |
 | Triage editor | never | drops/dedupes with reasons | no | no |
 | Confirmer | never | no | yes (intent-blind) | no |

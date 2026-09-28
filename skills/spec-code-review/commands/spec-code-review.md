@@ -9,14 +9,19 @@ Run the spec-code-review skill (auto-mounted) for this request: $ARGUMENTS
 Verb routing ($1 = verb; `review` is the default when $1 is a target or
 the ask is plainly a review):
 
-- `review [target] [args…]` → the full three-stage flow (gate → panel
+- `review [target] [args…]` → the full three-stage flow (gate →
+  preflight scout maps the codebase and modules → panel
   with triage and independent confirmation → synthesis). Targets:
   `diff` (default; `base` names the ref — HEAD, HEAD~1, any branch),
   `branch` (current branch vs its base; uncommitted work included and
   reported), `pr <number|url|owner/repo#N>` (gh CLI; auto-checkout of
   the PR head on a clean tree, refusal on a dirty one), `project
-  [paths]` (the whole tracked codebase, capped at the largest 30
-  files). Extra args: `intent` (what the change is supposed to do —
+  [paths]` (the whole tracked codebase — every source file, sharded
+  into byte-balanced directory-coherent reviewer parts per lens; a red
+  gate does not stop an audit, each failing check becomes a finding).
+  Extra args: `repo <dir>` (project mode in a multi-repo workspace:
+  the sub-repo to review, absolute or cwd-relative), `intent` (what
+  the change is supposed to do —
   the author's stated intent), `mode fast|full|auto`, `fix_rounds N`
   (N > 0 runs the verified fix loop after the review).
 - `fix <findings-json>` → the fix-only continuation (`fix_from`):

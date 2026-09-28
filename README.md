@@ -16,7 +16,8 @@ every skill lives at `skills/<name>/`, and one shared, harness-neutral install
 pipeline (`tools/sync.sh`) installs every skill it finds there to every
 supported coding-agent harness in one pass. `spec-to-prod` is the first
 resident skill; `spec-code-review` — the portable three-stage code review
-(the repo's own detected checks as a mechanical gate, then specialist
+(the repo's own detected checks as a mechanical gate, then a preflight
+scout that maps the codebase and modules, then specialist
 lenses with triage and independent confirmation of every finding, then
 synthesis, plus an optional author-fix loop ending in a merge
 recommendation) — is the second; § Adding a skill to this repo below is

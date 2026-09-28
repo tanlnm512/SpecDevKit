@@ -2,23 +2,24 @@
 name: spec-code-review
 description: >-
   Portable three-stage code review for any git repository — a change, a
-  pull request, a branch's recent changes, or the whole project. Stage 1
-  runs the repo's own detected checks as the mechanical gate (Makefile
-  targets, npm scripts, cargo, go, pytest/unittest, shell syntax and
-  secret shapes on the diff). Stage 2 reviews the target through separate lenses —
-  correctness, security, quality & tests (one general reviewer on small
-  targets) — triaged by one editor with independent confirmation of
-  every kept finding. Stage 3 synthesizes risk class,
-  test gaps and residual risks. An optional fix loop has an author agent
-  fix the confirmed findings in the working tree, verify every fix
-  independently, re-run the gate, and end with a merge / fix-first /
-  human recommendation. Use when the user asks to review a change —
-  "review the diff", "review and fix" — a pull request ("review PR 12"),
-  a branch's recent changes ("review what's on this branch") — or the
-  codebase as a whole ("review the project") — in this or any repo.
+  pull request, a branch, or the whole project. Stage 1
+  runs the repo's own checks as the mechanical gate (Makefile,
+  npm scripts, cargo, go, pytest/unittest, shell syntax, secret shapes).
+  A preflight scout then maps the codebase and modules (roles,
+  conventions, risks) so every reviewer starts from the same
+  ground. Stage 2 reviews the target through separate lenses —
+  correctness, security, quality & tests (one general reviewer when
+  small) — one editor triages, every kept finding independently
+  confirmed. Stage 3 synthesizes risk, test gaps and residual
+  risks. An optional fix loop has an author agent fix the confirmed
+  findings in the working tree, verify each fix, re-run the gate, and
+  recommend merge / fix-first / human. Use when the user asks to review
+  a change — "review the diff", "review and fix" — a pull request
+  ("review PR 12"), a branch's recent changes ("review what's on this
+  branch") — or the codebase as a whole ("review the project").
 metadata:
   owner: platform-core
-  version: "0.9.0"
+  version: "0.11.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -95,7 +96,15 @@ identically underneath — only the resolution differs:
   merge-base against the PR's base commit — the same PR-diff semantics
   GitHub uses — and the report names the PR (number, title, author,
   base, URL).
-- **project** — the codebase as it stands (see below).
+- **project** — the codebase as it stands (see below). In a multi-repo
+  workspace whose root is not itself a git repository, pass `repo`:
+  the sub-repo directory (absolute, or relative to the working
+  directory), resolved to its absolute toplevel before anything runs —
+  every git call, the gate's `--repo`, and the absolute file paths the
+  reviewers read root there. The runtime's cwd is not guaranteed to be
+  the workspace root, so nothing may rely on a relative repo path.
+  `repo` is supported for `project` only; change/branch/pr targets
+  refuse it — run those from inside the repository.
 
 Stage 1 always runs first with the resolved base: `--base <merge-base>`
 in diff/branch/pr mode, `--tree` in project mode.
@@ -144,12 +153,17 @@ instead of a diff:
 
 - The gate runs with `--tree` (shell syntax over every tracked
   script); everything else about the gate is unchanged — its suites
-  were always project-wide.
-- The review target is the tracked source files: extension-filtered,
+  were always project-wide. One exception to the gate-first rule: a
+  project audit does not stop at a red gate — each failing check
+  becomes a high-severity gate finding and the panel still reads the
+  code, because for an audit the failures are themselves findings.
+- The review target is every tracked source file: extension-filtered,
   with lockfiles, generated code and vendored/build directories
-  excluded, largest first, capped at 30 (`PROJECT_MAX_FILES`). Narrow
-  with explicit paths on big repos; anything the cap leaves out is
-  named under `notCovered`.
+  excluded. A target too large for one reviewer's turn is sharded:
+  contiguous runs of the path-sorted list (directories stay together),
+  closed at ~240 KB or 32 files per part, byte-balanced — and every
+  lens reads every part, so coverage is complete. Narrow the target
+  further with explicit `paths`.
 - There is no diff: reviewers read the listed files, the flagging
   bar's "introduced by this change" becomes "present in the code as it
   stands", and confirmation drops the introduced-by-the-change clause.
@@ -158,6 +172,32 @@ instead of a diff:
   work identically.
 - In project mode the `merge` recommendation reads as "the code is
   ready as it stands".
+
+### Preflight (stage 1.5) — the scout maps the ground
+
+Between a green gate and the first reviewer, one read-only scout
+explores the codebase and the modules the target touches and returns
+the map the panel starts from:
+
+- `modules` — the target's modules plus their close neighbors
+  (name, path, one-line role; within two hops);
+- `conventions` — the patterns the surrounding code establishes, the
+  ones design fit is judged against (error-handling idiom, test
+  layout, naming, module boundaries — AGENTS.md/CLAUDE.md folded in);
+- `riskAreas` — paths in or near the target that deserve extra
+  reviewer attention, one line each.
+
+The map rides the reviewer asks and the final assessment as context —
+verify against the code, never cite it as evidence. Confirmers never
+see it: independent confirmation verifies from the code alone, and a
+scout error must not rubber-stamp a finding. The scout reports a map,
+never findings — a defect it noticed travels only as a `riskAreas`
+line with a path, and the reviewers still must find it. A scout that
+fails degrades to the raw target (named under `notCovered`), and
+`fix_from` runs skip the step entirely (their review stages are
+skipped). The step runs in fast mode too — one bounded turn (≤8
+modules, ≤6 conventions, ≤6 risk areas) buys every reviewer the same
+starting ground.
 
 ### Stage 2 — specialist review with triage and confirmation
 
@@ -318,9 +358,11 @@ mode, as the branch is ready to merge.
 `contracts/panel.md` is the canonical contract (this file summarizes;
 it arbitrates). `gates/recommendation.md` arbitrates stop conditions
 and recommendation criteria. `decisions/` holds the panel's ADRs
-(D-001…D-007 — gate-first, independent confirmation, advisory-only,
+(D-001…D-011 — gate-first, independent confirmation, advisory-only,
 targets-collapse-to-diffs, the fix loop, dialect parity,
-precision-over-recall). `references/quickstart.md` is navigation, not
+precision-over-recall, the preflight scout, sub-repo targets, sharded
+project coverage, audits continuing past red gates).
+`references/quickstart.md` is navigation, not
 a second contract. `evals/cases.md` + `examples/review-target/` are
 the standing live-eval scenarios with a seeded-bug answer key;
 `templates/fix-from-findings.json` is the continuation payload

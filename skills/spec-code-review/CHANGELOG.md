@@ -6,6 +6,77 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.11.0 — 2026-09-28
+
+Full-coverage project audits, verified on a live 441-file run. Three
+changes, each proven by that audit (a multi-repo workspace's sub-repo,
+441 tracked source files / ~3.7 MB, read as 18 reviewer parts per lens,
+54 reviewer sessions, red pytest gate):
+
+- **Sub-repo targets — the `repo` arg** (D-009). In a multi-repo
+  workspace whose root is not a git repository, project mode
+  previously reviewed nothing and exited clean ("no tracked source
+  files matched") — a confident empty report. `repo <dir>` (absolute
+  or cwd-relative) is resolved to the repo's absolute toplevel via
+  `git -C <dir> rev-parse --show-toplevel` before anything runs; every
+  git call (`git -C`), the gate (`gate.sh --repo`) and the reviewers'
+  absolute file paths root there, because the runtime's cwd is not
+  guaranteed to be the workspace root (observed live). Change, branch
+  and PR targets refuse the arg until verified — run those from inside
+  the repository.
+- **Sharded project coverage** (D-010). Project mode now reviews every
+  tracked source file instead of the 30 largest: the path-sorted list
+  is cut into contiguous, directory-coherent parts closed at
+  SHARD_TARGET_BYTES (240 000) or SHARD_MAX_FILES (32), byte-balanced;
+  every lens reads every part and the lens's findings concatenate
+  before triage. "Covered 30 of 441" notCovered apologies are gone —
+  coverage is complete; `paths` narrows, the tunables live in control
+  flow only.
+- **Audits continue past red gates** (D-011). D-001's hard stop stands
+  for change reviews; a project audit instead records each failing
+  check as a high-severity gate finding and the panel still reads the
+  code — a red test suite is an audit finding, not a blocker of the
+  audit. gateNote now reports failing checks accurately wherever the
+  gate is red.
+
+SKILL.md's whole-project section, the router command, the workflow arg
+metadata, and the parity tests all carry the new contract; the
+PROJECT_MAX_FILES tunable and its cap wording are removed from both
+dialects.
+
+Migration: none required — the changes are additive for stock
+single-repo workspaces (no `repo` arg ⇒ stock behavior, byte-identical
+ask anchors on the diff path); re-run tools/sync.sh to redistribute.
+
+## 0.10.0 — 2026-09-28
+
+Preflight step — the scout. Between the green gate and the first
+reviewer, one read-only agent explores the codebase and the modules the
+target touches and returns a bounded RepoMap the panel starts from:
+`modules` (name/path/role, within two hops of the target, ≤8),
+`conventions` (the patterns design fit is judged against, ≤6) and
+`riskAreas` (one-line paths deserving extra attention, ≤6). The map
+rides the reviewer asks and the final assessments in both workflow
+dialects as context to verify, never evidence to cite; triage,
+confirmers and the fixer never receive it, so an independent
+confirmation inherits no scout claim; the scout reports no findings —
+a suspicion travels only as a riskAreas line with its path. A failed
+scout degrades to the raw target with a notCovered line; fix_from runs
+skip the step (their review stages are skipped); fast mode still gets
+it — one bounded turn buys every reviewer the same starting ground.
+The scout is materialized as `agents/code-review-scout.md` (injected
+into the zcode master's scout persona at run time, like the lens
+briefs; inline SCOUT_SYSTEM in the claude master). New phase
+"Preflight the codebase and modules the target touches" in both
+masters; contracts/panel.md gains the Preflight section and the
+roles-matrix row; D-008 records the decision; the router command and
+README name the step; parity tests pin the ask anchors, the
+scoutBlock call-site count (5 asks + definition — the confirm, triage
+and fixer asks carry none), the phase, and the brief.
+
+Migration: none required — the step is additive; re-run tools/sync.sh
+so the scout brief reaches every harness root.
+
 ## 0.9.0 — 2026-09-27
 
 Directory structure aligned with spec-to-prod's resource distribution:
