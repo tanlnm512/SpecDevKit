@@ -4,6 +4,45 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.13.0 — 2026-09-28
+
+Test-quality hardening (D-027): what "the suite is green" proves, four
+upgrades, no new dependencies. (1) `audit.py mutate <spec-dir>
+[--max-mutants N]` — mutation testing over the changed implementation
+files vs the approval-freeze base: a stdlib-only AST engine flips
+comparison/boolean/arithmetic operators and bumps small-int constants
+one mutant at a time and re-runs the auto TC commands after each;
+KILLED vs SURVIVED per mutant (a survivor is a test gap to adjudicate),
+byte-verified in-place restore, timeout counts as killed, cap 40
+mutants + 10-minute wall budget; the kill suite runs with
+PYTHONDONTWRITEBYTECODE and the mutated module's stale .pyc dropped —
+same-size mutants written within one mtime tick would otherwise read a
+cached predecessor from __pycache__ (CPython validates pyc by
+mtime+size) and turn every survivor into a fake kill. Coverage's
+file-shaped targets widen to their parent directory for the same
+honesty: pytest-cov reads a non-directory --cov argument as a module
+name, so a bare `calc.py` would collect nothing on modern pytest-cov. (2) `audit.py coverage <spec-dir>
+[--threshold N]` — line-coverage floor over every task.md `Touches:`
+path: runs the repo suite once under the repo's OWN pytest-cov
+(optional instrument, absent → explicit SKIPPED) against spec.md's new
+`**Coverage**: <int>` floor (default 80; `specstate.coverage_floor`);
+red suite or unmeasured touched file fails. (3) qa brief Method 7:
+property-based TCs (hypothesis et al., only when the repo already
+ships the library; bounded to the `**Pass condition**:` command shape
+and the 120 s cap; a dependency for testability stays a tech-spec
+D-### decision). (4) qa independence at every tier — amends D-024: the
+standard-tier merged designer now carries plan/tech/tasks (three
+briefs, authoring plan → tech-spec → task) and qa spawns
+implementation-blind alongside it in the same wave; test.md always
+comes from qa alone. SKILL.md delivery pass step 9 gains the mutation
+instrument, step 8 the coverage floor; gates/dod.md rules carry both;
+README scripts table updated.
+
+Migration: none required — existing docsets read `**Coverage**:` only
+if they choose to add the header (default floor 80); `Effort:
+standard` docsets simply get designer ∥ qa on their next design wave.
+
+
 ## 2.12.0 — 2026-09-28
 
 Audit gates removed (D-026): the pipeline is now `verify → approve →

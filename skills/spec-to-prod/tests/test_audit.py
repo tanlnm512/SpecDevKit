@@ -21,12 +21,25 @@ Covers the four TESTCOV contract groups assigned to audit.py:
 - dry/live proof separation (FR-004 / TC-004, audit half): classify_proofs
   and `dod --dry-run` execute no test.md command — a mutating pass
   condition leaves no canary — while plain dod still executes it.
+- mutate (D-027): the stdlib AST engine's site discovery and
+  one-flip-per-mutant generation, then the mode end to end in a real
+  temp git repo — a killed operator flip, a surviving dead-code
+  constant, byte-identical restore, the --max-mutants cap, and the
+  loud SKIPPED paths (not a git repo, no auto TC commands, no changed
+  non-test .py files).
+- coverage (D-027): parse_cov_table over a real `term` report, the
+  spec.md `**Coverage**` floor with the --threshold override, the
+  tooling-absent SKIPPED, red-suite/unmeasured/below-floor failures,
+  the pytest invocation shape, and one live pytest-cov run (skipped on
+  machines without the tooling).
 
-No test invokes git for real: every git path runs with subprocess.run
-patched (the sibling test_git_degradation.py additionally exercises the
-genuinely non-git workspace at CLI level).
+No test invokes git for real except the sanctioned repo fixtures
+(ScopeIntegrityTests, MutationModeTests): every degradation path runs
+with subprocess.run patched (the sibling test_git_degradation.py
+additionally exercises the genuinely non-git workspace at CLI level).
 """
 
+import ast
 import contextlib
 import importlib.util
 import io
@@ -48,6 +61,16 @@ _audit_spec.loader.exec_module(audit)
 # module; this import binds that same instance, so the spy below wraps the
 # exact parser object audit.py's gate 4 is required to call.
 import specstate  # noqa: E402 - valid only after the audit load above
+
+# PRODUCTION BUG (reported, deliberately NOT fixed here — this task may
+# not touch scripts/): audit.py 2.13.0's mode_coverage calls
+# task_touches(entry) but its `from specstate import ...` block lists only
+# approval_sha/coverage_floor/survey_items/task_entries, so any coverage
+# run with resolvable `Touches:` targets raises NameError. The tests
+# inject the canonical specstate.task_touches so the mode's own logic is
+# exercised; drop this shim once the import lands in audit.py.
+if not hasattr(audit, "task_touches"):
+    audit.task_touches = specstate.task_touches
 
 
 def run_audit(*argv):
@@ -764,6 +787,436 @@ class DodGate4DelegationTests(unittest.TestCase):
         self.assertNotIn('re.split(r"^## "', source)          # phase-section scan
         self.assertNotIn('startswith("phase")', source)       # phase filter
         self.assertNotIn('re.split(r"^(?=- \\[)"', source)    # checkbox-block split
+
+
+class MutationEngineTests(unittest.TestCase):
+    """D-027: audit.py mutate's stdlib AST engine — site discovery
+    (kinds, lines, descriptions) and one-flip-per-mutant source
+    generation, with the engine's deliberate blind spots pinned
+    (chained compares, bool-typed and huge constants)."""
+
+    SNIPPET = (
+        "def f(a, b):\n"
+        "    if a < b and a != 0:\n"
+        "        return a + b\n"
+        "    return None\n"
+    )
+    EXPECTED_SITES = {
+        (2, "Lt→GtE"),      # compare swap
+        (2, "And→Or"),      # boolop swap
+        (2, "NotEq→Eq"),    # compare swap
+        (2, "const 0→1"),   # the literal 0 in the NotEq compare
+        (3, "Add→Sub"),     # binop swap
+    }
+
+    def test_mutation_sites_kinds_lines_descriptions(self):
+        sites = audit.mutation_sites(ast.parse(self.SNIPPET))
+        self.assertEqual({(ln, desc) for _, _, ln, desc in sites},
+                         self.EXPECTED_SITES)
+        self.assertEqual(sorted(k for k, _, _, _ in sites),
+                         ["binop", "boolop", "compare", "compare", "const"])
+        # every site carries its node and a real line number
+        for kind, node, ln, desc in sites:
+            self.assertIsInstance(node, ast.AST)
+            self.assertEqual(ln, 3 if kind == "binop" else 2)
+
+    def test_python_mutants_flip_exactly_one_site_each(self):
+        mutants, err = audit.python_mutants(self.SNIPPET, "x.py")
+        self.assertIsNone(err)
+        self.assertEqual({(ln, desc) for ln, desc, _ in mutants},
+                         self.EXPECTED_SITES)
+        self.assertEqual(len(mutants), len(self.EXPECTED_SITES))
+        # fresh parse per mutant: each source is valid Python, differs
+        # from the original, and flips exactly one site
+        for ln, desc, mutated in mutants:
+            ast.parse(mutated)
+            self.assertNotEqual(mutated, self.SNIPPET, desc)
+        add_sub = next(m for _, d, m in mutants if d == "Add→Sub")
+        self.assertIn("a - b", add_sub)
+        self.assertNotIn("a + b", add_sub)
+        lt_gte = next(m for _, d, m in mutants if d == "Lt→GtE")
+        self.assertIn("a >= b", lt_gte)
+        and_or = next(m for _, d, m in mutants if d == "And→Or")
+        self.assertIn("a < b or a != 0", and_or)
+        const = next(m for _, d, m in mutants if d == "const 0→1")
+        self.assertIn("a != 1", const)
+        self.assertNotIn("a != 0", const)
+
+    def test_const_rules_int_only_bounded_small(self):
+        text = "n = 41\nflag = True\nbig = 1000000\nhuge = 999999\ns = '1'\n"
+        mutants, err = audit.python_mutants(text, "x.py")
+        self.assertIsNone(err)
+        descs = {d for _, d, _ in mutants}
+        self.assertEqual(descs, {"const 41→42", "const 999999→1000000"})
+        self.assertTrue(all(ln == 1 or ln == 4 for ln, _, _ in mutants))
+
+    def test_chained_compare_is_not_mutated(self):
+        mutants, err = audit.python_mutants(
+            "def f(a, b, c):\n    return a < b < c\n", "x.py")
+        self.assertIsNone(err)
+        self.assertEqual(mutants, [])
+
+    def test_parse_error_returns_no_mutants_and_the_message(self):
+        mutants, err = audit.python_mutants("def oops(:\n", "broken.py")
+        self.assertEqual(mutants, [])
+        self.assertIn("broken.py", err)
+        self.assertIn("not valid Python", err)
+
+
+def make_git_spec_repo(tmp, spec_files):
+    """The sanctioned real-git fixture for the mutate mode: git init, the
+    spec docset committed as the base, implementation files added after
+    (untracked, so they sit on the changed surface). Returns
+    (spec_dir, repo, base_sha)."""
+    repo = Path(tmp)
+    spec_dir = repo / "specs" / "demo"
+    spec_dir.mkdir(parents=True)
+    for name, text in spec_files.items():
+        (spec_dir / name).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=Test",
+         "-c", "user.email=test@example.invalid", "commit", "-qm", "base"],
+        check=True)
+    base = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True, check=True).stdout.strip()
+    return spec_dir, repo, base
+
+
+CALC_SRC = "def add(a, b):\n    return a + b\n"
+ADD_TC = ('### TC-001 — add\n'
+          '**Pass condition**: `python3 -c "from calc import add; '
+          'assert add(2, 3) == 5"` exits 0.\n')
+OBSERVATION_TC = ("### TC-001 — screen\n"
+                  "**Pass condition**: the result appears on screen.\n")
+
+
+class MutationModeTests(unittest.TestCase):
+    """D-027: audit.py mutate end to end — a real temp git repo, the auto
+    TC commands really executed as the kill suite, mutants written in
+    place and byte-restored, the cap and every loud SKIPPED path."""
+
+    def test_operator_flip_the_suite_catches_reads_killed(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec, repo, base = make_git_spec_repo(td, {"test.md": ADD_TC})
+            (repo / "calc.py").write_text(CALC_SRC)
+            code, out = run_audit("mutate", str(spec), "--repo", str(repo),
+                                  "--base", base)
+        self.assertEqual(code, 0, out)
+        self.assertIn("1 changed implementation file(s)", out)
+        self.assertIn("kill suite = 1 auto TC command(s), cap 40 mutants", out)
+        self.assertIn("KILLED   calc.py:2  Add→Sub", out)
+        self.assertIn("exit 1 in", out)
+        self.assertIn("1/1 mutants killed (100%) · 0 survived", out)
+        self.assertNotIn("SURVIVED", out)
+
+    def test_dead_code_constant_reads_survived_for_adjudication(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec, repo, base = make_git_spec_repo(td, {"test.md": PASSING_TC})
+            (repo / "dead.py").write_text("x = 1 + 1\n")
+            code, out = run_audit("mutate", str(spec), "--repo", str(repo),
+                                  "--base", base)
+        self.assertEqual(code, 0, out)
+        # three mutants (Add→Sub plus two const bumps), all survived: the
+        # green suite distinguishes none of them — a test gap, not a pass
+        self.assertEqual(out.count("SURVIVED dead.py:1"), 3)
+        self.assertIn("const 1→2", out)
+        self.assertIn("suite stayed green", out)
+        self.assertIn("0/3 mutants killed (0%) · 3 survived", out)
+        self.assertIn("adjudicate the survivors", out)
+        self.assertNotIn("KILLED", out)
+
+    def test_original_bytes_restored_after_the_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec, repo, base = make_git_spec_repo(td, {"test.md": ADD_TC})
+            p = repo / "calc.py"
+            p.write_text(CALC_SRC)
+            before = p.read_bytes()
+            code, out = run_audit("mutate", str(spec), "--repo", str(repo),
+                                  "--base", base)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(p.read_bytes(), before)
+
+    def test_max_mutants_caps_the_run_with_the_stop_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec, repo, base = make_git_spec_repo(td, {"test.md": PASSING_TC})
+            (repo / "dead.py").write_text("x = 1 + 1\n")  # 3 sites
+            code, out = run_audit("mutate", str(spec), "--repo", str(repo),
+                                  "--base", base, "--max-mutants", "1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("STOP     mutant cap 1 reached", out)
+        self.assertEqual(out.count("SURVIVED"), 1)
+        self.assertIn("0/1 mutants killed (0%) · 1 survived", out)
+
+    def test_no_auto_tc_commands_skips_loudly(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec, repo, base = make_git_spec_repo(
+                td, {"test.md": OBSERVATION_TC})
+            (repo / "calc.py").write_text(CALC_SRC)
+            code, out = run_audit("mutate", str(spec), "--repo", str(repo),
+                                  "--base", base)
+        self.assertEqual(code, 0, out)
+        self.assertIn("no auto TC commands in test.md — nothing to kill "
+                      "mutants with", out)
+        self.assertNotIn("KILLED", out)
+
+    def test_no_changed_non_test_py_files_skips(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec, repo, base = make_git_spec_repo(td, {"test.md": ADD_TC})
+            code, out = run_audit("mutate", str(spec), "--repo", str(repo),
+                                  "--base", base)
+        self.assertEqual(code, 0, out)
+        self.assertIn("no changed non-test .py files vs", out)
+
+    def test_non_git_repo_skips(self):
+        with unittest.mock.patch.object(audit.subprocess, "run", fake_run()):
+            code, out = run_audit("mutate", str(FIXTURE))
+        self.assertEqual(code, 0, out)
+        self.assertIn("mutate: SKIPPED (not a git repo)", out)
+
+
+TOUCH_TASK = """## Phase 1
+
+- [ ] T001 build the calculator (FR-001)
+  - Touches:
+    - `calc.py`
+"""
+
+
+def cov_spec(tmp, spec_md="", task_md=TOUCH_TASK):
+    """A spec dir whose task Touches <tmp>/calc.py, plus that module."""
+    spec_dir = tmp / "specs" / "demo"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "task.md").write_text(task_md, encoding="utf-8")
+    (spec_dir / "spec.md").write_text(spec_md, encoding="utf-8")
+    (tmp / "calc.py").write_text(CALC_SRC, encoding="utf-8")
+    return spec_dir
+
+
+COV_TABLE = (
+    "Name                Stmts   Miss  Cover   Missing\n"
+    "------------------------------------------------\n"
+    "calc.py                 4      2    50%   2\n"
+    "------------------------------------------------\n"
+    "TOTAL                   4      2    50%\n"
+)
+
+
+def fake_cov_run(stdout=COV_TABLE, returncode=0):
+    """subprocess.run stand-in answering the pytest-cov invocation with a
+    fixed term report; anything else fails loudly (the mode under test
+    spawns exactly one suite run per coverage pass)."""
+    def fake(cmd, *a, **k):
+        if isinstance(cmd, list) and "-m" in cmd and "pytest" in cmd:
+            return subprocess.CompletedProcess(cmd, returncode, stdout, "")
+        raise AssertionError(f"unexpected subprocess call: {cmd}")
+    return fake
+
+
+class CoverageModeTests(unittest.TestCase):
+    """D-027: audit.py coverage — the term-table parser, the spec.md
+    floor (--threshold override), target resolution from task.md
+    `Touches:`, and every verdict (PASS/FAIL/UNMEASURED/red suite/
+    tooling-absent SKIPPED). The tooling probe and the suite run are
+    patched; the live end-to-end path is LiveCoverageTests below."""
+
+    def run_coverage(self, spec, repo, *extra, table=COV_TABLE, rc=0):
+        with unittest.mock.patch.object(audit, "_cov_tooling",
+                                        return_value=True), \
+             unittest.mock.patch.object(audit.subprocess, "run",
+                                        fake_cov_run(stdout=table,
+                                                     returncode=rc)):
+            return run_audit("coverage", str(spec), "--repo", str(repo),
+                             *extra)
+
+    def test_parse_cov_table_reads_the_term_report(self):
+        self.assertEqual(audit.parse_cov_table(COV_TABLE), {"calc.py": 50})
+        self.assertEqual(audit.parse_cov_table(""), {})
+
+    def test_parse_cov_table_skips_name_total_and_prose(self):
+        text = ("Name                 Stmts   Miss  Cover   Missing\n"
+                "----------------------------------------\n"
+                "src/a.py                 2      0   100%\n"
+                "----------------------------------------\n"
+                "TOTAL                    2      0   100%\n"
+                "some prose line without numbers\n")
+        self.assertEqual(audit.parse_cov_table(text), {"src/a.py": 100})
+
+    def test_parse_cov_table_paths_with_spaces(self):
+        text = "my module.py             4      1    75%   7\n"
+        self.assertEqual(audit.parse_cov_table(text), {"my module.py": 75})
+
+    def test_tooling_absent_skips_never_false_green(self):
+        def no_tooling(cmd, *a, **k):
+            return subprocess.CompletedProcess(
+                cmd, 1, "", "ModuleNotFoundError: No module named 'pytest'")
+
+        with tempfile.TemporaryDirectory() as td:
+            spec = cov_spec(Path(td))
+            with unittest.mock.patch.object(audit.subprocess, "run",
+                                            no_tooling):
+                code, out = run_audit("coverage", str(spec),
+                                      "--repo", str(Path(td)))
+        self.assertEqual(code, 0, out)
+        self.assertIn("coverage: SKIPPED (pytest or pytest-cov not installed "
+                      "in this repo)", out)
+        self.assertIn("never a false green", out)
+
+    def test_floor_reads_spec_md_and_threshold_overrides_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec = cov_spec(Path(td), spec_md="# Spec\n**Coverage**: 90\n")
+            code, out = self.run_coverage(spec, Path(td))
+            self.assertEqual(code, 1, out)
+            self.assertIn("floor 90% over 1 intended file(s)/dir(s)", out)
+            self.assertIn("FAIL  calc.py: 50% < floor 90%", out)
+            code, out = self.run_coverage(spec, Path(td), "--threshold", "40")
+        self.assertEqual(code, 0, out)
+        self.assertIn("floor 40%", out)
+        self.assertIn("PASS  calc.py: 50%", out)
+        self.assertIn("PASS — 1/1 intended file(s)/dir(s) at or above 40%", out)
+
+    def test_pytest_invocation_shape(self):
+        # a file-shaped target widens to its parent directory: pytest-cov
+        # reads a non-directory --cov argument as a module name, so a bare
+        # `calc.py` would collect nothing on modern pytest-cov
+        calls = []
+        real = subprocess.run
+
+        def spy(cmd, *a, **k):
+            calls.append(cmd)
+            return real(cmd, *a, **k)
+
+        with tempfile.TemporaryDirectory() as td:
+            spec = cov_spec(Path(td))
+            with unittest.mock.patch.object(audit, "_cov_tooling",
+                                            return_value=True), \
+                 unittest.mock.patch.object(audit.subprocess, "run", spy):
+                run_audit("coverage", str(spec), "--repo", str(Path(td)))
+        self.assertEqual(
+            calls, [[sys.executable, "-m", "pytest", "--cov=.",
+                     "--cov-report=term", "-q"]])
+
+    def test_unmeasured_touched_file_fails(self):
+        table = ("Name                Stmts   Miss  Cover   Missing\n"
+                 "other.py                2      0   100%\n")
+        with tempfile.TemporaryDirectory() as td:
+            spec = cov_spec(Path(td))
+            code, out = self.run_coverage(spec, Path(td), table=table)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  calc.py: UNMEASURED", out)
+        self.assertIn("in Touches but absent from the coverage report", out)
+
+    def test_directory_target_reads_its_weakest_file(self):
+        table = ("Name                Stmts   Miss  Cover   Missing\n"
+                 "pkg/strong.py           2      0   100%\n"
+                 "pkg/weak.py             4      2    50%   3-4\n")
+        task = TOUCH_TASK.replace("`calc.py`", "`pkg/`")
+        with tempfile.TemporaryDirectory() as td:
+            spec = cov_spec(Path(td), task_md=task)
+            pkg = Path(td) / "pkg"
+            pkg.mkdir()
+            (pkg / "strong.py").write_text("x = 1\n", encoding="utf-8")
+            (pkg / "weak.py").write_text("x = 2\n", encoding="utf-8")
+            code, out = self.run_coverage(spec, Path(td), table=table)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  pkg: 50% < floor 80%", out)
+
+    def test_red_suite_fails_the_mode_outright(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec = cov_spec(Path(td))
+            code, out = self.run_coverage(spec, Path(td), rc=1,
+                                          table="1 failed in 0.01s\n")
+        self.assertEqual(code, 1, out)
+        self.assertIn("coverage: FAIL — the repo suite is red", out)
+        self.assertIn("coverage of a failing suite is not evidence", out)
+
+    def test_no_resolvable_targets_is_a_clean_noop(self):
+        with tempfile.TemporaryDirectory() as td:
+            spec = cov_spec(Path(td), task_md=TICKED_TASK)  # no Touches
+            code, out = self.run_coverage(spec, Path(td))
+        self.assertEqual(code, 0, out)
+        self.assertIn("no resolvable intended files in task.md "
+                      "`Touches:`", out)
+
+
+def cov_tooling_present():
+    """The same probe mode_coverage runs — the live tests below skip on
+    machines where the repo's pytest/pytest-cov are not importable (the
+    tooling is optional, never installed by us)."""
+    return all(
+        subprocess.run([sys.executable, "-c", f"import {m}"],
+                       capture_output=True).returncode == 0
+        for m in ("pytest", "pytest_cov"))
+
+
+@unittest.skipUnless(cov_tooling_present(),
+                     "pytest/pytest-cov not importable in this environment")
+class LiveCoverageTests(unittest.TestCase):
+    """The one live coverage run: real pytest-cov over a tiny repo whose
+    task Touches its package directory (the canonical `Touches:` shape) —
+    at-floor passes, an above-actual threshold fails. The weakest file in
+    the target speaks: the untested double() drags pkg/ to 75%."""
+
+    def test_at_floor_passes_and_above_actual_threshold_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            spec = cov_spec(repo, spec_md="# Spec\n**Coverage**: 40\n",
+                            task_md=TOUCH_TASK.replace("`calc.py`", "`pkg/`"))
+            pkg = repo / "pkg"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("", encoding="utf-8")
+            (pkg / "calc.py").write_text(
+                "def add(a, b):\n    return a + b\n\n\n"
+                "def double(a):\n    return a * 2\n", encoding="utf-8")
+            (repo / "test_calc.py").write_text(
+                "from pkg.calc import add\n\n\n"
+                "def test_add():\n    assert add(2, 3) == 5\n",
+                encoding="utf-8")
+            code, out = run_audit("coverage", str(spec), "--repo", str(repo))
+            self.assertEqual(code, 0, out)
+            self.assertIn("floor 40%", out)
+            self.assertIn("PASS  pkg: 75%", out)
+            code, out = run_audit("coverage", str(spec), "--repo", str(repo),
+                                  "--threshold", "90")
+            self.assertEqual(code, 1, out)
+            self.assertIn("75% < floor 90%", out)
+
+
+class MutateCoverageArgTests(unittest.TestCase):
+    """D-027's new modes parse like the rest: mutate/coverage accepted
+    through the extended parse_args tuple, bad flag values are usage
+    errors (exit 2, doc printed)."""
+
+    def test_new_modes_parse_with_defaults(self):
+        self.assertEqual(
+            audit.parse_args(["mutate", "s"]),
+            ("mutate", "s", None, None, False, False, 40, None))
+        self.assertEqual(
+            audit.parse_args(["coverage", "s"]),
+            ("coverage", "s", None, None, False, False, 40, None))
+
+    def test_mutate_and_coverage_flags_parse(self):
+        parsed = audit.parse_args(
+            ["mutate", "s", "--max-mutants", "7", "--repo", "r",
+             "--base", "abc1234"])
+        self.assertEqual(parsed, ("mutate", "s", "r", "abc1234", False,
+                                  False, 7, None))
+        parsed = audit.parse_args(["coverage", "s", "--threshold", "55"])
+        self.assertEqual(parsed[7], 55)
+
+    def test_non_int_max_mutants_is_a_usage_error(self):
+        # bad flag values fail the parse silently: exit 2, no doc, no
+        # partial run (unlike unknown modes, which print the usage doc)
+        code, out = run_audit("mutate", "s", "--max-mutants", "lots")
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+
+    def test_non_int_threshold_is_a_usage_error(self):
+        code, out = run_audit("coverage", "s", "--threshold", "high")
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
 
 
 class MainArgvTests(unittest.TestCase):

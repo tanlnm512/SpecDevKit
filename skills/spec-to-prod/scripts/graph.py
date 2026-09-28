@@ -58,9 +58,11 @@ Modes:
                  (files changed since the survey's stale baseline) so a
                  converge re-survey merges instead of rebuilding. At effort
                  tier `standard` (spec.md `**Effort**: standard`) the
-                 plan ∥ tech ∥ qa wave collapses into ONE merged designer
-                 payload authoring plan/tech-spec/test/task in a single
-                 spawn (D-024); while delivery is pending (execute done,
+                 plan ∥ tech wave (plus the tasks wave it feeds) collapses
+                 into ONE merged designer payload authoring
+                 plan/tech-spec/task in a single spawn, with qa as its own
+                 implementation-blind spawn alongside (D-024, D-027);
+                 while delivery is pending (execute done,
                  delivery not yet recorded), the reviewer-diff.md payload
                  (implementation-diff mode) is prepared the same way the
                  undetermined gate's researcher payload is.
@@ -687,20 +689,19 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
         lines = [
             f"- spec_dir: {spec_dir} (read spec.md, survey.md, and "
             "research.md yourself)",
-            "- Tier: standard (D-024) — ONE spawn authors the design "
-            "docset in this order: plan.md → tech-spec.md → test.md → "
-            "task.md. The multi-agent wave is collapsed at this tier; "
-            "check.py and the approve gate are not.",
+            "- Tier: standard (D-024, amended by D-027) — ONE spawn authors "
+            "plan.md → tech-spec.md → task.md in that order. The plan/tech "
+            "wave is collapsed at this tier; check.py, the approve gate, "
+            "and qa independence are not.",
             "- Team context: none recorded — assume solo, PR-per-milestone "
             "unless the spawn digest says otherwise",
             "- Architecture constraints: "
             + (f"specs/CONSTITUTION.md at {constitution}"
                if constitution.exists()
                else "none recorded (no specs/CONSTITUTION.md)"),
-            "- Blindness trade-off (accepted at this tier, D-024): test.md "
-            "is authored by the same spawn that wrote plan/tech — derive "
-            "TCs strictly from spec.md's acceptance criteria and survey "
-            "evidence, never from what the plan found convenient to test",
+            "- test.md belongs to the parallel qa spawn — NEVER write, "
+            "read, or reference it; qa stays implementation-blind at "
+            "every tier (D-027)",
         ]
     elif node == "tick-commit":
         # The reviewer's diff anchor: the approval freeze's Approved-at
@@ -739,10 +740,12 @@ def frontier_payloads(state: dict, spec_dir: Path,
     (execute done, delivery not yet recorded) — the implementation-diff
     reviewer payload (the instruments of a `run` decision and of the
     pre-tick review; --run still pauses at the tick-commit gate and never
-    spawns them). D-024: at effort tier `standard` the
-    plan ∥ tech ∥ qa wave (plus the tasks wave it feeds) collapses into ONE
-    merged design payload — one spawn writes plan.md, tech-spec.md,
-    test.md, and task.md; docset, check.py, and the gates are unchanged.
+    spawns them). D-024 (amended by D-027): at effort tier `standard` the
+    plan ∥ tech wave (plus the tasks wave it feeds) collapses into ONE
+    merged design payload — one spawn writes plan.md, tech-spec.md, and
+    task.md; qa stays its own implementation-blind spawn in the same
+    wave, so test.md always comes from qa alone. Docset, check.py, and
+    the gates are unchanged.
     `merge=False` (the --repair path) keeps every payload single-role —
     a repair run must never re-author the whole docset."""
     items: list[dict] = []
@@ -753,7 +756,7 @@ def frontier_payloads(state: dict, spec_dir: Path,
     for node in state["frontier"]:
         if node not in AGENT_BRIEFS:
             continue
-        if merge_design and node in ("plan", "tech", "qa"):
+        if merge_design and node in ("plan", "tech"):
             continue
         role, brief = AGENT_BRIEFS[node]
         if node == "execute":
@@ -777,7 +780,7 @@ def frontier_payloads(state: dict, spec_dir: Path,
         items.insert(0, {
             "node": "design", "role": "designer", "brief": None,
             "briefs": [AGENT_BRIEFS[n][1]
-                       for n in ("plan", "tech", "qa", "tasks")],
+                       for n in ("plan", "tech", "tasks")],
             "filename": "designer.md", "entry": None,
         })
     if state["nodes"]["research-gate"]["state"] == UNDETERMINED:
@@ -807,7 +810,7 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
                 return None
             bodies.append(f"### agents/{bf} (body; frontmatter stripped)\n\n"
                           + strip_frontmatter(raw))
-        brief_title = ("## Briefs — the four design roles in authoring "
+        brief_title = ("## Briefs — the three design roles in authoring "
                        "order (bodies; frontmatter stripped)")
         brief_body = "\n\n".join(bodies)
     else:
@@ -992,7 +995,7 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     human gate can never be worked past by launching), then the payload
     count from frontier_payloads (read-only: nothing is written). Only
     `wave` — a multi-payload wave, any execute span, or the merged design
-    payload (four briefs authoring the docset, D-024) — says launch."""
+    payload (briefs authoring the docset, D-024/D-027) — says launch."""
     n = state["nodes"]
     advisory = {"spec_dir": str(spec_dir),
                 "launch_workflow": False, "gate": None,
@@ -1021,14 +1024,16 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     payloads = frontier_payloads(state, spec_dir, repo)
     advisory["payloads"] = len(payloads)
     if len(payloads) == 1 and payloads[0]["node"] == "design":
-        # the merged designer (D-024) is one payload but not a light node:
-        # four briefs + protocol authoring the whole docset — the design
-        # stretch stays a workflow wave, only collapsed to one spawn
+        # the merged designer (D-024, D-027) is one payload but not a
+        # light node: three briefs + protocol authoring plan, tech-spec,
+        # and task — the design stretch stays a workflow wave, only
+        # collapsed to one spawn (qa already done — its own payload rides
+        # alongside when it isn't)
         return {**advisory, "weight": "wave", "launch_workflow": True,
-                "reason": "one merged design payload — four briefs "
-                          "(plan/tech/qa/tasks) authoring plan, tech-spec, "
-                          "test, and task (D-024) — heavy span, launch the "
-                          "spec-run workflow"}
+                "reason": "one merged design payload — three briefs "
+                          "(plan/tech/tasks) authoring plan, tech-spec, "
+                          "and task (D-024, D-027) — heavy span, launch "
+                          "the spec-run workflow"}
     if len(payloads) == 1 and payloads[0]["node"] != "execute":
         return {**advisory, "weight": "single",
                 "reason": "one light doc node ("

@@ -44,5 +44,13 @@ security, rollback, maintainability, or semantic conformance.
   D-### ruling — explicit, signed-for debt, not swept.
 - Bugfix specs add the revert-proof: revert the fix, watch the repro TC
   fail, restore, watch it pass — the strongest single evidence line.
+- Mutation honesty (D-027): `audit.py mutate <spec-dir>` flips
+  operators/constants in the changed implementation files and re-runs the
+  auto TCs per mutant — every SURVIVED mutant is a test gap to adjudicate;
+  a suite that kills its mutants is what makes gate 1 mean something.
+- Coverage floor (D-027): `audit.py coverage <spec-dir>` checks the
+  tasks' `Touches:` files against spec.md's `**Coverage**:` floor
+  (default 80%) when the repo ships pytest-cov — SKIPPED otherwise, never
+  a false green.
 - Two levels, deliberately: a task's tick is evidence collection, its
   done-note the proof; the DoD applies to the whole plan, once.

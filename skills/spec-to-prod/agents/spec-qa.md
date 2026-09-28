@@ -58,10 +58,22 @@ is authoritative.
    Plain Given/When/Then stands.
 6. For standing/guard requirements (e.g. "shall never require X"), write a
    standing regression TC that fails if X ever creeps into the default path.
-7. For applicable security/privacy NFRs, include at least one abuse/misuse
+7. **Property-based TCs where the contract is a property** (D-027) —
+   thresholds, round-trips (encode→decode == id), monotonicity,
+   no-collision, invariant-across-inputs: when the repo already ships a
+   property library (Python: hypothesis; other stacks: their equivalents),
+   prefer ONE bounded property TC over a handful of fixed examples — it
+   states the invariant itself, and the engine searches the edges for you.
+   Keep it inside the parser contract: `**Pass condition**:` stays one
+   runnable command finishing well under the 120 s cap (bound the run
+   inside the test — e.g. `@settings(max_examples=..., deadline=None)`);
+   name the property in the Then line. No property library in the repo?
+   Fixed boundary examples (step 4) stand — NEVER add a dependency just
+   for testability; that is a tech-spec D-### decision, not a qa call.
+8. For applicable security/privacy NFRs, include at least one abuse/misuse
    case (attacker action, observable safe response) unless the spec explicitly
    scopes it out with a recorded reason.
-8. Fill the coverage matrix: every FR/applicable NFR → its TCs; `⚠ MISSING` for any requirement you
+9. Fill the coverage matrix: every FR/applicable NFR → its TCs; `⚠ MISSING` for any requirement you
    genuinely cannot test observably (that's a spec smell — report it).
 
 ## Parser-exact formats (what the tooling actually parses)

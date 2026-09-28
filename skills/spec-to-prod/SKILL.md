@@ -15,7 +15,7 @@ description: >-
   spec").
 metadata:
   owner: platform-core
-  version: "2.12.0"
+  version: "2.13.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -211,11 +211,13 @@ and user approval intact. The tier is
 mechanical (D-024): spec.md's `**Effort**:` header field
 (`tiny | standard | large`; docsets without the field read `large` — the
 full-wave legacy behavior), chosen with the user at authoring and read by
-graph.py: at `standard`, `--emit-spawns` collapses the plan ∥ tech ∥ qa
-wave (plus the tasks wave it feeds) into ONE merged designer payload —
-one spawn authors plan.md → tech-spec.md → test.md → task.md in that
-order, carrying all four briefs and the shared protocol once; a partial
-write self-heals (whatever doc is missing still spawns individually the
+graph.py: at `standard`, `--emit-spawns` collapses the plan ∥ tech wave
+(plus the tasks wave it feeds) into ONE merged designer payload — one
+spawn authors plan.md → tech-spec.md → task.md in that order, carrying
+three briefs and the shared protocol once; **qa stays its own
+implementation-blind spawn in the same wave** (D-027), so test.md always
+comes from qa alone at every tier. A partial write self-heals (whatever
+doc is missing still spawns individually the
 next wave). `--repair` always emits single-role payloads.
 
 - **Tiny** (≤1 applicable requirement, ≤2 intended files, no unknowns, no
@@ -223,12 +225,11 @@ next wave). `--repair` always emits single-role payloads.
   execute inline or with one implementer, and run the same mechanical gates.
   No research spawn; no parallel wave.
 - **Standard — small and medium** (≤3 requirements or one area): the merged
-  design spawn above; a one-known-pattern change may go further inline
-  (survey inline, execution inline where exclusive ownership is
-  preserved). The tier's recorded trade-off: test.md shares its author
-  with plan/tech (no qa blindness) — the payload instructs deriving TCs
-  strictly from spec.md's acceptance criteria and survey evidence, and
-  check.py + the approve gate are unchanged.
+  design spawn above with qa alongside; a one-known-pattern change may go
+  further inline (survey inline, execution inline where exclusive
+  ownership is preserved). check.py and the approve gate are unchanged,
+  and qa independence is no longer traded away at this tier (D-027
+  amended D-024: the designer never writes test.md).
 - **Large / high-risk** (multi-area, external input, auth, persistence,
   migration, performance, security/privacy NFR, research-heavy): full waves,
   full depth, reviewer before implementation, implementation-diff reviewer
@@ -701,7 +702,12 @@ it, and the user reads it in the delivery summary.
    unexplained is a finding, not noise — flaky ≠ ignorable: fix the flake
    or park it with a D-###; a waived flake is a lying green.
 8. **Regression gate**: the repo's broader check per conventions (full
-   suite, impacted subset, or lint/format gates), green.
+   suite, impacted subset, or lint/format gates), green. Optional floor
+   (D-027): `scripts/audit.py coverage <spec-dir>` runs that same suite
+   under the repo's own pytest-cov and checks every task's `Touches:`
+   paths against spec.md's `**Coverage**:` floor (default 80) — without
+   coverage tooling it degrades to an explicit SKIPPED, never a false
+   green.
 9. **Review instruments** (findings adjudicated before the ticks —
    instruments, not gates):
    - **Scope diff** — the diff since the approval freeze's Approved-at
@@ -716,6 +722,13 @@ it, and the user reads it in the delivery summary.
      commented-out code, scratch files, or leftover TODOs from any task
      (unless a task's FR explicitly requires logging) — `scripts/audit.py
      clean` lists the suspects in the added lines; you adjudicate.
+   - **Mutation testing** (D-027) — `scripts/audit.py mutate <spec-dir>`
+     flips operators/constants one at a time in the changed
+     implementation files and re-runs the auto TC commands after each
+     mutant: a mutant the whole suite survives is a test gap to
+     adjudicate (no test distinguishes it) — the strongest single check
+     that a green suite means anything. Stdlib-only engine; `--max-mutants`
+     caps the run (default 40).
    - **DoD scorecard** — `scripts/audit.py dod <spec-dir>` prints the
      mechanical gates of `gates/dod.md` (proofs, completeness, contract,
      scope, hygiene) in one pass; judgment gates print MANUAL.

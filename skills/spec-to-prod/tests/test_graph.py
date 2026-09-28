@@ -2128,7 +2128,8 @@ class Graph019LaunchCheckTests(unittest.TestCase):
 
 
 class Graph020PipelineShorteningTests(unittest.TestCase):
-    """GRAPH-020: the pipeline shapes — mechanical effort tiering (D-024),
+    """GRAPH-020: the pipeline shapes — mechanical effort tiering (D-024,
+    amended by D-027: the standard-tier design wave is designer ∥ qa),
     the delivery-pending reviewer payload with its approval-freeze base,
     the tick-commit pause's prove-and-tick need, and the scaffold's
     skip-marker research default (D-025)."""
@@ -2175,32 +2176,52 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         # a fresh scaffold reads the template's default: standard
         self.assertEqual(compute(self.fresh)["effort"], "standard")
 
-    def test_standard_collapses_the_design_wave_into_one_payload(self):
+    def test_standard_collapses_the_design_wave_to_designer_plus_qa(self):
+        # D-024 as amended by D-027: the standard tier's plan ∥ tech wave
+        # (plus the tasks wave it feeds) collapses into ONE merged designer
+        # payload — but qa is NOT collapsed into it: test.md always comes
+        # from an implementation-blind qa spawn of its own, riding the
+        # same wave
         lines = self.payload_lines(self.standard)
-        self.assertEqual(len(lines), 1, lines)
+        self.assertEqual(len(lines), 2, lines)
         self.assertIn("designer.md", lines[0])
         self.assertIn("role: designer", lines[0])
         self.assertIn("node: design", lines[0])
+        self.assertIn("qa.md", lines[1])
+        self.assertIn("role: qa", lines[1])
+        self.assertIn("node: qa", lines[1])
         text = next(self.standard.glob("spawns/*/designer.md")).read_text(
             encoding="utf-8")
-        self.assertEqual(text.count("### agents/"), 4)
+        # three briefs in authoring order, the protocol exactly once
+        self.assertEqual(text.count("### agents/"), 3)
         self.assertEqual(text.count("## Shared protocol"), 1)
+        self.assertIn("## Briefs — the three design roles", text)
         self.assertIn("Tier: standard", text)
+        self.assertIn("test.md belongs to the parallel qa spawn", text)
+        # qa's own payload keeps the implementation-blindness contract
+        qa_text = next(self.standard.glob("spawns/*/qa.md")).read_text(
+            encoding="utf-8")
+        self.assertIn("never tech-spec.md or plan.md", qa_text)
 
     def test_merged_missing_brief_skip_names_the_real_file(self):
         # the merged designer item's brief field is None (it carries
         # briefs[]): a missing brief file must be named in the skip line,
-        # never "agents/None"
+        # never "agents/None" — here one of the designer's own three
+        # briefs and qa's brief are both unreadable, so every payload
+        # takes the skip path
         real = graph.read_raw
         buf = io.StringIO()
         with unittest.mock.patch.object(
                 graph, "read_raw",
-                lambda p: None if p.name == "spec-qa.md" else real(p)), \
+                lambda p: None if p.name in ("spec-tech.md", "spec-qa.md")
+                else real(p)), \
              contextlib.redirect_stdout(buf):
             written = graph.write_wave_payloads(
                 compute(self.standard), self.standard,
                 self.standard.parents[1], self._tmp / "skip-wave")
         self.assertEqual(written, [])
+        self.assertIn("SKIPPED (brief not found: agents/spec-tech.md)",
+                      buf.getvalue())
         self.assertIn("SKIPPED (brief not found: agents/spec-qa.md)",
                       buf.getvalue())
         self.assertNotIn("agents/None", buf.getvalue())
@@ -2222,18 +2243,36 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertIn("repair: plan already in the frontier", r.stdout)
 
     def test_standard_design_stretch_launches_as_a_wave(self):
-        # the merged designer is ONE payload but not a light node — the
-        # default tier's design stretch stays a workflow wave (D-024),
-        # never a "one light doc node" inline advisory
+        # D-027: the default tier's design stretch is TWO payloads — the
+        # merged designer plus its parallel implementation-blind qa — so
+        # it is never a "one light doc node" inline advisory: the wave
+        # launches (D-024's collapse, qa's independence intact)
         r = run_cli(self.standard, "--launch-check")
         self.assertEqual(r.returncode, 0, r.stderr)
         adv = json.loads(r.stdout)
         self.assertEqual(adv["weight"], "wave")
         self.assertTrue(adv["launch_workflow"])
-        self.assertEqual(adv["payloads"], 1)
+        self.assertEqual(adv["payloads"], 2)
         self.assertEqual(sorted(adv["frontier_agents"]),
                          ["plan", "qa", "tech"])
-        self.assertIn("merged design payload", adv["reason"])
+        self.assertIn("2 payload(s)", adv["reason"])
+        self.assertIn("heavy span", adv["reason"])
+
+    def test_single_merged_design_payload_still_launches_and_names_briefs(self):
+        # launch-check's single-design-payload branch (D-024/D-027): even
+        # when qa has already ridden ahead and only the merged designer
+        # remains, the design stretch launches — and its reason names the
+        # three briefs, never the old single-brief blindness trade-off
+        with unittest.mock.patch.object(
+                graph, "frontier_payloads",
+                return_value=[{"node": "design", "role": "designer"}]):
+            adv = graph.launch_check(compute(self.standard), self.standard,
+                                     self.standard.parents[1])
+        self.assertEqual(adv["weight"], "wave")
+        self.assertTrue(adv["launch_workflow"])
+        self.assertEqual(adv["payloads"], 1)
+        self.assertIn("three briefs (plan/tech/tasks)", adv["reason"])
+        self.assertNotIn("blindness", adv["reason"])
 
     def test_delivery_pending_prepares_the_reviewer_payload(self):
         lines = self.payload_lines(self.landed)

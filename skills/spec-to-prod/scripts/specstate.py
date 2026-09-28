@@ -95,6 +95,13 @@ LIFECYCLE_VALUES = {
     "delivered": DELIVERED_COMMIT,
 }
 
+# spec.md coverage-floor header: `**Coverage**: 80` (percent sign
+# tolerated, value clamped by the reader) — the minimum line coverage
+# audit.py's coverage mode enforces over the tasks' intended files when
+# the repo ships coverage tooling. Absent → the 80 default.
+COVERAGE_FLOOR = re.compile(
+    r"^\*\*Coverage\*\*\s*:\s*(\d{1,3})\s*%?", re.M)
+
 # survey.md baseline header: `**Baseline**: <version> @ <sha>`, backticks on
 # the sha tolerated; the second shape matches a bare angle-bracketed baseline
 # header carrying a real hash (e.g. `<v2 @ abc1234>`). The unfilled
@@ -188,6 +195,17 @@ def spec_effort(spec_md: str) -> str:
     m = EFFORT_LINE.search(spec_md) if spec_md else None
     word = m.group(1).lower() if m else ""
     return word if word in EFFORT_TIERS else "large"
+
+
+def coverage_floor(spec_md: str, default: int = 80) -> int:
+    """The spec.md coverage floor (`**Coverage**: <int>` percent), clamped
+    to 0–100; `default` (80) when the header is absent — the minimum line
+    coverage audit.py's coverage mode demands over the tasks' intended
+    files."""
+    m = COVERAGE_FLOOR.search(spec_md) if spec_md else None
+    if not m:
+        return default
+    return max(0, min(100, int(m.group(1))))
 
 
 def task_entries(task_md: str) -> list[TaskEntry]:

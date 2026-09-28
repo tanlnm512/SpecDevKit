@@ -4,7 +4,8 @@ specstate.py is the extraction of every doc-state parser check.py's
 monolithic main() and audit.py used to inline: spec Status, task entries
 (including the implemented marker), the Delivered header line, the
 approval-freeze anchor, the survey baseline/items, the researcher-skip
-marker, next-free-ID allocation, ID definitions, and the git availability
+marker, next-free-ID allocation, ID definitions, the coverage-floor
+header (D-027), and the git availability
 probes. Pure functions, stdlib only, no CLI: importing the module must
 produce no output and write nothing (asserted here, SPECSTATE-001), and
 every parser gets a representative case plus its None/missing/empty edge
@@ -253,6 +254,42 @@ class DeliveryStateTests(unittest.TestCase):
         self.assertEqual(specstate.delivery_state("no delivery record\n"),
                          ("missing", None))
         self.assertEqual(specstate.delivery_state(""), ("missing", None))
+
+
+class CoverageFloorTests(unittest.TestCase):
+    """The coverage floor audit.py's coverage mode enforces (D-027):
+    spec.md's `**Coverage**: <int>` header, clamped to 0-100; the 80
+    default when the header is absent. Line-leading bold headers only,
+    like every other doc-state header in this module."""
+
+    def test_absent_header_reads_the_80_default(self):
+        self.assertEqual(specstate.coverage_floor("# Spec, no floor line\n"), 80)
+        self.assertEqual(specstate.coverage_floor(""), 80)
+        self.assertEqual(specstate.coverage_floor("**Covered**: 90\n"), 80)
+
+    def test_absent_header_honors_a_custom_default(self):
+        self.assertEqual(specstate.coverage_floor("", default=60), 60)
+
+    def test_present_values_read_through(self):
+        self.assertEqual(specstate.coverage_floor("**Coverage**: 90\n"), 90)
+        self.assertEqual(specstate.coverage_floor("**Coverage**: 0\n"), 0)
+
+    def test_percent_sign_and_padding_tolerated(self):
+        self.assertEqual(specstate.coverage_floor("**Coverage**: 90%\n"), 90)
+        self.assertEqual(specstate.coverage_floor("**Coverage**:  75 %\n"), 75)
+
+    def test_only_line_leading_bold_header_counts(self):
+        self.assertEqual(
+            specstate.coverage_floor("prose citing **Coverage**: 90 mid-line\n"),
+            80)
+
+    def test_clamped_into_0_100(self):
+        # the regex captures up to three digits; coverage_floor clamps
+        # the value into 0..100 — 999 reads as the 100 ceiling, 0 stays
+        # the floor
+        self.assertEqual(specstate.coverage_floor("**Coverage**: 150\n"), 100)
+        self.assertEqual(specstate.coverage_floor("**Coverage**: 999\n"), 100)
+        self.assertEqual(specstate.coverage_floor("**Coverage**: 100\n"), 100)
 
 
 class SurveyBaselineTests(unittest.TestCase):

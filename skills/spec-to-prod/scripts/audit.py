@@ -7,6 +7,8 @@ their own; findings are adjudicated by the orchestrator).
 Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py clean    [<spec-dir>] [--repo <path>] [--base <rev>]
        audit.py proofs   <spec-dir> [--repo <path>] [--run]
+       audit.py mutate   <spec-dir> [--repo <path>] [--base <rev>] [--max-mutants N]
+       audit.py coverage <spec-dir> [--repo <path>] [--threshold N]
        audit.py dod      <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
        audit.py archived [--repo <path>]
@@ -59,6 +61,33 @@ converge — diffs specs/<name>/survey.md against its last committed
          the drift going unnoticed. Items unchanged or newly improved are
          not listed.
 
+mutate  — mutation testing over the changed implementation files
+         (D-027): flips operators and constants one at a time in every
+         changed non-test .py file vs base (default: the approval
+         freeze's Approved-at SHA) and re-runs the auto TC commands from
+         test.md after each mutant. A mutant that turns the suite red is
+         KILLED; one the whole suite survives is SURVIVED — no test in
+         the suite distinguishes it, a test gap to adjudicate, not a
+         pass. Stdlib-only AST engine (compare/boolean/arithmetic
+         operator swaps, small-int constant bumps); --max-mutants caps
+         the run (default 40) and a 10-minute wall budget stops it
+         early, listing what stayed untried. Mutants are written in
+         place and byte-restored after each run (a restore that cannot
+         be verified aborts the file loudly); timeouts count as killed
+         (the mutant hung the suite). Report always; exit 0.
+
+coverage — line-coverage floor over the tasks' intended files (D-027):
+         runs the repo suite once under pytest-cov and checks every
+         `Touches:` path from task.md against the floor — spec.md's
+         `**Coverage**: <int>` header (default 80), or --threshold to
+         override for this run. Uses the repo's OWN pytest/pytest-cov
+         when present (optional instruments, never new dependencies);
+         without them it degrades to an explicit SKIPPED, never a
+         false all-green. A red suite fails the mode outright; a touched
+         file missing from the report reads UNMEASURED and fails.
+         Exit 0 = every touched file at/above the floor · 1 = below,
+         unmeasured, or the suite is red.
+
 archived — the archive gate (OpenSpec validate --archived semantics):
          every dir under specs/archive/ must hold a task.md with no
          unticked, unstruck entry — an open box in the archive means a
@@ -79,10 +108,13 @@ read SKIPPED.
 """
 from __future__ import annotations
 
+import ast
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Shared doc-state parsers live in specstate.py beside this script — one
@@ -93,7 +125,13 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from specstate import approval_sha, survey_items, task_entries  # noqa: E402 - the sys.path setup above runs first
+from specstate import (  # noqa: E402 - the sys.path setup above runs first
+    approval_sha,
+    coverage_floor,
+    survey_items,
+    task_entries,
+    task_touches,
+)
 
 # Debug prints across common languages. printf( is deliberately absent —
 # ordinary C output; WARN heuristics err toward recall, the orchestrator
@@ -410,6 +448,352 @@ def mode_proofs(spec_dir: Path, repo: Path, run: bool) -> int:
     return 1 if d["failed"] else 0
 
 
+# --- mutation testing (D-027) ----------------------------------------------
+# A stdlib-only AST engine: one operator/constant flip at a time, the auto
+# TC commands as the kill suite. Optional instrument in the target repo's
+# own terms — no new dependency anywhere (constitution C-06).
+
+CMP_SWAP = {
+    ast.Lt: ast.GtE, ast.LtE: ast.Gt, ast.Gt: ast.LtE, ast.GtE: ast.Lt,
+    ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Is: ast.IsNot,
+    ast.IsNot: ast.Is, ast.In: ast.NotIn, ast.NotIn: ast.In,
+}
+BIN_SWAP = {
+    ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.Div, ast.Div: ast.Mult,
+}
+MUT_TIMEOUT = 120        # per auto-TC command while killing one mutant
+MUT_BUDGET = 600         # wall-clock seconds before no new mutant starts
+TEST_PATH = re.compile(r"(^|/)(tests?/|test_[^/]+\.py$|[^/]+_test\.py$)")
+
+
+class _OneMutator(ast.NodeTransformer):
+    """Applies exactly one mutation, targeted by node identity."""
+
+    def __init__(self, target: ast.AST, kind: str) -> None:
+        self.target, self.kind, self.hit = target, kind, False
+
+    def _try(self, node: ast.AST) -> ast.AST | None:
+        if node is not self.target:
+            return None
+        self.hit = True
+        if self.kind == "compare":
+            node.ops = [CMP_SWAP[type(node.ops[0])]()]
+        elif self.kind == "boolop":
+            node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
+        elif self.kind == "binop":
+            node.op = BIN_SWAP[type(node.op)]()
+        elif self.kind == "const":
+            node.value = node.value + 1
+        return node
+
+    def visit_Compare(self, node: ast.Compare) -> ast.Compare:
+        return self._try(node) or self.generic_visit(node)
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> ast.BoolOp:
+        return self._try(node) or self.generic_visit(node)
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.BinOp:
+        return self._try(node) or self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant) -> ast.Constant:
+        return self._try(node) or self.generic_visit(node)
+
+
+def mutation_sites(tree: ast.Module) -> list[tuple[str, ast.AST, int, str]]:
+    """Every mutable site as (kind, node, lineno, human description)."""
+    sites: list[tuple[str, ast.AST, int, str]] = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Compare) and len(node.ops) == 1
+                and type(node.ops[0]) in CMP_SWAP):
+            sites.append(("compare", node, node.lineno,
+                          f"{type(node.ops[0]).__name__}→"
+                          f"{CMP_SWAP[type(node.ops[0])].__name__}"))
+        elif isinstance(node, ast.BoolOp):
+            kind = "boolop"
+            desc = (f"{type(node.op).__name__}→"
+                    f"{'Or' if isinstance(node.op, ast.And) else 'And'}")
+            sites.append((kind, node, node.lineno, desc))
+        elif isinstance(node, ast.BinOp) and type(node.op) in BIN_SWAP:
+            sites.append(("binop", node, node.lineno,
+                          f"{type(node.op).__name__}→"
+                          f"{BIN_SWAP[type(node.op)].__name__}"))
+        elif (isinstance(node, ast.Constant) and type(node.value) is int
+                and not isinstance(node.value, bool)
+                and abs(node.value) < 10 ** 6):
+            sites.append(("const", node, node.lineno,
+                          f"const {node.value}→{node.value + 1}"))
+    return sites
+
+
+def python_mutants(text: str, path: str) -> tuple[list[tuple[int, str, str]], str | None]:
+    """(lineno, description, mutated source) per mutant — fresh parse per
+    mutant, so flips never stack. Second element: fatal parse error, if
+    the file is not valid Python at all."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        return [], f"{path}: not valid Python ({e.msg} line {e.lineno})"
+    out: list[tuple[int, str, str]] = []
+    for kind, _node, lineno, desc in mutation_sites(tree):
+        fresh = ast.parse(text)          # identity targeting needs the
+        sites = mutation_sites(fresh)    # same deterministic walk order
+        target = next((n for k, n, ln, _ in sites
+                       if k == kind and ln == lineno), None)
+        if target is None:
+            continue
+        mut = _OneMutator(target, kind)
+        mutated = mut.visit(fresh)
+        if not mut.hit:
+            continue
+        ast.fix_missing_locations(mutated)
+        out.append((lineno, desc, ast.unparse(mutated)))
+    return out, None
+
+
+def _mutantable_paths(repo: Path, base: str | None) -> list[str]:
+    """Changed .py implementation files: the mutation surface. Tests are
+    excluded — the engine mutates the implementation and lets the suite
+    kill it, never the other way around."""
+    return [p for p in changed_paths(repo, base)
+            if p.endswith(".py") and not p.startswith("specs/")
+            and not TEST_PATH.search(p) and (repo / p).is_file()]
+
+
+def _kill_env() -> dict[str, str]:
+    """The kill suite runs without bytecode caching: a same-size mutant
+    written within the same mtime tick would otherwise reuse the previous
+    mutant's __pycache__ entry and read a cached predecessor (CPython
+    validates pyc by mtime+size), turning every survivor into a fake
+    kill."""
+    return {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def _drop_pycache(repo: Path, path: str) -> None:
+    """Delete the mutated module's stale .pyc files — a pyc compiled from
+    an earlier mutant (or the pre-mutate source) can still be judged valid
+    when size and mtime-second collide; none may outlive the run."""
+    pyc_dir = (repo / path).parent / "__pycache__"
+    if not pyc_dir.is_dir():
+        return
+    stem = Path(path).stem
+    for pyc in pyc_dir.glob(f"{stem}.*.pyc"):
+        try:
+            pyc.unlink()
+        except OSError:
+            pass
+
+
+def _run_kill_suite(commands: list[str], repo: Path) -> tuple[str, str]:
+    """(verdict, detail) for one mutant: 'killed' on the first red or
+    timeout command, 'survived' when the whole suite stays green."""
+    for cmd in commands:
+        try:
+            r = subprocess.run(cmd, shell=True, cwd=str(repo),
+                               capture_output=True, text=True,
+                               timeout=MUT_TIMEOUT,
+                               env=_kill_env())
+        except subprocess.TimeoutExpired:
+            return "killed", f"timeout in `{cmd}`"
+        except (OSError, subprocess.SubprocessError) as e:
+            return "killed", f"`{cmd}` raised {e!r}"
+        if r.returncode != 0:
+            return "killed", f"exit {r.returncode} in `{cmd}`"
+    return "survived", "suite stayed green"
+
+
+def mode_mutate(spec_dir: Path, repo: Path, base: str | None,
+                max_mutants: int) -> int:
+    """Mutation testing over the changed implementation files: every
+    KILLED mutant was distinguished by some test; every SURVIVED one is a
+    test gap for the orchestrator to adjudicate. Report always; the
+    original file bytes are restored and verified after each mutant."""
+    if not git_available(repo):
+        print("mutate: SKIPPED (not a git repo) — no changed-file surface")
+        return 0
+    commands = [cmd for _tc, cmd in classify_proofs(spec_dir)["auto"]]
+    if not commands:
+        print("mutate: no auto TC commands in test.md — nothing to kill "
+              "mutants with (write executable pass conditions first)")
+        return 0
+    files = _mutantable_paths(repo, effective_base(spec_dir, base))
+    if not files:
+        print("mutate: no changed non-test .py files vs "
+              f"{effective_base(spec_dir, base) or 'working tree'} — "
+              "nothing to mutate")
+        return 0
+    print(f"mutate: {len(files)} changed implementation file(s) vs "
+          f"{effective_base(spec_dir, base)}, kill suite = "
+          f"{len(commands)} auto TC command(s), cap {max_mutants} mutants")
+    counts = {"killed": 0, "survived": 0}
+    survivors: list[str] = []
+    started = time.monotonic()
+    tried = 0
+    done = False
+    for path in files:
+        if done:
+            break
+        _drop_pycache(repo, path)
+        original = (repo / path).read_text(encoding="utf-8",
+                                           errors="replace")
+        mutants, err = python_mutants(original, path)
+        if err:
+            print(f"  SKIP     {err}")
+            continue
+        if not mutants:
+            print(f"  NOTE     {path}: no mutable sites")
+            continue
+        for lineno, desc, mutated in mutants:
+            if tried >= max_mutants:
+                print(f"  STOP     mutant cap {max_mutants} reached — "
+                      "re-run with --max-mutants to go deeper")
+                done = True
+                break
+            if time.monotonic() - started > MUT_BUDGET:
+                print("  STOP     time budget reached — remaining sites "
+                      "untried")
+                done = True
+                break
+            tried += 1
+            try:
+                (repo / path).write_text(mutated, encoding="utf-8")
+                verdict, detail = _run_kill_suite(commands, repo)
+            finally:
+                (repo / path).write_text(original, encoding="utf-8")
+            if (repo / path).read_text(encoding="utf-8",
+                                       errors="replace") != original:
+                print(f"  FAIL     {path}: restore not verifiable — "
+                      "stopping this file, check `git diff` before "
+                      "proceeding")
+                done = True
+                break
+            counts[verdict] += 1
+            line = f"{path}:{lineno}  {desc}"
+            if verdict == "survived":
+                survivors.append(line)
+                print(f"  SURVIVED {line} — {detail}")
+            else:
+                print(f"  KILLED   {line} ({detail})")
+    total = counts["killed"] + counts["survived"]
+    if not total:
+        print("  no mutants tried")
+        return 0
+    pct = round(100 * counts["killed"] / total)
+    print(f"  {counts['killed']}/{total} mutants killed ({pct}%) · "
+          f"{counts['survived']} survived")
+    if survivors:
+        print("  adjudicate the survivors: no test in the suite "
+              "distinguishes them — a missing case, not a pass")
+    return 0
+
+
+# --- coverage floor (D-027) -------------------------------------------------
+
+COV_LINE = re.compile(r"^(.*?)\s+(\d+)\s+(\d+)\s+(\d+)%\s*(.*)$")
+
+
+def _cov_tooling(repo: Path) -> bool:
+    """True when the repo's own pytest + pytest-cov are importable —
+    optional instruments detected at runtime, never installed by us."""
+    for mod in ("pytest", "pytest_cov"):
+        r = subprocess.run(
+            [sys.executable, "-c", f"import {mod}"], cwd=str(repo),
+            capture_output=True)
+        if r.returncode != 0:
+            return False
+    return True
+
+
+def parse_cov_table(text: str) -> dict[str, int]:
+    """{normalized path: cover%} from a `coverage term` table. Paths may
+    contain spaces; the shape (name stmts miss % missing) pins the parse."""
+    out: dict[str, int] = {}
+    for line in text.splitlines():
+        m = COV_LINE.match(line.strip())
+        if not m:
+            continue
+        name = m.group(1)
+        if name in ("Name", "TOTAL", ""):
+            continue
+        try:
+            int(m.group(2)), int(m.group(3)), int(m.group(4))
+        except ValueError:
+            continue
+        out[Path(name).as_posix()] = int(m.group(4))
+    return out
+
+
+def mode_coverage(spec_dir: Path, repo: Path, threshold: int | None) -> int:
+    """Line-coverage floor over the tasks' intended files: the repo suite
+    once under its own pytest-cov, every task.md `Touches:` path checked
+    against the floor. SKIPPED (loudly) without the tooling; a red suite
+    or an unmeasured touched file fails."""
+    if not _cov_tooling(repo):
+        print("coverage: SKIPPED (pytest or pytest-cov not installed in "
+              "this repo) — no coverage verdict, never a false green")
+        return 0
+    task_p = spec_dir / "task.md"
+    task = task_p.read_text(encoding="utf-8", errors="replace") if task_p.exists() else ""
+    touched: set[str] = set()
+    for entry in task_entries(task):
+        touched.update(task_touches(entry))
+    targets = sorted(t for t in touched
+                     if (repo / t).exists() and not t.startswith("specs/"))
+    if not targets:
+        print("coverage: no resolvable intended files in task.md "
+              "`Touches:` — nothing to measure")
+        return 0
+    spec_p = spec_dir / "spec.md"
+    spec_text = (spec_p.read_text(encoding="utf-8", errors="replace")
+                 if spec_p.exists() else "")
+    floor = threshold if threshold is not None else coverage_floor(spec_text)
+    # pytest-cov treats a non-directory --cov argument as a MODULE name,
+    # so a bare `calc.py` collects nothing ("module calc.py was never
+    # imported") — widen file targets to their parent directory and match
+    # the exact file's row in the report instead.
+    cov_args = [t if (repo / t).is_dir() else str(Path(t).parent or ".")
+                for t in targets]
+    argv = [sys.executable, "-m", "pytest",
+            *[f"--cov={a}" for a in sorted(set(cov_args))],
+            "--cov-report=term", "-q"]
+    print(f"coverage: floor {floor}% over {len(targets)} intended "
+          f"file(s)/dir(s) — running the repo suite once")
+    try:
+        r = subprocess.run(argv, cwd=str(repo), capture_output=True,
+                           text=True, errors="replace", timeout=600)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"coverage: FAIL — the suite could not run ({e!r})")
+        return 1
+    if r.returncode != 0:
+        tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
+        print("coverage: FAIL — the repo suite is red; coverage of a "
+              "failing suite is not evidence")
+        for line in tail:
+            print(f"    {line}")
+        return 1
+    measured = parse_cov_table(r.stdout)
+    fails = 0
+    for t in targets:
+        key = Path(t).as_posix()
+        hit = measured.get(key)
+        hits = [pct for p, pct in measured.items()
+                if p == key or p.startswith(key.rstrip("/") + "/")]
+        if hit is None and hits:
+            hit = min(hits)   # a directory target: its weakest file speaks
+        if hit is None:
+            print(f"  FAIL  {t}: UNMEASURED — in Touches but absent from "
+                  "the coverage report")
+            fails += 1
+        elif hit < floor:
+            print(f"  FAIL  {t}: {hit}% < floor {floor}%")
+            fails += 1
+        else:
+            print(f"  PASS  {t}: {hit}%")
+    print(f"  {'PASS' if not fails else 'FAIL'} — "
+          f"{len(targets) - fails}/{len(targets)} intended file(s)/dir(s) "
+          f"at or above {floor}%")
+    return 1 if fails else 0
+
+
 def mode_dod(spec_dir: Path, repo: Path, base: str | None,
              dry: bool = False) -> int:
     """The DoD scorecard: mechanical gates measured, judgment gates MANUAL.
@@ -639,14 +1023,16 @@ def parse_args(argv: list[str]):
         print(__doc__)
         return None
     mode = argv[0]
-    if mode not in ("scope", "clean", "proofs", "dod", "converge",
-                    "archived"):
+    if mode not in ("scope", "clean", "proofs", "mutate", "coverage", "dod",
+                    "converge", "archived"):
         print(__doc__)
         return None
     repo = None
     base = None
     run = "--run" in argv
     dry = "--dry-run" in argv
+    max_mutants = 40
+    threshold = None
     rest = []
     i = 1
     while i < len(argv):
@@ -665,10 +1051,21 @@ def parse_args(argv: list[str]):
                 return None
             base = argv[i + 1]
             i += 2
+        elif a == "--max-mutants":
+            if i + 1 >= len(argv) or not argv[i + 1].isdigit():
+                return None
+            max_mutants = int(argv[i + 1])
+            i += 2
+        elif a == "--threshold":
+            if i + 1 >= len(argv) or not argv[i + 1].isdigit():
+                return None
+            threshold = int(argv[i + 1])
+            i += 2
         else:
             rest.append(a)
             i += 1
-    if mode in ("scope", "proofs", "dod", "converge") and len(rest) != 1:
+    if mode in ("scope", "proofs", "mutate", "coverage", "dod",
+                "converge") and len(rest) != 1:
         print(__doc__)
         return None
     if mode == "archived" and rest:
@@ -680,7 +1077,8 @@ def parse_args(argv: list[str]):
         # should not be a usage error.
         print(__doc__)
         return None
-    return mode, (rest[0] if rest else None), repo, base, run, dry
+    return (mode, (rest[0] if rest else None), repo, base, run, dry,
+            max_mutants, threshold)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -695,7 +1093,8 @@ def main(argv: list[str] | None = None) -> int:
     parsed = parse_args(argv)
     if parsed is None:
         return 2
-    mode, spec_dir_s, repo_arg, base, run, dry = parsed
+    (mode, spec_dir_s, repo_arg, base, run, dry,
+     max_mutants, threshold) = parsed
     spec_dir = Path(spec_dir_s) if spec_dir_s else None
     if spec_dir is not None and not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory")
@@ -710,6 +1109,10 @@ def main(argv: list[str] | None = None) -> int:
         return mode_clean(repo, base)
     if mode == "archived":
         return mode_archived(repo)
+    if mode == "mutate":
+        return mode_mutate(spec_dir, repo, base, max_mutants)
+    if mode == "coverage":
+        return mode_coverage(spec_dir, repo, threshold)
     if mode == "dod":
         return mode_dod(spec_dir, repo, base, dry)
     if mode == "converge":

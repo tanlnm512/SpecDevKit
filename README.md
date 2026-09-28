@@ -356,7 +356,7 @@ All under `skills/spec-to-prod/scripts/`, run from a workspace root:
 | `scaffold.sh <name> [root]` | create `specs/<name>/` from templates, register in INDEX; refuses overwrite, requires kebab-case |
 | `check.py <spec-dir>` | the doc-set validator: 7 files, FR/NFR→T→TC traceability, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze integrity, constitution; `--survey-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
 | `freeze.py <spec-dir>` | approval freeze: `--record` writes the approved-doc hash manifest after explicit sign-off (existing manifests refuse overwrite; `--record --force` represents a fresh approval); `--verify` is read-only |
-| `audit.py <sub> <spec-dir>` | review instruments: `scope` (defaults to the approval-freeze SHA), `clean`, `proofs --run`, `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
+| `audit.py <sub> <spec-dir>` | review instruments: `scope` (defaults to the approval-freeze SHA), `clean`, `proofs --run`, `mutate` (mutation testing over the changed files), `coverage` (line-coverage floor over the tasks' intended files), `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
 | `graph.py <spec-dir>` | the workflow engine: frontier report, `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads), `--run [--runner] [--dry-run] [--max-waves N]` |
 | `archive.sh <name> [root]` | move a `Status: done` spec to `specs/archive/<date>-<name>/`, repoint INDEX |
 | `skill-dir.sh` | print the active skill directory (spawn-payload `skill_dir`) |
