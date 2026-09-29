@@ -19,7 +19,7 @@ description: >-
   when the word "brainstorm" is absent.
 metadata:
   owner: platform-core
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # spec-brainstorming — five-stage idea pressure-testing (before the spec exists)
@@ -34,7 +34,10 @@ named as the next step.
 The five stages are rigid: they always run in order, none is
 skippable, and each one's shape is pinned below. The rigidity is
 the product — a brainstorm that improvises its structure collapses
-into a chat.
+into a chat. The canonical statement of the run — stage shapes,
+the stage-2 payload, the digest grammar, the artifact rules — is
+`contracts/run.md` (this file summarizes; that one arbitrates);
+`gates/handoff.md` arbitrates the run's ending.
 
 ## When to use
 
@@ -178,7 +181,10 @@ Location rules: the default is `brainstorms/<name>.md` at the
 repository root; a user-named path wins. If the file already
 exists, read it — if it is a prior round of the same idea, ask
 (one question) whether to overwrite or version the name
-(`<name>-v2`); never clobber silently.
+(`<name>-v2`); never clobber silently. Every criterion in
+`gates/handoff.md` must hold before `/spec` is named — all five
+sections filled, every Cynic dealbreaker mapped, kill criteria
+observable, the direction the user's.
 
 The run's final message names the artifact path and the next
 step: `/spec <name>`, with this doc as intent input for the spec
@@ -198,6 +204,23 @@ conversation context carries over:
 4. Return contract: the agent writes nothing and returns only its
    digest — `angle:`, `pitch:`, `points:` (2–3 lines), `watch:`
    — decisions come from digest fields, never from prose.
+
+## The workflow form (the panel wave)
+
+Where the harness has a workflow runtime, stage 2 runs as the
+`spec-brainstorming` workflow (`workflows/spec-brainstorming.dwf.ts`
+on zcode, `workflows/spec-brainstorming.js` on Claude Code;
+D-004): dispatch it with stage 1's ground — `name`, `problem`,
+`audience`, `constraints` — and it loads the briefs and protocol
+from the skill dir at run time, spawns the three lenses fresh and
+in parallel, and returns the three digests verbatim for the
+session's matrix. The payload and digest contract is the one
+`contracts/run.md` pins — inline and workflow are one contract,
+not two (`tests/test_workflow_copies.py` keeps the dialects
+honest). Stages 1, 3, 4 and 5 are ALWAYS the session's: a
+workflow has no user-turn primitive, and a stop is not a
+question. A brief that fails to load degrades to the workflow's
+inline mission line, logged — never a skipped lens.
 
 ## Continuity
 

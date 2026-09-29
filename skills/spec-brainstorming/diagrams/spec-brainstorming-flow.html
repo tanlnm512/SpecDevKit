@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>spec-brainstorming — The Five-Stage Flow</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --color-line:    #c8ccd6;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 900px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: .72rem;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      margin-bottom: .5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      font-size: 2.6rem;
+      line-height: 1.05;
+      margin-bottom: .5rem;
+    }
+    .sub { color: var(--color-muted); max-width: 60ch; margin-bottom: 2.25rem; }
+    .rail { position: relative; padding-left: 2.4rem; }
+    .rail::before {
+      content: ""; position: absolute; left: .8rem; top: .6rem; bottom: .6rem;
+      width: 2px; background: var(--color-line);
+    }
+    .stage { position: relative; margin-bottom: 2rem; }
+    .stage::before {
+      content: ""; position: absolute; left: -2.02rem; top: .5rem;
+      width: .85rem; height: .85rem; border-radius: 50%;
+      background: var(--color-accent); border: 2px solid var(--color-paper);
+      box-shadow: 0 0 0 2px var(--color-accent);
+    }
+    .stage h2 {
+      font-family: var(--font-mono);
+      font-size: .82rem; font-weight: 600;
+      letter-spacing: .12em; text-transform: uppercase;
+      margin-bottom: .65rem;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: .6rem; }
+    .node {
+      flex: 1 1 200px;
+      background: #fff;
+      border: 1px solid var(--color-line);
+      border-radius: 10px;
+      padding: .8rem .95rem;
+      font-size: .88rem;
+      line-height: 1.45;
+    }
+    .node b { font-weight: 600; display: block; margin-bottom: .2rem; }
+    .node .mono { font-family: var(--font-mono); font-size: .78rem; color: var(--color-muted); }
+    .node.stop { border-color: var(--color-accent); }
+    .node.stop b { color: var(--color-accent); }
+    .arrow {
+      font-family: var(--font-mono); color: var(--color-muted);
+      font-size: .78rem; margin: .45rem 0 .45rem .1rem;
+    }
+    .loopbox {
+      border: 1.5px dashed var(--color-accent);
+      border-radius: 12px;
+      padding: .9rem;
+      margin-top: .6rem;
+    }
+    .loopbox .tag {
+      font-family: var(--font-mono); font-size: .7rem;
+      letter-spacing: .14em; text-transform: uppercase;
+      color: var(--color-accent); margin-bottom: .6rem;
+    }
+    footer {
+      font-family: var(--font-mono); font-size: .72rem;
+      color: var(--color-muted); margin-top: 2.5rem;
+      border-top: 1px solid var(--color-line); padding-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="eyebrow">spec-brainstorming</div>
+    <h1>The five-stage flow</h1>
+    <p class="sub">From a raw idea to a design specification the user owns.
+    Three independent lenses argue where the idea could go, why it might
+    die, and what the smallest honest version is; the user — never the
+    panel — picks the direction; the run ends with a durable artifact
+    and <span class="mono">/spec</span> named as the next step.</p>
+
+    <div class="rail">
+
+      <div class="stage">
+        <h2>Stage 1 — context discovery</h2>
+        <div class="row">
+          <div class="node"><b>Exactly ONE question</b>Restate the ask, then one clarifying question aimed at the fuzziest of problem / audience / constraints — never a list, never a form. The kebab-case name is stated in passing, not asked.</div>
+          <div class="node"><b>Still fuzzy after one follow-up?</b>Proceed on what is known, assumptions named in the artifact. An interview is not the goal — enough ground for three lenses to argue is.</div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <h2>Stage 2 — the perspective panel</h2>
+        <div class="loopbox">
+          <div class="tag">spawned fresh, in parallel — none sees another's output</div>
+          <div class="row">
+            <div class="node"><b>The Visionary</b>ceiling · leverage · love · adjacency — the generous reading, grounded in the stated problem, never sci-fi.</div>
+            <div class="node"><b>The Cynic</b>fatal assumptions · adoption blockers · hidden costs · kill criterion — the pre-mortem, real criticism not theater.</div>
+            <div class="node"><b>The Minimalist</b>core value · day-one cut list · fastest proof · scope guard — what survives if 90% is cut.</div>
+          </div>
+          <div class="arrow">each returns a digest only — angle · pitch · points · watch; presented distinctly labeled, no synthesis between them</div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <h2>Stage 3 — the trade-off matrix</h2>
+        <div class="row">
+          <div class="node"><b>One table</b>pros · cons · implementation speed · best-when per angle — speed is a coarse word plus one clause why, not an estimate.</div>
+          <div class="node stop"><b>No recommendation</b>The table carries no verdict — the Cynic's pros are honest, "best when" states the situation. The next move is the user's.</div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <h2>Stage 4 — socratic refinement</h2>
+        <div class="row">
+          <div class="node"><b>Single questions</b>Strictly one per turn, each shaped by the previous answer — sharpen scope, surface the blend, kill options. Suggested answers allowed; the question is always singular.</div>
+          <div class="node stop"><b>Soft cap five</b>Then stop asking: summarize the selection or blend — what was rejected and why — and ask for confirmation as the final question.</div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <h2>Stage 5 — handoff</h2>
+        <div class="row">
+          <div class="node"><b>brainstorms/&lt;name&gt;.md</b>Written from the pinned template: Direction (selected + rejected, with reasons) · Problem Statement · User Personas · Core MVP Features + out-of-scope · Risk Mitigations with early warnings and kill criteria.</div>
+          <div class="node stop"><b>Collision → one question</b>An existing file is read first: overwrite, or version the name — never a silent clobber. Nothing is ever written under specs/.</div>
+          <div class="node"><b>Next step: /spec &lt;name&gt;</b>The doc is intent input for the spec intake — pointed at, never parsed. The commit is the user's.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <footer>Canonical contract: contracts/run.md · handoff criteria: gates/handoff.md · source graph: spec-brainstorming-flow.mmd · workflow form (stage 2 only): D-004</footer>
+  </div>
+</body>
+</html>

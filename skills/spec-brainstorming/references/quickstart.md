@@ -26,11 +26,13 @@ panel briefs remain canonical.
 
 ## Pick the harness
 
-- **zcode / Claude Code / any skill-loading harness**: describe
-  the idea, or use the `/spec-brainstorming` router command. The
-  stages run inline in the conversation — the interactivity is
-  the point, so there is no background-workflow form of this
-  skill.
+- **zcode / Claude Code**: describe the idea, or use the
+  `/spec-brainstorming` router command — the stages run inline in
+  the conversation. On these two, stage 2 can also run as the
+  `spec-brainstorming` workflow (the panel wave, in the
+  background): hand it stage 1's ground — `name`, `problem`,
+  `audience`, `constraints` — and it returns the three digests;
+  stages 1, 3, 4 and 5 are always the session's (D-004).
 - **Any other agent**: the skill inline; `scripts/skill-dir.sh`
   is the only executable it needs (bash).
 

@@ -30,3 +30,41 @@ Rigid by design: the stages always run in order, none is
 skippable, and nothing is ever written under `specs/`.
 
 Migration: none required (new skill — first release).
+
+
+## 0.2.0 — 2026-09-29
+
+Structural parity with the sibling skills — the standard
+directories every resident skill carries, each with a real job:
+
+- **contracts/run.md** — the canonical run contract (stage
+  shapes, the stage-2 payload, the digest grammar, the artifact
+  rules, the workflow's scope). SKILL.md summarizes; it
+  arbitrates.
+- **gates/handoff.md** — the handoff gate: observer-checkable
+  stop conditions and readiness criteria before `/spec` is
+  named.
+- **workflows/** — the panel wave, a workflow form scoped to
+  stage 2 ONLY (D-004): both dialects
+  (`spec-brainstorming.dwf.ts` for zcode, `spec-brainstorming.js`
+  for Claude Code) load the briefs and protocol from the skill
+  dir at run time, spawn the three lenses fresh and in parallel,
+  and return the digests verbatim. The interactive stages are
+  always the session's — a stop is not a question.
+- **tests/** — the skill's own suite: `test_flow_contracts.py`
+  pins the rigid flow contract (five stages in order, the lens
+  briefs' digest contract, the template's pinned sections, the
+  green fixture satisfying the handoff gate) and
+  `test_workflow_copies.py` pins dialect parity (phases, payload
+  anchors, digest grammar, runtime invariants, briefs loaded
+  never embedded). 15 tests, wired into CI.
+- **examples/decision-tracker/** — the green fixture: a
+  completed design spec (the B1–B3 reference output) that
+  satisfies every handoff-gate criterion.
+- **diagrams/** — the five-stage flow (`spec-brainstorming-flow.mmd`
+  + the styled HTML render).
+
+Migration: none required — the inline flow is unchanged; the
+workflow form is additive, and no artifact or command surface
+moved.
+

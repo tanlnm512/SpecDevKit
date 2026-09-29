@@ -1,0 +1,25 @@
+flowchart TD
+    START([Ask: an idea, pre-spec]) --> S1["Stage 1 — context discovery<br/>restate · exactly ONE question · name in passing"]
+    S1 --> S1Q{still fuzzy after<br/>one follow-up?}
+    S1Q -- yes --> S1A["proceed on what's known<br/>assumptions named in the artifact"] --> S2
+    S1Q -- no --> S2
+
+    subgraph WAVE["Stage 2 — the perspective panel (spawned fresh, in parallel)"]
+        direction LR
+        V["The Visionary<br/>ceiling · leverage · love · adjacency"]
+        C["The Cynic<br/>fatal assumptions · blockers · hidden costs · kill criterion"]
+        M["The Minimalist<br/>core value · cut list · fastest proof · scope guard"]
+    end
+    S2["payload: skill_dir + restatement<br/>+ brief + protocol — spawns are fresh"] --> V & C & M
+    V & C & M --> DIG["digests only<br/>angle · pitch · points · watch"]
+
+    DIG --> S3["Stage 3 — trade-off matrix<br/>pros · cons · implementation speed · best when — no recommendation"]
+    S3 --> S4["Stage 4 — socratic refinement<br/>single questions, one per turn · soft cap 5"]
+    S4 --> S4Q{direction<br/>confirmed?}
+    S4Q -- no --> S4
+    S4Q -- yes --> S5["Stage 5 — handoff"]
+
+    S5 --> COLL{brainstorms/<name>.md<br/>already exists?}
+    COLL -- yes --> ASK["ONE question: overwrite or version the name<br/>never a silent clobber"] --> WRITE
+    COLL -- no --> WRITE["write from templates/design-spec.md<br/>direction · problem · personas · MVP · risks"]
+    WRITE --> NEXT(["/spec <name> — the doc is intent input<br/>nothing was ever written under specs/"])

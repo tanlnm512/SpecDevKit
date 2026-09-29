@@ -448,7 +448,7 @@ skills/
     ├── tests/              # this skill's own stdlib unittest suite (bash tests/run.sh)
     └── VERSION · CHANGELOG.md
 ├── spec-code-review/       # second resident skill — portable three-stage gated code review (same skeleton, own test suite)
-└── spec-brainstorming/     # third resident skill — five-stage pre-spec brainstorm panel (instructions + lens briefs, no suite)
+└── spec-brainstorming/     # third resident skill — five-stage pre-spec brainstorm panel (panel-wave workflow dialects, own test suite)
 tools/
 ├── sync.sh                 # shared installer: every skills/<name>/ → every harness root, SHA-verified
 ├── omp-defs.py             # shared: Claude-style agents/*.md frontmatter → omp task-agent frontmatter
