@@ -10,6 +10,17 @@
   },
   "plugins": [
     {
+      "name": "spec-brainstorming",
+      "description": "Five-stage idea co-design and pressure-testing before any spec or code exists \u2014 the pre-spec front door of the suite.",
+      "author": {
+        "name": "Stanley",
+        "email": "minhtan512@gmail.com"
+      },
+      "source": "./skills/spec-brainstorming",
+      "license": "MIT",
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-brainstorming"
+    },
+    {
       "name": "spec-code-review",
       "description": "Portable three-stage code review for any git repository \u2014 a change, a pull request, a branch, or the whole project.",
       "author": {

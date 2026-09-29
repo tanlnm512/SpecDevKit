@@ -20,7 +20,12 @@ resident skill; `spec-code-review` — the portable three-stage code review
 scout that maps the codebase and modules, then specialist
 lenses with triage and independent confirmation of every finding, then
 synthesis, plus an optional author-fix loop ending in a merge
-recommendation) — is the second; § Adding a skill to this repo below is
+recommendation) — is the second; `spec-brainstorming` — the pre-spec
+front door (one clarifying question, a spawned three-lens panel of
+Visionary / Cynic / Minimalist, a trade-off matrix, socratic
+refinement, then a durable design specification at
+`brainstorms/<name>.md` that feeds `/spec` as intent input) — is the
+third; § Adding a skill to this repo below is
 the contract any further one follows.
 
 The single organizing rule: **the doc state under `specs/<name>/` is the
@@ -277,6 +282,13 @@ Two invocation surfaces:
   /spec          /plan          /build        /test         /review       /ship
 ```
 
+`/spec-brainstorming` is the optional stage BEFORE this lifecycle:
+five rigid stages — one clarifying question, a parallel three-lens
+panel (Visionary / Cynic / Minimalist), a trade-off matrix, socratic
+refinement — ending in a design specification at
+`brainstorms/<name>.md`. It writes nothing under `specs/`; the doc is
+pointed at as intent input for `/spec <name>`, not parsed.
+
 | Command | Lands on |
 |---|---|
 | `/spec <name>` | the spec node + clarify loop (alias: the `scaffold` verb; a bug takes `bugfix`) |
@@ -418,7 +430,7 @@ plugin.json                     # Antigravity plugin marker — `agy plugin inst
 agents/                         # agy personas: byte-verbatim brief copies (committed, regenerate-only)
 LICENSE
 skills/
-└── spec-to-prod/           # first resident skill — a self-contained plugin root
+├── spec-to-prod/           # first resident skill — a self-contained plugin root
     ├── SKILL.md            # the orchestrator's playbook (workflow graph, spawn mechanics, rules)
     ├── .claude-plugin/plugin.json  # this skill's plugin manifest (tools/plugin-manifest.py)
     ├── commands/            # router (spec-to-prod.md) + 6 lifecycle wrappers (spec/plan/build/test/review/ship)
@@ -435,6 +447,8 @@ skills/
     ├── observations/       # living open-items list
     ├── tests/              # this skill's own stdlib unittest suite (bash tests/run.sh)
     └── VERSION · CHANGELOG.md
+├── spec-code-review/       # second resident skill — portable three-stage gated code review (same skeleton, own test suite)
+└── spec-brainstorming/     # third resident skill — five-stage pre-spec brainstorm panel (instructions + lens briefs, no suite)
 tools/
 ├── sync.sh                 # shared installer: every skills/<name>/ → every harness root, SHA-verified
 ├── omp-defs.py             # shared: Claude-style agents/*.md frontmatter → omp task-agent frontmatter
