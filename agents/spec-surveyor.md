@@ -88,7 +88,7 @@ is authoritative.
    already asks of you — the check exists because a real survey once
    satisfied that rule in wording only, writing plausible but nonexistent
    symbol names and off-by-hundreds line numbers for 9 of 13 citations, and
-   nothing caught it until the closing audit, three waves and three
+   nothing caught it until the pre-tick proof pass, three waves and three
    documents later.
 
 ## Done when

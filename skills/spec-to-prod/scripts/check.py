@@ -374,10 +374,11 @@ def other_specs_exist(repo_root: Path, spec_dir: Path) -> bool:
 
 
 def constitution_only_check(repo_root: Path) -> int:
-    """Standalone --constitution mode: a scriptable pre-flight for before-
-    audit gate 6's presence half (the semantic "every article complied with"
-    half stays the orchestrator's judgment call) — usable without any of the
-    five contract files existing, e.g. as a CI hook or a Stage-0 sanity check."""
+    """Standalone --constitution mode: a scriptable form of the approval
+    pre-flight's constitution presence half (the semantic "every article
+    complied with" half stays the orchestrator's judgment call) — usable
+    without any of the five contract files existing, e.g. as a CI hook or a
+    Stage-0 sanity check."""
     filled, msg = constitution_status(repo_root)
     print(f"constitution check: {repo_root / 'specs' / 'CONSTITUTION.md'}")
     if filled:

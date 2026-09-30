@@ -900,7 +900,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
          "reviewer BLOCKs = 0; WARN/NIT fixed or parked-with-ruling"),
         (9, "RULINGS", "MANUAL",
          "every D-### surfaced in the delivery summary"),
-        (10, "SIGN-OFF", "MANUAL", "user acks the rulings report"),
+        (10, "SIGN-OFF", "MANUAL", "explicit yes on the summary"),
     ]
     print(f"dod: {spec_dir} — gate table in gates/dod.md"
           + (" (dry run)" if dry else ""))

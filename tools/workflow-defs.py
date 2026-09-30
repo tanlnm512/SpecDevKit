@@ -206,7 +206,8 @@ function findPause(st: GraphState): Stop | null {
         " — after the explicit yes, run freeze.py <spec-dir> --record",
     };
   }
-  if (nodeState(st, "execute") === "done" && st.status !== "done") {
+  if (nodeState(st, "execute") === "done" &&
+      nodeState(st, "tick-commit") !== "done") {
     return {
       kind: "gate",
       gate: "tick-commit",
@@ -531,7 +532,8 @@ function findPause(st) {
         " — after the explicit yes, run freeze.py <spec-dir> --record",
     };
   }
-  if (nodeState(st, "execute") === "done" && st.status !== "done") {
+  if (nodeState(st, "execute") === "done" &&
+      nodeState(st, "tick-commit") !== "done") {
     return {
       kind: "gate",
       gate: "tick-commit",

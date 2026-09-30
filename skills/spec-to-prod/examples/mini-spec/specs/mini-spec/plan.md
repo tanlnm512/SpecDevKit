@@ -26,5 +26,5 @@ the tech spec.
   plain function named multiply, no dunder magic.
 
 ## Delivery
-One commit for the whole plan at the closing audit, on branch
-`feature/mini-calc`.
+One delivery pass at the tick-commit gate — implementation commit, then
+the delivery-record commit — on branch `feature/mini-calc`.

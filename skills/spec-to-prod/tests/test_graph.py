@@ -1129,6 +1129,21 @@ class Graph018DeliveryEvidenceTests(unittest.TestCase):
         self.assertIn("SKIPPED (not a git repo)",
                       s["nodes"]["tick-commit"]["reason"])
 
+    def test_done_status_without_delivery_record_still_pauses(self):
+        # find_pause keys on the gate's own delivery-record state, never
+        # spec.md Status: an interrupted ship (Status hand-set to done
+        # before the Delivered record) resumes at the named tick-commit
+        # gate, not as an unexplained hold
+        d = ticked_fixture(self._tmp / "f", status="done")
+        with unittest.mock.patch.object(graph.specstate, "git_available",
+                                        return_value=True), \
+             unittest.mock.patch.object(graph.specstate, "head_sha",
+                                        return_value=DELIVERY_SHA), \
+             unittest.mock.patch.object(graph, "run_check", return_value=0):
+            pause = graph.find_pause(compute(d))
+        self.assertIsNotNone(pause)
+        self.assertEqual(pause[0], "tick-commit")
+
     def test_scaffold_placeholder_reads_pending_never_done(self):
         d = scaffold(self._tmp / "t")
         tasks = (d / "task.md").read_text(encoding="utf-8")
@@ -2284,9 +2299,11 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
             encoding="utf-8")
         self.assertIn("Mode: implementation-diff — the pre-tick "
                       "implementation review", text)
-        # the non-git tmp records no approval freeze — the base falls
-        # back to HEAD
-        self.assertIn("the approval-freeze anchor `HEAD`", text)
+        # the non-git tmp records no approval freeze — the payload
+        # anchors on the intended-files union, never git commands
+        self.assertIn("Base: none (non-git — anchor the review on every "
+                      "task's intended-files union instead)", text)
+        self.assertNotIn("git -C", text)
         # the reviewer is the one protocol-exempt role
         self.assertNotIn("## Shared protocol", text)
 
@@ -2297,6 +2314,8 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
                 "tick-commit", self.landed, self.landed.parents[1], None)
         self.assertIn("the approval-freeze anchor `3fa9c21`", payload)
         self.assertNotIn("`HEAD`", payload)
+        self.assertIn(f"git -C {self.landed.parents[1]} diff 3fa9c21",
+                      payload)
 
     def test_approve_is_the_pause_between_verify_and_execute(self):
         pause = graph.find_pause(compute(self.approve_pause))

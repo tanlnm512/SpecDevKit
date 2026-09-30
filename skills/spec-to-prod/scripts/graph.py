@@ -707,16 +707,28 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
         # The reviewer's diff anchor: the approval freeze's Approved-at
         # commit — a real SHA read from approvals/approval.md, never raw
         # marker text, because it is interpolated into a git command the
-        # reviewer runs (`HEAD~2;id`-shaped text must not survive).
-        base = specstate.approval_sha(spec_dir) or "HEAD"
+        # reviewer runs (`HEAD~2;id`-shaped text must not survive). No
+        # approval SHA (a non-git freeze's dash — or no freeze at all)
+        # leaves no diff base: anchor the review on every task's
+        # intended-files union instead, never raw HEAD.
+        base = specstate.approval_sha(spec_dir)
+        base_line = (
+            f"- Base: the approval-freeze anchor `{base}`" if base else
+            "- Base: none (non-git — anchor the review on every task's "
+            "intended-files union instead)")
         lines = [
             f"- spec_dir: {spec_dir}",
             "- Mode: implementation-diff — the pre-tick implementation "
             "review (findings only, edit nothing)",
-            f"- Base: the approval-freeze anchor `{base}`",
-            "- The complete final diff (run both, read everything):",
-            f"   git -C {repo} diff {base}      # tracked changes since base",
-            f"   git -C {repo} status --porcelain   # untracked files — read in full",
+            base_line,
+        ]
+        if base:
+            lines += [
+                "- The complete final diff (run both, read everything):",
+                f"   git -C {repo} diff {base}      # tracked changes since base",
+                f"   git -C {repo} status --porcelain   # untracked files — read in full",
+            ]
+        lines += [
             "- Plan-side truth: read task.md, tech-spec.md, test.md, "
             "survey.md, and specs/CONSTITUTION.md under the spec dir's "
             "parent",
@@ -922,7 +934,8 @@ def find_pause(state: dict, wave_dir: str | None = None) -> tuple[str, str] | No
         return "approve", (n["approve"]["reason"]
                            + " — after the explicit yes, run "
                            "`freeze.py <spec-dir> --record`")
-    if n["execute"]["state"] == DONE and state["status"] != "done":
+    if (n["execute"]["state"] == DONE
+            and n["tick-commit"]["state"] != DONE):
         commit_note = ("make implementation commit C1, then delivery-record "
                        "commit C2" if state["git"]["available"]
                        else "commit SKIPPED (not a git repo)")

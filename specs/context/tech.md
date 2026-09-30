@@ -20,7 +20,7 @@ code moved; per-spec surveys carry their own evidence.
 - Spec verification: `python3 skills/spec-to-prod/scripts/check.py
   <spec-dir>`; workflow state: `…/scripts/graph.py <spec-dir>`.
 - Approval/evidence integrity: `freeze.py <spec-dir> --record|--verify`
-  and `audit.py evidence <spec-dir>`.
+  and `check.py` (verifies the freeze on an approved docset).
 - Install + verify: `bash tools/sync.sh` (SHA-verifies every root).
 - Manifests: `python3 tools/plugin-manifest.py` after VERSION or
   SKILL.md description changes.

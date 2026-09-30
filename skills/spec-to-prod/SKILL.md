@@ -935,7 +935,7 @@ and the approve node — a HUMAN gate — stays open without it). Immediately
 after the explicit yes, run `scripts/freeze.py <spec-dir> --record`:
 `approvals/approval.md` hashes the approved intent/evidence docs (spec
 Status excluded; tech-spec is an immutable prefix with append-only D-###
-room). `check.py` and `audit.py evidence` fail a lifecycle-v2 approved
+room). `check.py` and `freeze.py <spec-dir> --verify` fail a lifecycle-v2 approved
 docset whose freeze is missing or changed. A post-approval correction is a
 fresh user approval and a new freeze, never an unrecorded rewrite.
 
