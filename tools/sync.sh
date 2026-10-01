@@ -50,6 +50,15 @@
 #                                 the repo root is the plugin that
 #                                 `agy plugin install` copies; agy owns
 #                                 ~/.gemini/config/plugins itself).
+#   rules/engineering-rules.md -> the § Engineering rules sections in
+#                              skills/spec-to-prod/agents/_shared-protocol.md
+#                              and skills/spec-code-review/agents/
+#                              code-review-fixer.md — COMMITTED
+#                              regenerate-only carrier views, refreshed
+#                              in-place by tools/kit-rules.py before
+#                              install and drift-checked in verify
+#                              (D-028). Repo-local: nothing here is
+#                              installed to a harness root.
 #
 # omp also reads ~/.agents/skills (its `agents` provider, priority 70),
 # so that root alone would serve omp sessions; the ~/.omp copy makes
@@ -429,6 +438,14 @@ fi
 # --check stops here (FR-009): the preflight above reported refusals and
 # the verify pass below reports drift — read-only either way.
 if [ "$CHECK" = 0 ]; then
+  # Kit-wide engineering rules (D-028): refresh the § Engineering rules
+  # carrier sections from the canonical rules/engineering-rules.md
+  # BEFORE any install copies them out — same committed regenerate-only
+  # discipline as the agy personas below. Never runs in --dry-run or
+  # --check mode: those write nothing anywhere.
+  python3 "$PKG_ROOT/tools/kit-rules.py" || {
+    echo "ERROR: kit-rules refresh failed — nothing installed"; exit 1
+  }
   for name in "${SKILLS[@]}"; do
     skill_dir="$PKG_ROOT/skills/$name"
 
@@ -674,5 +691,10 @@ for name in "${SKILLS[@]}"; do
     rm -rf "$tmp"
   fi
 done
+
+# Kit-wide engineering rules (D-028): the committed carrier sections
+# must match a fresh injection from rules/engineering-rules.md — the
+# same regenerate-only guarantee the agy personas get above.
+python3 "$PKG_ROOT/tools/kit-rules.py" --check || fail=1
 
 exit $fail

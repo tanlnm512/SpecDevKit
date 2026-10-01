@@ -13,6 +13,10 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                      frontmatter + VERSION
                                                      (tools/plugin-manifest.py
                                                      --check)
+  kit-rules   agents/_shared-protocol.md and         vs the injection from
+              agents/code-review-fixer.md            rules/engineering-rules.md
+              § Engineering rules sections           (tools/kit-rules.py
+                                                     --check)
   diagrams    diagrams/spec-to-prod-workflow.mmd     vs the workflow graph
                                                      contract in
                                                      scripts/graph.py
@@ -159,6 +163,12 @@ def check_manifests() -> int:
     return run_tool(PKG_ROOT / "tools" / "plugin-manifest.py", "--check")
 
 
+def check_kit_rules() -> int:
+    print("== kit-rules — canonical source: rules/engineering-rules.md via "
+          "tools/kit-rules.py")
+    return run_tool(PKG_ROOT / "tools" / "kit-rules.py", "--check")
+
+
 def check_diagrams() -> int:
     print("== diagrams — canonical source: scripts/graph.py's workflow "
           "graph (NODES, DATA_EDGES, CONDITIONAL_EDGES, LOOP_EDGES)")
@@ -190,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     failed = []
     for name, check in (("workflows", check_workflows),
                         ("manifests", check_manifests),
+                        ("kit-rules", check_kit_rules),
                         ("diagrams", check_diagrams),
                         ("examples", check_examples)):
         if check():
@@ -198,8 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"drift check: FAILED — {', '.join(failed)} differ from their "
               f"canonical sources")
         return 1
-    print("drift check: OK — workflows, manifests, diagrams, examples match "
-          "their canonical sources")
+    print("drift check: OK — workflows, manifests, kit-rules, diagrams, "
+          "examples match their canonical sources")
     return 0
 
 

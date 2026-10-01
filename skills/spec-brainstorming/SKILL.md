@@ -19,7 +19,7 @@ description: >-
   when the word "brainstorm" is absent.
 metadata:
   owner: platform-core
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # spec-brainstorming — five-stage idea pressure-testing (before the spec exists)
@@ -221,6 +221,18 @@ honest). Stages 1, 3, 4 and 5 are ALWAYS the session's: a
 workflow has no user-turn primitive, and a stop is not a
 question. A brief that fails to load degrades to the workflow's
 inline mission line, logged — never a skipped lens.
+
+## Operator rules
+
+The panel writes no code and runs no commands — its only deliverables
+are digests and the stage-5 artifact — so the kit-wide engineering
+rules (`spec-to-prod`'s `agents/_shared-protocol.md` § Engineering
+rules, mirrored in the code-review fixer brief) bind downstream, when
+the chosen direction becomes a spec and then code. One rule binds
+here, for the session running this skill: a long foreground call may
+be auto-backgrounded by the harness; NEVER poll a backgrounded job
+(`sleep`, `ps`, `pgrep`, `top`) — do other work or end your reply;
+you will be woken with its output.
 
 ## Continuity
 

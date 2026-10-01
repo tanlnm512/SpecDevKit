@@ -88,6 +88,9 @@ are all-or-nothing — there is no path scoping)**:
    history ("previously…", "added for T003", "fix for bug …"), or
    reviewer-narrative ("now handles the edge case correctly") in code
    comments or docstrings. Docstrings state the contract, not the change.
+   The kit-wide engineering rules in `_shared-protocol.md` § Engineering
+   rules (already in your payload) are canonical — this policy restates
+   their commenting half; on any mismatch they win.
 3. **Reuse before writing**: grep the task's area for an existing
    utility/helper before adding a new one — reuse only on a clean fit;
    a near-match bent to fit is worse than a small duplicate. Prefer the

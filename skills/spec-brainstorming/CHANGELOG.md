@@ -6,6 +6,27 @@ five rigid stages from a raw idea to a durable design
 specification that feeds spec-to-prod's `/spec` intake.
 
 
+## 0.3.0 — 2026-10-01
+
+Kit-wide engineering rules scoping (D-005): the suite's new
+engineering rules (test discipline, backgrounded-job discipline,
+strict code commenting — canonical in spec-to-prod's
+`agents/_shared-protocol.md` § Engineering rules) deliberately do
+NOT ride into the lens briefs — the three lenses are read-only
+(digests + the stage-5 artifact, no code, no tests, no commands),
+so none of the rules' actions can occur here; the rules bind
+downstream, when the chosen direction becomes a spec and then
+code. What binds at this skill is the session-level
+backgrounded-job discipline, recorded in a new SKILL.md
+§ Operator rules for the orchestrator running stages 1, 3, 4 and
+5. If a future stage starts running commands or generating code,
+D-005 is revisited, not silently extended.
+
+Migration: none required — no agent brief, contract, or workflow
+master changed; the new SKILL.md section is orchestrator-facing
+prose.
+
+
 ## 0.2.0 — 2026-09-29
 
 Structural parity with the sibling skills — the standard

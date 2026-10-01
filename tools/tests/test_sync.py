@@ -30,8 +30,9 @@ LEDGER = ".spec-dev-kit-deployed"
 # not bytes. The invoked tools; the skill's consumable surfaces (tree
 # files the tests reference, the allowlisted command set, one role plus
 # its shared prose, the workflow masters); the committed agy persona
-# the verify pass byte-compares. Behavior fidelity is per-file; corpus
-# size is not load-bearing.
+# the verify pass byte-compares; and the kit-rules surfaces sync
+# refreshes and drift-checks (rules source, the injector, both carrier
+# files). Behavior fidelity is per-file; corpus size is not load-bearing.
 SKILL = "skills/spec-to-prod"
 SYNC_CORPUS = (
     "tools/sync.sh",
@@ -40,6 +41,8 @@ SYNC_CORPUS = (
     "tools/agent-defs.py",
     "tools/workflow-defs.py",
     "tools/install-workflow.sh",
+    "tools/kit-rules.py",
+    "rules/engineering-rules.md",
     f"{SKILL}/SKILL.md",
     f"{SKILL}/VERSION",
     f"{SKILL}/scripts/tick.py",
@@ -56,6 +59,7 @@ SYNC_CORPUS = (
     f"{SKILL}/agents/_shared-protocol.md",
     f"{SKILL}/workflows/spec-run.dwf.ts",
     f"{SKILL}/workflows/spec-run.js",
+    "skills/spec-code-review/agents/code-review-fixer.md",
     "agents/spec-surveyor.md",
 )
 
@@ -459,6 +463,48 @@ class DroidCommandsTests(SyncShBase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("REFUSE", r.stdout)
         self.assertIn("hand-written note", dest.read_text())
+
+
+class KitRulesSyncTests(SyncShBase):
+    """tools/kit-rules.py wiring (D-028): sync refreshes the two
+    § Engineering rules carrier sections from the canonical
+    rules/engineering-rules.md before installing, and --check reports a
+    hand-edited carrier as DRIFT without writing anything."""
+
+    def test_sync_refreshes_a_stale_carrier_and_installs_fresh(self):
+        self.assertEqual(self.run_sync().returncode, 0)
+        carrier = self.repo / SKILL / "agents" / "_shared-protocol.md"
+        carrier.write_text(carrier.read_text() + "stale hand-edit\n")
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # the committed carrier was regenerated back to the source
+        self.assertNotIn("stale hand-edit", carrier.read_text())
+        # and the installed copies carry the fresh section too
+        installed = (self.home / ".zcode" / "skills" / "spec-to-prod"
+                     / "agents" / "_shared-protocol.md").read_text()
+        self.assertNotIn("stale hand-edit", installed)
+
+    def test_check_reports_stale_carrier_as_drift_and_writes_nothing(self):
+        self.assertEqual(self.run_sync().returncode, 0)
+        carrier = self.repo / SKILL / "agents" / "_shared-protocol.md"
+        carrier.write_text(carrier.read_text() + "stale hand-edit\n")
+        before = self.home_snapshot()
+        r = self.run_sync("--check")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("DRIFT", r.stdout)
+        self.assertIn("stale hand-edit", carrier.read_text())
+        self.assertEqual(self.home_snapshot(), before)
+
+    def test_stale_carrier_cannot_wedge_a_fresh_install(self):
+        # the refresh runs before the first install write, so even a
+        # never-installed HOME ends up with the source-fresh section
+        carrier = self.repo / SKILL / "agents" / "_shared-protocol.md"
+        carrier.write_text(carrier.read_text() + "stale hand-edit\n")
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn(
+            "stale hand-edit",
+            self.skill_root("agents", "_shared-protocol.md").read_text())
 
 
 def _run_one(task):

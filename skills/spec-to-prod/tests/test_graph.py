@@ -1273,6 +1273,16 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
             payload = (self.wave / name).read_text(encoding="utf-8")
             self.assertIn(protocol, payload, name)
 
+    def test_engineering_rules_ride_every_payload(self):
+        # D-028: the kit-wide engineering rules are canonical in
+        # _shared-protocol.md § Engineering rules — the protocol embed
+        # carries them into every payload with no extra wiring
+        for name in ("planner.md", "tech.md", "qa.md"):
+            payload = (self.wave / name).read_text(encoding="utf-8")
+            self.assertIn("## Engineering rules (kit-wide)", payload, name)
+            self.assertIn("fail on the pre-fix code", payload, name)
+            self.assertIn("NEVER poll a", payload, name)
+
     def test_wave_dir_override(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec001b-"))
         try:

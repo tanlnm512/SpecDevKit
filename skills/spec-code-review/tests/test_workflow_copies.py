@@ -746,6 +746,18 @@ class AgentBriefTests(unittest.TestCase):
         text = FIXER_BRIEF.read_text(encoding="utf-8")
         for anchor in ("Never commit", "pin the corrected behavior in the test"):
             self.assertIn(anchor, flat(text))
+        # D-012: the fixer is the review side's only code writer — the
+        # kit-wide engineering rules ride its brief (byte parity with
+        # the shared-protocol carrier is pinned in
+        # tools/tests/test_kit_rules.py)
+        for anchor in (
+            "## Engineering rules (kit-wide)",
+            "fail on the pre-fix code",
+            "NEVER poll a",
+            "git history owns that",
+            "one owner test at the strongest boundary",
+        ):
+            self.assertIn(anchor, flat(text), anchor)
 
     def test_scout_brief_pins_the_map_not_findings_rule(self):
         # the scout is orientation, never a findings source: the brief

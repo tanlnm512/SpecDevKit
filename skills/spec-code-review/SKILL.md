@@ -19,7 +19,7 @@ description: >-
   branch") — or the codebase as a whole ("review the project").
 metadata:
   owner: platform-core
-  version: "0.11.0"
+  version: "0.12.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -290,6 +290,9 @@ When the user asked to fix as well, run bounded rounds (default 2):
    tree: minimal, repo style, NEVER commits, never weakens a test to
    make a finding go away (pin corrected behavior instead). Dispatch
    `agents/code-review-fixer.md` where the harness supports subagents.
+   That brief carries the kit-wide engineering rules (§ Engineering
+   rules: test discipline, backgrounded-job discipline, code
+   commenting) — they bind the fix loop's every edit.
 2. Every attempted fix is verified by an independent reader: `fixed` /
    `unfixed` / `worse`.
 3. The gate re-runs; failures become findings the fixer must clear.
@@ -342,6 +345,11 @@ commit decision and message are the user's.
   as the run result's `markdown` field.
 - **Other agents**: follow the stages inline; `scripts/gate.sh` is
   plain bash + python3 and is the only script you need.
+- **Long foreground calls** (this skill runs none itself, but a fix
+  loop may) may be auto-backgrounded by the harness; the result
+  arrives as a follow-up when the job finishes. NEVER poll a
+  backgrounded job (`sleep`, `ps`, `pgrep`, `top`) — do other work or
+  end your reply; you will be woken with its output.
 
 ## Reading the result
 

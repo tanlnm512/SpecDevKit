@@ -15,7 +15,7 @@ description: >-
   spec").
 metadata:
   owner: platform-core
-  version: "2.13.0"
+  version: "2.14.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -1031,11 +1031,18 @@ TC per unchanged FR).
   touch test.md at all during implementation. A real correction to an
   existing decision or TC is a fresh tech/qa re-brief (§ Run modes) with
   fresh evidence, not an inline edit mid-implementation.
+- Long foreground calls may be auto-backgrounded by the harness; the
+  result arrives as a follow-up when the job finishes. NEVER poll a
+  backgrounded job (`sleep`, `ps`, `pgrep`, `top`) — do other work or
+  end your reply; you will be woken with its output.
 
 The agent-facing versions of these rules (citations verbatim, symbols over
 line numbers, IDs never renumbered, one file per agent, never spawn/commit)
 are canonical in `agents/_shared-protocol.md` § Universal
-rules — that file, not this one, is what sub-agents actually read.
+rules — that file, not this one, is what sub-agents actually read. The
+kit-wide engineering rules (test discipline, backgrounded-job discipline,
+code commenting) are canonical in the same file's § Engineering rules and
+ride into every spawn payload with it.
 
 ## Anti-patterns
 
@@ -1075,6 +1082,7 @@ rules — that file, not this one, is what sub-agents actually read.
 13. Essay or decision-log comments, and copy-pasted logic, landing in the
     diff → comments state constraints, decisions live in tech-spec
     D-###s, and shared logic lives in one shared home. *Implementer brief
-    § Method 2–3; `audit.py clean` flags essay comments (≥120-char
+    § Method 2–3; the kit-wide commenting rules (`_shared-protocol.md`
+    § Engineering rules); `audit.py clean` flags essay comments (≥120-char
     comment lines) and comment walls (≥8 consecutive) as adjudication
     suspects.*

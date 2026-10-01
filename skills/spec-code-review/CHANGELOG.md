@@ -6,6 +6,31 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.12.0 — 2026-10-01
+
+Kit-wide engineering rules in the fix loop (D-012): the fixer brief
+(`agents/code-review-fixer.md`) carries the suite's engineering
+rules verbatim as § Engineering rules — test discipline (a new or
+strengthened test protects behavior, a contract, or a credible
+regression; smallest test that proves it; a regression test fails
+on the pre-fix code for the intended reason), the backgrounded-job
+discipline (never poll a backgrounded job), and strict code
+commenting (why not what; no decision logs or volatile values —
+git history owns the why). The brief is the one channel that
+reaches every fixer path: runtime-loaded by both workflow
+dialects, installed as an agent def, and cited by SKILL.md
+§ Stage 4 for the inline path. Compliance-side, not
+enforcement-side: the lenses keep their own bar (Principle 8 —
+the panel imposes nothing of its own). The brief's section is a
+generated view of the canonical `rules/engineering-rules.md`
+(injected by `tools/kit-rules.py`, drift-checked — spec-to-prod's
+D-028); `tools/tests/test_kit_rules.py` pins the anchors and the
+injection.
+
+Migration: none required — additive brief section; workflow
+masters are untouched, so no re-bake is needed.
+
+
 ## 0.11.0 — 2026-09-28
 
 Full-coverage project audits, verified on a live 441-file run. Three

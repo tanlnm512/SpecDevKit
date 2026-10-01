@@ -21,6 +21,15 @@
   decision, and every divergence from a doc contract gets its own D-###.
 - **C-06**: stdlib-only Python, no new runtime dependency without a
   tech-spec D-### decision.
+- **C-07**: every added test protects observable behavior, a contract,
+  or a credible regression — the smallest test that reliably proves it;
+  one owner test per contract at the strongest boundary; a bug-fix
+  regression test fails on the pre-fix code for the intended reason.
+- **C-08**: code comments explain why, not what — no decision logs,
+  change history, or volatile values in comments or docstrings; git
+  history owns the why.
+- **C-09**: never poll a backgrounded job — do other work or end the
+  turn; the result arrives when the job finishes.
 
 ## Rationale
 - C-01: a second status surface inevitably disagrees with the first;
@@ -35,3 +44,10 @@
   wish had happened".
 - C-06: zero-install stdlib tooling is part of the repo's contract with
   its users.
+- C-07: tests that mirror implementation or duplicate owners cost
+  maintenance without protecting anything; a regression test that
+  passes pre-fix proves nothing.
+- C-08: comment rot and embedded decision logs contradict git history
+  and mislead the next reader (anti-pattern 13 in spec-to-prod).
+- C-09: polling burns the session's turns and races the harness's own
+  completion notification.

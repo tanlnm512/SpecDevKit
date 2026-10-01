@@ -4,6 +4,43 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.14.0 — 2026-10-01
+
+Kit-wide engineering rules (D-028): three rules now bind every agent
+and orchestrator in the suite wherever their action happens — test
+discipline (protect behavior, a contract, or a credible regression;
+smallest test that proves it; one owner test per contract; a
+regression test fails on the pre-fix code for the intended reason),
+the backgrounded-job discipline (never poll a backgrounded job — do
+other work or end your reply; the result arrives on completion), and
+strict code commenting (why not what; no decision logs, change
+history, or volatile values — git history owns the why). Canonical
+carrier: `agents/_shared-protocol.md` § Engineering rules, which
+`graph.py build_payload` already embeds byte-verbatim into every
+spawn payload (reviewer exempt as before — it writes nothing), so
+the rules reach every role in-session and in both workflow dialects
+with zero workflow-master edits. Canonical text lives ONCE in the
+repo-root `rules/engineering-rules.md` and is injected into both
+carriers by `tools/kit-rules.py` (drift-checked by
+`drift-check.py`'s kit-rules category; carriers are generated views
+like the manifests, and `tools/sync.sh` refreshes them before every
+install and drift-checks them in verify). The orchestrator gains the
+backgrounded-job bullet in § Rules that bind the orchestrator;
+anti-pattern 13 cites the canonical section. The repo's own
+`specs/CONSTITUTION.md` gains the matching articles C-07–C-09
+binding this repo's development; a thin root `AGENTS.md` makes the
+constitution and the rules source machine-discoverable to any
+coding agent in this repo; the end-user
+`templates/constitution.md` is deliberately unchanged (D-028).
+`tools/tests/test_kit_rules.py` pins the injection, the load-bearing
+anchors, the SKILL.md pointers, and spec-code-review's fixer-brief
+carrier (that skill's D-012).
+
+Migration: none required — the section is additive to every spawn
+payload and no existing doc contract changes; re-run `tools/sync.sh`
+to pick up the regenerated briefs and installed copies.
+
+
 ## 2.13.0 — 2026-09-28
 
 Test-quality hardening (D-027): what "the suite is green" proves, four
