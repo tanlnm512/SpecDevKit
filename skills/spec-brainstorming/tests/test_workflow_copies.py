@@ -31,6 +31,7 @@ WF_JS = SKILL / "workflows" / "spec-brainstorming.js"
 # The protocol spine both dialects must carry, phase for phase.
 PHASES = [
     "Load the lens briefs and the shared panel protocol",
+    "Gather external evidence from GitHub and the web",
     "Argue the idea from three independent lenses",
     "Assemble the labeled angles for the session",
 ]
@@ -42,7 +43,11 @@ PAYLOAD_ANCHORS = [
     "Argue this idea from your lens only.",
     "The idea, in the idea-owner's words:",
     "not established — name the gap as an assumption, never a fact",
+    "External evidence pack (GitHub + web, gathered before you spawned — cite it, verify against it):",
+    "not gathered — every external claim is an assumption",
     "Ground every point in what is stated here; name assumptions as assumptions, never invent facts.",
+    "Cite a source for every load-bearing claim — file:line for in-repo, URL + access date for external; what has no source is an assumption, said as one.",
+    "Before writing your digest, attack your own strongest point once; argue what survives.",
     "Return only your digest: angle, pitch, points (2-3 lines), watch — one line per field. ",
     "If you cannot satisfy your brief, say so in watch rather than working around it.",
 ]
@@ -61,6 +66,7 @@ REPORT_ANCHORS = [
     "loaded from the skill dir at run time",
     "inline mission line",
     "the session must re-ask this lens",
+    "external evidence pack did not load — external claims in the digests are assumptions, not sourced",
     "stage 1 (context discovery), stage 3 (trade-off matrix), stage 4 (refinement) and stage 5 (handoff) are the session's, always",
     "no user-turn primitive",
 ]
@@ -129,6 +135,18 @@ class ParityTests(unittest.TestCase):
             for name, text in (("dwf.ts", self.ts), ("js", self.js)):
                 self.assertNotIn(sentence, text,
                                   f"{name}: brief rubric embedded — the lens is forked, not loaded (D-004)")
+
+    def test_evidence_researcher_is_shared(self):
+        # zcode: a named persistent agent returning the typed pack;
+        # claude: a one-shot schema-validated agent. Same role text,
+        # same phase, same degrade sentence.
+        self.assertIn("Evidence researcher", self.ts)
+        self.assertIn("interface EvidencePack", self.ts)
+        self.assertIn('"evidence-researcher"', self.js)
+        self.assertIn('required: ["pack"]', self.js)
+        for name, text in (("dwf.ts", self.ts), ("js", self.js)):
+            self.assertIn("gh search repos", text, f"{name}: researcher ask lost the GitHub search instruction")
+            self.assertIn("never invent a source", text, f"{name}: researcher ask lost the no-fabrication rule")
 
 
 class ZcodeDialectTests(unittest.TestCase):

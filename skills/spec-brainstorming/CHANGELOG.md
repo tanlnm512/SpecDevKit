@@ -6,6 +6,48 @@ five rigid stages from a raw idea to a durable design
 specification that feeds spec-to-prod's `/spec` intake.
 
 
+## 0.4.0 — 2026-10-01
+
+External evidence grounding for the panel. A brainstorm that
+argues only from the idea-owner's repo inherits the repo's own
+blind spots — the 0.3.0 panel proved it in the field, reasoning
+from source code and stale internal snapshots while the outside
+world moved. Stage 2 now gathers an **evidence pack** before the
+lenses spawn: one neutral researcher (never a lens seat — the
+pack is shared input, the digests stay independent) searches
+GitHub for prior art and competing tools (stars, activity,
+maintenance signals) and the web for 2–4 authoritative sources,
+each finding returned with its URL and access date. The pack
+rides the stage-2 payload (`contracts/run.md` item 4); a failed
+gather is logged and the payload says so — the lenses then treat
+every external claim as an assumption and never invent a source.
+
+Deep thinking is pinned, not hoped for: the shared panel protocol
+gains two rules — **Ground outside the payload too** (cite
+`file:line` for in-repo claims, URL + access date for external;
+unsourced claims are stated as assumptions; "searched and found
+nothing" is a finding) and **Falsify once, then argue** (each
+lens attacks its own strongest point once before writing the
+digest, then argues what survives at full conviction).
+
+Both workflow dialects carry the change in parity: a new
+"Gather external evidence from GitHub and the web" phase, the
+evidence section and citation/self-falsification sentences in the
+shared payload ask, and the degrade honesty in verified/notCovered
+— all pinned by extended anchors in `tests/test_workflow_copies.py`.
+Args are unchanged; the workflow form gathers the pack itself,
+the inline form's session gathers it before spawning.
+
+Fixed: the zcode master's empty-payload early exit inferred
+`never[]` for its `angles`/`verified` report fields and failed
+the run's typecheck before any lens spawned; the fields are now
+typed.
+
+Migration: none required — dispatch args are unchanged; sessions
+running the inline form should gather the evidence pack before
+spawning (SKILL.md says how).
+
+
 ## 0.3.0 — 2026-10-01
 
 Kit-wide engineering rules scoping (D-005): the suite's new

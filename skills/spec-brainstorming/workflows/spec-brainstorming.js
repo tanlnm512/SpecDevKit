@@ -4,15 +4,17 @@ export const meta = {
     "The panel wave of a spec-brainstorming run — stage 2 only. " +
     "Takes the stage-1 ground (the problem restatement, the audience, " +
     "the constraints), loads the three lens briefs and the shared " +
-    "panel protocol from the skill dir at run time, spawns The " +
-    "Visionary, The Cynic and The Minimalist fresh and in parallel " +
-    "from one payload — none sees another's output — and returns the " +
-    "three digests verbatim, ready for the session's trade-off " +
-    "matrix. The interactive stages (context discovery, matrix, " +
-    "refinement, handoff) never run in a workflow: a stop is not a " +
-    "question (the skill's D-004). Use when a brainstorming session " +
-    "has its stage-1 ground and the panel wave should run in the " +
-    "background — the session keeps stages 1, 3, 4 and 5.",
+    "panel protocol from the skill dir at run time, gathers an " +
+    "external evidence pack from GitHub and the web with one neutral " +
+    "researcher, then spawns The Visionary, The Cynic and The " +
+    "Minimalist fresh and in parallel from one payload — none sees " +
+    "another's output — and returns the three digests verbatim, " +
+    "ready for the session's trade-off matrix. The interactive " +
+    "stages (context discovery, matrix, refinement, handoff) never " +
+    "run in a workflow: a stop is not a question (the skill's " +
+    "D-004). Use when a brainstorming session has its stage-1 " +
+    "ground and the panel wave should run in the background — the " +
+    "session keeps stages 1, 3, 4 and 5.",
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +84,15 @@ const DIGEST_SCHEMA = {
   additionalProperties: false,
 };
 
+const EVIDENCE_SCHEMA = {
+  type: "object",
+  properties: {
+    pack: { type: "string" },
+  },
+  required: ["pack"],
+  additionalProperties: false,
+};
+
 // ONE probe per file read: runs the exact command and returns its
 // combined stdout verbatim through a schema — the script's only seam
 // to the shell (same pattern as the sibling skills' probe agents).
@@ -134,6 +145,10 @@ var LENSES = [
   },
 ];
 
+// The external evidence pack, gathered in its own phase before the
+// lenses spawn; payloadAsk() reads it at lens-spawn time.
+var evidencePack = "";
+
 // The ask every lens answers — the payload contract of
 // contracts/run.md. Load-bearing sentences; the zcode master
 // carries them word for word, and tests/test_workflow_copies.py
@@ -144,7 +159,11 @@ function payloadAsk() {
     "The idea, in the idea-owner's words:\n" + PROBLEM + "\n\n" +
     "Audience: " + (AUDIENCE || "not established — name the gap as an assumption, never a fact") + "\n" +
     "Constraints: " + (CONSTRAINTS || "not established — name the gap as an assumption, never a fact") + "\n\n" +
+    "External evidence pack (GitHub + web, gathered before you spawned — cite it, verify against it):\n" +
+    (evidencePack || "not gathered — every external claim is an assumption") + "\n\n" +
     "Ground every point in what is stated here; name assumptions as assumptions, never invent facts.\n" +
+    "Cite a source for every load-bearing claim — file:line for in-repo, URL + access date for external; what has no source is an assumption, said as one.\n" +
+    "Before writing your digest, attack your own strongest point once; argue what survives.\n" +
     "Return only your digest: angle, pitch, points (2-3 lines), watch — one line per field. " +
     "If you cannot satisfy your brief, say so in watch rather than working around it."
   );
@@ -182,6 +201,39 @@ async function main() {
   missingBriefs.forEach(function (l) {
     log(l.name + ": brief did not load — arguing from the inline mission line");
   });
+
+  function researchAsk() {
+    return (
+      "You are the evidence researcher of a brainstorming panel — a neutral " +
+      "gatherer, not a lens: find what the outside world already knows about this " +
+      "territory, never argue, never editorialize.\n\n" +
+      "The idea: " + NAME + " — " + PROBLEM + "\n\n" +
+      "Audience: " + (AUDIENCE || "not established") + "\n" +
+      "Constraints: " + (CONSTRAINTS || "not established") + "\n\n" +
+      "Search GitHub with the gh CLI (gh search repos, gh search issues) for prior art " +
+      "and competing tools on the idea's keywords — stars, last activity, maintenance " +
+      "signals. Search the web with whatever search or fetch tools your harness grants " +
+      "(WebSearch, WebFetch, curl) for 2-4 authoritative sources that support or " +
+      "contradict the idea's premises.\n\n" +
+      "Return only: { pack } — markdown, one bullet per finding: the claim, the URL, " +
+      "the access date, and whether it supports or contradicts. If nothing can be " +
+      "gathered (no tools, no network), return an empty pack — never invent a source."
+    );
+  }
+
+  async function gatherEvidence() {
+    const r = await agent(researchAsk(), { label: "evidence-researcher", schema: EVIDENCE_SCHEMA });
+    const pack = r && typeof r.pack === "string" ? r.pack.trim() : "";
+    if (!pack) {
+      log("external evidence pack did not load — external claims in the digests are assumptions, not sourced");
+      return "";
+    }
+    log("evidence pack gathered — " + pack.split("\n").filter(function (s) { return s.trim().indexOf("-") === 0; }).length + " sourced finding(s)");
+    return pack;
+  }
+
+  phase("Gather external evidence from GitHub and the web");
+  evidencePack = await gatherEvidence();
 
   function lensAsk(i) {
     const parts = [LENSES[i].mission];
@@ -238,8 +290,17 @@ async function main() {
       "three lens seats spawned fresh and in parallel from one payload — none saw another's output",
       "each lens carried its full brief and the shared panel protocol, loaded from the skill dir at run time",
       "every digest follows the pinned grammar: angle, pitch, points (2-3 lines), watch",
-    ],
+    ].concat(
+      evidencePack
+        ? ["external evidence pack gathered from GitHub and the web before the lenses spawned"]
+        : []
+    ),
     notCovered: []
+      .concat(
+        !evidencePack
+          ? ["external evidence pack did not load — external claims in the digests are assumptions, not sourced"]
+          : []
+      )
       .concat(
         missingBriefs.map(function (l) {
           return l.name + " argued from its inline mission line only — its brief did not load; re-run in-session with the full brief if its rubric matters here";

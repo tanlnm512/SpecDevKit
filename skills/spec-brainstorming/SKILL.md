@@ -19,7 +19,7 @@ description: >-
   when the word "brainstorm" is absent.
 metadata:
   owner: platform-core
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # spec-brainstorming — five-stage idea pressure-testing (before the spec exists)
@@ -120,13 +120,22 @@ Spawn the three lenses in one message, in parallel:
   the one core value, the thinnest delivery, what NOT to build on
   day one.
 
+Before the lenses spawn, gather the external evidence pack: what
+the outside world already knows about the idea's territory —
+prior art and competing tools on GitHub (stars, activity,
+maintenance signals), plus 2–4 authoritative web sources, each
+finding with its URL and access date. The workflow form gathers
+it mechanically; inline, the session gathers it. A failed gather
+is named as such — the lenses then treat every external claim as
+an assumption.
+
 Each spawn carries the payload contract below (skill_dir, the
 problem restatement in the user's own words where possible, the
-frontmatter-stripped brief body, `_panel-protocol.md` verbatim)
-and returns only its digest. Present the three angles distinctly
-labeled — `### The Visionary`, `### The Cynic`, `### The
-Minimalist` — faithful to the digests, with at most a sentence of
-framing each. No synthesis yet.
+frontmatter-stripped brief body, `_panel-protocol.md` verbatim,
+the evidence pack) and returns only its digest. Present the three
+angles distinctly labeled — `### The Visionary`, `### The Cynic`,
+`### The Minimalist` — faithful to the digests, with at most a
+sentence of framing each. No synthesis yet.
 
 ### Stage 3 — the trade-off matrix
 
@@ -201,7 +210,11 @@ conversation context carries over:
    constraints, in the user's own words where possible.
 3. The brief body (frontmatter stripped) byte-verbatim, then
    `agents/_panel-protocol.md` verbatim.
-4. Return contract: the agent writes nothing and returns only its
+4. The evidence pack: external grounding gathered before the
+   spawns — GitHub signals and authoritative web sources, each
+   with URL and access date; a failed gather is logged, never
+   papered over.
+5. Return contract: the agent writes nothing and returns only its
    digest — `angle:`, `pitch:`, `points:` (2–3 lines), `watch:`
    — decisions come from digest fields, never from prose.
 
@@ -211,7 +224,9 @@ Where the harness has a workflow runtime, stage 2 runs as the
 `spec-brainstorming` workflow (`workflows/spec-brainstorming.dwf.ts`
 on zcode, `workflows/spec-brainstorming.js` on Claude Code;
 D-004): dispatch it with stage 1's ground — `name`, `problem`,
-`audience`, `constraints` — and it loads the briefs and protocol
+`audience`, `constraints` — and it gathers the external evidence
+pack from GitHub and the web with one neutral researcher, loads
+the briefs and protocol
 from the skill dir at run time, spawns the three lenses fresh and
 in parallel, and returns the three digests verbatim for the
 session's matrix. The payload and digest contract is the one
