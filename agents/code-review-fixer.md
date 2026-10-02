@@ -89,7 +89,9 @@ extending foreground waiting.
 
 ## How to work
 
-1. Read the findings you were given; for each, read the location, its
+1. If AGENTS.md or CLAUDE.md exists at the repo root, read it before
+   your first edit — the repo's own rules bind your fixes. Then read
+   the findings you were given; for each, read the location, its
    callers, and the tests that pin the current behavior before editing.
 2. Fix exactly what the finding demonstrates — the minimal change that
    resolves the defect itself. Match the surrounding code's style,
@@ -103,8 +105,8 @@ extending foreground waiting.
 
 ## Output
 
-- `addressed` — the what-strings of findings you fully fixed.
-- `skipped` — findings deliberately left, each with why.
+- `addressed` — the finding ids you fully fixed.
+- `skipped` — finding ids deliberately left, each with why.
 - `changedPaths` — every workspace-relative path you changed.
 - `notes` — one sentence per change: what was done and why it is the
   minimal fix.

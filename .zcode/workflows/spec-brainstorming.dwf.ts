@@ -3,13 +3,15 @@ description: >-
   The panel wave of a spec-brainstorming run — stage 2 only. Takes
   the stage-1 ground (the problem restatement, the audience, the
   constraints), loads the three lens briefs and the shared panel
-  protocol from the skill dir at run time, spawns The Visionary,
-  The Cynic and The Minimalist fresh and in parallel from one
-  payload — none sees another's output — and returns the three
-  digests verbatim, ready for the session's trade-off matrix. The
-  interactive stages (context discovery, matrix, refinement,
-  handoff) never run in a workflow: a stop is not a question
-  (the skill's D-004).
+  protocol from the skill dir at run time, gathers an external
+  evidence pack from GitHub and the web with one neutral
+  researcher, then spawns The Visionary, The Cynic and The
+  Minimalist fresh and in parallel from one payload — none sees
+  another's output — and returns the three digests verbatim,
+  ready for the session's trade-off matrix. The interactive
+  stages (context discovery, matrix, refinement, handoff) never
+  run in a workflow: a stop is not a question (the skill's
+  D-004).
 whenToUse: >-
   Use when a brainstorming session has its stage-1 ground (the
   idea, the audience and the constraints are stated) and the
@@ -51,7 +53,7 @@ args:
 */
 
 // spec-brainstorming.dwf.ts — the zcode dialect of the panel wave.
-// /Users/lnmtan/.zcode/skills/spec-brainstorming below is a placeholder; the installer bakes the
+// /Users/tanle/.zcode/skills/spec-brainstorming below is a placeholder; the installer bakes the
 // active skill dir into the installed copy (a runtime skill_dir
 // arg wins). The zcode facade has no user-installable agent
 // types, so the lens briefs under <skillDir>/agents/ are read at
@@ -73,7 +75,12 @@ interface LensDigest {
   watch: string;
 }
 
-const SKILL_DIR_BAKED = "/Users/lnmtan/.zcode/skills/spec-brainstorming";
+interface EvidencePack {
+  /** Markdown pack: one bullet per finding — claim, URL, access date, supports/contradicts. Empty when nothing could be gathered. */
+  pack: string;
+}
+
+const SKILL_DIR_BAKED = "/Users/tanle/.zcode/skills/spec-brainstorming";
 const skillDir =
   typeof args.skill_dir === "string" && args.skill_dir
     ? args.skill_dir
@@ -90,13 +97,17 @@ const CONSTRAINTS =
     ? args.constraints.trim()
     : "";
 
+// The external evidence pack, gathered in its own phase before the
+// lenses spawn; payloadAsk() reads it at lens-spawn time.
+let evidencePack = "";
+
 if (!PROBLEM) {
   report({
     conclusion: "No problem restatement was given — the panel wave has nothing to argue. " +
       "Run stage 1 in the session first (one clarifying question, the user answers), then " +
       "dispatch this workflow with that answer as the problem arg.",
-    angles: [],
-    verified: [],
+    angles: [] as LensDigest[],
+    verified: [] as string[],
     notCovered: ["no lens ran — the payload was empty (stage 1 is the session's, always)"],
   });
 } else {
@@ -152,7 +163,11 @@ function payloadAsk(): string {
     "The idea, in the idea-owner's words:\n" + PROBLEM + "\n\n" +
     "Audience: " + (AUDIENCE || "not established — name the gap as an assumption, never a fact") + "\n" +
     "Constraints: " + (CONSTRAINTS || "not established — name the gap as an assumption, never a fact") + "\n\n" +
+    "External evidence pack (GitHub + web, gathered before you spawned — cite it, verify against it):\n" +
+    (evidencePack || "not gathered — every external claim is an assumption") + "\n\n" +
     "Ground every point in what is stated here; name assumptions as assumptions, never invent facts.\n" +
+    "Cite a source for every load-bearing claim — file:line for in-repo, URL + access date for external; what has no source is an assumption, said as one.\n" +
+    "Before writing your digest, attack your own strongest point once; argue what survives.\n" +
     "Return only your digest: angle, pitch, points (2-3 lines), watch — one line per field. " +
     "If you cannot satisfy your brief, say so in watch rather than working around it.";
 }
@@ -177,6 +192,37 @@ function lensSystem(i: number): string {
   return parts.join("\n\n---\n\n");
 }
 
+function researchAsk(): string {
+  return "You are the evidence researcher of a brainstorming panel — a neutral " +
+    "gatherer, not a lens: find what the outside world already knows about this " +
+    "territory, never argue, never editorialize.\n\n" +
+    "The idea: " + NAME + " — " + PROBLEM + "\n\n" +
+    "Audience: " + (AUDIENCE || "not established") + "\n" +
+    "Constraints: " + (CONSTRAINTS || "not established") + "\n\n" +
+    "Search GitHub with the gh CLI (gh search repos, gh search issues) for prior art " +
+    "and competing tools on the idea's keywords — stars, last activity, maintenance " +
+    "signals. Search the web with whatever search or fetch tools your harness grants " +
+    "(WebSearch, WebFetch, curl) for 2-4 authoritative sources that support or " +
+    "contradict the idea's premises.\n\n" +
+    "Return only: { pack } — markdown, one bullet per finding: the claim, the URL, " +
+    "the access date, and whether it supports or contradicts. If nothing can be " +
+    "gathered (no tools, no network), return an empty pack — never invent a source.";
+}
+
+async function gatherEvidence(): Promise<string> {
+  const r = await agent("Evidence researcher").ask<EvidencePack>(researchAsk());
+  const pack = r && typeof r.pack === "string" ? r.pack.trim() : "";
+  if (!pack) {
+    log("external evidence pack did not load — external claims in the digests are assumptions, not sourced");
+    return "";
+  }
+  log("evidence pack gathered — " + pack.split("\n").filter((s) => s.trim().startsWith("-")).length + " sourced finding(s)");
+  return pack;
+}
+
+phase("Gather external evidence from GitHub and the web");
+evidencePack = await gatherEvidence();
+
 phase("Argue the idea from three independent lenses");
 
 // Fresh, parallel, one payload — none sees another's output (D-002).
@@ -200,8 +246,10 @@ report({
     "three lens seats spawned fresh and in parallel from one payload — none saw another's output",
     "each lens carried its full brief and the shared panel protocol, loaded from the skill dir at run time",
     "every digest follows the pinned grammar: angle, pitch, points (2-3 lines), watch",
+    ...(evidencePack ? ["external evidence pack gathered from GitHub and the web before the lenses spawned"] : []),
   ],
   notCovered: [
+    ...(!evidencePack ? ["external evidence pack did not load — external claims in the digests are assumptions, not sourced"] : []),
     ...missingBriefs.map((l) =>
       l.name + " argued from its inline mission line only — its brief did not load; re-run in-session with the full brief if its rubric matters here"),
     ...failed.map((l) => l.name + " returned no digest — the session must re-ask this lens before the matrix"),

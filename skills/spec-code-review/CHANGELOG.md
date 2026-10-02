@@ -6,6 +6,29 @@ review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
 
+## 0.13.0 — 2026-10-02
+
+Stable finding ids and the report markdown as the fix_from carrier
+(D-013). A finding's identity is its `id`, minted when it becomes
+tracked — `<lens>-<n>` at confirmation, `gate-N` / `fix-review-N`
+in the loop, `carried-N` for id-less carried items — replacing
+`where` (which collides at a shared `path:line` and moves under the
+fixes the loop lands). The id rides the findings board key, the
+report heading (`### [correctness-1 · HIGH · verified · lens] …`),
+the returned findings JSON, and the fixer's `addressed`/`skipped`
+replies (now ids, not matched `what`-strings). `fix_from` accepts
+the saved report markdown itself — `parseFindingsMd` reads the
+findings section back (id-bearing 0.13 headings and pre-id 0.12
+headings alike), so the review-then-ask flow hands over the artifact
+the user actually saved; JSON stays equally valid. The fixer now
+reads the target repo's AGENTS.md/CLAUDE.md before its first edit —
+the reviewers already did; the repo's own rules bind the fixes.
+
+Migration: none required — ids are additive (a fix_from payload
+without them mints `carried-N`), and the pre-0.13 report markdown
+still parses. Fixes that consume the report's findings JSON
+programmatically see one new leading field per item (`id`).
+
 ## 0.12.0 — 2026-10-01
 
 Kit-wide engineering rules in the fix loop (D-012): the fixer brief

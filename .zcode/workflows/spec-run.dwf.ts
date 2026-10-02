@@ -24,7 +24,7 @@ args:
 */
 // ---------------------------------------------------------------------------
 // spec-run.dwf.ts — the zcode dialect of the spec-to-prod frontier loop.
-// /Users/lnmtan/.zcode/skills/spec-to-prod below is a placeholder; tools/install-workflow.sh bakes the
+// /Users/tanle/.zcode/skills/spec-to-prod below is a placeholder; tools/install-workflow.sh bakes the
 // active skill dir into the installed copy (a runtime skill_dir arg wins).
 // ---------------------------------------------------------------------------
 /*
@@ -81,7 +81,7 @@ interface Stop {
   detail?: string;
 }
 
-const SKILL_DIR_BAKED = "/Users/lnmtan/.zcode/skills/spec-to-prod";
+const SKILL_DIR_BAKED = "/Users/tanle/.zcode/skills/spec-to-prod";
 const skillDir =
   typeof args.skill_dir === "string" && args.skill_dir
     ? args.skill_dir

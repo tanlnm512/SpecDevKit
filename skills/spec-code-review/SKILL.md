@@ -19,7 +19,7 @@ description: >-
   branch") — or the codebase as a whole ("review the project").
 metadata:
   owner: platform-core
-  version: "0.12.0"
+  version: "0.13.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)
@@ -287,7 +287,8 @@ grows.
 When the user asked to fix as well, run bounded rounds (default 2):
 
 1. An **author/fixer** fixes the confirmed findings in the working
-   tree: minimal, repo style, NEVER commits, never weakens a test to
+   tree: reads the repo's AGENTS.md/CLAUDE.md first, minimal, repo
+   style, NEVER commits, never weakens a test to
    make a finding go away (pin corrected behavior instead). Dispatch
    `agents/code-review-fixer.md` where the harness supports subagents.
    That brief carries the kit-wide engineering rules (§ Engineering
@@ -304,13 +305,15 @@ When the user asked to fix as well, run bounded rounds (default 2):
 to ask the user, so the decision gate is a second run, and `fix_from`
 makes it cheap: run a review first (`fix_rounds: 0`), present the
 findings with their severity and impact, and let the user decide. If
-they fix, run the workflow again with `fix_from` — the findings JSON
-from the previous report, inline or as a file path (each item
-`{where, what, evidence, severity, lens, status, impact, fixStatus}`;
-items already marked fixed are dropped) — plus `fix_rounds`. That run
-skips the review stages entirely: it loads the carried findings, runs
-the fix loop on them, and ends with the recommendation. `fix_rounds`
-defaults to 2 in this mode.
+they fix, run the workflow again with `fix_from` — the previous
+report's markdown (the saved report file; its findings section parses
+back, ids included), or its findings JSON inline or as a file path
+(each item `{id, where, what, evidence, severity, lens, status,
+impact, fixStatus}`; ids are optional — an id-less item gets
+`carried-N`; items already marked fixed are dropped) — plus
+`fix_rounds`. That run skips the review stages entirely: it loads the
+carried findings, runs the fix loop on them, and ends with the
+recommendation. `fix_rounds` defaults to 2 in this mode.
 
 End with a **recommendation**: `merge` (everything fixed, gate green,
 nothing new), `fix-first` (ordinary findings remain), or `human`
@@ -327,7 +330,8 @@ commit decision and message are the user's.
   `spec-code-review` (args: `base`, `target` `diff`/`branch`/`pr`/
   `project`, `pr` (the pull request, pr mode), `intent` (what the
   change is supposed to do — the author's stated intent), `fix_from`
-  (findings JSON from a previous report — fix-only continuation),
+  (the previous report's markdown or its findings JSON — fix-only
+  continuation),
   `paths` (project mode), `mode` fast/full/auto, `fix_rounds`, optional
   `skill_dir` override).
   A repo may keep its own

@@ -77,6 +77,12 @@ buys every reviewer the same starting ground.
 Every finding, in any representation (agent output, triage, report,
 fix_from payload), carries:
 
+- `id` — stable identity minted when the finding becomes tracked:
+  `<lens>-<n>` at confirmation, `gate-N` / `fix-review-N` inside the
+  loop, `carried-N` for an id-less fix_from item. Reviewers never mint
+  ids — identity begins at tracking. `where` is evidence, not
+  identity: lines move as fixes land, and two findings can share a
+  location.
 - `where` — `path:line` on the new side of the diff (current tree in
   project mode; a check name for gate-lens rows).
 - `what` — one sentence: the problem and why it matters. Not the fix.

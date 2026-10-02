@@ -401,8 +401,8 @@ const FIX_SCHEMA = {
       type: "array",
       items: {
         type: "object",
-        properties: { what: { type: "string" }, why: { type: "string" } },
-        required: ["what", "why"],
+        properties: { id: { type: "string" }, why: { type: "string" } },
+        required: ["id", "why"],
         additionalProperties: false,
       },
     },
@@ -750,19 +750,90 @@ async function probeBaseBranchAndName() {
   };
 }
 
-// fix_from loader: findings JSON from a previous review — inline (starts
-// with [ or {) or a file path read through a probe. Accepts a bare
-// array of finding items or an object with a findings array; each item
-// needs where and what, everything else defaults sensibly. Entries the
-// previous run already marked fixed are dropped; the rest return as
-// pending tracked findings, highest severity first. A string return is
-// a user-facing error.
+// Finding identity (0.13.0, D-013): an id is minted the moment a
+// finding becomes tracked — "<lens>-<n>" at confirmation, gate-N /
+// fix-review-N inside the loop — and rides every later representation
+// (report heading, fix_from payload). `where` is evidence, not
+// identity: lines move as fixes land, and two findings can share a
+// location.
+let idSeqs = {};
+function nextId(prefix) {
+  idSeqs[prefix] = (idSeqs[prefix] !== undefined ? idSeqs[prefix] : 0) + 1;
+  return prefix + "-" + idSeqs[prefix];
+}
+
+// Parse the findings section of a report this workflow emitted — the
+// fix_from carrier for the natural handover artifact (the saved report
+// markdown). Recognizes both the id-bearing heading (0.13.0+) and the
+// pre-id heading (through 0.12.0; those items arrive id-less and the
+// loader mints carried-N). Pure and self-contained — no outer
+// references — so the parity suite can extract and execute it in both
+// dialects.
+function parseFindingsMd(text) {
+  const items = [];
+  let cur = null;
+  for (const line of text.split("\n")) {
+    const m = /^### \[([^\s·]+) · (LOW|MEDIUM|HIGH) · (verified|unconfirmed) · ([^\]]+?)\] (.*)$/.exec(line);
+    const legacy = m ? null : /^### \[(LOW|MEDIUM|HIGH) · (verified|unconfirmed) · ([^\]]+?)\] (.*)$/.exec(line);
+    const hit = m || legacy;
+    if (hit) {
+      if (cur) items.push(cur);
+      const off = m ? 0 : 1;
+      let lens = hit[4 - off];
+      let fixStatus = "pending";
+      const fx = /^(.*?) · fix: (fixed|unfixed|worse|pending)$/.exec(lens);
+      if (fx) {
+        lens = fx[1];
+        fixStatus = fx[2];
+      }
+      cur = {
+        id: m ? hit[1] : "",
+        where: "",
+        what: hit[5 - off],
+        evidence: "",
+        severity: hit[2 - off].toLowerCase(),
+        status: hit[3 - off],
+        lens: lens,
+        impact: "",
+        fixStatus: fixStatus,
+      };
+      continue;
+    }
+    if (cur) {
+      let b = /^- where: `(.*)`$/.exec(line);
+      if (b) {
+        cur.where = b[1];
+        continue;
+      }
+      b = /^- evidence: (.*)$/.exec(line);
+      if (b) {
+        cur.evidence = b[1];
+        continue;
+      }
+      b = /^- impact: (.*)$/.exec(line);
+      if (b) cur.impact = b[1];
+    }
+  }
+  if (cur) items.push(cur);
+  return items.filter(function (f) { return f.where && f.what; });
+}
+
+// fix_from loader: findings from a previous review — inline JSON
+// (starts with [ or {), a JSON file, or the report markdown itself
+// (parsed by parseFindingsMd; its headings carry the finding ids).
+// Accepts a bare array of finding items or an object with a findings
+// array; each item needs where and what, everything else defaults
+// sensibly. A carried id is kept; an id-less item (legacy JSON, a
+// pre-id report) gets carried-N. Entries the previous run already
+// marked fixed are dropped; the rest return as pending tracked
+// findings, highest severity first. A string return is a user-facing
+// error.
 async function loadFixFromFindings() {
   let text = FIX_FROM_ARG;
   if (!/^\s*[\[{]/.test(text)) {
     const out = await probe("fix-from-probe", "cat " + shq(FIX_FROM_ARG));
     if (out === null || !out.trim()) {
-      return "fix_from: could not read \"" + FIX_FROM_ARG + "\" — pass a findings JSON file path (workspace-relative or absolute) or inline JSON.";
+      return "fix_from: could not read \"" + FIX_FROM_ARG + "\" — pass the review report markdown, a findings JSON file path (workspace-relative or absolute), or inline JSON.";
     }
     text = out;
   }
@@ -770,12 +841,17 @@ async function loadFixFromFindings() {
   try {
     parsed = JSON.parse(text);
   } catch (e) {
-    return "fix_from: the findings payload is not valid JSON — expected the findings array of a previous review report.";
+    const mdItems = parseFindingsMd(text);
+    if (mdItems.length === 0) {
+      return "fix_from: the payload is neither valid JSON nor a parseable review report — pass the report markdown of a previous review, or its findings JSON.";
+    }
+    parsed = mdItems;
   }
   const items = Array.isArray(parsed)
     ? parsed
     : (parsed && Array.isArray(parsed.findings) ? parsed.findings : []);
   const trackedOut = [];
+  let carriedSeq = 0;
   for (const it of items) {
     if (!it || typeof it.where !== "string" || !it.where || typeof it.what !== "string" || !it.what) {
       log("fix_from: skipping an item without where/what");
@@ -784,6 +860,7 @@ async function loadFixFromFindings() {
     if (it.fixStatus === "fixed") continue; // already resolved in the previous run
     trackedOut.push({
       finding: {
+        id: typeof it.id === "string" && it.id ? it.id : "carried-" + (++carriedSeq),
         where: it.where,
         what: it.what,
         evidence: typeof it.evidence === "string" ? it.evidence : "",
@@ -1034,6 +1111,7 @@ function fixerAsk(round, unresolved, gateFeedback) {
       JSON.stringify(
         unresolved.map(function (t) {
           return {
+            id: t.finding.id,
             where: t.finding.where,
             what: t.finding.what,
             evidence: t.finding.evidence,
@@ -1045,11 +1123,12 @@ function fixerAsk(round, unresolved, gateFeedback) {
         null,
         2,
       ) +
-      "\nWork in the working tree; never commit. You may run a single targeted test file for code you touch, " +
-      "but the repo's checks re-run the moment you finish — do not run them yourself.\n" +
+      "\nWork in the working tree; never commit. If AGENTS.md or CLAUDE.md exists at the repo root, read it " +
+      "before your first edit — the repo's own rules bind your fixes. You may run a single targeted test file " +
+      "for code you touch, but the repo's checks re-run the moment you finish — do not run them yourself.\n" +
       intentBlock() +
-      "Return addressed (the what-strings you fully fixed), skipped (what you deliberately left, with why), " +
-      "changedPaths, and notes (one sentence per change: what was done and why it is minimal)."
+      "Return addressed (the finding ids you fully fixed), skipped (the finding ids you deliberately left, with " +
+      "why), changedPaths, and notes (one sentence per change: what was done and why it is minimal)."
     );
   }
   return (
@@ -1058,6 +1137,7 @@ function fixerAsk(round, unresolved, gateFeedback) {
     JSON.stringify(
       unresolved.map(function (t) {
         return {
+          id: t.finding.id,
           where: t.finding.where,
           what: t.finding.what,
           evidence: t.finding.evidence,
@@ -1083,7 +1163,7 @@ function verifyAsk(t, notes) {
     "A reviewer confirmed this finding " + (PROJECT ? "in the project's code" : "on the change (`git diff " + BASE + "`)") +
     ", and the author has since attempted a fix.\n" +
     repoBlock() +
-    "Finding: " + JSON.stringify({ where: t.finding.where, what: t.finding.what, severity: t.finding.severity, lens: t.finding.lens }) +
+    "Finding: " + JSON.stringify({ id: t.finding.id, where: t.finding.where, what: t.finding.what, severity: t.finding.severity, lens: t.finding.lens }) +
     "\nAuthor's notes: " + (notes || "(none)") +
     "\nVerify in the CURRENT working tree: read the location and its immediate callers or contract; confirm " +
     "the described defect is gone and the fix is minimal and sound.\n" +
@@ -1118,6 +1198,7 @@ function loopFinalAsk(tracked, roundsUsed, gateGreen, changedPaths) {
     JSON.stringify(
       tracked.map(function (t) {
         return {
+          id: t.finding.id,
           where: t.finding.where,
           what: t.finding.what,
           severity: t.finding.severity,
@@ -1150,11 +1231,14 @@ function loopFinalAsk(tracked, roundsUsed, gateGreen, changedPaths) {
   );
 }
 
+// The report's findings section — the heading carries the finding id
+// first, so a reader (and parseFindingsMd on a fix_from handover)
+// references findings as correctness-1, not as a path that moves.
 function findingsMd(items) {
   const lines = [];
   for (const f of items) {
     lines.push(
-      "### [" + f.severity.toUpperCase() + " · " + f.status + " · " + f.lens +
+      "### [" + f.id + " · " + f.severity.toUpperCase() + " · " + f.status + " · " + f.lens +
       (f.fixStatus === "pending" ? "" : " · fix: " + f.fixStatus) + "] " + f.what,
     );
     lines.push("- where: `" + f.where + "`");
@@ -1270,6 +1354,7 @@ async function main() {
     allConfirmed = tracked.map(function (t) { return t.finding; });
     summary = tracked.map(function (t) {
       return {
+        id: t.finding.id,
         where: t.finding.where,
         what: t.finding.what,
         severity: t.finding.severity,
@@ -1287,6 +1372,7 @@ async function main() {
     for (const g of preBad) {
       tracked.push({
         finding: {
+          id: nextId("gate"),
           where: g.name,
           what: "Repo check failed before the fixes: " + g.name,
           evidence: g.tail || "(no output)",
@@ -1516,6 +1602,7 @@ async function main() {
     for (const g of gateFailed) {
       gateTracked.push({
         finding: {
+          id: nextId("gate"),
           where: g.name,
           what: "Repo check failed before the review: " + g.name,
           evidence: g.tail || "(no output)",
@@ -1531,6 +1618,7 @@ async function main() {
     if (!PROJECT) {
     const gateFindings = gateFailed.map(function (g) {
       return {
+        id: nextId("gate"),
         where: g.name,
         what: "Repo check failed: " + g.name,
         evidence: g.tail || "(no output)",
@@ -1715,6 +1803,7 @@ async function main() {
       : { status: "unconfirmed", note: "no confirmation result — the confirmer returned nothing; treat as unverified" };
     if (!c) log("confirm " + keptAll[i].finding.where + ": no result");
     allConfirmed.push({
+      id: nextId(keptAll[i].lens),
       where: keptAll[i].finding.where,
       what: keptAll[i].finding.what,
       evidence: keptAll[i].finding.evidence,
@@ -1730,6 +1819,7 @@ async function main() {
   });
   summary = gateTracked.map(function (t) {
     return {
+      id: t.finding.id,
       where: t.finding.where,
       what: t.finding.what,
       severity: t.finding.severity,
@@ -1737,7 +1827,7 @@ async function main() {
       status: t.finding.confirmation.status,
     };
   }).concat(allConfirmed.map(function (c) {
-    return { where: c.where, what: c.what, severity: c.severity, lens: c.lens, status: c.confirmation.status };
+    return { id: c.id, where: c.where, what: c.what, severity: c.severity, lens: c.lens, status: c.confirmation.status };
   }));
 
   // -------------------------------------------------------------------------
@@ -1802,6 +1892,7 @@ async function main() {
       for (const g of gateBad) {
         tracked.push({
           finding: {
+            id: nextId("gate"),
             where: g.name,
             what: "Repo check failed after the fixes: " + g.name,
             evidence: g.tail || "(no output)",
@@ -1859,6 +1950,7 @@ async function main() {
             const fc = fixConfs[i];
             tracked.push({
               finding: {
+                id: nextId("fix-review"),
                 where: fixKept[i].where,
                 what: fixKept[i].what,
                 evidence: fixKept[i].evidence,
@@ -1937,6 +2029,7 @@ async function main() {
 
   const reportedFindings = tracked.map(function (t) {
     return {
+      id: t.finding.id,
       where: t.finding.where,
       what: t.finding.what,
       evidence: t.finding.evidence,

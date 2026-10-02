@@ -129,6 +129,23 @@ FIX_CONTINUATION_ANCHORS = [
 ]
 FIX_FROM_PROBE = "fix-from-probe"
 
+# The 0.13.0 identity and carrier contract (D-013): findings carry
+# stable ids minted at tracking (board key, report heading, fixer
+# replies join on ids), the saved report markdown parses back as a
+# fix_from carrier, and the fixer reads the target repo's AGENTS.md
+# before its first edit. Anchors pin the minting helpers, the
+# id-bearing heading, the parser and the carried-N fallback in both
+# dialects.
+FINDING_ID_ANCHORS = [
+    "the finding ids you fully fixed",
+    "before your first edit — the repo's own rules bind your fixes",
+    "function parseFindingsMd",
+    '"carried-" + (++carriedSeq)',
+    '"### [" + f.id + " · "',
+    'nextId("gate")',
+    'nextId("fix-review")',
+]
+
 # The 0.7.1 repair pins: every panel-confirmed defect from the 0.7.0
 # review gets an anchor here so it cannot silently regress.
 FIXES_071 = {
@@ -372,6 +389,19 @@ class ParityTests(unittest.TestCase):
         self.assertIn('impact: { type: "string" }', self.js)
         self.assertIn('required: ["where", "what", "evidence", "severity"],', self.js)
 
+    def test_finding_ids_and_markdown_carrier_are_shared(self):
+        # D-013: every tracked finding carries a stable id; the fixer
+        # replies in ids; the report markdown parses back as a carrier
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            for anchor in FINDING_ID_ANCHORS:
+                self.assertIn(anchor, flat(text), f"{anchor} in {name}")
+            self.assertIn("id: t.finding.id,", text, name)
+        # the findings board keys on the id, never on where (zcode-only)
+        self.assertIn('key: "id"', self.ts)
+        # the claude fixer schema joins skipped items on ids too
+        self.assertIn(
+            'properties: { id: { type: "string" }, why: { type: "string" } }', self.js)
+
     def test_zero_seven_one_fixes_are_shared(self):
         for text, name in ((self.ts, "ts"), (self.js, "js")):
             for anchor in FIXES_071["ts"]:
@@ -504,6 +534,23 @@ class VersionParityTests(unittest.TestCase):
                       (SKILL / "CHANGELOG.md").read_text(encoding="utf-8"))
 
 
+def node_runs_typescript():
+    """True when node exists and can execute TypeScript (unflagged type
+    stripping) — the executor for the extracted dialect functions. Probes
+    with a typed one-liner so pre-23.6 builds skip loudly instead of
+    hard-failing the suite."""
+    if not NODE:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        probe = Path(tmp) / "ts_probe.ts"
+        probe.write_text(
+            "function double(n: number): number { return n * 2; }\n"
+            'if (double(2) !== 4) throw new Error("ts probe failed");\n',
+            encoding="utf-8")
+        r = subprocess.run([NODE, str(probe)], capture_output=True, text=True)
+    return r.returncode == 0
+
+
 class ShardPartitionTests(unittest.TestCase):
     """shardProjectFiles is the core behavioral change of 0.11.0, and
     the string anchors above only prove both dialects carry its text.
@@ -523,18 +570,10 @@ class ShardPartitionTests(unittest.TestCase):
         if not NODE:
             raise unittest.SkipTest(
                 "node is required to execute the real shardProjectFiles")
-        with tempfile.TemporaryDirectory() as tmp:
-            probe = Path(tmp) / "ts_probe.ts"
-            probe.write_text(
-                "function double(n: number): number { return n * 2; }\n"
-                'if (double(2) !== 4) throw new Error("ts probe failed");\n',
-                encoding="utf-8")
-            r = subprocess.run([NODE, str(probe)], capture_output=True, text=True)
-        if r.returncode != 0:
-            detail = r.stderr.strip() or "(no stderr)"
+        if not node_runs_typescript():
             raise unittest.SkipTest(
                 "node cannot execute TypeScript (unflagged type stripping "
-                "required): " + detail[:200])
+                "required)")
 
     # (files, sizes, expected parts); inputs unsorted on purpose — the
     # function sorts before partitioning
@@ -612,6 +651,100 @@ class ShardPartitionTests(unittest.TestCase):
                 if len(p) > 1:
                     self.assertLessEqual(
                         sum(sizes.get(f, 0) for f in p), cap_bytes)
+
+
+class FindingsMarkdownTests(unittest.TestCase):
+    """parseFindingsMd is the 0.13.0 fix_from markdown carrier (D-013).
+    Like ShardPartitionTests, this suite extracts the REAL function from
+    each master and executes it through node: the id-bearing 0.13
+    heading, the pre-id 0.12 heading, the fix-suffix, the bullet fields,
+    junk lines and the where/what floor must behave identically in both
+    dialects — the report findingsMd emits is the exact text this
+    parser reads back on a fix_from handover."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not NODE:
+            raise unittest.SkipTest(
+                "node is required to execute the real parseFindingsMd")
+        if not node_runs_typescript():
+            raise unittest.SkipTest(
+                "node cannot execute TypeScript (unflagged type stripping "
+                "required)")
+
+    SAMPLE = "\n".join([
+        "# Code review — HEAD (3 files, ~40 added lines)",
+        "",
+        "## Findings (4 confirmed · 2 high · 0 fixed)",
+        "",
+        "### [correctness-1 · HIGH · verified · correctness] Refund computed before conversion.",
+        "- where: `src/pay.py:42`",
+        "- evidence: amount = base * qty  # line 42",
+        "- impact: non-USD refunds wrong",
+        "",
+        "### [quality-2 · LOW · unconfirmed · quality · fix: unfixed] Dead legacy block slows startup.",
+        "- where: `src/legacy.py:10`",
+        "- evidence: import six — unused",
+        "",
+        "### [MEDIUM · verified · security] Legacy-shape finding without an id.",
+        "- where: `src/old.py:7`",
+        "- evidence: md5 used for passwords",
+        "",
+        "### [gate-3 · HIGH · verified · gate] Repo check failed: pytest",
+        "- where: `pytest`",
+        "- evidence: 2 failed",
+        "",
+        "### [quality-9 · MEDIUM · verified · quality] No where bullet — dropped.",
+        "",
+        "Some prose line that is not a finding.",
+        "- evidence: orphan bullet",
+    ])
+
+    EXPECTED = [
+        {"id": "correctness-1", "where": "src/pay.py:42",
+         "what": "Refund computed before conversion.",
+         "evidence": "amount = base * qty  # line 42", "severity": "high",
+         "status": "verified", "lens": "correctness",
+         "impact": "non-USD refunds wrong", "fixStatus": "pending"},
+        {"id": "quality-2", "where": "src/legacy.py:10",
+         "what": "Dead legacy block slows startup.",
+         "evidence": "import six — unused", "severity": "low",
+         "status": "unconfirmed", "lens": "quality",
+         "impact": "", "fixStatus": "unfixed"},
+        {"id": "", "where": "src/old.py:7",
+         "what": "Legacy-shape finding without an id.",
+         "evidence": "md5 used for passwords", "severity": "medium",
+         "status": "verified", "lens": "security",
+         "impact": "", "fixStatus": "pending"},
+        {"id": "gate-3", "where": "pytest",
+         "what": "Repo check failed: pytest", "evidence": "2 failed",
+         "severity": "high", "status": "verified", "lens": "gate",
+         "impact": "", "fixStatus": "pending"},
+    ]
+
+    def parse(self, name, text):
+        """Run the dialect's own parseFindingsMd on the sample report."""
+        m = re.search(r"^function parseFindingsMd\(.*?^\}", text, re.M | re.S)
+        self.assertIsNotNone(m, f"parseFindingsMd in {name}")
+        script = (
+            m.group(0)
+            + "\nconsole.log(JSON.stringify(parseFindingsMd(%s)));\n"
+            % json.dumps(self.SAMPLE)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ("parse.ts" if name == "dwf.ts" else "parse.js")
+            path.write_text(script, encoding="utf-8")
+            r = subprocess.run([NODE, str(path)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
+        return json.loads(r.stdout)
+
+    def test_report_markdown_parses_identically_in_both_dialects(self):
+        texts = {"dwf.ts": DWF_TS.read_text(encoding="utf-8"),
+                 "js": WF_JS.read_text(encoding="utf-8")}
+        parsed = {n: self.parse(n, t) for n, t in texts.items()}
+        self.assertEqual(parsed["dwf.ts"], parsed["js"],
+                         "dialects disagree on the sample report")
+        self.assertEqual(parsed["js"], self.EXPECTED)
 
 
 class ZcodeDialectTests(unittest.TestCase):

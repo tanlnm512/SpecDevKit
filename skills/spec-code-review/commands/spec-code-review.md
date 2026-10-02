@@ -24,9 +24,10 @@ the ask is plainly a review):
   the change is supposed to do —
   the author's stated intent), `mode fast|full|auto`, `fix_rounds N`
   (N > 0 runs the verified fix loop after the review).
-- `fix <findings-json>` → the fix-only continuation (`fix_from`):
-  carry a previous report's findings (file path or inline JSON) into
-  the fix loop — fixer, independent verification per fix, gate re-run,
+- `fix <report-or-findings>` → the fix-only continuation (`fix_from`):
+  carry a previous report's findings into the fix loop — the saved
+  report markdown itself, or findings JSON (file path or inline) —
+  fixer, independent verification per finding, gate re-run,
   fresh-eyes review; `fix_rounds` defaults to 2. This is the second
   half of the review-then-ask flow: review first, present the
   findings, let the user decide, then fix from the report.

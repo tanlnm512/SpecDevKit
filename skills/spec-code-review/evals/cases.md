@@ -51,3 +51,7 @@ the report line. Never average — aggregate.
   attempted fix carries an independent fixed/unfixed/worse verdict;
   the gate re-ran; a recommendation is issued per
   `gates/recommendation.md`; fixes are uncommitted.
+- **Variant (markdown carrier)**: repeat with the E2 report markdown
+  file as `fix_from` — same carried findings, ids preserved from the
+  report headings (an id-less pre-0.13 report must still parse; its
+  items arrive as `carried-N`).

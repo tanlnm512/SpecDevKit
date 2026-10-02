@@ -1,7 +1,8 @@
 {
-  "_readme": "fix_from payload — findings carried from a previous review's report into the fix-only continuation (D-005). Copy the findings array of the previous report (or a bare array of items) and edit it before passing as the fix_from arg (file path or inline JSON). Rules the loader applies: items need where and what; evidence/severity/lens/impact/status default sensibly when absent; an item already marked fixStatus 'fixed' is dropped; items are re-sorted by severity. The two items below are examples of each case.",
+  "_readme": "fix_from payload — findings carried from a previous review's report into the fix-only continuation (D-005, ids and the markdown carrier per D-013). Hand over the saved report markdown itself, or copy the findings array of the previous report (or a bare array of items) and edit it before passing as the fix_from arg (file path or inline JSON). Rules the loader applies: items need where and what; id is optional — a carried id is kept, an id-less item gets carried-N; evidence/severity/lens/impact/status default sensibly when absent; an item already marked fixStatus 'fixed' is dropped; items are re-sorted by severity. The two items below are examples of each case.",
   "findings": [
     {
+      "id": "correctness-1",
       "where": "src/pay.py:42",
       "what": "Refund amount is computed before the currency conversion, so refunds in non-USD accounts are off by the conversion rate.",
       "evidence": "amount = base * qty  # line 42 — conversion applied at line 55, after the refund object is built",
@@ -12,6 +13,7 @@
       "fixStatus": "pending"
     },
     {
+      "id": "quality-2",
       "where": "src/legacy.py:10",
       "what": "Dead legacy import block slows startup by 200ms.",
       "evidence": "import six, collections  # line 10 — six unused elsewhere in the file",

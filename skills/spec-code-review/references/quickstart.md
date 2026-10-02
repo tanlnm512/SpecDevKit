@@ -11,7 +11,7 @@ This is navigation, not a second contract. `SKILL.md`,
 | What's on this branch | `review target branch` (optional `base`) |
 | A pull request | `review target pr, pr: 12` (gh CLI; clean tree auto-checkout, dirty tree refused) |
 | The whole codebase | `review target project` (+ `paths: src` on big repos) |
-| Fix what a review found | `fix <findings.json>` — the `fix_from` continuation |
+| Fix what a review found | `fix <report.md or findings.json>` — the `fix_from` continuation |
 | Just the mechanical floor | `gate` (or `gate --tree` for project scope) |
 
 ## Pick the harness
@@ -29,9 +29,9 @@ This is navigation, not a second contract. `SKILL.md`,
    severity, impact, risk and a verdict; a recommendation only comes
    with the fix loop (`gates/recommendation.md` arbitrates).
 2. Present them; the user decides.
-3. If fixing: `fix <findings JSON>` (+ `fix_rounds`, default 2) — the
-   carried findings go straight to the verified fix loop; nothing is
-   re-reviewed.
+3. If fixing: `fix <report.md or findings JSON>` (+ `fix_rounds`,
+   default 2) — the carried findings go straight to the verified fix
+   loop; nothing is re-reviewed.
 4. Fixes land uncommitted; the commit is the user's.
 
 ## Reading a report

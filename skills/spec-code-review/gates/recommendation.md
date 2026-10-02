@@ -14,7 +14,7 @@ observer-checkable — an onlooker with the report can verify each one.
 | Target resolves to an empty diff / no matching files | "Nothing to review" with the resolved scope |
 | Pr mode, working tree dirty | Refusal — uncommitted work would be misattributed to the PR (checkout or not) |
 | Pr mode, gh view/checkout/merge-base fails | Refusal with the failing step |
-| fix_from payload unusable | Refusal: unreadable file / invalid JSON / no actionable items |
+| fix_from payload unusable | Refusal: unreadable file / neither valid JSON nor a parseable report findings section / no actionable items |
 | Fix rounds exhausted with findings unresolved | Loop ends; state is reported per finding |
 
 ## Recommendation criteria (fix-loop runs only)
