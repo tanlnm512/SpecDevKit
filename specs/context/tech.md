@@ -1,6 +1,7 @@
 # Tech baseline — SpecDevKit
 
-**Baseline**: bc5e9de + current working tree (2026-09-22 assurance hardening) · living view — refresh where the
+**Baseline**: bc5e9de + current working tree (2026-09-22 assurance hardening; refreshed
+2026-10-04 @ 3cfc8f1b for kit-level-up: per-skill test suites) · living view — refresh where the
 code moved; per-spec surveys carry their own evidence.
 
 ## Stack
@@ -15,8 +16,13 @@ code moved; per-spec surveys carry their own evidence.
 
 - Tooling suites: `bash tools/tests/run.sh` (unittest per file; prefers
   `uvx python@3.12`, falls back to `python3`).
-- Skill script suites: `python3 skills/spec-to-prod/tests/test_<x>.py`
-  (check / audit / graph / specstate / tick / git-degradation).
+- Skill script suites: `bash skills/<name>/tests/run.sh` for each of the
+  three skills (spec-to-prod's per-file runners:
+  `python3 skills/spec-to-prod/tests/test_<x>.py` — check / audit /
+  graph / specstate / tick / git-degradation).
+- Live eval cases: `skills/<name>/evals/cases.md` (conversational,
+  judged from transcripts) — distinct from the mechanical `tests/`
+  suites; the stdlib runner tools/evals.py now exists (list/run/validate/procedure).
 - Spec verification: `python3 skills/spec-to-prod/scripts/check.py
   <spec-dir>`; workflow state: `…/scripts/graph.py <spec-dir>`.
 - Approval/evidence integrity: `freeze.py <spec-dir> --record|--verify`

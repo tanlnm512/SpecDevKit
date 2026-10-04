@@ -17,6 +17,7 @@ the report line. Never average — aggregate.
 - **Pass criteria**: gate rows all pass; zero findings (no invented
   findings to seem busy — Principle 4); `notCovered` present and
   honest; risk `low`; no recommendation issued (review-only run).
+- **Run**: session: any repo with a trivially clean one-file change per **Setup**; run the review in a session; judge from the report against the pass criteria above
 
 ## E2 — Seeded bugs, recall through the lenses (`examples/review-target/`)
 
@@ -30,6 +31,7 @@ the report line. Never average — aggregate.
   item is absent from findings (a flag there is a false positive —
   fails the case); the report's testGaps name the uncovered refund
   behavior.
+- **Run**: session: build the fixture diff per `examples/review-target/README.md`; run the review in a session (mode full); judge the report against `EXPECTED.md` and the pass criteria above
 
 ## E3 — PR flow (gh present)
 
@@ -40,6 +42,7 @@ the report line. Never average — aggregate.
   logged; the report header names PR number/title/author/base with URL;
   the diff equals GitHub's PR diff (merge-base); re-running with a
   dirty tree produces the refusal, not a review.
+- **Run**: session: scratch GitHub repo with an open PR per **Setup**; run the review in a session; judge from the report and the PR state against the pass criteria above
 
 ## E4 — fix_from continuation (review-then-ask)
 
@@ -55,3 +58,5 @@ the report line. Never average — aggregate.
   file as `fix_from` — same carried findings, ids preserved from the
   report headings (an id-less pre-0.13 report must still parse; its
   items arrive as `carried-N`).
+- **Run**: session: take an E2 report, edit its findings JSON per **Setup**; run the fix continuation in a session; judge from the transcript against the pass criteria above
+

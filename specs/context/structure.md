@@ -1,7 +1,8 @@
 # Code structure — SpecDevKit
 
-**Baseline**: bc5e9de + current working tree (2026-09-22 assurance hardening) · living view — later specs' surveys
-read this first and re-survey only the delta.
+**Baseline**: bc5e9de + current working tree (2026-09-22 assurance hardening; refreshed
+2026-10-04 @ 3cfc8f1b for kit-level-up: three-skill layout, tools/ inventory, evals
+surfaces) · living view — later specs' surveys read this first and re-survey only the delta.
 
 ## Module map
 
@@ -33,8 +34,20 @@ read this first and re-survey only the delta.
   `omp-defs.py` / `agent-defs.py` (agent-def dialect generators),
   `workflow-defs.py` (workflow dialect generator),
   `install-workflow.sh` (per-harness workflow installer),
-  `plugin-manifest.py` (marketplace manifests), `tests/` (tooling
-  suites, fake-HOME convention).
+  `plugin-manifest.py` (marketplace manifests),
+  `kit-rules.py` (injects rules/engineering-rules.md into the agent
+  carriers), `drift-check.py` (generated-surface drift), `ownership.py`,
+  `tests/` (tooling suites, fake-HOME convention).
+- `skills/spec-code-review/` + `skills/spec-brainstorming/` — the two
+  sibling skills, same self-contained shape as spec-to-prod (SKILL.md,
+  agents/, commands/, scripts/, templates/, gates/, references/,
+  decisions/, tests/ with run.sh + a workflow-copies parity test,
+  workflows/, VERSION, CHANGELOG.md). Each ships `evals/cases.md` —
+  standing live-run eval cases (E1–E4 review; B1–B5 brainstorming;
+  E1–E6 spec-to-prod pipeline) with setup/ask/pass criteria; no
+Each skill's evals/ also holds cases.md (standing eval scenarios) and, since 2026-10-04, evals/results/ — the recorded live-run corpus (15 runs).
+- `skills/spec-code-review/examples/review-target/` — the seeded-bug
+  review fixture (base/, change.diff, EXPECTED.md, README.md).
 - `agents/` (repo root) — committed regenerate-only Antigravity
   personas; byte-equal to the skill briefs (verified every sync).
 - `specs/` — this repo's own specs (INDEX.md, CONSTITUTION.md,

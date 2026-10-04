@@ -1,0 +1,16 @@
+# E1 session transcript — spec-to-prod, full happy-path pipeline
+
+- date: 2026-10-04 · drill harness (orchestrator + simulated user, disclosed) · feature: slugify utility module (3 FRs) · scratch /tmp/slugify-utility · role agents ran as fresh `agy -p` headless sessions on mechanically emitted payloads (no inline fallback needed)
+- disclosed harness fixups: one agy flag-order error corrected on first spawn; one D-004 append re-positioned (net: appended once, in order)
+
+## Verdicts
+
+- C1: pass — the --state-json snapshot sequence (S0…S9, embedded in the session return) shows the frontier correct at every step: post-authoring spec DONE + survey READY + frontier [survey]; gate decision left the marker byte-in-place (S2a==S2b, no write). NUANCE recorded honestly: the criterion expected `research-gate: undetermined` at S1b, but the D-025 scaffold ships research.md pre-seeded with the exact skip marker, so a fresh scaffold never displays undetermined — the gate decision itself remained the orchestrator's (quoted judgment + byte-in-place verification), tooling never decided it
+- C2: pass — after the gate decision, the analysis wave was a SOLO surveyor in ONE spawn (exactly 1 payload emitted; a researcher would have joined on run)
+- C3: pass — then the authoring wave ran designer + qa in ONE batch (2 payloads, parallel calls in a single message)
+- C4: pass — clarify ran as one batched frontier-first round (Q1–Q7 numbered with recommended answers); every question closed: Q1–Q4 answered, Q3 residue deferred (Scope out), Q5–Q7 named assumptions pinned in spec.md; no open markers remained
+- C5: pass — `AWAITING HUMAN: approve` observed (execute:blocked at S5/S6) BEFORE any implementer spawned; the simulated user's yes preceded Status: approved + freeze.py --record (Approved-at 52eb351)
+- C6: pass — execute worked the per-task frontier (`--explain execute` surfaced runnable tasks + file-overlap notes); the orchestrator overruled parallel to serial on full file-overlap (recorded ruling); the `(fix n/5)` edge did NOT fire — all four implementers passed acceptance first pass — recorded as the honest outcome, not staged
+- C7: pass — every role digest matches its brief's shape (surveyor statuses/unknowns/surprises; designer milestones/approach+rejected+blast-radius; tasks; qa TCs/coverage; implementer task/status/files/commit-line/deviation)
+- C8: pass — the tick-commit gate held the single proof pass until green: audit.py proofs 11/11 PASS + unittest 14/14 + scope clean + clean sweep clean BEFORE tick.py and before C1 (38405e5) / C2 (342c316, Delivered recorded, tree clean)
+- C9: pass — graph.py never auto-satisfied a gate: clarify closed via user answers; approve paused and was answered; tick-commit paused until the proof pass; the research-gate skip was recorded through the marker, tooling only read it

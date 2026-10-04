@@ -22,6 +22,7 @@ average — aggregate.
   asked; after the user's answer, stage 2 spawns three distinct
   lens agents in one message; the three angles are presented
   distinctly labeled with no synthesis between them.
+- **Run**: session: fresh repo with no `brainstorms/` dir; give the **Ask** to a session; judge the transcript and stage shapes against the pass criteria above
 
 ## B2 — Trade-off matrix and refinement shape
 
@@ -35,6 +36,7 @@ average — aggregate.
   single questions strictly one per turn; the question count
   never exceeds five before a summary-with-confirmation appears;
   the run never names a "winner" the user didn't pick.
+- **Run**: session: continue B1 or start fresh per **Setup**; judge the matrix and refinement turns against the pass criteria above
 
 ## B3 — Handoff artifact (the deliverable)
 
@@ -48,6 +50,7 @@ average — aggregate.
   the risk table or is explicitly accepted; nothing was written
   under `specs/`; the final message names the artifact path and
   `/spec <name>` as the next step.
+- **Run**: session: run the flow to stage 5 per **Setup**; judge `brainstorms/<name>.md` against the pass criteria above
 
 ## B4 — Compile-only and collision behavior
 
@@ -60,6 +63,7 @@ average — aggregate.
   overwrite vs version-the-name; no silent clobber. On "version
   it", the artifact lands as `<name>-v2.md` (or a user-named
   path) with the template's full shape.
+- **Run**: session: repo with an existing `brainstorms/<name>.md` per **Setup**; give the **Ask** to a session; judge the compile-only behavior against the pass criteria above
 
 ## B5 — The weak idea is told it's weak
 
@@ -72,3 +76,5 @@ average — aggregate.
   not-worth-building steelman without softening; if the user
   still proceeds, the artifact's Direction records the risk
   honestly and the kill criteria are observable, not vague.
+- **Run**: session: give the **Ask** to a session; judge the Cynic's digest and the matrix against the pass criteria above
+

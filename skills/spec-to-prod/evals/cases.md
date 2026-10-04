@@ -31,6 +31,7 @@ part of the evidence — the frontier is the only scheduler being judged.
   matches its brief's shape; the tick-commit gate holds the single
   end-of-plan proof pass until every proof is green; graph.py never
   auto-satisfies a gate.
+- **Run**: session: scratch repo per **Setup**; run the pipeline in a session; judge the `--state-json` snapshot sequence and docs against the pass criteria above
 
 ## E2 — Bugfix spec
 
@@ -42,6 +43,7 @@ part of the evidence — the frontier is the only scheduler being judged.
   before any fix work; one regression TC per unchanged FR; the delivery
   pass includes the revert-proof (revert → repro TC fails → restore →
   passes).
+- **Run**: session: scratch repo with a planted bug per **Setup**; run the bugfix pipeline in a session; judge against the pass criteria above
 
 ## E3 — Researcher gate, negative branch
 
@@ -52,6 +54,7 @@ part of the evidence — the frontier is the only scheduler being judged.
   line; no manufactured research questions; the analysis wave is a solo
   surveyor (`--state-json`: research skipped via the marker, tech READY
   on the either-form resolution).
+- **Run**: session: feature whose approach is obvious per **Setup**; run the pipeline in a session; judge the gate's skip branch against the pass criteria above
 
 ## E4 — Resume mid-implementation
 
@@ -63,6 +66,7 @@ part of the evidence — the frontier is the only scheduler being judged.
   before spawning (SKIPPED-noted where no git exists); already-
   implemented work not redone; interrupted tasks resumed or
   respawned per their `(in-progress)` marks.
+- **Run**: session: interrupt an E1 run with two tasks `(in-progress)` per **Setup**; resume in a fresh session; judge the recomputed frontier against the pass criteria above
 
 ## E5 — Single-agent repair run
 
@@ -71,6 +75,7 @@ part of the evidence — the frontier is the only scheduler being judged.
 - **Pass criteria**: check.py failure names the node to re-run; the
   matching single agent is re-briefed (not the whole wave); IDs not
   renumbered; the frontier and check.py green afterward.
+- **Run**: session: break a milestone's FR coverage in E1's spec per **Setup**; run the single-agent repair in a session; judge against the pass criteria above
 
 ## E6 — Delivery pass, red
 
@@ -81,3 +86,5 @@ part of the evidence — the frontier is the only scheduler being judged.
   fix round annotated `(fix 1/5)` in task.md (the loop edge the graph
   surfaces); the full delivery pass re-runs green before the single
   commit lands.
+- **Run**: session: replay E1 with one implementer leaving a debug print and touching an out-of-scope file per **Setup**; judge the delivery pass against the pass criteria above
+

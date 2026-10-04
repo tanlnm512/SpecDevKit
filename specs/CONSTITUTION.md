@@ -30,6 +30,10 @@
   history owns the why.
 - **C-09**: never poll a backgrounded job — do other work or end the
   turn; the result arrives when the job finishes.
+- **C-10**: every kit increment names the eval case(s) it serves —
+  the standing case in the skill's `evals/cases.md` whose verdict the
+  increment claims to improve, hold, or prove; two consecutive
+  increments without a served case stop the level-up program.
 
 ## Rationale
 - C-01: a second status surface inevitably disagrees with the first;
@@ -51,3 +55,6 @@
   and mislead the next reader (anti-pattern 13 in spec-to-prod).
 - C-09: polling burns the session's turns and races the harness's own
   completion notification.
+- C-10: surface without evidence outruns value — the tripwire the
+  kit-level-up baseline exists to enforce (brainstorms/kit-level-up.md
+  kill criterion 2).
