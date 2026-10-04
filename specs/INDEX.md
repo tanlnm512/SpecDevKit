@@ -1,2 +1,2 @@
 # Specs index
-- [kit-level-up](kit-level-up/spec.md) — active (created 2026-10-03)
+- [kit-level-up](kit-level-up/spec.md) — done (created 2026-10-03, delivered 2026-10-04 @ 8b37586c24d80487b37e0b4329e56fd6141f3bca)

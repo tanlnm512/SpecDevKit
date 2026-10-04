@@ -1,6 +1,6 @@
 # Spec: kit-level-up
 
-**Status**: active
+**Status**: done
 **Effort**: standard
 **Created**: 2026-10-04
 **Branch**: `main`

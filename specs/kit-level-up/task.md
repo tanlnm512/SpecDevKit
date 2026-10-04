@@ -3,7 +3,7 @@
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 **Lifecycle**: v2
 Status reflects code state per [survey.md](survey.md), not intent.
-**Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
+**Delivered**: commit @ 8b37586c24d80487b37e0b4329e56fd6141f3bca
 
 **Phase-0 baseline roll-up (FR-008 — 2026-10-04, 15/15 cases run live, results filed per skill):**
 
