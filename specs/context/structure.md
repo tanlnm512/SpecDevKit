@@ -36,8 +36,17 @@ surfaces) · living view — later specs' surveys read this first and re-survey 
   `install-workflow.sh` (per-harness workflow installer),
   `plugin-manifest.py` (marketplace manifests),
   `kit-rules.py` (injects rules/engineering-rules.md into the agent
-  carriers), `drift-check.py` (generated-surface drift), `ownership.py`,
-  `tests/` (tooling suites, fake-HOME convention).
+  carriers), `drift-check.py` (generated-surface drift), `grade.py`
+  (mechanical half of rubrics/kit-grading-rubric.md — periodic kit
+  grading), `ownership.py`, `tests/` (tooling suites, fake-HOME
+  convention).
+- `rubrics/` — kit-level canonical docs: `kit-grading-rubric.md`
+  (dimensions, weights, anchors, and the M/J split `tools/grade.py`
+  computes; drift-pinned by tools/tests/test_grade.py).
+- `skills/spec-code-review/scripts/review_orchestrator.py` — the shared
+  review-state oracle (D-014): target resolution, gate, sharding, IDs,
+  findings parsing, report assembly; one stdlib home the workflow
+  dialects call through probe agents.
 - `skills/spec-code-review/` + `skills/spec-brainstorming/` — the two
   sibling skills, same self-contained shape as spec-to-prod (SKILL.md,
   agents/, commands/, scripts/, templates/, gates/, references/,

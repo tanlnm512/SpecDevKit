@@ -60,3 +60,9 @@ the report line. Never average — aggregate.
   items arrive as `carried-N`).
 - **Run**: session: take an E2 report, edit its findings JSON per **Setup**; run the fix continuation in a session; judge from the transcript against the pass criteria above
 
+
+## E5 — Real-repo review, working tree (inline fast mode)
+
+- **Setup**: a real, working repository with uncommitted changes (this kit itself qualifies); ask: "review the working tree" with `fix_rounds: 0`, executed inline in fast mode (one general reviewer, single context — the inline form AGENTS.md documents for harnesses without the workflow).
+- **Pass criteria**: the gate runs the repo's own detected checks and reports each row with its exit code (never inventing a check); every reported finding carries `path:line` and quoted evidence from the real diff; findings are fixed in-loop and re-verified (compile + owner tests + gate re-run); the report separates fixed findings from residue and names notCovered honestly (single-context confirmation disclosed as a limitation, not claimed as independent); the run ends with a recommendation and nothing committed.
+- **Run**: session: review the current working tree of a real repo inline (fast mode), fix what the review confirms, re-run the gate, then judge the session against the criteria above

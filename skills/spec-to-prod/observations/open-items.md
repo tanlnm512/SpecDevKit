@@ -28,3 +28,19 @@ decision, or strike it when resolved outright.
    the dir when the first benchmark case is measured, not before.
 6. **data/ intentionally absent**: the skill carries no runtime data;
    specs/context/ is generated per-project, not shipped.
+7. **Known accepted limitations** (disclosed so nobody re-derives
+   them; each is a deliberate trade, not an oversight):
+   - Doc-state parsing is markdown-structured, not AST'd — a writer
+     who paraphrases a pinned heading or digest field can wedge a
+     node. The checkers and `test_flow_contracts`-style pinning keep
+     the kit's own surfaces honest; free-form prose in live specs is
+     judgment, not machine-read.
+   - The graph's done-signals are presence-and-shape checks (file
+     exists, markers closed), not semantic review — a plausible-looking
+     but hollow artifact can read "done". The reviewer node and the
+     delivery-pass audits exist precisely to catch that; the graph
+     never claims to.
+   - `audit.py clean` heuristics (comment length, comment walls) are
+     adjudication suspects, not verdicts — a flagged line is a prompt
+     for the orchestrator's judgment, and a clean scan is not proof of
+     cleanliness.

@@ -120,6 +120,20 @@ def find_case(cases, selector):
     return None
 
 
+def repo_context():
+    """Where the case ran, so real-repo evidence labels itself — a
+    result that claims a real repo must name it (kit rubric S4)."""
+    try:
+        r = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, cwd=ROOT, timeout=10)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return f"{ROOT.name} (no remote — scratch/local)"
+
+
 def render_results(case, verdicts, findings, contract_bent, via):
     lines = [
         f"# Eval result — {case.selector}",
@@ -128,6 +142,7 @@ def render_results(case, verdicts, findings, contract_bent, via):
         f"- date: {date.today():%Y-%m-%d}",
         f"- kind: {case.kind}",
         f"- source: {case.source}",
+        f"- repo: {repo_context()}",
         f"- recorded via: {via}",
         "",
         "## Verdicts",

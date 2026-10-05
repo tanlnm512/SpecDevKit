@@ -27,8 +27,8 @@ then build each axis only where the baseline proves it dirty.**
   in-repo and a minimal stdlib runner so re-running a case is one
   command. Phase 2 — the three axes build only where the baseline
   shows dirt, and every increment names the eval case it serves.
-- Rationale (the orchestrator's recommendation, confirmed by the
-  owner): all three lenses agreed nothing can currently show an
+- Rationale: the orchestrator's recommendation, confirmed by the owner
+  — all three lenses agreed nothing can currently show an
   upgrade made the skills *better* — E1–E4 have never run live
   (`skills/spec-code-review/observations/open-items.md` item 5) —
   so the axes would otherwise be vibes; the baseline is hours, not
