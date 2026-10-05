@@ -1,6 +1,6 @@
 # Spec: Brainstorm handoff checker
 
-**Status**: approved
+**Status**: done
 **Effort**: standard
 **Created**: 2026-10-05
 **Branch**: `feat/brainstorm-handoff-checker`
