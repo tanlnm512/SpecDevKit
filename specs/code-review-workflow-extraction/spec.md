@@ -1,6 +1,6 @@
 # Spec: code-review-workflow-extraction
 
-**Status**: approved
+**Status**: done
 **Effort**: large
 **Created**: 2026-10-05
 **Branch**: `refactor/review-workflow-oracle`

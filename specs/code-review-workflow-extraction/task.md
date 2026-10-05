@@ -3,7 +3,7 @@
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 **Lifecycle**: v2
 Status reflects code state per [survey.md](survey.md), not intent.
-**Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
+**Delivered**: commit @ 5516bc6 — every task proven green before the tick (suites, parity 35/35, runtime execution, drift, check.py)
 
 ## Burndown
 | Phase | Total | Done |
