@@ -19,7 +19,7 @@ description: >-
   branch") — or the codebase as a whole ("review the project").
 metadata:
   owner: platform-core
-  version: "0.13.1"
+  version: "0.1.0"
 ---
 
 # spec-code-review — gated, confirmed code review (with optional fix loop)

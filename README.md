@@ -76,11 +76,11 @@ modeling, rollback design, and both reviewer modes.
 
 | Harness | Skills | Agent defs | Entry |
 |---------|--------|-----------|-------|
-| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | `/spec-to-prod` router + `/spec`…`/ship` · `/spec-run` dynamic workflow |
+| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | `/spec-to-prod` router + `/spec`…`/spec-ship` · `/spec-run` dynamic workflow |
 | omp | native root / marketplace | `~/.omp/agent/agents/` regenerated (omp dialect) | `/skill:spec-to-prod` |
 | zcode | plugin / sync | none — fallback spawn carries briefs in the payload | `/spec-to-prod` · `/spec-run` dynamic workflow |
 | opencode | `~/.agents/skills/` (compatibility root it scans) | `~/.config/opencode/agents/` regenerated (permission map) | `skill` tool / `@spec-<role>` |
-| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | `/spec`…`/ship` via `~/.factory/commands` (gated); `references/droid-modes.md` for spec & mission modes |
+| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | `/spec`…`/spec-ship` via `~/.factory/commands` (gated); `references/droid-modes.md` for spec & mission modes |
 | Antigravity (agy) | this repo as a plugin | committed root `agents/` personas (byte-verbatim) | `agy plugin install` |
 
 ADR-015 records the model: one skill copy at `~/.agents/skills/` feeds
@@ -279,7 +279,7 @@ Two invocation surfaces:
  │ Idea │ ───▶ │ Spec │ ───▶ │ Code │ ───▶ │ Test │ ───▶ │  QA  │ ───▶ │  Go  │
  │Refine│      │  PRD │      │ Impl │      │Debug │      │ Gate │      │ Live │
  └──────┘      └──────┘      └──────┘      └──────┘      └──────┘      └──────┘
-  /spec          /plan          /build        /test         /review       /ship
+  /spec        /spec-plan     /spec-build   /spec-test    /spec-review  /spec-ship
 ```
 
 `/spec-brainstorming` is the optional stage BEFORE this lifecycle:
@@ -292,13 +292,14 @@ pointed at as intent input for `/spec <name>`, not parsed.
 | Command | Lands on |
 |---|---|
 | `/spec <name>` | the spec node + clarify loop (alias: the `scaffold` verb; a bug takes `bugfix`) |
-| `/plan <spec>` | waves from current doc state through verify to the approve gate |
-| `/build <spec> [T###]` | the execute node — implementer waves; nothing ticked or committed |
-| `/test <spec>` | the proof pass: every TC pass condition green + regression gate |
-| `/review <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
-| `/ship <spec>` | tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
+| `/spec-plan <spec>` | waves from current doc state through verify to the approve gate |
+| `/spec-build <spec> [T###]` | the execute node — implementer waves; nothing ticked or committed |
+| `/spec-test <spec>` | the proof pass: every TC pass condition green + regression gate |
+| `/spec-review <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
+| `/spec-ship <spec>` | tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
 
-`/test`, `/review`, `/ship` are three steps of the ONE delivery pass,
+`/spec-test`, `/spec-review`, `/spec-ship` are three steps of the ONE
+delivery pass,
 never three gates. "Prod" means production-READY (ADR-014):
 the flow ends at a verified single commit; push/deploy/publish stay
 human/CI gates. On omp the entry is `/skill:spec-to-prod`; the router
@@ -346,7 +347,7 @@ session keeps every judgment. The recommended shape alternates the two —
 | 2 | workflow — run `spec-run` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
 | 3 | session | pre-flight (baseline green on the spec's branch), present the docset, get approval → `Status: approved` + `freeze.py --record` |
 | 4 | workflow — rerun `spec-run` | execute waves hands-off: one implementer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
-| 5 | session — `/test` `/review` `/ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
+| 5 | session — `/spec-test` `/spec-review` `/spec-ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
 
 Rules of thumb: the workflow stops `AWAITING HUMAN` at every judgment
 gate — resolve the gate in-session, rerun, and the loop resumes from doc
@@ -405,7 +406,7 @@ walking `skills/*/`, never by a hardcoded name:
 3. `skills/<name>/commands/<name>.md` — optional: a router command
    (`/<name> <verb> …`) if the skill benefits from one — lives inside
    the skill dir so it stays a self-contained plugin root.
-   Bare-named lifecycle-style wrappers (`/spec`, `/plan`, …) are an
+   Short-lifecycle command wrappers (`/spec`, `/spec-plan`, …) are an
    explicit per-skill opt-in — a `commands/extra.txt` file in the
    skill (one line of space-separated bare names; ADR-013) — because
    generic names land flat in shared global command roots; the
@@ -433,7 +434,7 @@ skills/
 ├── spec-to-prod/           # first resident skill — a self-contained plugin root
     ├── SKILL.md            # the orchestrator's playbook (workflow graph, spawn mechanics, rules)
     ├── .claude-plugin/plugin.json  # this skill's plugin manifest (tools/plugin-manifest.py)
-    ├── commands/            # router (spec-to-prod.md) + 6 lifecycle wrappers (spec/plan/build/test/review/ship)
+    ├── commands/            # router + 6 lifecycle wrappers (spec/spec-plan/spec-build/spec-test/spec-review/spec-ship)
     ├── agents/spec-*.md    # 8 role briefs = harness defs (frontmatter + body) + _shared-protocol.md
     ├── contracts/docset.md # canonical doc-set/ownership/payload contract
     ├── gates/              # dod (the 10-gate DoD scorecard)

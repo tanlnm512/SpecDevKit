@@ -5,6 +5,17 @@ Release history. The skill began life 2026-09-23 as the validated
 review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
+## 0.1.0 — 2026-10-05 (re-baseline)
+
+Suite-wide version re-baseline: every skill resets to 0.1.0 (user
+decision, 2026-10-05), and releases from here bump minor or patch by
+the user's explicit choice at release time — never automatically
+(RELEASE.md § 2). No behavior change rides this entry; the latest
+behavioral releases below remain accurate history.
+
+Migration: none required — the reset is metadata-only; update any
+pinned-version references to 0.1.0.
+
 ## 0.13.1 — 2026-10-05
 
 Quality-lens severity calibration for test findings (serves eval case

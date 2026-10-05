@@ -6,6 +6,17 @@ five rigid stages from a raw idea to a durable design
 specification that feeds spec-to-prod's `/spec` intake.
 
 
+## 0.1.0 — 2026-10-05 (re-baseline)
+
+Suite-wide version re-baseline: every skill resets to 0.1.0 (user
+decision, 2026-10-05), and releases from here bump minor or patch by
+the user's explicit choice at release time — never automatically
+(RELEASE.md § 2). No behavior change rides this entry; the latest
+behavioral releases below remain accurate history.
+
+Migration: none required — the reset is metadata-only; update any
+pinned-version references to 0.1.0.
+
 ## 0.5.0 — 2026-10-05
 
 Mechanical handoff checker (delivered as spec brainstorm-handoff-checker;

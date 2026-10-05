@@ -4,6 +4,33 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 0.1.0 — 2026-10-05
+
+Namespaced lifecycle commands (D-029, amending D-013; holds eval case
+`spec-brainstorming/b3` — its handoff names `/spec <name>`, unchanged —
+and leaves the `spec-to-prod/e1` router surface intact). The six thin
+lifecycle wrappers keep their shape but five drop their bare names:
+`/plan` → `/spec-plan`, `/build` → `/spec-build`, `/test` →
+`/spec-test`, `/review` → `/spec-review`, `/ship` → `/spec-ship`;
+`/spec` and the `/spec-to-prod` router are unchanged. Reason: bare
+verbs that name harness modes or built-ins collide semantically —
+`/plan` reads as plan-mode on every major coding agent, `/review` is a
+Claude Code built-in and ambiguous with the sibling `spec-code-review`
+skill, and no install governance can fix muscle memory. The flat
+`spec-` prefix is portable to every command root, self-documenting, and
+matches the `@spec-<role>` convention already shipped on opencode.
+Governance unchanged: extra.txt allowlist, provenance ledger,
+foreign-file refusal; sync's stale-deploy cleanup prunes the renamed
+bare files it previously deployed.
+
+Migration: replace `/plan` with `/spec-plan`, `/build` with
+`/spec-build`, `/test` with `/spec-test`, `/review` with
+`/spec-review`, and `/ship` with `/spec-ship`; `/spec` and
+`/spec-to-prod <verb>` work exactly as before. Re-run
+`bash tools/sync.sh` once — it installs the new names and prunes the
+old bare-name files it deployed; if you copied a bare-name command file
+by hand, delete that copy yourself.
+
 ## 2.14.1 — 2026-10-05
 
 Quoted evidence no longer reads as template residue (serves eval case

@@ -15,7 +15,7 @@ description: >-
   spec").
 metadata:
   owner: platform-core
-  version: "2.14.1"
+  version: "0.1.0"
 ---
 
 # Spec-to-Prod (spec-driven development)
@@ -502,10 +502,12 @@ use the fallback spawn — same briefs, rules carried in the prompt
 
 ## Lifecycle commands (the addyosmani surface)
 
-Six thin command files — `commands/{spec,plan,build,test,review,ship}.md`
+Six thin command files —
+`commands/{spec,spec-plan,spec-build,spec-test,spec-review,spec-ship}.md`
 in this package, installed flat into the harness command roots alongside
 the router — expose the development lifecycle popularized by
-addyosmani/agent-skills. Each delegates into the graph at a node; no new
+addyosmani/agent-skills, namespaced under `spec-` so no command collides
+with a harness mode or built-in (ADR-029). Each delegates into the graph at a node; no new
 machinery, contract unchanged:
 
 ```text
@@ -514,25 +516,26 @@ machinery, contract unchanged:
  │ Idea │ ───▶ │ Spec │ ───▶ │ Code │ ───▶ │ Test │ ───▶ │  QA  │ ───▶ │  Go  │
  │Refine│      │  PRD │      │ Impl │      │Debug │      │ Gate │      │ Live │
  └──────┘      └──────┘      └──────┘      └──────┘      └──────┘      └──────┘
-  /spec          /plan          /build        /test         /review       /ship
+  /spec        /spec-plan     /spec-build   /spec-test    /spec-review  /spec-ship
 ```
 
 | Command | Graph landing |
 |---------|---------------|
 | `/spec <name>` | DEFINE — the spec node + clarify loop (the `scaffold` verb; `bugfix` deltas when it's a bug) |
-| `/plan <spec>` | PLAN — run waves from current doc state through verify to the approve gate |
-| `/build <spec> [T###]` | BUILD — the execute node (the `implement` verb): implementer waves, no ticks, no commits |
-| `/test <spec>` | VERIFY — the proof pass: `audit.py proofs --run` + regression gate; requires execute done |
-| `/review <spec>` | REVIEW — the review instruments: scope diff, cleanliness sweep, DoD scorecard, implementation-diff reviewer |
-| `/ship <spec>` | SHIP — tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
+| `/spec-plan <spec>` | PLAN — run waves from current doc state through verify to the approve gate |
+| `/spec-build <spec> [T###]` | BUILD — the execute node (the `implement` verb): implementer waves, no ticks, no commits |
+| `/spec-test <spec>` | VERIFY — the proof pass: `audit.py proofs --run` + regression gate; requires execute done |
+| `/spec-review <spec>` | REVIEW — the review instruments: scope diff, cleanliness sweep, DoD scorecard, implementation-diff reviewer |
+| `/spec-ship <spec>` | SHIP — tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
 
-Namespace split, one surface apart: the bare lifecycle commands are
+Namespace split, one surface apart: the `spec-` lifecycle commands are
 graph-spanning runs; the `/spec-to-prod <verb>` router keeps its own
 verb space — there `plan`/`tech`/`qa` still mean single-agent authoring
-repair runs and `review` still means the docs reviewer (ADR-013).
-`/test`, `/review`, and `/ship` are three steps of the ONE delivery
+repair runs and `review` still means the docs reviewer (ADR-013,
+amended by ADR-029).
+`/spec-test`, `/spec-review`, and `/spec-ship` are three steps of the ONE delivery
 pass, never three gates: a failure in any step is a fix round, and the
-pass re-runs whole from its proof step (§ Execution mode); `/ship`
+pass re-runs whole from its proof step (§ Execution mode); `/spec-ship`
 refuses unless the other two are green. Deliberately NOT adopted from
 that surface: per-task commits and per-task verification.
 
@@ -760,9 +763,10 @@ it, and the user reads it in the delivery summary.
     step 7** — the plan lands all-or-nothing, not task-by-task or
     phase-by-phase.
 
-The lifecycle commands `/test`, `/review`, and `/ship` enter this one
-procedure at its steps — `/test` = 7–8, `/review` = 9 (all four
-instruments), `/ship` = 10–12 plus `Status: done` and on request archive
+The lifecycle commands `/spec-test`, `/spec-review`, and `/spec-ship`
+enter this one procedure at its steps — `/spec-test` = 7–8,
+`/spec-review` = 9 (all four instruments), `/spec-ship` = 10–12 plus
+`Status: done` and on request archive
 — steps of the ONE pass, never three gates; a failure in any step is a
 fix round, and the whole procedure re-runs from step 7.
 

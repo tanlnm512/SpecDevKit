@@ -23,9 +23,11 @@ repo root.
 Bump `skills/<name>/VERSION` and the `metadata.version` line in that
 skill's `SKILL.md` frontmatter. The VERSION file is the source of truth;
 the frontmatter and the generated manifests are kept equal to it
-mechanically (step 5 fails on any mismatch). Pick the semver from the
-change: behavior fix → patch, feature → minor, a rename or a contract
-users must act on → major.
+mechanically (step 5 fails on any mismatch). The bump is the user's
+call, never automatic: ask "minor or patch?" and apply exactly the
+answer — patch for behavior fixes, minor for features. A major or a
+re-baseline (like the 2026-10-05 suite-wide reset to 0.1.0) happens
+only by the user's explicit instruction.
 
 ## 3. Changelog
 

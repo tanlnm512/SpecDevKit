@@ -159,6 +159,12 @@ ledger_record() {  # <ledger-file> <command-name> <master-file>
   mv "$1.tmp" "$1"
 }
 
+ledger_forget() {  # <ledger-file> <command-name>
+  [ -f "$1" ] || return 0
+  grep -v " $2\$" "$1" > "$1.tmp" || true
+  mv "$1.tmp" "$1"
+}
+
 sha() {  # <file> -> sha256 on stdout
   shasum -a 256 < "$1" | cut -d' ' -f1
 }
@@ -178,6 +184,64 @@ atomic_put() {  # <src> <dest>
   rm -f "$tmp"
   cp -p "$1" "$tmp"
   mv "$tmp" "$2"
+}
+
+# Flat command roots are shared turf: a name this kit deployed that no
+# skill claims anymore (no router, no extra.txt entry) is a stale
+# deploy — pruned only while its hash still matches the ledger.
+# Anything else at that name is foreign now and stays untouched, never
+# refused: the name is no longer ours to defend.
+claimed_command_names() {
+  local name base
+  for name in "${SKILLS[@]}"; do
+    printf '%s\n' "$name"
+    for base in $(extra_commands "$name"); do
+      printf '%s\n' "$base"
+    done
+  done
+}
+
+stale_commands_in() {  # <root> — ledgered, unclaimed, hash-verified names
+  local root="$1"
+  local ledger="$root/$LEDGER_NAME" name claimed
+  [ -f "$ledger" ] || return 0
+  claimed="$(claimed_command_names | sort -u)"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    [ -f "$root/$name.md" ] || continue
+    printf '%s\n' "$claimed" | grep -qx "$name" && continue
+    ledger_entry_matches "$ledger" "$name" "$root/$name.md" || continue
+    printf '%s\n' "$name"
+  done < <(awk '{print $2}' "$ledger")
+}
+
+plan_stale_commands() {  # <root> — dry-run's delete decisions
+  local root="$1" name
+  [ "$DRY_RUN" = 1 ] || return 0
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    echo "plan  delete $root/$name.md"
+  done < <(stale_commands_in "$root")
+}
+
+prune_stale_commands() {  # <root>
+  local root="$1" name names
+  names="$(stale_commands_in "$root")"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    rm "$root/$name.md"
+    ledger_forget "$root/$LEDGER_NAME" "$name"
+    echo "clean $root/$name.md (stale deploy)"
+  done < <(stale_commands_in "$root")
+}
+
+check_stale_commands() {  # <root>
+  local root="$1" name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    echo "STALE $root/$name.md (deployed name no longer shipped — rerun sync)"
+    fail=1
+  done < <(stale_commands_in "$root")
 }
 
 # Skills-tree provenance — the command roots' refuse-don't-clobber
@@ -429,6 +493,13 @@ if [ "$PREFLIGHT_FAIL" -ne 0 ]; then
   exit 1
 fi
 
+for root in "${COMMANDS_ROOTS[@]}"; do
+  plan_stale_commands "$root"
+done
+if [ -d "$HOME/.factory" ]; then
+  plan_stale_commands "$DROID_COMMANDS_ROOT"
+fi
+
 if [ "$DRY_RUN" = 1 ]; then
   echo "dry run complete — nothing was written, no ownership recorded"
   exit 0
@@ -542,6 +613,13 @@ if [ "$CHECK" = 0 ]; then
       python3 "$PKG_ROOT/tools/agent-defs.py" --target agy --skill-dir "$skill_dir" --out "$PKG_ROOT/agents" >/dev/null
     fi
   done
+
+  for root in "${COMMANDS_ROOTS[@]}"; do
+    prune_stale_commands "$root"
+  done
+  if [ -d "$HOME/.factory" ]; then
+    prune_stale_commands "$DROID_COMMANDS_ROOT"
+  fi
 fi
 
 # --- verify ---------------------------------------------------------------
@@ -695,6 +773,12 @@ done
 # Kit-wide engineering rules (D-028): the committed carrier sections
 # must match a fresh injection from rules/engineering-rules.md — the
 # same regenerate-only guarantee the agy personas get above.
+for root in "${COMMANDS_ROOTS[@]}"; do
+  check_stale_commands "$root"
+done
+if [ -d "$HOME/.factory" ]; then
+  check_stale_commands "$DROID_COMMANDS_ROOT"
+fi
 python3 "$PKG_ROOT/tools/kit-rules.py" --check || fail=1
 
 exit $fail

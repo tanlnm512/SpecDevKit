@@ -19,7 +19,7 @@ description: >-
   when the word "brainstorm" is absent.
 metadata:
   owner: platform-core
-  version: "0.5.0"
+  version: "0.1.0"
 ---
 
 # spec-brainstorming — five-stage idea pressure-testing (before the spec exists)

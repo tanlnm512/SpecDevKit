@@ -50,11 +50,11 @@ SYNC_CORPUS = (
     f"{SKILL}/commands/extra.txt",
     f"{SKILL}/commands/spec-to-prod.md",
     f"{SKILL}/commands/spec.md",
-    f"{SKILL}/commands/plan.md",
-    f"{SKILL}/commands/build.md",
-    f"{SKILL}/commands/test.md",
-    f"{SKILL}/commands/review.md",
-    f"{SKILL}/commands/ship.md",
+    f"{SKILL}/commands/spec-plan.md",
+    f"{SKILL}/commands/spec-build.md",
+    f"{SKILL}/commands/spec-test.md",
+    f"{SKILL}/commands/spec-review.md",
+    f"{SKILL}/commands/spec-ship.md",
     f"{SKILL}/agents/spec-surveyor.md",
     f"{SKILL}/agents/_shared-protocol.md",
     f"{SKILL}/workflows/spec-run.dwf.ts",
@@ -105,9 +105,9 @@ class SyncShTests(SyncShBase):
         r1 = self.run_sync()
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
         self.assertTrue((self.skill_root("SKILL.md")).is_file())
-        # extra.txt bare name landed in a command root
+        # extra.txt wrapper name landed in a command root
         self.assertTrue(
-            (self.home / ".agents" / "commands" / "build.md").is_file())
+            (self.home / ".agents" / "commands" / "spec-build.md").is_file())
         # skills-tree provenance ledger exists and is excluded from verify
         self.assertTrue(self.skill_root(LEDGER).is_file())
         # atomic replacement preserves the shipped executable bits
@@ -136,16 +136,16 @@ class SyncShTests(SyncShBase):
     def test_command_update_replaces_content_and_ledger_atomically(self):
         self.assertEqual(self.run_sync().returncode, 0)
         root = self.home / ".agents" / "commands"
-        dest = root / "build.md"
+        dest = root / "spec-build.md"
         master = (self.repo / "skills" / "spec-to-prod"
-                  / "commands" / "build.md")
+                  / "commands" / "spec-build.md")
         master.write_text(
             master.read_text() + "\n<!-- touched by master -->\n")
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("touched by master", dest.read_text())
         entries = [line for line in (root / LEDGER).read_text().splitlines()
-                   if line.endswith(" build")]
+                   if line.endswith(" spec-build")]
         self.assertEqual(
             entries,
             [f"{hashlib.sha256(dest.read_bytes()).hexdigest()} build"])
@@ -312,7 +312,7 @@ class SyncShTests(SyncShBase):
         # on ~/.factory existing) must cost zero writes on a fresh
         # install: not even the first skill root gets created.
         (self.home / ".factory" / "commands").mkdir(parents=True)
-        foreign = self.home / ".factory" / "commands" / "build.md"
+        foreign = self.home / ".factory" / "commands" / "spec-build.md"
         foreign.write_text("# a hand-written note, not the wrapper\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
@@ -457,12 +457,40 @@ class DroidCommandsTests(SyncShBase):
     def test_foreign_file_in_droid_commands_is_refused(self):
         (self.home / ".factory").mkdir()
         self.assertEqual(self.run_sync().returncode, 0)
-        dest = self.home / ".factory" / "commands" / "build.md"
+        dest = self.home / ".factory" / "commands" / "spec-build.md"
         dest.write_text("# a hand-written note, not the wrapper\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("REFUSE", r.stdout)
         self.assertIn("hand-written note", dest.read_text())
+
+
+class StaleCommandPruneTests(SyncShBase):
+    """A name that leaves extra.txt must not linger in flat command
+    roots (D-029's migration path); a foreign file at an unclaimed
+    name is shared turf and stays untouched."""
+
+    def test_renamed_extra_name_is_pruned_and_foreign_survives(self):
+        commands = self.repo / SKILL / "commands"
+        (commands / "legacy.md").write_text("# legacy wrapper\n",
+                                            encoding="utf-8")
+        extra = commands / "extra.txt"
+        extra.write_text(extra.read_text().strip() + " legacy\n",
+                         encoding="utf-8")
+        r1 = self.run_sync()
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        legacy = self.home / ".claude" / "commands" / "legacy.md"
+        self.assertTrue(legacy.is_file())
+
+        extra.write_text(extra.read_text().replace(" legacy", ""),
+                         encoding="utf-8")
+        (commands / "legacy.md").unlink()
+        foreign = self.home / ".claude" / "commands" / "plan.md"
+        foreign.write_text("# someone else's plan\n", encoding="utf-8")
+        r2 = self.run_sync()
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertFalse(legacy.exists())
+        self.assertTrue(foreign.is_file())
 
 
 class KitRulesSyncTests(SyncShBase):
