@@ -13,7 +13,7 @@ SKILL.md summarizes; this file arbitrates. The agent-facing subset
 | 2 — perspective multiplication | three lens agents spawned fresh, in parallel, from one payload; angles presented distinctly labeled, no synthesis between them | all three digests are presented |
 | 3 — trade-off matrix | one table — Angle / Pros / Cons / Implementation speed / Best when — carrying no recommendation | the table is presented; the next move is the user's |
 | 4 — socratic refinement | single questions, strictly one per turn, each shaped by the previous answer; soft cap five, then a summary asking confirmation | the user confirms the selection or blend |
-| 5 — handoff | `brainstorms/<name>.md` written from `templates/design-spec.md`; an existing file is read first and its collision resolved by ONE question | the artifact is on disk and the final message names `/spec <name>` |
+| 5 — handoff | `brainstorms/<name>.md` written from `templates/design-spec.md`; an existing file is read first and its collision resolved by ONE question | the artifact is on disk, the mechanical check exits 0 after any fix-and-rerun, the judgment criteria hold, and the final message names `/spec <name>` |
 
 The panel never picks the direction. Every stage ends in the
 user's words, and the artifact records the user's chosen
@@ -63,8 +63,26 @@ it.
 - An existing file is read first: a prior round of the same idea
   triggers ONE question — overwrite, or version the name
   (`<name>-v2`); never a silent clobber.
+- Before `/spec` is named, run this on the exact artifact path:
+
+  ```sh
+  python3 skills/spec-brainstorming/scripts/check.py ARTIFACT
+  ```
+
+  The checker uses the operator-named path without assuming
+  `brainstorms/`. On exit 1, fix each named artifact failure and
+  rerun; proceed only after exit 0.
 - `templates/design-spec.md` pins the shape;
   `gates/handoff.md` arbitrates readiness.
+
+The checker decides only artifact-observable criteria: sections,
+placeholders, Direction fields, the feature and out-of-scope
+lists, risk-row cells, kill-criteria presence, path handling,
+located reporting, and exit status. Mapping every panel-digest
+Cynic dealbreaker into the artifact — digest-to-artifact
+dealbreaker mapping — remains judgment because the digest is not
+part of the artifact; a green check never claims that mapping
+was proved.
 
 ## The workflow form (the panel wave)
 

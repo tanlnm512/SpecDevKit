@@ -19,7 +19,7 @@ description: >-
   when the word "brainstorm" is absent.
 metadata:
   owner: platform-core
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # spec-brainstorming — five-stage idea pressure-testing (before the spec exists)
@@ -191,9 +191,28 @@ repository root; a user-named path wins. If the file already
 exists, read it — if it is a prior round of the same idea, ask
 (one question) whether to overwrite or version the name
 (`<name>-v2`); never clobber silently. Every criterion in
-`gates/handoff.md` must hold before `/spec` is named — all five
-sections filled, every Cynic dealbreaker mapped, kill criteria
-observable, the direction the user's.
+`gates/handoff.md` must hold before `/spec` is named.
+
+Before naming `/spec`, run the mechanical gate on the exact
+artifact path:
+
+```sh
+python3 skills/spec-brainstorming/scripts/check.py ARTIFACT
+```
+
+`ARTIFACT` is the default or user-named path exactly as chosen;
+the checker assumes no `brainstorms/` location. On exit 1, fix
+each named failure in the artifact and rerun until exit 0.
+
+The checker decides only what the artifact can show: section
+presence and content, surviving placeholders, Direction fields,
+the numbered feature list and out-of-scope list, risk-row cells,
+kill-criteria presence, path readability, and located result
+reporting with its exit code. Digest-to-artifact
+Cynic-dealbreaker mapping is outside its evidence — the digest
+is not part of the artifact — as are whether the rationale is
+genuinely the user's and whether the kill evidence is truly
+observable. Judge those before handoff.
 
 The run's final message names the artifact path and the next
 step: `/spec <name>`, with this doc as intent input for the spec

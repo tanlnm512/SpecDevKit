@@ -17,18 +17,47 @@ with the transcript and the artifact can verify each one.
 
 ## Handoff-readiness criteria (ALL must hold before `/spec` is named)
 
-- All five template sections present and filled — no template
-  placeholders left behind.
-- **Direction** records the selection AND the rejection with its
-  reason, in the user's terms — the panel's favorite is not the
-  direction.
-- Every Cynic dealbreaker from the digest appears in the risk
-  table, mapped to a mitigation or an explicit acceptance —
-  never dropped silently.
+Run the mechanical gate first, on the exact default or
+user-named artifact path:
+
+```sh
+python3 skills/spec-brainstorming/scripts/check.py ARTIFACT
+```
+
+Exit 1 is not a handoff: fix each named artifact failure and
+rerun until the checker exits 0.
+
+### Artifact-observable checks (mechanical)
+
+The checker validates the operator-named path without assuming
+`brainstorms/`, reports one located line per failed criterion,
+and exits 0 only when all of these pass:
+
+- the five template sections are present and non-empty;
+- no pinned template placeholder survives;
+- Direction records a selection, rationale, rejection, and
+  rejection reason;
+- Core MVP Features contains a numbered feature list and an
+  explicit out-of-scope list;
+- every risk-table row names an early warning and a mitigation
+  or explicit acceptance;
+- kill criteria are present.
+
+### Judgment-only checks
+
+- Digest-to-artifact dealbreaker mapping: every Cynic
+  dealbreaker from the panel digest appears in the risk table,
+  mapped to a mitigation or an explicit acceptance — never
+  dropped silently. The checker cannot decide this because the
+  digest is not part of the artifact.
+- The rejection reason and rationale are in the user's terms —
+  the panel's favorite is not the direction.
 - Kill criteria are observable: stated so the evidence could
   actually be seen, not a vague worry.
-- The artifact is at `brainstorms/<name>.md` (or the user-named
-  path) and nothing under `specs/` was touched.
+
+### Run-boundary checks
+
+- Nothing under `specs/` was touched.
 - The final message names the artifact path and `/spec <name>`
   as the next step.
 

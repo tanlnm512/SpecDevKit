@@ -6,6 +6,31 @@ five rigid stages from a raw idea to a durable design
 specification that feeds spec-to-prod's `/spec` intake.
 
 
+## 0.5.0 — 2026-10-05
+
+Mechanical handoff checker (delivered as spec brainstorm-handoff-checker;
+serves eval case `spec-brainstorming/b3`). Stage 5 no longer hands off on
+judgment alone: `scripts/check.py ARTIFACT` validates the artifact against
+every handoff-gate criterion observable from the file — the five pinned
+sections present exactly once and non-empty, no surviving template
+placeholders (the contract test's own stems, located by line), Direction's
+selected/rationale/rejected-with-reason, the numbered feature list and
+out-of-scope cut list, every risk row's early warning and mitigation-or-
+acceptance, at least one risk row (a dealbreaker dropped silently is the
+exact evil the gate exists to prevent), and kill criteria — printing
+located `FAIL path:line criterion` lines and exiting 1 on any miss. Every
+run ends with a `JUDGMENT:` disclosure naming what the check does NOT
+decide — digest-to-artifact dealbreaker mapping above all — so a green
+check never claims more than it proved. SKILL.md, gates/handoff.md, and
+contracts/run.md wire the run-before-`/spec` with fix-and-rerun. Owner
+suite: 10 CLI-bound tests including two regressions proven red on the
+pre-fix checker (duplicate section headings, vacuous risk tables);
+skill suite 42/42.
+
+Migration: none required — the checker is additive; existing artifacts
+that satisfy the gate pass unchanged, and the session simply runs the
+check before naming `/spec`.
+
 ## 0.4.0 — 2026-10-01
 
 External evidence grounding for the panel. A brainstorm that
