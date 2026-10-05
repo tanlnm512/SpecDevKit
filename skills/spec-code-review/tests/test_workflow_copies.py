@@ -26,6 +26,11 @@ from pathlib import Path
 SKILL = Path(__file__).resolve().parents[1]
 DWF_TS = SKILL / "workflows" / "spec-code-review.dwf.ts"
 WF_JS = SKILL / "workflows" / "spec-code-review.js"
+# D-014: the shared review oracle is the single home of the asks,
+# systems, tunables, sharding, findings parsing and report assembly the
+# dialects used to duplicate — anchors that lived "in both masters" now
+# live here, once, and the dialects are pinned for the relay.
+ORACLE = SKILL / "scripts" / "review_orchestrator.py"
 
 # shardProjectFiles is executed (not just anchored) by ShardPartitionTests
 # below; node is the executor, so the invariant test skips loudly where
@@ -64,7 +69,7 @@ ASK_ANCHORS = [
 # sentence names the part, not a bare file list.
 PROJECT_ASK_ANCHORS = [
     "There is no diff — the target is ",
-    'part " + part + " of " + parts + " of the project\'s tracked source files',
+    "of the project's tracked source files (",
     "your sibling reviewers of the same lens read the other parts",
     "present in the code as it stands",
     "path:line in the current tree",
@@ -306,6 +311,13 @@ def flat(text):
     return " ".join(text.split())
 
 
+def pflat(text):
+    """flat, for python sources: implicit string concatenation across
+    lines must not break prose anchors (quotes, plus signs and escape
+    backslashes vanish; whitespace collapses)."""
+    return " ".join(text.replace('"', " ").replace("+", " ").replace("\\", " ").split())
+
+
 class ParityTests(unittest.TestCase):
     def setUp(self):
         self.ts = read(DWF_TS)
@@ -324,64 +336,103 @@ class ParityTests(unittest.TestCase):
         self.assertEqual(js_phases, PHASES)
 
     def test_tunables_match(self):
+        # one home since D-014: the oracle owns every tunable; the
+        # dialects consume its resolved flags instead of re-declaring
+        oracle = ORACLE.read_text(encoding="utf-8")
+        for anchor in ("FAST_MAX_LINES = 400", "FAST_MAX_FILES = 5",
+                       "SHARD_TARGET_BYTES = 240000", "SHARD_MAX_FILES = 32",
+                       "SUGGEST_SPLIT_LINES = 1000", "SUGGEST_SPLIT_FILES = 20",
+                       "SEV_RANK"):
+            self.assertIn(anchor, oracle, anchor)
+        self.assertNotIn("PROJECT_MAX_FILES", oracle)
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            self.assertIn("FAST_MAX_LINES = 400", text, name)
-            self.assertIn("FAST_MAX_FILES = 5", text, name)
-            self.assertIn("SHARD_TARGET_BYTES = 240000", text, name)
-            self.assertIn("SHARD_MAX_FILES = 32", text, name)
-            self.assertIn("SUGGEST_SPLIT_LINES = 1000", text, name)
-            self.assertIn("SUGGEST_SPLIT_FILES = 20", text, name)
-            self.assertIn("SEV_RANK", text, name)
-            # 0.11.0: the 30-file project cap is gone — sharded parts
-            # cover every tracked source file
-            self.assertNotIn("PROJECT_MAX_FILES", text, name)
+            self.assertNotIn("FAST_MAX_LINES =", text, f"{name} re-declares an oracle tunable")
+            # the mode/split decisions ride the oracle's resolved flags
+            self.assertIn("fast_mode_default", text, name)
 
     def test_target_mode_branches_are_shared(self):
+        oracle = ORACLE.read_text(encoding="utf-8")
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
             self.assertIn('TARGET === "project"', text, name)
             self.assertIn('"--tree"', text, name)
-            # project targeting functions exist under the same names
-            self.assertIn("function reviewAskProject", text, name)
-            self.assertIn("function triageAskProject", text, name)
-            self.assertIn("function confirmAskProject", text, name)
-            self.assertIn("function finalAskProject", text, name)
+        # the project ask family exists once, in the oracle, and both
+        # dialects dispatch on its ask kinds
+        for fn in ("def _review_ask_project", "def _triage_ask_project",
+                   "def _confirm_ask_project", "def _final_ask_project"):
+            self.assertIn(fn, oracle, fn)
+        for kind in ("review-project", "triage-project", "confirm-project", "final-project"):
+            self.assertIn(kind, oracle, kind)
+            self.assertIn(kind, self.js, f"{kind} relayed in js")
+            self.assertIn(kind, self.ts, f"{kind} relayed in ts")
 
     def test_pr_and_branch_targets_are_shared(self):
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
             self.assertIn('TARGET === "branch"', text, name)
             self.assertIn('TARGET === "pr"', text, name)
             self.assertIn("const TARGETS", text, name)
-            for anchor in PR_TARGET_ANCHORS:
+        # resolution mechanics live in the oracle's scope; the refusal
+        # and checkout-safety UX lives in the dialects that render it
+        for anchor in ("baseRefOid", "headRefOid", "refs/remotes/origin/HEAD",
+                       "merge-base", "rev-list"):
+            self.assertIn(anchor, oracle, f"{anchor} in oracle")
+        for anchor in ("needs a pr arg", "the working tree is dirty",
+                       "common ancestor", "switch back when done reviewing"):
+            for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
                 self.assertIn(anchor, flat(text), f"{anchor} in {name}")
 
     def test_panel_definition_matches(self):
+        # the panel's lenses are defined once in the oracle; both
+        # dialects dispatch on the fetched definitions
+        oracle = ORACLE.read_text(encoding="utf-8")
+        for label in ("correctness", "security", "quality", "general"):
+            self.assertIn(f'"label": "{label}"', oracle, f"{label} in oracle")
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for label in ("correctness", "security", "quality", "general"):
-                self.assertIn(f'label: "{label}"', text, f"{label} in {name}")
+            self.assertIn("general", text, f"general dispatched in {name}")
+            self.assertTrue("SYSTEMS.general" in text or "systemsCache.general" in text,
+                            f"general dispatched in {name}")
+            self.assertTrue("SYSTEMS.lenses" in text or "systemsCache.lenses" in text,
+                            f"lenses dispatched in {name}")
 
     def test_ask_anchors_are_shared(self):
+        # asks exist exactly once (the oracle); both dialects render
+        # every wave through the batch relay
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
         for anchor in ASK_ANCHORS + PROJECT_ASK_ANCHORS:
-            self.assertIn(anchor, flat(self.ts), anchor)
-            self.assertIn(anchor, flat(self.js), anchor)
+            self.assertIn(anchor, oracle, anchor)
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            self.assertIn("askWave", text, f"batch relay in {name}")
+            self.assertIn('"--kind", "batch"', flat(text), f"batch kind in {name}")
 
     def test_intent_channel_and_split_advice_are_shared(self):
-        # intent rides into reviewer/triage/final/fixer asks in both
-        # dialects (4 intentBlock call sites + 1 definition each);
-        # confirmation stays intent-blind — the confirm asks never see it
+        # intent rides the oracle's reviewer/triage/final/fixer asks
+        # (intentBlock is its helper); confirmation stays intent-blind —
+        # the confirm renderers never read it
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
+        for anchor in ("the author's stated intent",
+                       "stated intent never waives a demonstrable defect"):
+            self.assertIn(anchor, oracle, anchor)
+        self.assertGreaterEqual(oracle.count("_intent_block(ctx)"), 4,
+                                "intent rides reviewer/triage/final/fixer asks")
+        self.assertNotIn("_intent_block", oracle.split("def _confirm_ask")[1].split("def ")[0])
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for anchor in INTENT_SPLIT_ANCHORS:
-                self.assertIn(anchor, flat(text), f"{anchor} in {name}")
-            # 4 call sites (reviewer, triage, final, fixer) + 1 definition
-            self.assertEqual(text.count("intentBlock()"), 5, name)
             self.assertIn("INTENT_ARG", text, name)
-            self.assertIn("SUGGEST_SPLIT_LINES", text, name)
+            self.assertIn("intent: intentText", text, f"intent crosses the relay in {name}")
+            self.assertIn("suggestSplit", text, f"oracle's split flag consumed in {name}")
+            self.assertIn("consider splitting into smaller", flat(text),
+                          f"split advice renders in {name}")
 
     def test_fix_from_continuation_and_impact_are_shared(self):
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for anchor in FIX_CONTINUATION_ANCHORS:
+            # the continuation UX sentences render from the dialects
+            for anchor in ("fix_from", "findings carried from the previous review",
+                           "the review stages were skipped (fix_from)"):
                 self.assertIn(anchor, flat(text), f"{anchor} in {name}")
             # fix-only defaults the loop to 2 rounds instead of a no-op
             self.assertIn("if (FIX_FROM && FIX_ROUNDS === 0) FIX_ROUNDS = 2;", text, name)
+        # the impact ask sentence lives in the oracle's reviewer asks
+        self.assertIn("what the defect breaks and when it bites", oracle)
         # the impact field rides each dialect's finding schema: optional
         # in the zcode interface, schema-declared in the claude master
         # with the required list left unchanged (impact is optional)
@@ -391,11 +442,19 @@ class ParityTests(unittest.TestCase):
 
     def test_finding_ids_and_markdown_carrier_are_shared(self):
         # D-013: every tracked finding carries a stable id; the fixer
-        # replies in ids; the report markdown parses back as a carrier
+        # replies in ids; the report markdown parses back as a carrier.
+        # Minting helpers, the id-bearing heading and the carried-N
+        # fallback live in the oracle; the dialects mint gate and
+        # fix-review ids at their tracking sites.
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
+        for anchor in ("the finding ids you fully fixed",
+                       "before your first edit — the repo's own rules bind your fixes",
+                       "def parse_findings_md", "carried-{carried}",
+                       "### [{f['id']}"):
+            self.assertIn(anchor, oracle, anchor)
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for anchor in FINDING_ID_ANCHORS:
-                self.assertIn(anchor, flat(text), f"{anchor} in {name}")
-            self.assertIn("id: t.finding.id,", text, name)
+            self.assertIn('nextId("gate")', text, f"gate ids minted in {name}")
+            self.assertIn('nextId("fix-review")', text, f"fix-review ids minted in {name}")
         # the findings board keys on the id, never on where (zcode-only)
         self.assertIn('key: "id"', self.ts)
         # the claude fixer schema joins skipped items on ids too
@@ -403,11 +462,23 @@ class ParityTests(unittest.TestCase):
             'properties: { id: { type: "string" }, why: { type: "string" } }', self.js)
 
     def test_zero_seven_one_fixes_are_shared(self):
+        # anchors that moved to the oracle are pinned there; the ones
+        # that stayed in the dialects (mutability, render guards, the
+        # refusal UX) stay pinned in both
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
+        for anchor in ("The refusal is unconditional", "function mdSafe"):
+            self.assertIn(anchor, oracle.replace("def md_safe", "function mdSafe").replace(
+                "# The refusal is unconditional", "The refusal is unconditional"), anchor)
         for text, name in ((self.ts, "ts"), (self.js, "js")):
-            for anchor in FIXES_071["ts"]:
+            for anchor in ("let FIX_ROUNDS", "!FIX_FROM && PR", "!FIX_FROM && BRANCH_MODE",
+                           "refused to review a PR target over a dirty working tree",
+                           "let scopeDirty", "included in the reviewed diff"):
                 self.assertIn(anchor, text, f"{anchor} in {name}")
-        for anchor in FIXES_071["js"]:
-            self.assertIn(anchor, self.js, f"{anchor} in js")
+        self.assertIn("function mdSafe", self.js, "mdSafe in js")
+        self.assertIn("*_[\\]()!<>", self.ts, "ts escapes the same markdown-active class")
+        for anchor in ("impact: typeof keptAll[i].finding.impact",
+                       "impact: typeof fixKept[i].impact"):
+            self.assertIn(anchor, self.js, anchor)
 
     def test_dynamic_workflow_contract_pieces(self):
         # 0.9.0: the zcode master is checked against the real
@@ -425,63 +496,83 @@ class ParityTests(unittest.TestCase):
             self.assertIn("String(args.base).trim()", text, name)
         # gate findings carry the required impact field in both dialects
         for text, name in ((self.ts, "ts"), (self.js, "js")):
-            self.assertIn('lens: "gate", impact: "",', flat(text), name)
+            self.assertIn('lens: "gate",', flat(text), name)
 
     def test_dogfood_review_repairs_are_shared(self):
         # the first live workflow run (dogfooding this stack) found the
         # fix_from pre-fix gate rendering red as green — both dialects
         # now failure-handle it and render from the authoritative gate
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for anchor in FIXES_DOGFOOD:
+            for anchor in ("Repo check failed before the fixes", "let finalGate"):
                 self.assertIn(anchor, flat(text), f"{anchor} in {name}")
+        for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
+            self.assertIn("indistinguishable from omission", flat(text), f"rounds comment in {name}")
 
     def test_panel_review_repairs_are_shared(self):
         # the review of the 0.11.0 change confirmed four defects in it;
-        # each repair is pinned in both dialects so none regresses
+        # each repair is pinned so none regresses — ask-side anchors in
+        # the oracle, orchestration anchors in both dialects
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
+        for anchor in ("diff_cmd = ", "Every kept non-gate finding has now been through independent confirmation"):
+            self.assertIn(anchor, oracle, anchor)
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for anchor in FIXES_PANEL_REVIEW:
+            for anchor in ("reviewer part(s) returned no result — their files were not reviewed",
+                           "FIX_ROUNDS > 0 && tracked.length > 0",
+                           "Each non-gate finding was re-checked by an independent reader",
+                           "every kept non-gate finding confirmed by an independent reader"):
                 self.assertIn(anchor, flat(text), f"{anchor} in {name}")
             # the repo arg resolves BEFORE the fix_from branch runs its
             # pre-fix gate, so a continuation run roots there too
             self.assertLess(text.index("if (REPO_ARG)"), text.index("if (FIX_FROM) {"), name)
-            # the fixer, the round-2+ fixer, the verifiers and the
-            # fresh-eyes fix reviewer all work the sub-repo:
-            # 7 repoBlock() call sites + 1 definition
-            self.assertEqual(text.count("repoBlock()"), 8, name)
+            # the sub-repo roots every ask: the relay carries repo_abs
+            self.assertIn("repo_abs: REPO_ABS", text, f"repo_abs crosses the relay in {name}")
 
     def test_subrepo_sharding_and_red_gate_audit_are_shared(self):
         # 0.11.0: full-coverage project audits. Sub-repo targeting roots
         # every command at an absolutely-resolved toplevel and refuses
         # unverified targets; the project target shards into parts every
         # lens reads; a red gate becomes gate findings instead of a stop.
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
+        for anchor in ("function shardProjectFiles".replace("function shardProjectFiles", "def shard_files"),
+                       "def part_label", "did NOT all pass — failing:"):
+            self.assertIn(anchor, oracle, anchor)
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for anchor in SUBREPO_SHARD_ANCHORS:
+            for anchor in ("did not resolve to a git repository", "repo with target",
+                           "the workflow from inside that repository",
+                           "reviewer part(s) per lens", "project audit continues past the red gate",
+                           "Repo check failed before the review"):
                 self.assertIn(anchor, flat(text), f"{anchor} in {name}")
             self.assertIn("REPO_ARG", text, name)
             self.assertIn("REPO_ABS", text, name)
             self.assertIn('"--repo"', text, name)
-            self.assertIn("function repoPath", text, name)
-            self.assertIn("function repoBlock", text, name)
             self.assertIn("rev-parse", text, name)
-            # the gate re-run after fix rounds roots at the repo too
             self.assertIn("gateTracked", text, name)
         # the repo arg is declared in the zcode master's metadata
         self.assertIn("repo:", self.ts)
-        # the claude master resolves the toplevel through a probe
+        # both dialects resolve the toplevel before anything else runs
         self.assertIn('"repo-probe"', self.js)
+        self.assertIn('world.run("git", ["-C", REPO_ARG, "rev-parse", "--show-toplevel"])', self.ts)
 
     def test_preflight_scout_is_shared(self):
         # 0.10.0: the scout map rides reviewer and final-assessment asks
-        # in both dialects. 5 call sites (two reviewer asks, two final
-        # asks, the loop final) + 1 definition — the triage, fixer and
-        # confirm asks carry none, so independent confirmation can
-        # inherit no scout claim.
+        # — the triage, fixer and confirm asks carry none, so
+        # independent confirmation can inherit no scout claim. The ask
+        # text lives in the oracle; the dialects pass the map through
+        # the relay and keep the degradation line.
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
+        for anchor in PREFLIGHT_ANCHORS:
+            if anchor in ("preflight scout returned no map",
+                          "the review ran without the codebase and module context step"):
+                continue
+            self.assertIn(anchor, oracle, anchor)
         for text, name in ((self.ts, "dwf.ts"), (self.js, "js")):
-            for anchor in PREFLIGHT_ANCHORS:
+            for anchor in ("preflight scout returned no map",
+                           "the review ran without the codebase and module context step"):
                 self.assertIn(anchor, flat(text), f"{anchor} in {name}")
-            self.assertEqual(text.count("scoutBlock()"), 6, name)
-            self.assertIn("SCOUT_SYSTEM", text, name)
-            self.assertIn("scoutAsk(PROJECT ? targetFiles : changed)", text, name)
+            self.assertTrue("SYSTEMS.scout" in text or "systemsCache.scout" in text,
+                            f"scout system dispatched in {name}")
+            self.assertIn("scout_map: scoutMap", text, f"scout map crosses the relay in {name}")
+            self.assertIn("files: PROJECT ? targetFiles : changed", text, f"scout target in {name}")
         # the scout's RepoMap is schema-validated in the claude master
         # and a typed interface in the zcode master
         self.assertIn("SCOUT_SCHEMA", self.js)
@@ -606,51 +697,24 @@ class ShardPartitionTests(unittest.TestCase):
          [["big"], ["s1", "s2", "s3"]]),
     ]
 
-    def shard(self, name, text, files, sizes):
-        """Run the dialect's own shardProjectFiles on (files, sizes)."""
-        m = re.search(r"^function shardProjectFiles\(.*?^\}", text, re.M | re.S)
-        self.assertIsNotNone(m, f"shardProjectFiles in {name}")
-        consts = dict(re.findall(
-            r"^const (SHARD_TARGET_BYTES|SHARD_MAX_FILES) = (\d+);", text, re.M))
-        self.assertEqual(set(consts), {"SHARD_TARGET_BYTES", "SHARD_MAX_FILES"}, name)
-        script = (
-            "const SHARD_TARGET_BYTES = %s;\nconst SHARD_MAX_FILES = %s;\n"
-            % (consts["SHARD_TARGET_BYTES"], consts["SHARD_MAX_FILES"])
-            + m.group(0)
-            + "\nconsole.log(JSON.stringify(shardProjectFiles(%s, %s)));\n"
-            % (json.dumps(files), json.dumps(sizes))
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / ("shard.ts" if name == "dwf.ts" else "shard.js")
-            path.write_text(script, encoding="utf-8")
-            r = subprocess.run([NODE, str(path)], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
-        return json.loads(r.stdout)
-
-    def test_partition_contract_holds_in_both_dialects(self):
-        texts = {"dwf.ts": DWF_TS.read_text(encoding="utf-8"),
-                 "js": WF_JS.read_text(encoding="utf-8")}
-        consts = dict(re.findall(
-            r"^const (SHARD_TARGET_BYTES|SHARD_MAX_FILES) = (\d+);", texts["js"], re.M))
-        cap_bytes = int(consts["SHARD_TARGET_BYTES"])
-        max_files = int(consts["SHARD_MAX_FILES"])
+    def test_partition_contract_holds_in_the_oracle(self):
+        """D-014: sharding lives once, in the oracle — execute its REAL
+        shard_files against the same cases the dialect extraction used
+        to cover: expected partitions, contiguity, both caps."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("review_orchestrator", ORACLE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        cap_bytes, max_files = mod.SHARD_TARGET_BYTES, mod.SHARD_MAX_FILES
         for files, sizes, expected in self.CASES:
-            parts = {n: self.shard(n, t, files, sizes) for n, t in texts.items()}
-            self.assertEqual(parts["dwf.ts"], parts["js"],
-                             f"dialects disagree on {files!r}")
-            got = parts["js"]
+            got = mod.shard_files(files, sizes)
             self.assertEqual(got, expected, f"partition of {files!r}")
-            # every file in exactly one part, in path-sorted contiguous
-            # order — nothing dropped, nothing reviewed twice
             self.assertEqual([f for p in got for f in p], sorted(files))
-            # every part but the last respects both caps — unless it is
-            # a single file too big for the byte cap (unavoidable, and
-            # only the trailing merge may push the last part over)
-            for p in got[:-1]:
-                self.assertLessEqual(len(p), max_files)
-                if len(p) > 1:
+            for part in got[:-1]:
+                self.assertLessEqual(len(part), max_files)
+                if len(part) > 1:
                     self.assertLessEqual(
-                        sum(sizes.get(f, 0) for f in p), cap_bytes)
+                        sum(sizes.get(f, 0) for f in part), cap_bytes)
 
 
 class FindingsMarkdownTests(unittest.TestCase):
@@ -722,29 +786,25 @@ class FindingsMarkdownTests(unittest.TestCase):
          "impact": "", "fixStatus": "pending"},
     ]
 
-    def parse(self, name, text):
-        """Run the dialect's own parseFindingsMd on the sample report."""
-        m = re.search(r"^function parseFindingsMd\(.*?^\}", text, re.M | re.S)
-        self.assertIsNotNone(m, f"parseFindingsMd in {name}")
-        script = (
-            m.group(0)
-            + "\nconsole.log(JSON.stringify(parseFindingsMd(%s)));\n"
-            % json.dumps(self.SAMPLE)
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / ("parse.ts" if name == "dwf.ts" else "parse.js")
-            path.write_text(script, encoding="utf-8")
-            r = subprocess.run([NODE, str(path)], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
-        return json.loads(r.stdout)
-
-    def test_report_markdown_parses_identically_in_both_dialects(self):
-        texts = {"dwf.ts": DWF_TS.read_text(encoding="utf-8"),
-                 "js": WF_JS.read_text(encoding="utf-8")}
-        parsed = {n: self.parse(n, t) for n, t in texts.items()}
-        self.assertEqual(parsed["dwf.ts"], parsed["js"],
-                         "dialects disagree on the sample report")
-        self.assertEqual(parsed["js"], self.EXPECTED)
+    def test_report_markdown_round_trips_through_the_oracle(self):
+        """D-014: findings markdown and its parser live once, in the
+        oracle — the report it renders must parse back to exactly what
+        a fix_from handover carries (D-013's carrier contract)."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("review_orchestrator", ORACLE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        parsed = mod.parse_findings_md(self.SAMPLE)
+        self.assertEqual(parsed, self.EXPECTED)
+        # render → parse is the identity the carrier depends on
+        rendered = "\n".join(mod.findings_md([
+            {"id": f["id"] or "carried-1", "where": f["where"], "what": f["what"],
+             "evidence": f["evidence"], "severity": f["severity"], "status": f["status"],
+             "lens": f["lens"], "impact": "", "fixStatus": "pending"}
+            for f in self.EXPECTED]))
+        round_trip = mod.parse_findings_md(rendered)
+        self.assertEqual([(f["where"], f["what"], f["severity"]) for f in round_trip],
+                         [(f["where"], f["what"], f["severity"]) for f in self.EXPECTED])
 
 
 class ZcodeDialectTests(unittest.TestCase):
@@ -762,8 +822,11 @@ class ZcodeDialectTests(unittest.TestCase):
                 f"forbidden token {token!r} in spec-code-review.dwf.ts")
 
     def test_gate_runs_through_world_run(self):
-        self.assertIn('world.run("bash"', self.ts)
-        self.assertIn("scripts/gate.sh", self.ts)
+        # D-014: the shell seam is the oracle itself — one world.run per
+        # fetch, gate.sh reached only inside it
+        self.assertIn('world.run("python3"', self.ts)
+        self.assertIn("scripts/review_orchestrator.py", self.ts)
+        self.assertIn("gate-probe", self.ts)
 
     def test_panel_briefs_are_injected_at_run_time(self):
         # no user-installable agent types on zcode: the briefs are read
@@ -809,18 +872,11 @@ class ClaudeDialectTests(unittest.TestCase):
         self.assertNotIn("subprocess", self.js)
         self.assertIn("gate-probe", self.js)
         self.assertIn("scope-probe", self.js)
-        self.assertIn("target-probe", self.js)
-        # pr/branch resolution probes (0.5.0): pr metadata, head/dirty
-        # state, checkout, merge-base, base-branch detection
-        self.assertIn("pr-meta-probe", self.js)
-        self.assertIn("pr-head-probe", self.js)
-        self.assertIn("pr-checkout-probe", self.js)
-        self.assertIn("merge-base-probe", self.js)
-        self.assertIn("base-ref-probe", self.js)
+        # pr/branch resolution rides the ONE scope fetch (NFR-003)
         # fix_from continuation probe (0.7.0): reads the carried findings
         self.assertIn(FIX_FROM_PROBE, self.js)
-        # the gate command reaches the probe shell-quoted, never bare
-        self.assertIn('shq(skillDir + "/scripts/gate.sh")', self.js)
+        # the oracle command reaches the probe shell-quoted, never bare
+        self.assertIn('shq(skillDir + "/scripts/review_orchestrator.py")', self.js)
 
 
 class AgentBriefTests(unittest.TestCase):
@@ -856,14 +912,13 @@ class AgentBriefTests(unittest.TestCase):
             self.assertIn("disallowedTools:", text)
 
     def test_lens_focus_strings_match_every_representation(self):
-        ts = DWF_TS.read_text(encoding="utf-8")
-        js = WF_JS.read_text(encoding="utf-8")
+        # D-014: the workflows dispatch on the oracle's definitions; the
+        # focus strings live in the oracle and the agent briefs
+        oracle = pflat(ORACLE.read_text(encoding="utf-8"))
         for label, focus in LENS_FOCUS.items():
             brief = LENS_BRIEFS[label].read_text(encoding="utf-8")
-            for text, name in ((ts, "dwf.ts"), (js, "js"),
-                               (brief, f"{label} brief")):
-                self.assertIn(flat(focus), flat(text),
-                              f"{label} focus in {name}")
+            self.assertIn(pflat(focus), oracle, f"{label} focus in oracle")
+            self.assertIn(flat(focus), flat(brief), f"{label} focus in brief")
 
     def test_panel_protocol_carries_the_shared_bar(self):
         text = PANEL_PROTOCOL.read_text(encoding="utf-8")

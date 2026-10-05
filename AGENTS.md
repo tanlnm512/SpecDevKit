@@ -38,9 +38,12 @@ shared install/validation tooling (`tools/`). Python is stdlib-only
     `tools/kit-rules.py` (`tools/sync.sh` also refreshes them before
     every install)
 - **Agent briefs live in `skills/<skill>/agents/`** — root `agents/`
-  copies are generated views. Workflow dialect twins
-  (`spec-code-review.*`, `spec-brainstorming.*`) are hand-maintained
-  masters kept in parity by each skill's `tests/test_workflow_copies.py`.
+  copies are generated views. The spec-code-review dialect twins are
+  thin hand-maintained orchestration over the shared review oracle
+  (`scripts/review_orchestrator.py`, D-014): shared state, systems,
+  asks and report assembly live once there, fetched through one probe
+  per phase; `tests/test_workflow_copies.py` pins the split.
+  `spec-brainstorming.*` remains a hand-maintained twin pair.
 - **Skills are self-contained by packaging** — each `skills/<name>/`
   ships alone (marketplace `source: ./skills/<name>`), so content used
   by several skills is duplicated on purpose and pinned by tests.

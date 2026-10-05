@@ -5,6 +5,19 @@ Release history. The skill began life 2026-09-23 as the validated
 review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
+## Unreleased
+
+Shared review oracle (D-014): target resolution, the mechanical gate,
+project sharding, finding IDs, carried-findings parsing, report
+assembly, panel systems and ask text move from the two workflow
+dialects into one stdlib script (`scripts/review_orchestrator.py`),
+unit-tested in the skill's suite and fetched by both dialects through
+one probe per phase. The dialect twins shrink to thin orchestration
+(2,114 → 996 and 2,239 → 1,102 lines) and the runtime harness now
+EXECUTES the Claude dialect end-to-end (`tools/tests/
+test_workflow_runtime.py`). Parity tests re-pinned to the split:
+shared anchors live in the oracle once, dialect anchors pin the relay.
+
 ## 0.1.0 — 2026-10-05 (re-baseline)
 
 Suite-wide version re-baseline: every skill resets to 0.1.0 (user

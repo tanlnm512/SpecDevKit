@@ -3,9 +3,7 @@ description: >-
   Three-stage code review in any repository, with an optional fix loop,
   over a change, a pull request, a branch's recent changes, or the whole
   project. Stage 1 runs the repo's own detected checks as the mechanical
-  gate (the skill's scripts/gate.sh probes Makefile, npm scripts, cargo,
-  go, pytest/unittest, and shell syntax — on the diff, or on every
-  tracked script in project mode). Stage 2 reviews the target through
+  gate (the skill's scripts/gate.sh). Stage 2 reviews the target through
   separate lenses — correctness, security, quality & tests (one general
   reviewer in fast mode) — each triaged by one editor, with independent
   confirmation of every kept finding. Stage 3 synthesizes a report with
@@ -30,19 +28,19 @@ args:
       Diff mode: the base ref the change is reviewed against (default
       HEAD — working-tree changes; HEAD~1 reviews the last commit; any
       branch, tag or sha). Branch mode: the base branch the current
-      branch is diffed against (default: the remote's default branch —
-      origin/HEAD, else main/master). Ignored in pr and project mode.
+      branch is diffed against (default: the remote's default branch).
+      Ignored in pr and project mode.
   target:
     type: string
     description: >-
       diff (default) reviews the change against base; branch reviews the
       current branch's recent changes — the merge-base diff against the
       base branch, uncommitted work included; pr reviews a GitHub pull
-      request (needs the gh CLI; the PR head is checked out
-      automatically on a clean tree, refused on a dirty one); project
-      reviews the repository's tracked source files as they stand — all
-      of them: a big target is sharded into byte-balanced,
-      directory-coherent reviewer parts per lens.
+      request (needs the gh CLI; the PR head is checked out automatically
+      on a clean tree, refused on a dirty one); project reviews the
+      repository's tracked source files as they stand — all of them: a
+      big target is sharded into byte-balanced, directory-coherent
+      reviewer parts per lens.
   pr:
     type: string
     description: >-
@@ -60,33 +58,27 @@ args:
     description: >-
       Fix-only continuation: the findings from a previous review — the
       report markdown itself (a file path to the saved report), or
-      findings JSON (a file path or inline): a bare array of {id, where,
-      what, evidence, severity, lens, status, impact} items or an object
-      with a findings array. Skips the review stages and runs the fix
-      loop on the carried findings; fix_rounds defaults to 2 in this
-      mode. The user-facing flow: run a review first, present the
-      report, ask the user, then fix from it.
+      findings JSON (a file path or inline). Skips the review stages and
+      runs the fix loop on the carried findings; fix_rounds defaults
+      to 2 in this mode.
   paths:
     type: string
     description: >-
       Project mode only: comma- or space-separated repo-relative
-      paths/directories to restrict the target to (files under the
-      named dirs). Empty means every tracked source file.
+      paths/directories to restrict the target to. Empty means every
+      tracked source file.
   repo:
     type: string
     description: >-
       Sub-repo directory to review — for multi-repo workspaces whose
-      root is not itself a git repository. Absolute, or relative to
-      the working directory; resolved to the repo's absolute toplevel
-      before anything runs. Empty means the workspace root is the
-      repo. Supported for target project; change/branch/pr targets
-      refuse it — run those from inside the repository.
+      root is not itself a git repository. Empty means the workspace
+      root is the repo. Supported for target project; change/branch/pr
+      targets refuse it — run those from inside the repository.
   mode:
     type: string
     description: >-
       fast = one general reviewer; full = three specialists; auto (default)
-      picks fast for small targets (short diffs, few files) and full
-      otherwise.
+      picks fast for small targets and full otherwise.
   fix_rounds:
     type: number
     description: >-
@@ -94,74 +86,68 @@ args:
       rounds: the author agent fixes confirmed findings in the working
       tree, each fix is independently verified, the gate re-runs, and a
       fresh-eyes reviewer scans the fix diff. Ends with a merge
-      recommendation; fixes stay uncommitted. In fix_from mode N
-      defaults to 2 when omitted.
+      recommendation; fixes stay uncommitted. In fix_from mode N defaults
+      to 2 when omitted.
   skill_dir:
     type: string
     description: >-
       Absolute skill dir override (defaults to the path baked at install
-      time by tools/install-workflow.sh).
+      time).
 */
 
+// ---------------------------------------------------------------------------
+// spec-code-review.dwf.ts — the zcode dialect (thin oracle-relay form,
+// D-014): all shared review state — target resolution, the gate, sharding,
+// finding IDs, findings parsing, report assembly, panel systems and ask
+// text — lives in scripts/review_orchestrator.py, fetched through ONE
+// world.run per phase (NFR-003). This file keeps only what is
+// runtime-native: typed agent coordination, panel-brief injection, the
+// live findings board, and the run's report bookkeeping.
+// ---------------------------------------------------------------------------
+
 interface Finding {
-  /** "path:line" on the new side of the diff — where the problem lives. */
   where: string;
-  /** One sentence: what is wrong and why it matters. Not the fix. */
   what: string;
-  /** The lines read, or command output, that demonstrate the problem is real. */
   evidence: string;
-  /** high = data loss, crash, wrong result or security compromise; medium = a real defect the author should fix; low = minor. */
   severity: "low" | "medium" | "high";
-  /** One sentence: what the defect breaks and when it bites (callers, data at risk). Optional — reviewers supply it for high/medium findings. */
   impact?: string;
+  lens?: string;
 }
 
 interface LensReview {
-  /** Findings from this reviewer's lens only; empty is the expected answer for a clean diff. */
   findings: Finding[];
 }
 
 interface DroppedFinding {
   where: string;
   what: string;
-  /** One line: why triage dropped it (duplicate, style, speculation, pre-existing). */
   reason: string;
 }
 
 interface TriageVerdict {
-  /** Findings worth the author's attention after dedup and scope checks. */
   kept: Finding[];
-  /** Findings dropped at triage, each with its reason. */
   dropped: DroppedFinding[];
 }
 
 interface Confirmation {
-  /** verified = reproduced independently from the code; unconfirmed = the confirmer could not reproduce it. */
   status: "verified" | "unconfirmed";
-  /** One sentence: what the confirmer checked and what was seen. */
   note: string;
 }
 
 interface ConfirmedFinding extends Finding {
-  /** Stable identity, minted when the finding becomes tracked: "<lens>-<n>" (also gate-N, fix-review-N, carried-N). */
   id: string;
   lens: string;
   confirmation: Confirmation;
 }
 
 interface Assessment {
-  /** Overall risk of merging this change as-is. */
   risk: "low" | "medium" | "high";
-  /** Behaviors this change alters that no test covers. */
   testGaps: string[];
-  /** What remains unverified after the checks and the review. */
   residualRisks: string[];
-  /** Two or three sentences: should this merge, and what must the author fix first. */
   verdict: string;
 }
 
 interface FinalAssessment extends Assessment {
-  /** merge = every finding fixed, gate green, nothing new — recommend merging; fix-first = ordinary findings remain; human = judgment calls or residue a human must decide. */
   recommendation: "merge" | "fix-first" | "human";
 }
 
@@ -171,20 +157,12 @@ interface GateResult {
   tail: string;
 }
 
-// The preflight scout's map: orientation for the reviewers, produced by
-// one read-only turn between the green gate and the panel. Context to
-// start from — never evidence, and never shown to a confirmer.
 interface RepoMap {
-  /** The modules the target lives in plus their close neighbors (within two hops). */
   modules: { name: string; path: string; role: string }[];
-  /** The repo patterns design fit is judged against. */
   conventions: string[];
-  /** Paths in or near the target that deserve extra reviewer attention. */
   riskAreas: string[];
 }
 
-// Pr mode metadata from `gh pr view` — carried into the scope log and
-// the report header so the review names what it reviewed.
 interface PrMeta {
   number: number;
   title: string;
@@ -195,40 +173,19 @@ interface PrMeta {
   baseRefOid: string;
   headRefName: string;
   headRefOid: string;
-  // The PR description, whitespace-collapsed and capped — the change's
-  // stated intent when the caller passes no intent arg.
   body: string;
 }
 
 interface ReportedFinding {
-  /** Stable finding id ("<lens>-<n>", gate-N, fix-review-N, carried-N) — the join key across reports and fix_from runs. */
   id: string;
-  /** "path:line" with the problem, or the check name for gate findings. */
   where: string;
-  /** One sentence: what is wrong. */
   what: string;
-  /** What showed it — the lines read, or the command and output that proved it. */
   evidence: string;
-  /** "verified" when an independent reader or a deterministic check confirmed it; "unconfirmed" when confirmation failed. */
-  status: "verified" | "unconfirmed";
-  /** How much it matters. Reserve "high" for data loss, a crash, a wrong result, or a security compromise. */
+  status: string;
   severity: "low" | "medium" | "high";
-  /** Which review lens found it (correctness, security, quality, general, fix-review, or gate). */
   lens: string;
-  /** One sentence: what the defect breaks and when it bites. Empty for gate findings. */
   impact: string;
-  /** After a fix round: latest fix verification (fixed | unfixed | worse | pending when no round ran). */
-  fixStatus: "fixed" | "unfixed" | "worse" | "pending";
-}
-
-interface WorkflowReport {
-  /** Two or three sentences answering what the user asked for. */
-  conclusion: string;
-  findings: ReportedFinding[];
-  /** What the run checked and how: the commands it ran, the files it covered. */
-  verified: string[];
-  /** What the run did not look at or could not check, and why. */
-  notCovered: string[];
+  fixStatus: string;
 }
 
 interface LensDef {
@@ -239,31 +196,23 @@ interface LensDef {
 }
 
 interface FixOutcome {
-  /** The finding ids the fixer believes it fully addressed this round. */
   addressed: string[];
-  /** Findings deliberately not addressed, each with why. */
   skipped: { id: string; why: string }[];
-  /** Workspace-relative paths the fixer changed this round. */
   changedPaths: string[];
-  /** One sentence per change: what was done and why it is the minimal fix. */
   notes: string[];
 }
 
 interface Verification {
-  /** fixed = genuinely resolved in the current tree; unfixed = still present; worse = the fix introduced a new problem. */
   status: "fixed" | "unfixed" | "worse";
-  /** One sentence: what was checked and what was seen. */
   note: string;
 }
 
 interface TrackedFinding {
   finding: ConfirmedFinding;
-  /** Latest fix status across loop rounds. */
   fix: "pending" | "fixed" | "unfixed" | "worse";
   fixNote: string;
 }
 
-// Tunables live here, in control flow only — never inside ask text.
 const TARGETS = ["diff", "branch", "pr", "project"];
 const TARGET = typeof args.target === "string" && args.target.trim() ? args.target.trim().toLowerCase() : "diff";
 const PROJECT = TARGET === "project";
@@ -273,99 +222,33 @@ const PR_ARG = typeof args.pr === "string" && args.pr.trim() ? args.pr.trim() : 
 const INTENT_ARG = typeof args.intent === "string" && args.intent.trim() ? args.intent.trim() : "";
 const HAS_BASE = typeof args.base === "string" && args.base.trim() ? true : false;
 const BASE_ARG = HAS_BASE ? String(args.base).trim() : "";
-// BASE starts at the diff default and is resolved in the scope phase:
-// args.base in diff mode (default HEAD), the merge-base with the base
-// branch in branch mode, the merge-base with the PR's base commit in
-// pr mode — every diff-mode ask and the gate then work unchanged.
+// BASE is resolved by the oracle's scope: the merge-base in branch/pr
+// modes, args.base (default HEAD) in diff mode.
 let BASE = HAS_BASE ? BASE_ARG : "HEAD";
 const PATHS_ARG = typeof args.paths === "string" && args.paths.trim() ? args.paths.trim() : "";
-// The sub-repo under the workspace root to review, for multi-repo
-// workspaces whose root is not itself a git repository. Empty means the
-// workspace root IS the repo. Every git call, the gate and the paths
-// handed to subagents are rooted there.
-// The sub-repo to review, for multi-repo workspaces whose root is not
-// itself a git repository. Empty means the workspace root IS the repo.
-// The runtime's cwd is not guaranteed to be the workspace root, so no
-// command may rely on a relative repo path: the scope phase resolves
-// the arg to the repo's ABSOLUTE toplevel via `git -C <dir> rev-parse
-// --show-toplevel` (works for absolute args and for args relative to
-// the cwd) and everything — every git call, the gate's --repo, and the
-// paths handed to subagents — roots there.
 const REPO_ARG = typeof args.repo === "string" && args.repo.trim() ? args.repo.trim().replace(/\/+$/, "") : "";
 let REPO_ABS = "";
-// git argv rooted at the resolved repo (git -C makes every subcommand
-// run there); stock passthrough when no repo arg was given
-function gitArgv(argv: string[]): string[] {
-  return REPO_ABS ? ["-C", REPO_ABS].concat(argv) : argv;
-}
-// repo-relative path -> absolute, for file lists in asks (absolute
-// paths resolve in every subagent's file tools regardless of cwd)
-function repoPath(p: string): string {
-  return REPO_ABS ? REPO_ABS + "/" + p : p;
-}
-// Orientation for subagents when the repo is a sub-directory: where the
-// repo root is, and that listed paths are absolute.
-function repoBlock(): string {
-  return REPO_ABS
-    ? "The repository under review lives at \"" + REPO_ABS + "\" — treat that directory as the repo root " +
-      "(AGENTS.md / CLAUDE.md / the Makefile live there; every path below is absolute). Run any git command as " +
-      "`git -C " + REPO_ABS + " ...`.\n"
-    : "";
-}
 const MODE = typeof args.mode === "string" && args.mode.trim() ? args.mode.trim().toLowerCase() : "auto";
 const FIX_FROM_ARG = typeof args.fix_from === "string" && args.fix_from.trim() ? args.fix_from.trim() : "";
-// Fix-only continuation: findings carried from a previous review's
-// report; the review stages are skipped and the fix loop runs directly.
 const FIX_FROM = FIX_FROM_ARG !== "";
-// let, not const: the fix_from default below bumps it to 2 — note an
-// explicit fix_rounds: 0 cannot be distinguished from omission and is
-// bumped too: a fix_from run is always a fix run.
 let FIX_ROUNDS =
   typeof args.fix_rounds === "number" && Number.isInteger(args.fix_rounds) && args.fix_rounds >= 0
     ? args.fix_rounds
     : 0;
-// A fix_from run is a fix run: with no round count — or an explicit 0,
-// indistinguishable from omission — it gets the default bounded loop
+// A fix_from run is always a fix run: an explicit fix_rounds: 0 is
+// indistinguishable from omission, so it gets the default bounded loop
 // rather than a review-only no-op.
 if (FIX_FROM && FIX_ROUNDS === 0) FIX_ROUNDS = 2;
-// __SKILL_DIR__ is a placeholder; tools/install-workflow.sh bakes the
-// active skill dir into the installed copy (a runtime skill_dir arg wins).
 const SKILL_DIR_BAKED = "__SKILL_DIR__";
-const skillDir =
-  typeof args.skill_dir === "string" && args.skill_dir
-    ? args.skill_dir
-    : SKILL_DIR_BAKED;
-const FAST_MAX_LINES = 400;
-const FAST_MAX_FILES = 5;
-// A change over these bounds still gets a full review, but the report
-// adds a split recommendation: reviewers read whole targets, and
-// coverage thins as the change grows.
-const SUGGEST_SPLIT_LINES = 1000;
-const SUGGEST_SPLIT_FILES = 20;
-// Whole-project reviews read files, not diffs: the target is every
-// tracked source file. A big repo is split into reviewer parts —
-// contiguous runs of the path-sorted list, so directories stay
-// together — closed at SHARD_TARGET_BYTES or SHARD_MAX_FILES, and every
-// lens reads every part. paths narrows the list further.
-const SHARD_TARGET_BYTES = 240000;
-const SHARD_MAX_FILES = 32;
+const skillDir = typeof args.skill_dir === "string" && args.skill_dir ? args.skill_dir : SKILL_DIR_BAKED;
 const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
-// Finding identity: an id is minted the moment a finding becomes
-// tracked — "<lens>-<n>" at confirmation, gate-N / fix-review-N inside
-// the loop — and rides every later representation (board card, report
-// heading, fix_from payload). `where` is evidence, not identity: lines
-// move as fixes land, and two findings can share a location.
 let idSeqs: Record<string, number> = {};
 function nextId(prefix: string): string {
-  idSeqs[prefix] = (idSeqs[prefix] ?? 0) + 1;
+  idSeqs[prefix] = (idSeqs[prefix] !== undefined ? idSeqs[prefix] : 0) + 1;
   return prefix + "-" + idSeqs[prefix];
 }
 
-// The findings board: the live view for whoever watches the run — every
-// reported finding is a card that moves to its stage column (verified,
-// unconfirmed, then fixed/unfixed/worse as fix rounds land). Keyed by
-// the finding id — `where` collides when two findings share a location.
 // Declared once at the top level; report(item, "findings") feeds it.
 artifact.board("findings", {
   title: "Findings",
@@ -379,446 +262,42 @@ artifact.board("findings", {
   ],
 });
 
-// Source-file targeting for project mode: an extension whitelist plus a
-// few well-known build files, minus lockfiles, generated code and the
-// common vendored/build directories. Deliberately conservative — a file
-// the filter misses is only ever a coverage note in the report, never a
-// wrong review.
-const CODE_EXTENSIONS = [
-  "bash", "c", "cc", "clj", "cljs", "cmake", "cpp", "cs", "css", "cxx", "dart",
-  "d", "edn", "el", "elm", "erl", "ex", "exs", "fish", "go", "gradle", "groovy",
-  "graphql", "h", "hh", "hpp", "hs", "html", "hrl", "java", "js", "json", "jsx",
-  "kt", "kts", "less", "lua", "m", "ml", "mli", "mm", "nim", "php", "pl", "pm",
-  "proto", "ps1", "py", "pyi", "r", "rb", "rs", "sass", "scala", "scss", "sh",
-  "sql", "svelte", "swift", "tf", "toml", "ts", "tsx", "vue", "yaml", "yml",
-  "zig", "zsh",
-];
-const CODE_BASENAMES = [
-  "Makefile", "Dockerfile", "CMakeLists.txt", "Rakefile", "Gemfile",
-  "Justfile", "Podfile", "Vagrantfile", "Brewfile",
-];
-const EXCLUDED_BASENAMES = [
-  "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock",
-  "poetry.lock", "Pipfile.lock", "uv.lock", "go.sum", "composer.lock",
-  "Gemfile.lock",
-];
-const EXCLUDED_SEGMENTS = [
-  "vendor/", "third_party/", "external/", "node_modules/", "dist/",
-  "__snapshots__/", ".venv/", "venv/",
-];
-
-function isExcludedSource(path: string): boolean {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  if (EXCLUDED_BASENAMES.indexOf(base) !== -1) return true;
-  if (base.endsWith(".d.ts")) return true;
-  if (base.endsWith(".min.js") || base.endsWith(".min.css")) return true;
-  if (base.endsWith(".pb.go") || /_pb2\.py$/.test(base)) return true;
-  for (const seg of EXCLUDED_SEGMENTS) {
-    if (path.indexOf(seg) !== -1) return true;
-  }
-  return false;
-}
-
-function isSourceFile(path: string): boolean {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  if (CODE_BASENAMES.indexOf(base) !== -1) return true;
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0) return false; // no extension, or a dotfile — not source
-  return CODE_EXTENSIONS.indexOf(base.slice(dot + 1).toLowerCase()) !== -1;
-}
-
-function matchesPathFilter(path: string, terms: string[]): boolean {
-  if (terms.length === 0) return true;
-  for (const t of terms) {
-    if (path === t || path.startsWith(t + "/")) return true;
-  }
-  return false;
-}
-
-const HONESTY =
-  " If your instructions are impossible to satisfy, escalate and say so plainly rather than working around it.";
-
-const LENSES: LensDef[] = [
-  {
-    label: "correctness",
-    name: "Correctness reviewer",
-    system:
-      "You are the correctness reviewer on a code review panel. You read whole diffs, follow call sites, " +
-      "and report only defects a reasonable author would fix: logic errors, broken edge cases, wrong or missing " +
-      "error handling, concurrency hazards, contract violations between caller and callee. Never style, never " +
-      "speculation, never pre-existing issues the change does not touch." + HONESTY,
-    focus:
-      "logic errors, broken edge cases, wrong or missing error handling, concurrency hazards, broken contracts between caller and callee.",
-  },
-  {
-    label: "security",
-    name: "Security reviewer",
-    system:
-      "You are the security reviewer on a code review panel. You read whole diffs and trace untrusted data from " +
-      "where it enters to where it is used. You report only real, demonstrable vulnerabilities and exposure " +
-      "changes a reasonable author would fix — not checklist theater, not speculation." + HONESTY,
-    focus:
-      "untrusted input paths, injection, secrets and token handling, unsafe deserialization, permission changes, destructive operations.",
-  },
-  {
-    label: "quality",
-    name: "Quality and tests reviewer",
-    system:
-      "You are the quality-and-tests reviewer on a code review panel. You read whole diffs and judge what the next " +
-      "reader pays for. You report complexity that obscures, over-engineering, misleading names, comments and docs " +
-      "that drift from the code, test problems — changed behavior with no test covering it, tests that cannot " +
-      "fail — and design fit: whether the change follows the patterns the surrounding code already establishes. " +
-      "Never pure style or formatting; the repo's checks own those." + HONESTY,
-    focus:
-      "complexity the next reader pays for, over-engineering, misleading names, comments and docs that drift from the code, and tests — behavior this change alters with no test covering it, tests that cannot fail, and design fit — whether the change follows the patterns the surrounding code already establishes instead of inventing a parallel way.",
-  },
-];
-
-const GENERAL: LensDef = {
-  label: "general",
-  name: "General reviewer",
-  system:
-    "You are the sole reviewer on a small change. You combine three lenses — correctness (logic, edge cases, " +
-    "error handling), security (untrusted input, secrets, permissions), and quality (complexity, tests that fail " +
-    "to cover changed behavior, design fit with the patterns the surrounding code establishes) — and report only " +
-    "defects a reasonable author would fix. Never style, never speculation, never pre-existing issues the change " +
-    "does not touch." + HONESTY,
-  focus:
-    "correctness (logic, edge cases, error handling), security (untrusted input, secrets, permissions), and quality (complexity, tests that fail to cover changed behavior, design fit with the patterns the surrounding code establishes).",
-};
-
-const FIXER_SYSTEM =
-  "You are the author and fixer of this change. You receive confirmed review findings and fix them in the " +
-  "working tree. Minimal, surgical fixes in the repo's own style — no refactors beyond what a finding requires. " +
-  "Never commit. Never weaken, skip, or delete a test to make a finding go away; if a fix legitimately changes " +
-  "behavior, pin the corrected behavior in the test. If a finding is wrong or cannot be fixed, say so in skipped " +
-  "with why rather than pretending." + HONESTY;
-
-const FIX_REVIEW_SYSTEM =
-  "You are the fresh-eyes reviewer for an author's fixes. The author cannot see their own gaps; you can. You " +
-  "read only the cumulative diff of the paths the author changed, and you report NEW defects those fixes " +
-  "introduce — never the original findings, which separate verifiers own." + HONESTY;
-
-const SCOUT_SYSTEM =
-  "You are the preflight scout of a code review panel. Before the reviewers read the target, you explore the " +
-  "codebase and map the modules, conventions and risk areas they will judge against. You report a map, never " +
-  "findings — defects belong to the reviewers, and a map entry is context to verify, not evidence to cite." +
-  HONESTY;
-
-function outTail(s: string, n: number): string {
-  const t = s.trim();
-  return t ? t.split("\n").slice(-n).join("\n") : "";
-}
-
-// PR-author-controlled fields (title, author, base, url) render inside
-// the trusted report artifact: escape the markdown-active characters so
-// a crafted PR cannot plant links, images or emphasis in the report the
-// reader merges from. Logs and asks stay raw — only report markdown is
-// escaped.
-function mdSafe(s: string): string {
-  return s.replace(/[\\`*_[\]()!<>]/g, (ch) => "\\" + ch);
-}
-
-// The mechanical gate: the skill's gate.sh detects and runs the repo's
-// OWN checks and reports a JSON array on stdout. Run once before the
-// review and again after every fix round. Project mode passes --tree so
-// the shell-syntax family scans every tracked script, not the diff.
-async function runGate(): Promise<GateResult[]> {
-  const gateArgs = (REPO_ABS ? ["--repo", REPO_ABS] : []).concat(PROJECT ? ["--tree"] : ["--base", BASE]);
-  const r = await world.run("bash", [skillDir + "/scripts/gate.sh"].concat(gateArgs), { timeoutMs: 1800000 });
-  try {
-    const parsed = JSON.parse(r.stdout) as { name: string; exit_code: number | null; tail: string }[];
-    return parsed.map((g) => ({ name: g.name, exitCode: g.exit_code ?? 0, tail: g.tail }));
-  } catch {
-    return [{
-      name: "gate.sh (spec-code-review)",
-      exitCode: 1,
-      tail: outTail(r.stdout + "\n" + r.stderr, 12) || "gate.sh produced no JSON report",
-    }];
-  }
-}
-
-// Project-mode targeting: tracked files from git, sizes from wc, filtered
-// to source, largest first, capped. Two world.run calls — ls-files first
-// guards the xargs/wc pipeline against an empty repo (a shell `xargs` on
-// empty input can still invoke wc, which would then wait on stdin).
-async function selectProjectFiles(): Promise<{ files: string[]; sizes: Record<string, number>; candidates: number }> {
-  const listed = await world.run("git", gitArgv(["ls-files"]));
-  const all = listed.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
-  if (all.length === 0) return { files: [], sizes: {}, candidates: 0 };
-  const sizes: Record<string, number> = {};
-  const lsCmd = REPO_ABS ? "git -C '" + REPO_ABS.replace(/'/g, "'\\''") + "' ls-files -z" : "git ls-files -z";
-  const wc = await world.run(
-    "bash", ["-c", lsCmd + " | xargs -0 wc -c"], { timeoutMs: 120000 });
-  for (const line of wc.stdout.split("\n")) {
-    const m = /^\s*(\d+)\s+(.+)$/.exec(line);
-    if (m && m[2] !== "total") sizes[m[2]] = parseInt(m[1], 10);
-  }
-  const terms = PATHS_ARG.split(/[\s,]+/).filter(Boolean);
-  const candidates = all.filter(
-    (p) => isSourceFile(p) && !isExcludedSource(p) && matchesPathFilter(p, terms));
-  const sorted = candidates.sort((a, b) => {
-    const d = (sizes[b] ?? 0) - (sizes[a] ?? 0);
-    return d !== 0 ? d : (a < b ? -1 : a > b ? 1 : 0);
-  });
-  return { files: sorted, sizes, candidates: candidates.length };
-}
-
-// Shard the project target: contiguous runs of the path-sorted list —
-// directories stay together, so a part's files share context — closed
-// at SHARD_TARGET_BYTES or SHARD_MAX_FILES. A trailing run too small to
-// be its own part merges into the previous one. Deterministic, so a
-// resumed run re-derives the same parts.
-function shardProjectFiles(files: string[], sizes: Record<string, number>): string[][] {
-  const sorted = files.slice().sort();
-  const parts: string[][] = [];
-  let cur: string[] = [];
-  let curBytes = 0;
-  for (const f of sorted) {
-    const b = sizes[f] ?? 0;
-    if (cur.length > 0 && (curBytes + b > SHARD_TARGET_BYTES || cur.length >= SHARD_MAX_FILES)) {
-      parts.push(cur);
-      cur = [];
-      curBytes = 0;
-    }
-    cur.push(f);
-    curBytes += b;
-  }
-  if (cur.length > 0) {
-    if (parts.length > 0 && curBytes <= SHARD_TARGET_BYTES / 4) {
-      for (const f of cur) parts[parts.length - 1].push(f);
-    } else {
-      parts.push(cur);
-    }
-  }
-  return parts;
-}
-
-// A part's label for its reviewer's card: the most common top-two path
-// segments in the part, so the name says what it covers.
-function partLabel(files: string[]): string {
-  const counts: Record<string, number> = {};
-  for (const f of files) {
-    const segs = f.split("/");
-    const key = segs.length >= 2 ? segs.slice(0, 2).join("/") : segs[0];
-    counts[key] = (counts[key] ?? 0) + 1;
-  }
-  let best = "";
-  let n = -1;
-  for (const k of Object.keys(counts)) {
-    if (counts[k] > n) {
-      n = counts[k];
-      best = k;
-    }
-  }
-  return best;
-}
-
-function gateNote(gate: GateResult[]): string {
-  if (gate.length === 0) {
-    return "No repo checks were detected by the gate — this review has no mechanical floor; " +
-      "the report must say so under notCovered";
-  }
-  const failed = gate.filter((g) => g.exitCode !== 0);
-  if (failed.length === 0) {
-    return "The repo's own checks the gate detected (" + gate.map((g) => g.name).join("; ") + ") all passed";
-  }
-  return "The repo's own checks the gate detected did NOT all pass — failing: " +
-    failed.map((g) => g.name).join("; ") + " (each failure is recorded as a gate finding)";
-}
-
-// --- pr and branch target resolution ----------------------------------------
-// Both collapse to a diff review against a resolved base — the merge-base
-// with the base branch — so the panel machinery, the gate and the fix loop
-// run unchanged underneath. The panel and any fix loop work in the working
-// tree, so pr mode requires the PR head to be checked out: on a clean tree
-// the workflow checks it out itself (announced, with the previous HEAD in
-// the log); on a dirty tree it refuses rather than hide uncommitted work.
-
-async function gitOut(argv: string[]): Promise<string> {
-  const r = await world.run("git", gitArgv(argv));
-  return r.exitCode === 0 ? r.stdout.trim() : "";
-}
-
-function prMetaFromJson(raw: string): PrMeta | null {
-  let j: any;
-  try {
-    j = JSON.parse(raw);
-  } catch {
+// The shared review-state oracle (D-014), one world.run per fetch: its
+// JSON contract is status ok/error, errors carry a stage the run maps
+// to its exact stop-the-panel text.
+async function oracle(label: string, subargs: string[]): Promise<any | null> {
+  const r = await world.run("python3", [skillDir + "/scripts/review_orchestrator.py", ...subargs], { timeoutMs: 1800000 });
+  if (r.exitCode !== 0 || !r.stdout.trim()) {
+    log(label + ": oracle returned no result");
     return null;
   }
-  if (!j || typeof j.headRefOid !== "string" || !j.headRefOid) return null;
-  const body = typeof j.body === "string" ? j.body.replace(/\s+/g, " ").trim() : "";
-  return {
-    number: typeof j.number === "number" ? j.number : 0,
-    title: typeof j.title === "string" ? j.title.replace(/\s+/g, " ").trim() : "",
-    author: j.author && typeof j.author.login === "string" ? j.author.login : "unknown",
-    state: typeof j.state === "string" ? j.state : "UNKNOWN",
-    url: typeof j.url === "string" ? j.url : "",
-    baseRefName: typeof j.baseRefName === "string" ? j.baseRefName : "",
-    baseRefOid: typeof j.baseRefOid === "string" ? j.baseRefOid : "",
-    headRefName: typeof j.headRefName === "string" ? j.headRefName : "",
-    headRefOid: j.headRefOid,
-    body: body.length > 1200 ? body.slice(0, 1200) + "..." : body,
-  };
-}
-
-async function resolvePrMeta(pr: string): Promise<PrMeta | null> {
   try {
-    const r = await world.run("gh", ["pr", "view", pr, "--json",
-      "number,title,author,baseRefName,baseRefOid,headRefName,headRefOid,state,url,body"]);
-    if (r.exitCode !== 0) return null;
-    return prMetaFromJson(r.stdout);
-  } catch {
+    return JSON.parse(r.stdout);
+  } catch (e) {
+    log(label + ": oracle stdout is not JSON: " + String(e));
     return null;
   }
 }
 
-// Branch-mode base resolution: explicit base first (remote form, then
-// local), else the remote's default branch (origin/HEAD dereferenced to
-// the branch it points at), else main/master — local or remote — first
-// resolvable wins. Empty means nothing resolved; the caller fails loudly.
-async function detectBaseBranch(): Promise<string> {
-  const candidates: string[] = [];
-  if (HAS_BASE) {
-    candidates.push("origin/" + BASE_ARG, BASE_ARG);
-  } else {
-    const head = await gitOut(["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]);
-    if (head) candidates.push(head);
-    candidates.push("origin/main", "main", "origin/master", "master");
-  }
-  for (const c of candidates) {
-    if (await gitOut(["rev-parse", "-q", "--verify", c])) return c;
-  }
-  return "";
+// gate rows cross the oracle boundary as exit_code (its JSON contract);
+// the orchestration below keeps its historic internal exitCode shape
+function gateRows(oracleRows: any[]): GateResult[] {
+  return oracleRows.map((g) => ({
+    name: g.name,
+    exitCode: typeof g.exit_code === "number" ? g.exit_code : 0,
+    tail: g.tail,
+  }));
 }
 
-// Parse the findings section of a report this workflow emitted — the
-// fix_from carrier for the natural handover artifact (the saved report
-// markdown). Recognizes both the id-bearing heading (0.13.0+) and the
-// pre-id heading (through 0.12.0; those items arrive id-less and the
-// loader mints carried-N). Pure and self-contained — no outer
-// references — so the parity suite can extract and execute it in both
-// dialects.
-function parseFindingsMd(text: string): any[] {
-  const items: any[] = [];
-  let cur: any = null;
-  for (const line of text.split("\n")) {
-    const m = /^### \[([^\s·]+) · (LOW|MEDIUM|HIGH) · (verified|unconfirmed) · ([^\]]+?)\] (.*)$/.exec(line);
-    const legacy = m ? null : /^### \[(LOW|MEDIUM|HIGH) · (verified|unconfirmed) · ([^\]]+?)\] (.*)$/.exec(line);
-    const hit = (m || legacy) as RegExpExecArray | null;
-    if (hit) {
-      if (cur) items.push(cur);
-      const off = m ? 0 : 1;
-      let lens = hit[4 - off];
-      let fixStatus = "pending";
-      const fx = /^(.*?) · fix: (fixed|unfixed|worse|pending)$/.exec(lens);
-      if (fx) {
-        lens = fx[1];
-        fixStatus = fx[2];
-      }
-      cur = {
-        id: m ? hit[1] : "",
-        where: "",
-        what: hit[5 - off],
-        evidence: "",
-        severity: hit[2 - off].toLowerCase(),
-        status: hit[3 - off],
-        lens: lens,
-        impact: "",
-        fixStatus: fixStatus,
-      };
-      continue;
-    }
-    if (cur) {
-      let b = /^- where: `(.*)`$/.exec(line);
-      if (b) {
-        cur.where = b[1];
-        continue;
-      }
-      b = /^- evidence: (.*)$/.exec(line);
-      if (b) {
-        cur.evidence = b[1];
-        continue;
-      }
-      b = /^- impact: (.*)$/.exec(line);
-      if (b) cur.impact = b[1];
-    }
-  }
-  if (cur) items.push(cur);
-  return items.filter((f) => f.where && f.what);
+// one world.run renders a whole wave of asks (NFR-003)
+async function askWave(label: string, items: { kind: string; ctx: any }[]): Promise<string[] | null> {
+  const d = await oracle(label, ["ask", "--kind", "batch", "--ctx", JSON.stringify({ batch: items })]);
+  return d && d.status === "ok" && Array.isArray(d.asks) ? d.asks : null;
 }
 
-// fix_from loader: findings from a previous review — inline JSON
-// (starts with [ or {), a JSON file, or the report markdown itself
-// (parsed by parseFindingsMd; its headings carry the finding ids).
-// Accepts a bare array of finding items or an object with a findings
-// array; each item needs where and what, everything else defaults
-// sensibly. A carried id is kept; an id-less item (legacy JSON, a
-// pre-id report) gets carried-N. Entries the previous run already
-// marked fixed are dropped; the rest return as pending tracked
-// findings, highest severity first. A string return is a user-facing
-// error.
-async function loadFindingsFromFixFrom(): Promise<TrackedFinding[] | string> {
-  let text = FIX_FROM_ARG;
-  if (!/^\s*[\[{]/.test(text)) {
-    const r = await world.run("cat", [FIX_FROM_ARG]);
-    if (r.exitCode !== 0) {
-      return "fix_from: could not read \"" + FIX_FROM_ARG + "\" — pass the review report markdown, a findings JSON file path (workspace-relative or absolute), or inline JSON.";
-    }
-    text = r.stdout;
-  }
-  let parsed: any;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    const mdItems = parseFindingsMd(text);
-    if (mdItems.length === 0) {
-      return "fix_from: the payload is neither valid JSON nor a parseable review report — pass the report markdown of a previous review, or its findings JSON.";
-    }
-    parsed = mdItems;
-  }
-  const items: any[] = Array.isArray(parsed)
-    ? parsed
-    : parsed && Array.isArray(parsed.findings) ? parsed.findings : [];
-  const tracked: TrackedFinding[] = [];
-  let carriedSeq = 0;
-  for (const it of items) {
-    if (!it || typeof it.where !== "string" || !it.where || typeof it.what !== "string" || !it.what) {
-      log("fix_from: skipping an item without where/what");
-      continue;
-    }
-    if (it.fixStatus === "fixed") continue; // already resolved in the previous run
-    tracked.push({
-      finding: {
-        id: typeof it.id === "string" && it.id ? it.id : "carried-" + (++carriedSeq),
-        where: it.where,
-        what: it.what,
-        evidence: typeof it.evidence === "string" ? it.evidence : "",
-        severity: it.severity === "high" || it.severity === "medium" || it.severity === "low" ? it.severity : "medium",
-        lens: typeof it.lens === "string" && it.lens ? it.lens : "general",
-        impact: typeof it.impact === "string" ? it.impact : "",
-        confirmation: {
-          status: it.status === "unconfirmed" ? "unconfirmed" : "verified",
-          note: "carried from the previous review's report",
-        },
-      },
-      fix: "pending",
-      fixNote: "carried from the previous review",
-    });
-  }
-  if (tracked.length === 0) {
-    return "fix_from: the payload carried no actionable findings — every item was invalid or already marked fixed.";
-  }
-  tracked.sort((a, b) => (SEV_RANK[a.finding.severity] ?? 3) - (SEV_RANK[b.finding.severity] ?? 3));
-  return tracked;
-}
-
-// The zcode facade has no user-installable agent types, so the panel
-// briefs under <skillDir>/agents/ are read at run time and appended to
-// the inline personas. Briefs sit outside the workspace, so files.read
-// cannot reach them — cat through world.run is the same seam gate.sh
-// uses. A missing brief degrades to the inline rubric, never an error.
+// Briefs sit outside the workspace, so files.read cannot reach them —
+// cat through world.run is the same seam the oracle uses. A missing
+// brief degrades to the inline system, never an error.
 async function readBrief(file: string): Promise<string> {
   const r = await world.run("cat", [skillDir + "/agents/" + file]);
   return r.exitCode === 0 ? r.stdout.trim() : "";
@@ -844,411 +323,53 @@ const BRIEF_FILES: Record<string, string[]> = {
   ],
 };
 
-// The author's stated intent — the rebuttal channel for unattended runs:
-// it lets reviewers and triage apply the intentional-behavior-change
-// exclusion with knowledge instead of guesswork, while never waiving a
-// demonstrable defect. Confirmation stays intent-blind on purpose: the
-// confirmer verifies from the code alone.
-function intentBlock(): string {
-  return intentText
-    ? "What this change is supposed to do (the author's stated intent):\n" + intentText + "\n" +
-      "Judge the change against that intent: a deliberate choice the intent states up front is an " +
-      "intentional behavior change, not a finding — but stated intent never waives a demonstrable defect.\n"
-    : "";
-}
-
-// The preflight scout's ask: map the ground before the panel reads the
-// target. The file list orients the scout — the changed files in change
-// modes, the target list in project mode — capped at 40 lines with the
-// remainder named so the scout still maps across all of them.
-function scoutAsk(files: string[]): string {
-  const listed = files.slice(0, 40);
-  const target = PROJECT
-    ? "A whole-project review is about to start. Its target is the repo's tracked source files — the " +
-      files.length + " files the panel will read, and the modules they live in.\n"
-    : "A change review is about to start. The change (`git diff " + BASE + "`) touches these files:\n";
-  return (
-    target +
-    repoBlock() +
-    listed.map((f) => "- " + repoPath(f)).join("\n") +
-    (files.length > listed.length
-      ? "\n- ... and " + (files.length - listed.length) + " more — map the modules across all of them"
-      : "") +
-    "\n" +
-    "You are the preflight scout: before the panel reads the target, explore the codebase and map the ground " +
-    "the reviewers will stand on.\n" +
-    "1. modules — the modules the target files live in, plus the modules they depend on and are depended on " +
-    "by (name, path, one-line role each; stay within two hops of the target).\n" +
-    "2. conventions — the patterns the surrounding code already establishes, the ones design fit is judged " +
-    "against (error-handling idiom, test layout, naming, module boundaries); read AGENTS.md or CLAUDE.md at " +
-    "the root first if one exists.\n" +
-    "3. riskAreas — the places in or near the target that deserve the reviewers' extra attention (hotspots, " +
-    "tricky call paths, concurrency or parsing edges), one line each with its path.\n" +
-    "Read-only: do not edit anything, do not report defects — findings are the reviewers' job; " +
-    "you produce the map they start from. Verify every entry against the code as it stands: an empty list " +
-    "for a small repo is honest, a guessed entry is not. Keep it tight — " +
-    "at most 8 modules, 6 conventions, 6 risk areas; the map orients, it does not enumerate."
-  );
-}
-
-// The scout map rides the reviewer and final-assessment asks only —
-// triage, the fixer and the confirmers work without it, so an
-// independent confirmation can inherit no scout claim.
-function scoutBlock(): string {
-  if (!scoutMap) return "";
-  const mods = scoutMap.modules.map((m) => m.name + " (" + m.path + ") — " + m.role).join("; ");
-  return (
-    "Codebase map from the preflight scout — context to start from; verify against the code, " +
-    "never cite it as evidence:\n" +
-    "- modules: " + (mods || "(none mapped)") + "\n" +
-    "- conventions: " + (scoutMap.conventions.join("; ") || "(none mapped)") + "\n" +
-    "- risk areas: " + (scoutMap.riskAreas.join("; ") || "(none mapped)") + "\n"
-  );
-}
-
-function reviewAsk(lensDef: LensDef, files: number, lines: number, overCap: boolean, gateLine: string): string {
-  const scope =
-    "`git diff " + BASE + "` — " + files + " files, ~" + lines + " added lines" +
-    (overCap ? " (diff over the harness size cap — page through it with git diff directly)" : "");
-  return (
-    "Review the change " + scope + " in this repository.\n" +
-    scoutBlock() +
-    "1. Run `git diff " + BASE + "` and read the FULL diff — do not stop at the first issue. Open the changed " +
-    "files for context wherever the diff alone is ambiguous; check call sites when a defect depends on them.\n" +
-    "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n" +
-    "3. Report only findings from your lens: " + lensDef.focus + "\n" +
-    intentBlock() +
-    "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, " +
-    "what data is at risk). Omit it only for minor, low-severity items.\n" +
-    "A finding must be: discrete and actionable; introduced by this change; demonstrable from the code (quote the " +
-    "deciding lines in evidence); something the author would reasonably fix. Exclude: speculative might-fail " +
-    "concerns, pre-existing problems the change does not worsen, style/formatting (the repo's checks own those), " +
-    "and intentional behavior changes.\n" +
-    "Cite every finding as path:line on the new side of the diff. An empty findings list is the expected answer " +
-    "for a clean diff — never invent one to seem busy.\n" +
-    "Do not edit any file. " + gateLine + " before you started, so do not re-run the " +
-    "test suites; spend your turn on what only a reader can see."
-  );
-}
-
-// Project mode: there is no diff — the reviewers read the target files
-// from the tree, and the bar is "present in the code as it stands". A
-// big repo arrives in parts; each part's reviewer reads exactly its
-// file list, its siblings of the same lens read the rest.
-function reviewAskProject(
-  lensDef: LensDef,
-  files: string[],
-  candidates: number,
-  part: number,
-  parts: number,
-  gateLine: string,
-): string {
-  const scope =
-    "part " + part + " of " + parts + " of the project's tracked source files (" + candidates +
-    " files in total — your sibling reviewers of the same lens read the other parts; report only " +
-    "what you find in the files below)";
-  return (
-    "Review the current state of this project's code. There is no diff — the target is " + scope + ":\n" +
-    files.map((f) => "- " + repoPath(f)).join("\n") + "\n" +
-    repoBlock() +
-    scoutBlock() +
-    "1. Read EVERY target file in full — do not stop at the first issue. Check call sites outside the list " +
-    "whenever a defect depends on them.\n" +
-    "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n" +
-    "3. Report only findings from your lens: " + lensDef.focus + "\n" +
-    "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, " +
-    "what data is at risk). Omit it only for minor, low-severity items.\n" +
-    "A finding must be: discrete and actionable; present in the code as it stands; demonstrable from the code " +
-    "(quote the deciding lines in evidence); something the author would reasonably fix. Exclude: speculative " +
-    "might-fail concerns, style/formatting (the repo's checks own those), and deliberate design choices the " +
-    "team has clearly signed off on.\n" +
-    "Cite every finding as path:line in the current tree. An empty findings list is the expected answer " +
-    "for clean code — never invent one to seem busy.\n" +
-    "Do not edit any file. " + gateLine + " before you started, so do not re-run the " +
-    "test suites; spend your turn on what only a reader can see."
-  );
-}
-
-function triageAsk(lensLabel: string, findings: Finding[]): string {
-  return (
-    "Raw findings from the " + lensLabel + " reviewer for the change under review (`git diff " + BASE + "`):\n" +
-    JSON.stringify(findings, null, 2) +
-    "\n" + intentBlock() +
-    "You are the triage editor. For each finding, keep it or drop it. Keep = it meets the bar — real, " +
-    "introduced by this change, actionable, worth the author's attention. Drop = a duplicate of a finding you " +
-    "have already kept from another lens, a style nit, speculation, or a pre-existing issue. Never drop something " +
-    "merely because it is inconvenient, and never keep what the repo's own checks already decide (they all " +
-    "passed). Give every dropped item a one-line reason."
-  );
-}
-
-// Project mode: the bar is presence in the target, not introduction by a change.
-function triageAskProject(lensLabel: string, findings: Finding[]): string {
-  return (
-    "Raw findings from the " + lensLabel + " reviewer(s) for the project code under review:\n" +
-    JSON.stringify(findings, null, 2) +
-    "\nYou are the triage editor. For each finding, keep it or drop it. Keep = it meets the bar — real, " +
-    "present in the code as it stands, actionable, worth the author's attention. Drop = a duplicate of a finding " +
-    "you have already kept from another lens, a style nit, or speculation. Never drop something merely because " +
-    "it is inconvenient, and never keep what the repo's own checks already decide (they all passed). Give every " +
-    "dropped item a one-line reason."
-  );
-}
-
-function confirmAsk(f: Finding): string {
-  return (
-    "You are an independent confirmer. A reviewer reported this finding on the change `git diff " + BASE + "`:\n" +
-    JSON.stringify(f, null, 2) +
-    "\nVerify it from the code alone. Read the file at that location; confirm the cited lines exist and the claim " +
-    "holds; confirm this change introduced it (`git diff " + BASE + " -- <path>` covers those lines). Check a " +
-    "call site if the claim depends on one. Do not edit anything, and do not re-run the repo's test suites.\n" +
-    "If the claim holds and the change introduced it, answer verified. If you cannot reproduce it, or it predates " +
-    "the change, answer unconfirmed and say what you saw instead."
-  );
-}
-
-function confirmAskProject(f: Finding): string {
-  return (
-    "You are an independent confirmer. A reviewer reported this finding in the project's code:\n" +
-    JSON.stringify(f, null, 2) +
-    "\nVerify it from the code alone. Read the file at that location; confirm the cited lines exist and the " +
-    "claim holds. Check a call site if the claim depends on one. Do not edit anything, and do not re-run the " +
-    "repo's test suites.\n" +
-    "If the claim holds, answer verified. If you cannot reproduce it, answer unconfirmed and say what you saw " +
-    "instead."
-  );
-}
-
-function finalAsk(summary: unknown[], gateLine: string): string {
-  return (
-    "Every kept non-gate finding has now been through independent confirmation:\n" +
-    JSON.stringify(summary, null, 2) +
-    "\n" + gateLine + " before review started. Produce the final assessment of this change. Run `git diff " + BASE +
-    "` yourself wherever you need to judge it, and read the test files before claiming a test gap.\n" +
-    intentBlock() +
-    scoutBlock() +
-    "risk: low | medium | high — what merging this change as-is would risk. testGaps: behaviors this change " +
-    "alters that no test covers (empty if none). residualRisks: what remains unverified after the checks and " +
-    "the review. verdict: two or three sentences — should this merge, and what must the author fix first."
-  );
-}
-
-function finalAskProject(summary: unknown[], gateLine: string, files: string[]): string {
-  return (
-    "Every kept non-gate finding has now been through independent confirmation:\n" +
-    JSON.stringify(summary, null, 2) +
-    "\n" + gateLine + " before review started. Produce the final assessment of the project's code. Read the " +
-    "target files yourself wherever you need to judge them (" + files.slice(0, 10).map(repoPath).join(", ") +
-    (files.length > 10 ? ", ..." : "") + "), and read the test files before claiming a test gap.\n" +
-    repoBlock() +
-    scoutBlock() +
-    "risk: low | medium | high — the risk in the code as it stands. testGaps: behaviors with no test covering " +
-    "them (empty if none). residualRisks: what remains unverified after the checks and the review. verdict: two " +
-    "or three sentences — is the code ready as it stands, and what must be fixed first."
-  );
-}
-
-function fixerAsk(round: number, unresolved: TrackedFinding[], gateFeedback: string): string {
-  if (round === 1) {
-    const opening = PROJECT
-      ? "Fix the confirmed findings in the project's code:\n"
-      : "Fix the confirmed findings on the change (`git diff " + BASE + "`):\n";
-    return (
-      opening +
-      repoBlock() +
-      JSON.stringify(
-        unresolved.map((t) => ({
-          id: t.finding.id,
-          where: t.finding.where,
-          what: t.finding.what,
-          evidence: t.finding.evidence,
-          severity: t.finding.severity,
-          lens: t.finding.lens,
-          impact: typeof t.finding.impact === "string" ? t.finding.impact : "",
-        })),
-        null,
-        2,
-      ) +
-      "\nWork in the working tree; never commit. If AGENTS.md or CLAUDE.md exists at the repo root, read it " +
-      "before your first edit — the repo's own rules bind your fixes. You may run a single targeted test file " +
-      "for code you touch, but the repo's checks re-run the moment you finish — do not run them yourself.\n" +
-      intentBlock() +
-      "Return addressed (the finding ids you fully fixed), skipped (the finding ids you deliberately left, with " +
-      "why), changedPaths, and notes (one sentence per change: what was done and why it is minimal)."
-    );
-  }
-  return (
-    "Round " + round + ". These findings are still unresolved after the previous round — the independent " +
-    "verifiers said, per item:\n" +
-    JSON.stringify(
-      unresolved.map((t) => ({ id: t.finding.id, where: t.finding.where, what: t.finding.what, verifier: t.fixNote })),
-      null,
-      2,
-    ) +
-    (gateFeedback
-      ? "\nThe repo's own checks are currently FAILING after the last round:\n" + gateFeedback
-      : "\nThe repo's own checks passed after the last round.") +
-    repoBlock() +
-    "\nYou hold the full finding detail from earlier rounds in your context. Fix exactly these, same rules as " +
-    "before: minimal, in the repo's style, never commit, never weaken a test to make a finding go away."
-  );
-}
-
-function verifyAsk(t: TrackedFinding, notes: string): string {
-  return (
-    "A reviewer confirmed this finding " + (PROJECT ? "in the project's code" : "on the change (`git diff " + BASE + "`)") +
-    ", and the author has since attempted a fix.\n" +
-    repoBlock() +
-    "Finding: " + JSON.stringify({ id: t.finding.id, where: t.finding.where, what: t.finding.what, severity: t.finding.severity, lens: t.finding.lens }) +
-    "\nAuthor's notes: " + (notes || "(none)") +
-    "\nVerify in the CURRENT working tree: read the location and its immediate callers or contract; confirm " +
-    "the described defect is gone and the fix is minimal and sound.\n" +
-    "Answer fixed only if the defect itself is resolved — cosmetic proximity is not a fix. Answer unfixed if " +
-    "it still stands. Answer worse if the fix introduced a new problem (say what, in note). Do not edit anything."
-  );
-}
-
-function fixReviewAsk(paths: string[], gateGreen: boolean): string {
-  // Root the diff command at the sub-repo when one was resolved — the
-  // workspace root's cwd need not be a git repository at all (D-009).
-  const diffCmd = REPO_ABS
-    ? "git -C '" + REPO_ABS.replace(/'/g, "'\\''") + "' diff " + BASE + " -- <path>"
-    : "git diff " + BASE + " -- <path>";
-  return (
-    "The author fixed review findings by changing:\n" +
-    paths.map((p) => "- " + p).join("\n") +
-    "\n" + repoBlock() +
-    "Read the cumulative diff for exactly these paths (`" + diffCmd + "`, one per path) and " +
-    "the current file contents where context matters. Judge the fix code as a fresh reviewer on a new change: " +
-    "report only NEW defects these fixes introduce — the same bar as the panel (real, introduced by these " +
-    "fixes, demonstrable from the code, the author would fix). Do not re-report the original findings; " +
-    "separate verifiers own those.\n" +
-    "An empty findings list is the expected answer for clean fixes. Do not edit anything; the repo's own " +
-    "checks " + (gateGreen ? "all passed" : "are currently failing") + " after the fixes."
-  );
-}
-
-function loopFinalAsk(
-  tracked: TrackedFinding[],
-  roundsUsed: number,
-  gateGreen: boolean,
-  changedPaths: string[],
-): string {
-  return (
-    "The fix loop ran " + roundsUsed + " round(s). Every tracked finding and its state:\n" +
-    JSON.stringify(
-      tracked.map((t) => ({
-        id: t.finding.id,
-        where: t.finding.where,
-        what: t.finding.what,
-        severity: t.finding.severity,
-        lens: t.finding.lens,
-        reviewStatus: t.finding.confirmation.status,
-        fix: t.fix,
-        fixNote: t.fixNote,
-      })),
-      null,
-      2,
-    ) +
-    "\nThe repo's own checks after the final round: " + (gateGreen ? "all passed" : "FAILING (see lens 'gate' items)") +
-    ".\nAll paths the author changed: " + (changedPaths.join(", ") || "(none)") +
-    scoutBlock() +
-    (PROJECT
-      ? "\nProduce the final assessment of the project's code INCLUDING the fixes — read the target files " +
-        "yourself where you need to judge them, and read the test files before claiming a test gap.\n" +
-        "risk: the risk in the code as it stands. testGaps: behaviors still without any test covering them. " +
-        "residualRisks: what remains unverified. verdict: two or three sentences — is the code ready as it " +
-        "stands now? recommendation: merge | fix-first | human — merge means the code is ready as it stands " +
-        "(every finding fixed, the checks green, nothing new surfaced); human when judgment calls or " +
-        "unconfirmed residue remain."
-      : "\nProduce the final assessment of the change INCLUDING the fixes — run `git diff " + BASE + "` yourself " +
-        "where you need to judge it, and read the test files before claiming a test gap.\n" +
-        "risk: what merging now would risk. testGaps: behaviors still altered with no test covering them. " +
-        "residualRisks: what remains unverified. verdict: two or three sentences — should this merge now? " +
-        "recommendation: merge | fix-first | human — merge only if every finding is fixed, the checks are green, " +
-        "and nothing new surfaced; human when judgment calls or unconfirmed residue remain.")
-  );
-}
-
-// The report's findings section — the heading carries the finding id
-// first, so a reader (and parseFindingsMd on a fix_from handover)
-// references findings as correctness-1, not as a path that moves.
-function findingsMd(items: ReportedFinding[]): string[] {
-  const lines: string[] = [];
-  for (const f of items) {
-    lines.push(
-      "### [" + f.id + " · " + f.severity.toUpperCase() + " · " + f.status + " · " + f.lens +
-      (f.fixStatus === "pending" ? "" : " · fix: " + f.fixStatus) + "] " + f.what,
-    );
-    lines.push("- where: `" + f.where + "`");
-    lines.push("- evidence: " + f.evidence);
-    if (f.impact) lines.push("- impact: " + f.impact);
-    lines.push("");
-  }
-  return lines;
-}
+let intentText = INTENT_ARG;
+let scopeDirty = false;
+let scoutMap: RepoMap | null = null;
 
 // ---------------------------------------------------------------------------
-// Shared panel state: a fix_from run populates it from the previous
-// review's report; a fresh run populates it through the phases below.
+// The run ------------------------------------------------------------------
+
 let targetFiles: string[] = [];
-let targetSizes: Record<string, number> = {};
-// The project target, sharded into reviewer parts (contiguous,
-// directory-coherent runs of the path-sorted file list).
 let targetParts: string[][] = [];
+let partLabels: string[] = [];
 let targetCandidates = 0;
+let gateTracked: TrackedFinding[] = [];
 let changed: string[] = [];
 let addedLines = 0;
-let diffOverCap = false;
 let prMeta: PrMeta | null = null;
 let branchBaseRef = "";
 let branchName = "";
 let commitCount = 0;
-// The change's stated intent: the intent arg, else the PR description.
-let intentText = INTENT_ARG;
-// The preflight scout's map, set between the green gate and the panel
-// on a fresh review; null on fix_from runs and when the scout fails.
-let scoutMap: RepoMap | null = null;
-// Set in the scope phase: the reviewed diff includes uncommitted work.
-// Branch mode promises this in the report, not just the log.
-let scopeDirty = false;
 let gate: GateResult[] = [];
 let GATE_LINE = "";
 let modeUsed = "fix-only";
 let tracked: TrackedFinding[] = [];
-// Failing repo checks from the pre-review gate, as tracked findings. A
-// change review stops at a red gate; a project audit continues and
-// reports them alongside the panel's findings.
-let gateTracked: TrackedFinding[] = [];
-// Part reviewers that returned no result, as notCovered lines — a
-// failed part's files were read by nobody, and the report must say so
-// instead of claiming every dispatched part was read.
-let partCoverageGaps: string[] = [];
 let allConfirmed: ConfirmedFinding[] = [];
 let allDropped: DroppedFinding[] = [];
-let summary: { id: string; where: string; what: string; severity: "low" | "medium" | "high"; lens: string; status: "verified" | "unconfirmed" }[] = [];
+let summary: { id: string; where: string; what: string; severity: "low" | "medium" | "high"; lens: string; status: string }[] = [];
+let partCoverageGaps: string[] = [];
+let askCtxBase: any = {};
+let fastDefault = false;
+let suggestSplit = false;
 
-// The triage editor exists in both flows: it runs the cross-lens dedup
-// and the final assessment on a fresh review, and the fix-review triage
-// plus the closing assessment on a fix_from continuation.
+// The triage editor exists in both flows: cross-lens dedup and the final
+// assessment on a fresh review; fix-review triage and the closing
+// assessment on a fix_from continuation. Its system rides the oracle's
+// single-source definition plus the panel protocol brief.
+const SYSTEMS: any = await oracle("systems-probe", ["systems"]);
+if (!SYSTEMS || SYSTEMS.status !== "ok") {
+  return {
+    conclusion: "The panel systems could not be loaded from the oracle — rerun the workflow.",
+    findings: [],
+    verified: [],
+    notCovered: ["the whole review — the systems fetch failed"],
+  };
+}
 const triage = agent("Triage editor", {
-  system: await withBrief(
-    "You are the triage editor of a code review panel. Reviewers hand you their raw findings lens by lens; you " +
-    "dedupe across lenses, enforce the flagging bar (real, introduced by the change, actionable), and drop style " +
-    "nits, speculation and pre-existing issues with a one-line reason. You are stingy but never suppress a real " +
-    "defect to keep the count down.",
-    ["_panel-protocol.md"],
-  ),
+  system: await withBrief(SYSTEMS.triage, ["_panel-protocol.md"]),
 });
 
-// Resolve the repo arg to the repo's absolute toplevel before anything
-// else touches git — before the fix_from branch as well, so a
-// continuation run's pre-fix gate and every fix-round re-run root at
-// the sub-repo like a fresh review's do. Every later command roots
-// there (git -C, the gate's --repo, the absolute paths in asks). An
-// arg that resolves to nothing fails loudly with the fix in the
-// conclusion — a silent fallback to the cwd would review the wrong
-// tree, or nothing.
 if (REPO_ARG) {
   const resolved = await world.run("git", ["-C", REPO_ARG, "rev-parse", "--show-toplevel"]);
   REPO_ABS = resolved.exitCode === 0 ? resolved.stdout.trim() : "";
@@ -1264,8 +385,8 @@ if (REPO_ARG) {
   if (!PROJECT) {
     return {
       conclusion: "The repo arg is supported for target project today — for a change, branch or PR review, run " +
-        "the workflow from inside that repository (its own workspace), where the diff and the working tree the " +
-        "panel reads are the repo's own.",
+        "the workflow from inside that repository (its own workspace), where the diff and the working tree " +
+        "the panel reads are the repo's own.",
       findings: [],
       verified: [],
       notCovered: ["the review target — repo with target " + TARGET + " is not supported yet"],
@@ -1276,16 +397,25 @@ if (REPO_ARG) {
 
 if (FIX_FROM) {
   phase("Load the findings from the previous review");
-  const loaded = await loadFindingsFromFixFrom();
-  if (typeof loaded === "string") {
+  const isInline = /^\s*[\[{]/.test(FIX_FROM_ARG);
+  const loaded = await oracle("fix-from-probe", ["findings-parse", isInline ? "--text" : "--file", FIX_FROM_ARG]);
+  if (!loaded) {
     return {
-      conclusion: loaded,
+      conclusion: "fix_from: could not read \"" + FIX_FROM_ARG + "\" — pass the review report markdown, a findings JSON file path, or inline JSON.",
       findings: [],
       verified: [],
       notCovered: ["the fix loop — fix_from payload unusable"],
     };
   }
-  tracked = loaded;
+  if (loaded.status === "error") {
+    return {
+      conclusion: "fix_from: " + loaded.error + " — pass the review report markdown of a previous review, or its findings JSON.",
+      findings: [],
+      verified: [],
+      notCovered: ["the fix loop — fix_from payload unusable"],
+    };
+  }
+  tracked = loaded.tracked;
   allConfirmed = tracked.map((t) => t.finding);
   summary = tracked.map((t) => ({
     id: t.finding.id,
@@ -1295,21 +425,18 @@ if (FIX_FROM) {
     lens: t.finding.lens,
     status: t.finding.confirmation.status,
   }));
-  gate = await runGate();
-  GATE_LINE = gateNote(gate);
-  // A red pre-fix gate does NOT stop a fix_from run — clearing it is
-  // the fixer's job — but it must never render as green: failing checks
-  // enter tracked as gate findings the fixer must clear, and every
-  // report surface reads the authoritative final gate state below.
-  const preFixFailed = gate.filter((g) => g.exitCode !== 0);
-  for (const g of preFixFailed) {
+  const g = await oracle("gate-probe", ["gate", ...(REPO_ABS ? ["--repo", REPO_ABS] : []), "--base", BASE]);
+  gate = g && g.status === "ok" ? gateRows(g.rows) : [{ name: "gate.sh (spec-code-review)", exitCode: 1, tail: "gate.sh produced no JSON report" }];
+  GATE_LINE = g && g.status === "ok" ? g.note : "The repo's own checks could not be read";
+  const preFixFailed = gate.filter((x) => x.exitCode !== 0);
+  for (const x of preFixFailed) {
     const gid = nextId("gate");
     tracked.push({
       finding: {
         id: gid,
-        where: g.name,
-        what: "Repo check failed before the fixes: " + g.name,
-        evidence: g.tail || "(no output)",
+        where: x.name,
+        what: "Repo check failed before the fixes: " + x.name,
+        evidence: x.tail || "(no output)",
         severity: "high",
         lens: "gate",
         impact: "",
@@ -1318,14 +445,7 @@ if (FIX_FROM) {
       fix: "unfixed",
       fixNote: "pre-fix: check failing",
     });
-    report({
-      id: gid,
-      where: g.name,
-      what: "Repo check failed before the fixes: " + g.name,
-      severity: "high",
-      lens: "gate",
-      stage: "gate",
-    }, "findings");
+    report({ id: gid, where: x.name, what: "Repo check failed before the fixes: " + x.name, severity: "high", lens: "gate", stage: "gate" }, "findings");
   }
   log("fix loop: " + tracked.length + " finding(s) carried from the previous review — pre-fix gate: " +
     (gate.length - preFixFailed.length) + "/" + gate.length + " checks passing" +
@@ -1352,111 +472,80 @@ if (PR && !PR_ARG) {
   };
 }
 
+// ONE oracle fetch resolves the whole scope + gate (NFR-003).
+const scopeArgs = ["scope", "--target", TARGET, "--base", BASE_ARG || "HEAD",
+  ...(PR_ARG ? ["--pr", PR_ARG] : []),
+  ...(REPO_ABS ? ["--repo", REPO_ABS] : []),
+  ...(PATHS_ARG ? ["--paths", PATHS_ARG] : []),
+  "--include-gate"];
+const sc = await oracle("scope-probe", scopeArgs);
+if (!sc) {
+  return {
+    conclusion: "The scope probe returned no result — the review cannot see the change. Rerun the workflow.",
+    findings: [],
+    verified: [],
+    notCovered: ["the change scope — the git scope probe failed"],
+  };
+}
+if (sc.status === "error") {
+  const stage = sc.stage || "";
+  const fail = (conclusion: string, notCovered: string) => ({
+    conclusion, findings: [], verified: [], notCovered: [notCovered],
+  });
+  if (stage === "pr-view") return fail(
+    "gh pr view failed for \"" + PR_ARG + "\" — is the gh CLI installed and authenticated, and is that a valid pull request in this repo's remote?",
+    "the pull request — gh pr view returned nothing usable");
+  if (stage === "pr-state") return fail(
+    "The review cannot see the git state (rev-parse/status probe returned nothing) — rerun the workflow.",
+    "the pull request — git state probe failed");
+  if (stage === "pr-dirty") return fail(
+    sc.head_matches
+      ? "PR #" + (sc.pr_number || "") + " is checked out but the working tree is dirty — the PR diff would fold uncommitted local work into code attributed to the PR. Commit or stash, then rerun."
+      : "PR #" + (sc.pr_number || "") + " is not checked out and the working tree is dirty — the panel reads the working tree, so checking out would hide uncommitted work. Commit or stash, then rerun; on a clean tree the review checks the PR out itself.",
+    "the pull request — refused to review a PR target over a dirty working tree");
+  if (stage === "pr-checkout") return fail(
+    "Could not check out the PR (gh pr checkout failed, or HEAD does not match the PR head afterward) — check the PR out manually and rerun.",
+    "the pull request — automatic checkout failed");
+  if (stage === "pr-merge-base") return fail(
+    "No common ancestor between HEAD and the PR's base commit — cannot compute the PR diff.",
+    "the pull request — merge-base with the base commit failed");
+  if (stage === "branch-no-base") return fail(
+    "Could not detect a base branch for the branch review — pass base explicitly (e.g. base: \"main\").",
+    "the branch review — no base branch resolved");
+  if (stage === "branch-merge-base") return fail(
+    "No common ancestor between HEAD and " + (sc.base || "") + " — cannot compute the branch diff.",
+    "the branch review — merge-base with " + (sc.base || "") + " failed");
+  if (stage === "ls-files") return fail(
+    "The target probe returned no result — the review cannot see the project's files. Rerun the workflow.",
+    "the project file listing — the target probe failed");
+  // diff with an unresolvable base behaves as an empty diff, exactly as
+  // the inline implementation did
+  return fail("git diff " + (sc.base || BASE) + " has no changes — nothing to review.",
+    "the change scope — the review target resolved to an empty diff");
+}
+
 if (PR) {
-  const meta = await resolvePrMeta(PR_ARG);
-  if (!meta || !meta.baseRefOid) {
-    return {
-      conclusion: "gh pr view failed for \"" + PR_ARG + "\" — is the gh CLI installed and authenticated, " +
-        "and is that a valid pull request in this repo's remote?",
-      findings: [],
-      verified: [],
-      notCovered: ["the pull request — gh pr view returned nothing usable"],
-    };
-  }
-  prMeta = meta;
-  if (!intentText && meta.body) intentText = meta.body;
-  const head = await gitOut(["rev-parse", "HEAD"]);
-  // The refusal is unconditional: a dirty tree misattributes uncommitted
-  // work to the PR either way — the diff would fold it in when the head
-  // is already checked out, and a checkout would hide it when it is not.
-  const statusOut = await world.run("git", gitArgv(["status", "--porcelain"]));
-  const dirty = statusOut.stdout.trim() !== "";
-  if (dirty) {
-    return {
-      conclusion: "PR #" + meta.number + (head === meta.headRefOid
-        ? " is checked out but the working tree is dirty — the PR diff would fold uncommitted local work " +
-          "into code attributed to the PR. Commit or stash, then rerun."
-        : " is not checked out and the working tree is dirty — the panel reads the working tree, so checking " +
-          "out would hide uncommitted work. Commit or stash, then rerun; on a clean tree the review checks " +
-          "the PR out itself."),
-      findings: [],
-      verified: [],
-      notCovered: ["the pull request — refused to review a PR target over a dirty working tree"],
-    };
-  }
-  if (head !== meta.headRefOid) {
-    const prev = head || "(unknown)";
-    let co;
-    try {
-      co = await world.run("gh", ["pr", "checkout", PR_ARG]);
-    } catch {
-      co = { exitCode: 1, stdout: "", stderr: "" };
-    }
-    const head2 = await gitOut(["rev-parse", "HEAD"]);
-    if (co.exitCode !== 0 || head2 !== meta.headRefOid) {
-      return {
-        conclusion: "Could not check out PR #" + meta.number + " (gh pr checkout failed, or HEAD does not " +
-          "match the PR head afterward) — check the PR out manually and rerun.",
-        findings: [],
-        verified: [],
-        notCovered: ["the pull request — automatic checkout failed"],
-      };
-    }
-    log("checked out PR #" + meta.number + " (previous HEAD " + prev.slice(0, 12) +
-      ") — switch back when done reviewing");
-  }
-  const mb = await world.run("git", gitArgv(["merge-base", "HEAD", meta.baseRefOid]));
-  if (mb.exitCode !== 0 || !mb.stdout.trim()) {
-    return {
-      conclusion: "No common ancestor between HEAD and the PR's base commit (" + meta.baseRefOid.slice(0, 12) +
-        ") — cannot compute the PR diff.",
-      findings: [],
-      verified: [],
-      notCovered: ["the pull request — merge-base with the base commit failed"],
-    };
-  }
-  BASE = mb.stdout.trim();
-  log("review target: PR #" + meta.number + " " + meta.title + " (" + meta.state + ", by " + meta.author +
-    ", base " + meta.baseRefName + ") — diff vs merge-base " + BASE.slice(0, 12));
+  prMeta = sc.pr;
+  if (!intentText && prMeta.body) intentText = prMeta.body;
+  BASE = sc.merge_base;
+  if (sc.previous_head) log("checked out PR #" + prMeta.number + " (previous HEAD " + sc.previous_head.slice(0, 12) + ") — switch back when done reviewing");
+  log("review target: PR #" + prMeta.number + " " + prMeta.title + " (" + prMeta.state + ", by " + prMeta.author + ", base " + prMeta.baseRefName + ") — diff vs merge-base " + BASE.slice(0, 12));
 } else if (BRANCH_MODE) {
-  branchName = (await gitOut(["branch", "--show-current"])) || "(detached HEAD)";
-  branchBaseRef = await detectBaseBranch();
-  if (!branchBaseRef) {
-    return {
-      conclusion: "Could not detect a base branch for the branch review — pass base explicitly " +
-        "(e.g. base: \"main\").",
-      findings: [],
-      verified: [],
-      notCovered: ["the branch review — no base branch resolved"],
-    };
-  }
-  const mb = await world.run("git", gitArgv(["merge-base", "HEAD", branchBaseRef]));
-  if (mb.exitCode !== 0 || !mb.stdout.trim()) {
-    return {
-      conclusion: "No common ancestor between HEAD and " + branchBaseRef + " — cannot compute the branch diff.",
-      findings: [],
-      verified: [],
-      notCovered: ["the branch review — merge-base with " + branchBaseRef + " failed"],
-    };
-  }
-  BASE = mb.stdout.trim();
-  const cnt = await gitOut(["rev-list", "--count", BASE + "..HEAD"]);
-  commitCount = parseInt(cnt, 10) || 0;
-  log("review target: branch " + branchName + " vs " + branchBaseRef + " — merge-base " + BASE.slice(0, 12) +
-    ", " + commitCount + " commit(s)");
+  branchName = sc.branch_name || "";
+  branchBaseRef = sc.base;
+  BASE = sc.merge_base;
+  commitCount = sc.commit_count;
+  log("review target: branch " + branchName + " vs " + branchBaseRef + " — merge-base " + BASE.slice(0, 12) + ", " + commitCount + " commit(s)");
 }
 
 if (PROJECT) {
-  const sel = await selectProjectFiles();
-  targetFiles = sel.files;
-  targetSizes = sel.sizes;
-  targetCandidates = sel.candidates;
-  targetParts = shardProjectFiles(targetFiles, targetSizes);
-  log(
-    "review target: project" + (REPO_ABS ? " (repo: " + REPO_ABS + ")" : "") + " — all " + targetCandidates +
+  targetFiles = sc.files;
+  targetCandidates = sc.candidates;
+  targetParts = sc.parts;
+  partLabels = sc.part_labels;
+  log("review target: project" + (REPO_ABS ? " (repo: " + REPO_ABS + ")" : "") + " — all " + targetCandidates +
     " tracked source files" + (PATHS_ARG ? " (paths filter: " + PATHS_ARG + ")" : "") +
-    ", read as " + targetParts.length + " reviewer part(s) per lens"
-  );
+    ", read as " + targetParts.length + " reviewer part(s) per lens");
   if (targetFiles.length === 0) {
     return {
       conclusion: "No tracked source files matched the project target" +
@@ -1467,77 +556,48 @@ if (PROJECT) {
     };
   }
 } else {
-  const scope = await git.status();
-  changed = await git.changedFiles(BASE);
-  try {
-    const d = await git.diff(BASE);
-    addedLines = d.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
-  } catch {
-    diffOverCap = true;
-  }
-  log(
-    "change under review: " +
+  changed = sc.files;
+  addedLines = sc.added;
+  scopeDirty = !sc.clean;
+  log("change under review: " +
     (PR ? "PR #" + (prMeta as PrMeta).number + " (diff vs merge-base " + BASE.slice(0, 12) + ")"
       : BRANCH_MODE ? "branch " + branchName + " (diff vs merge-base " + BASE.slice(0, 12) + ")"
       : "git diff " + BASE) +
     " — " + changed.length + " files, ~" + addedLines + " added lines" +
-    (scope.clean ? " (clean tree)" : " (uncommitted work present)") +
-    ((addedLines > SUGGEST_SPLIT_LINES || changed.length > SUGGEST_SPLIT_FILES)
-      ? " — large change: the report will recommend splitting"
-      : "")
-  );
-  scopeDirty = !scope.clean;
-
+    (sc.clean ? " (clean tree)" : " (uncommitted work present)") +
+    (sc.suggest_split ? " — large change: the report will recommend splitting" : ""));
   if (changed.length === 0) {
+    const nothing = PR
+      ? "PR #" + (prMeta as PrMeta).number + " has no changes against " + (prMeta as PrMeta).baseRefName + " — nothing to review."
+      : BRANCH_MODE
+        ? "Branch " + branchName + " has no changes against " + branchBaseRef + " — nothing to review."
+        : "git diff " + BASE + " has no changes — nothing to review.";
     return {
-      conclusion: PR
-        ? "PR #" + (prMeta as PrMeta).number + " has no changes against " + (prMeta as PrMeta).baseRefName +
-          " — nothing to review."
-        : BRANCH_MODE
-          ? "Branch " + branchName + " has no changes against " + branchBaseRef + " — nothing to review."
-          : "No changes against " + BASE + " — nothing to review.",
+      conclusion: nothing,
       findings: [],
       verified: ["change scope: the review target resolved to an empty diff"],
       notCovered: [],
     };
   }
 }
+fastDefault = sc.fast_mode_default;
+suggestSplit = sc.suggest_split;
 
-gate = await runGate();
-GATE_LINE = gateNote(gate);
-
-const gateFailed = gate.filter((g) => g.exitCode !== 0);
+gate = gateRows(sc.gate.rows);
+GATE_LINE = sc.gate.note;
+const gateFailed = gate.filter((x) => x.exitCode !== 0);
 log("repo checks: " + (gate.length - gateFailed.length) + "/" + gate.length + " detected and run" +
   (gateFailed.length > 0 ? " — " + gateFailed.length + " FAILING" : ""));
 
-// One id per failing check, minted once: the board card and the
-// tracked gate finding it becomes on a continuing audit are the same
-// finding, not two.
-const gateIds = gateFailed.map(() => nextId("gate"));
-gateFailed.forEach((g, i) => {
-  report({
-    id: gateIds[i],
-    where: g.name,
-    what: "Repo check failed: " + g.name,
-    evidence: g.tail || "(no output)",
-    status: "verified",
-    severity: "high",
-    lens: "gate",
-    stage: "gate",
-  }, "findings");
-});
-
 if (gateFailed.length > 0) {
-  // A project audit does not stop at a red gate — the failures are audit
-  // findings; the panel still reads the code. A change review does stop:
-  // mechanical fixes first, then rerun.
-  gateFailed.forEach((g, i) => {
+  for (const x of gateFailed) {
+    const gid = nextId("gate");
     gateTracked.push({
       finding: {
-        id: gateIds[i],
-        where: g.name,
-        what: "Repo check failed before the review: " + g.name,
-        evidence: g.tail || "(no output)",
+        id: gid,
+        where: x.name,
+        what: "Repo check failed before the review: " + x.name,
+        evidence: x.tail || "(no output)",
         severity: "high",
         lens: "gate",
         impact: "",
@@ -1546,89 +606,53 @@ if (gateFailed.length > 0) {
       fix: "pending",
       fixNote: "not yet attempted",
     });
-  });
+    report({ id: gid, where: x.name, what: "Repo check failed before the review: " + x.name, severity: "high", lens: "gate", stage: "gate" }, "findings");
+  }
   if (!PROJECT) {
-  const gateFindings: ReportedFinding[] = gateFailed.map((g, i) => ({
-    id: gateIds[i],
-    where: g.name,
-    what: "Repo check failed: " + g.name,
-    evidence: g.tail || "(no output)",
-    status: "verified",
-    severity: "high",
-    lens: "gate",
-    impact: "",
-    fixStatus: "pending",
-  }));
-  const scopeLine = PR
-    ? "PR #" + (prMeta as PrMeta).number + " (" + changed.length + " files) failed the repo's own checks, so the "
-    : BRANCH_MODE
-      ? "Branch " + branchName + " (" + changed.length + " files) failed the repo's own checks, so the "
-      : "The change (`git diff " + BASE + "` — " + changed.length + " files) failed the repo's own checks, so the ";
-  const gateMd = [
-    "# Code review — checks failed, review stopped",
-    "",
-    scopeLine,
-    "specialist reviewers were not spent on it. Fix these first, then rerun the review.",
-    "",
-    "## Failed checks",
-    "",
-    ...gate.map((g) =>
-      "- " + (g.exitCode === 0 ? "pass" : "**FAIL**") + " — " + g.name +
-      (g.exitCode === 0 ? "" : "\n\n  ```\n  " + g.tail + "\n  ```")
-    ),
-  ].join("\n");
-  try {
-    await artifact.markdown("review-report", gateMd, {
-      title: "Code review — checks failed",
-      description: "The mechanical gate failed; specialist review was skipped.",
-      primary: true,
-    });
-  } catch (e) {
-    log("report not published: " + String(e));
+    const gateMd = [
+      "# Code review — checks failed, review stopped", "",
+      PR ? "PR #" + (prMeta as PrMeta).number + " (" + changed.length + " files) failed the repo's own checks, so the "
+        : BRANCH_MODE ? "Branch " + branchName + " (" + changed.length + " files) failed the repo's own checks, so the "
+        : "The change (`git diff " + BASE + "` — " + changed.length + " files) failed the repo's own checks, so the ",
+      "specialist reviewers were not spent on it. Fix these first, then rerun the review.", "",
+      "## Failed checks", "",
+      ...gate.map((x) => "- " + (x.exitCode === 0 ? "pass" : "**FAIL**") + " — " + x.name +
+        (x.exitCode === 0 ? "" : "\n\n  ```\n  " + x.tail + "\n  ```")),
+    ].join("\n");
+    return {
+      conclusion:
+        (PR ? "PR #" + (prMeta as PrMeta).number : BRANCH_MODE ? "Branch " + branchName : "The change") +
+        " failed " + gateFailed.length + " of " + gate.length +
+        " detected repo checks (" + gateFailed.map((x) => x.name).join("; ") + "). Specialist review was skipped — " +
+        "these are mechanical fixes; rerun the review after they pass.",
+      findings: gateFailed.map((x) => ({
+        id: nextId("gate"), where: x.name, what: "Repo check failed: " + x.name,
+        evidence: x.tail || "(no output)", status: "verified", severity: "high" as const,
+        lens: "gate", impact: "", fixStatus: "pending",
+      })),
+      verified: ["the mechanical gate ran the repo's own detected checks — " + gateFailed.length + " failed"],
+      notCovered: ["specialist review of the diff — skipped because the mechanical gate failed"],
+      markdown: gateMd,
+    };
   }
-  return {
-    conclusion:
-      (PR ? "PR #" + (prMeta as PrMeta).number : BRANCH_MODE ? "Branch " + branchName : "The change") +
-      " failed " + gateFailed.length + " of " + gate.length +
-      " detected repo checks (" + gateFailed.map((g) => g.name).join("; ") + "). Specialist review was skipped — " +
-      "these are mechanical fixes; rerun the review after they pass.",
-    findings: gateFindings,
-    verified: ["the mechanical gate ran the repo's own detected checks — " + gateFailed.length + " failed"],
-    notCovered: [
-      "specialist review of the diff — skipped because the mechanical gate failed",
-    ],
-  };
-  }
-  log("project audit continues past the red gate — " + gateFailed.length +
-    " failing check(s) recorded as gate findings");
+  log("project audit continues past the red gate — " + gateFailed.length + " failing check(s) recorded as gate findings");
 }
 
 // ---------------------------------------------------------------------------
 phase("Preflight the codebase and modules the target touches");
 
-// One scout turn between the gate and the panel: a read-only map of the
-// modules and conventions the reviewers are about to judge against, so
-// every lens starts from the same grounded context instead of each
-// rediscovering it. The map rides the reviewer and final-assessment
-// asks only; a scout that fails degrades to the raw target, named
-// under notCovered — it never stops the run.
 const scout = agent("Preflight scout", {
-  system: await withBrief(SCOUT_SYSTEM, ["code-review-scout.md"]),
+  system: await withBrief(SYSTEMS.scout, ["code-review-scout.md"]),
 });
+const scoutAsks = await askWave("scout-ask-probe", [
+  { kind: "scout", ctx: { base: BASE, project: PROJECT, files: PROJECT ? targetFiles : changed, repo_abs: REPO_ABS || null } },
+]);
 try {
-  scoutMap = await scout.ask<RepoMap>(scoutAsk(PROJECT ? targetFiles : changed));
+  scoutMap = scoutAsks ? await scout.ask<RepoMap>(scoutAsks[0]) : null;
 } catch {
   scoutMap = null;
 }
-// ask<T>() types the reply but enforces no shape at runtime (the js dialect
-// gets that from its schema option), so a resolved-but-malformed reply
-// degrades to a map-less run here instead of throwing below.
-if (
-  scoutMap &&
-  (!Array.isArray(scoutMap.modules) ||
-    !Array.isArray(scoutMap.conventions) ||
-    !Array.isArray(scoutMap.riskAreas))
-) {
+if (scoutMap && (!Array.isArray(scoutMap.modules) || !Array.isArray(scoutMap.conventions) || !Array.isArray(scoutMap.riskAreas))) {
   scoutMap = null;
 }
 log(scoutMap
@@ -1639,40 +663,44 @@ log(scoutMap
 // ---------------------------------------------------------------------------
 phase("Review the change through separate lenses and confirm every finding");
 
-if (MODE === "fast" || MODE === "full") {
-  modeUsed = MODE;
-} else {
-  modeUsed = PROJECT
-    ? (targetFiles.length <= FAST_MAX_FILES ? "fast" : "full")
-    : (!diffOverCap && addedLines <= FAST_MAX_LINES && changed.length <= FAST_MAX_FILES ? "fast" : "full");
-}
-const panel: LensDef[] = modeUsed === "fast" ? [GENERAL] : LENSES;
+modeUsed = MODE === "fast" || MODE === "full" ? MODE : (fastDefault ? "fast" : "full");
+const panel: LensDef[] = modeUsed === "fast" ? [SYSTEMS.general] : SYSTEMS.lenses;
 log("review mode: " + modeUsed + (modeUsed === "fast" ? " (small diff, one general reviewer)" : " (three specialists)"));
 
+askCtxBase = { base: BASE, intent: intentText, scout_map: scoutMap, repo_abs: REPO_ABS || null, project: PROJECT };
+// ONE ask wave for the whole panel (per part in project mode)
+const reviewItems: { kind: string; ctx: any; label: string; lens: LensDef }[] = [];
+for (const lensDef of panel) {
+  if (PROJECT) {
+    targetParts.forEach((partFiles, pi) => {
+      reviewItems.push({
+        kind: "review-project",
+        ctx: { ...askCtxBase, lens: lensDef, files: partFiles, candidates: targetCandidates, part: pi + 1, parts: targetParts.length, gate_line: GATE_LINE },
+        label: lensDef.name + " · part " + (pi + 1) + "/" + targetParts.length + " · " + (partLabels[pi] || "part"),
+        lens: lensDef,
+      });
+    });
+  } else {
+    reviewItems.push({
+      kind: "review",
+      ctx: { ...askCtxBase, lens: lensDef, files_n: changed.length, lines: addedLines, over_cap: false, gate_line: GATE_LINE },
+      label: lensDef.name,
+      lens: lensDef,
+    });
+  }
+}
+const reviewAsks = await askWave("review-asks-probe", reviewItems);
+
 const perLens = await Promise.all(
-  panel.map(async (lensDef) => {
-    const system = await withBrief(
-      lensDef.system,
-      BRIEF_FILES[lensDef.label] ?? [],
-    );
-    // Project mode: the lens's reviewers fan out over the target parts —
-    // one reviewer per part, all with this lens's persona — and the lens's
-    // findings are the concatenation before triage dedupes them.
+  panel.map(async (lensDef, li) => {
+    const system = await withBrief(lensDef.system, BRIEF_FILES[lensDef.label] ?? []);
     let rawFindings: Finding[] = [];
     if (PROJECT) {
+      const myItems = reviewItems.filter((it) => it.lens === lensDef);
+      const asks = reviewAsks ? myItems.map((it, i) => reviewAsks[reviewItems.indexOf(it)]) : [];
       const partReviews = await Promise.all(
-        targetParts.map((partFiles, pi) =>
-          agent(
-            lensDef.name + " · part " + (pi + 1) + "/" + targetParts.length + " · " + partLabel(partFiles),
-            { system },
-          ).ask<LensReview>(
-            reviewAskProject(lensDef, partFiles, targetCandidates, pi + 1, targetParts.length, GATE_LINE),
-          ),
-        ),
+        myItems.map((it, i) => agent(it.label, { system }).ask<LensReview>(asks[i])),
       );
-      // A part reviewer that returns nothing is a coverage failure, not
-      // a silently skipped shard: the gap is recorded and the log counts
-      // only the parts that actually came back.
       const failedParts = partReviews.filter((r) => !r || !Array.isArray(r.findings)).length;
       rawFindings = partReviews.flatMap((r) => (r && Array.isArray(r.findings) ? r.findings : []));
       if (failedParts > 0) {
@@ -1684,153 +712,117 @@ const perLens = await Promise.all(
       log(lensDef.name + ": " + (targetParts.length - failedParts) + "/" + targetParts.length +
         " part(s) read — " + rawFindings.length + " finding(s)");
     } else {
-      const review = await agent(lensDef.name, { system }).ask<LensReview>(
-        reviewAsk(lensDef, changed.length, addedLines, diffOverCap, GATE_LINE),
-      );
+      const ask = reviewAsks ? reviewAsks[reviewItems.findIndex((it) => it.lens === lensDef)] : "";
+      const review = ask ? await agent(lensDef.name, { system }).ask<LensReview>(ask) : { findings: [] as Finding[] };
       rawFindings = review.findings;
       log(lensDef.name + ": " + rawFindings.length + " finding(s)");
     }
     if (rawFindings.length === 0) {
-      return { lens: lensDef.label, confirmed: [] as ConfirmedFinding[], dropped: [] as DroppedFinding[] };
+      return { lens: lensDef.label, confirmed: [] as ConfirmedFinding[], dropped: [] as DroppedFinding[], raw: [] as Finding[] };
     }
-    const triaged = await triage.ask<TriageVerdict>(
-      PROJECT ? triageAskProject(lensDef.label, rawFindings) : triageAsk(lensDef.label, rawFindings),
-    );
-    const confirmations = await Promise.all(
-      triaged.kept.map((f, i) =>
-        agent("Confirm " + lensDef.label + " finding " + (i + 1)).ask<Confirmation>(
-          PROJECT ? confirmAskProject(f) : confirmAsk(f),
-        ),
-      ),
-    );
-    const confirmed = triaged.kept.map((f, i) => ({ ...f, id: lensDef.label + "-" + (i + 1), lens: lensDef.label, confirmation: confirmations[i] }));
-    for (const c of confirmed) {
-      report({
-        id: c.id,
-        where: c.where,
-        what: c.what,
-        severity: c.severity,
-        lens: c.lens,
-        status: c.confirmation.status,
-        stage: c.confirmation.status,
-      }, "findings");
-    }
-    return { lens: lensDef.label, confirmed, dropped: triaged.dropped };
+    return { lens: lensDef.label, confirmed: [] as ConfirmedFinding[], dropped: [] as DroppedFinding[], raw: rawFindings };
   }),
 );
 
-allConfirmed = perLens
-  .flatMap((p) => p.confirmed)
-  .sort((a, b) => (SEV_RANK[a.severity] ?? 3) - (SEV_RANK[b.severity] ?? 3));
-allDropped = perLens.flatMap((p) => p.dropped);
-summary = gateTracked
-  .map((t) => ({
-    id: t.finding.id,
-    where: t.finding.where,
-    what: t.finding.what,
-    severity: t.finding.severity,
-    lens: t.finding.lens,
-    status: t.finding.confirmation.status,
-  }))
-  .concat(allConfirmed.map((c) => ({
-    id: c.id,
-    where: c.where,
-    what: c.what,
-    severity: c.severity,
-    lens: c.lens,
-    status: c.confirmation.status,
-  })));
-
-const confirmedTracked: TrackedFinding[] = allConfirmed.map((f) => ({
-  finding: f,
-  fix: "pending" as "pending",
-  fixNote: "not yet attempted",
-}));
-tracked = gateTracked.concat(confirmedTracked);
+// ONE triage ask wave for every lens that found something, then ONE
+// confirm ask wave per lens's kept findings (batched by lens to match
+// the typed per-lens agent fan-out)
+for (const r of perLens) {
+  if (!(r.raw && r.raw.length > 0)) continue;
+  const lensDef = panel.find((l) => l.label === r.lens)!;
+  const tAsks = await askWave("triage-asks-probe", [
+    { kind: PROJECT ? "triage-project" : "triage", ctx: { ...askCtxBase, lens_label: r.lens, findings: r.raw } },
+  ]);
+  const triaged = tAsks ? await triage.ask<TriageVerdict>(tAsks[0]) : { kept: r.raw, dropped: [] as DroppedFinding[] };
+  const cAsks = triaged.kept.length ? await askWave("confirm-asks-probe",
+    triaged.kept.map((f) => ({ kind: PROJECT ? "confirm-project" : "confirm", ctx: { ...askCtxBase, finding: f } }))) : [];
+  const confirmations = await Promise.all(
+    triaged.kept.map((f, i) =>
+      agent("Confirm " + r.lens + " finding " + (i + 1)).ask<Confirmation>(cAsks ? cAsks[i] : ""),
+    ),
+  );
+  r.confirmed = triaged.kept.map((f, i) => ({ ...f, id: r.lens + "-" + (i + 1), lens: r.lens, confirmation: confirmations[i] }));
+  r.dropped = triaged.dropped;
+  for (const c of r.confirmed) {
+    report({
+      id: c.id, where: c.where, what: c.what, severity: c.severity, lens: c.lens,
+      status: c.confirmation.status, stage: c.confirmation.status,
+    }, "findings");
+  }
+  r.raw = [];
 }
 
-// ---------------------------------------------------------------------------
-// The fix loop: the author fixes, independent verifiers check every fix,
-// the gate re-runs, fresh eyes scan the fix diff. Bounded by rounds.
+allConfirmed = perLens.flatMap((r) => r.confirmed);
+allDropped = perLens.flatMap((r) => r.dropped);
+allConfirmed.sort((a, b) =>
+  (SEV_RANK[a.severity] !== undefined ? SEV_RANK[a.severity] : 3) -
+  (SEV_RANK[b.severity] !== undefined ? SEV_RANK[b.severity] : 3));
+summary = gateTracked.map((t) => ({
+  id: t.finding.id, where: t.finding.where, what: t.finding.what,
+  severity: t.finding.severity, lens: t.finding.lens, status: t.finding.confirmation.status,
+})).concat(allConfirmed.map((c) => ({
+  id: c.id, where: c.where, what: c.what, severity: c.severity, lens: c.lens, status: c.confirmation.status,
+})));
+
+tracked = gateTracked.concat(allConfirmed.map((f) => ({ finding: f, fix: "pending" as const, fixNote: "not yet attempted" })));
+}
+
 let roundsUsed = 0;
-// The authoritative last gate run: the pre-fix gate now, replaced by
-// each fix round's re-run. Every report surface reads this, never the
-// stale pre-fix array, so a red gate can never render as green.
-let finalGate: GateResult[] = gate;
-let gateGreen = gate.every((g) => g.exitCode === 0);
+let finalGate = gate;
+let gateGreen = gate.every((x) => x.exitCode === 0);
 const fixerNotes: string[] = [];
 const allChangedPaths: string[] = [];
 
-// The loop keys off tracked, not allConfirmed: a fresh project audit's
-// gate findings (gateTracked, fix "pending") must reach the fixer too —
-// a red-gate audit with a clean panel has nothing in allConfirmed.
 if (FIX_ROUNDS > 0 && tracked.length > 0) {
   phase("Fix the confirmed findings and verify every fix");
   const fixer = agent("Author and fixer", {
-    system: await withBrief(FIXER_SYSTEM, ["code-review-fixer.md", "_panel-protocol.md"]),
+    system: await withBrief(SYSTEMS.fixer, ["code-review-fixer.md", "_panel-protocol.md"]),
   });
   let gateFeedback = "";
 
   for (let round = 1; round <= FIX_ROUNDS; round++) {
     const unresolved = tracked.filter((t) => t.fix !== "fixed");
-    if (unresolved.length === 0) {
-      break;
-    }
-    const outcome = await fixer.ask<FixOutcome>(fixerAsk(round, unresolved, gateFeedback));
+    if (unresolved.length === 0) break;
+    const fAsks = await askWave("fixer-ask-probe", [{
+      kind: "fixer",
+      ctx: { base: BASE, project: PROJECT, intent: intentText, repo_abs: REPO_ABS || null, round, unresolved, gate_feedback: gateFeedback || null },
+    }]);
+    const outcome = await fixer.ask<FixOutcome>(fAsks ? fAsks[0] : "");
     roundsUsed = round;
     for (const n of outcome.notes) fixerNotes.push("round " + round + ": " + n);
     for (const p of outcome.changedPaths) if (allChangedPaths.indexOf(p) === -1) allChangedPaths.push(p);
-    log(
-      "fix round " + round + ": " + outcome.addressed.length + " addressed · " + outcome.skipped.length +
-      " skipped · " + outcome.changedPaths.length + " path(s) changed"
-    );
+    log("fix round " + round + ": " + outcome.addressed.length + " addressed · " + outcome.skipped.length +
+      " skipped · " + outcome.changedPaths.length + " path(s) changed");
 
-    const roundGate = await runGate();
+    const g = await oracle("gate-probe", ["gate", ...(REPO_ABS ? ["--repo", REPO_ABS] : []), ...(PROJECT ? ["--tree"] : ["--base", BASE])]);
+    const roundGate = g && g.status === "ok" ? gateRows(g.rows) : [{ name: "gate.sh (spec-code-review)", exitCode: 1, tail: "gate.sh produced no JSON report" }];
     finalGate = roundGate;
-    const gateBad = roundGate.filter((g) => g.exitCode !== 0);
+    const gateBad = roundGate.filter((x) => x.exitCode !== 0);
     gateGreen = gateBad.length === 0;
-    gateFeedback = gateBad.map((g) => g.name + ":\n" + g.tail).join("\n\n");
+    gateFeedback = gateBad.map((x) => x.name + ":\n" + x.tail).join("\n\n");
     log("checks after round " + round + ": " + (roundGate.length - gateBad.length) + "/" + roundGate.length + " passed");
 
-    // gate failures are tracked like findings: the fixer must clear them next round
     for (let i = tracked.length - 1; i >= 0; i--) {
       if (tracked[i].finding.lens === "gate") tracked.splice(i, 1);
     }
-    for (const g of gateBad) {
+    for (const x of gateBad) {
       const gid = nextId("gate");
       tracked.push({
         finding: {
-          id: gid,
-          where: g.name,
-          what: "Repo check failed after the fixes: " + g.name,
-          evidence: g.tail || "(no output)",
-          severity: "high",
-          lens: "gate",
+          id: gid, where: x.name, what: "Repo check failed after the fixes: " + x.name,
+          evidence: x.tail || "(no output)", severity: "high", lens: "gate",
           confirmation: { status: "verified", note: "exit code nonzero after fix round " + round },
         },
-        fix: "unfixed",
-        fixNote: "round " + round + ": check failing",
+        fix: "unfixed", fixNote: "round " + round + ": check failing",
       });
-      report({
-        id: gid,
-        where: g.name,
-        what: "Repo check failed after the fixes: " + g.name,
-        severity: "high",
-        lens: "gate",
-        stage: "gate",
-        fix: "unfixed",
-        round,
-      }, "findings");
+      report({ id: gid, where: x.name, what: "Repo check failed after the fixes: " + x.name, severity: "high", lens: "gate", stage: "gate", fix: "unfixed", round }, "findings");
     }
 
-    // A reader cannot verify a check name: gate-lens entries in the stale
-    // pre-fixer snapshot were replaced above by the fresh authoritative
-    // gate re-run, so the verify wave covers code findings only.
     const verifiable = unresolved.filter((t) => t.finding.lens !== "gate");
+    const vAsks = verifiable.length ? await askWave("verify-asks-probe",
+      verifiable.map((t) => ({ kind: "verify", ctx: { base: BASE, project: PROJECT, repo_abs: REPO_ABS || null, tracked: t, notes: outcome.notes.join(" | ") } }))) : [];
     const verifications = await Promise.all(
-      verifiable.map((t, i) =>
-        agent("Verify round " + round + " fix " + (i + 1)).ask<Verification>(verifyAsk(t, outcome.notes.join(" | "))),
-      ),
+      verifiable.map((t, i) => agent("Verify round " + round + " fix " + (i + 1)).ask<Verification>(vAsks ? vAsks[i] : "")),
     );
     for (let i = 0; i < verifiable.length; i++) {
       const v = verifications[i];
@@ -1841,36 +833,25 @@ if (FIX_ROUNDS > 0 && tracked.length > 0) {
     }
 
     if (outcome.changedPaths.length > 0) {
-      const fixReview = await agent("Fix reviewer round " + round, { system: FIX_REVIEW_SYSTEM }).ask<LensReview>(
-        fixReviewAsk(outcome.changedPaths, gateGreen),
-      );
+      const frAsks = await askWave("fix-review-ask-probe", [{ kind: "fix-review", ctx: { base: BASE, repo_abs: REPO_ABS || null, paths: outcome.changedPaths, gate_green: gateGreen } }]);
+      const fixReview = await agent("Fix reviewer round " + round, { system: SYSTEMS.fix_review }).ask<LensReview>(frAsks ? frAsks[0] : "");
       if (fixReview.findings.length > 0) {
-        const triagedFix = await triage.ask<TriageVerdict>(triageAsk("fix-review", fixReview.findings));
+        const ftAsks = await askWave("fix-review-triage-ask-probe", [{ kind: "triage", ctx: { base: BASE, intent: intentText, lens_label: "fix-review", findings: fixReview.findings } }]);
+        const triagedFix = await triage.ask<TriageVerdict>(ftAsks ? ftAsks[0] : "");
+        const fcAsks = await askWave("fix-review-confirm-asks-probe",
+          triagedFix.kept.map((f) => ({ kind: "confirm", ctx: { base: BASE, finding: f } })));
         const fixConfs = await Promise.all(
-          triagedFix.kept.map((f, i) =>
-            agent("Confirm fix-review finding " + round + "-" + (i + 1)).ask<Confirmation>(confirmAsk(f)),
-          ),
+          triagedFix.kept.map((f, i) => agent("Confirm fix-review finding " + round + "-" + (i + 1)).ask<Confirmation>(fcAsks ? fcAsks[i] : "")),
         );
         for (let i = 0; i < triagedFix.kept.length; i++) {
           const c: ConfirmedFinding = { ...triagedFix.kept[i], id: nextId("fix-review"), lens: "fix-review", confirmation: fixConfs[i] };
           tracked.push({ finding: c, fix: "pending", fixNote: "new from fix review, round " + round });
-          report({
-            id: c.id,
-            where: c.where,
-            what: c.what,
-            severity: c.severity,
-            lens: "fix-review",
-            status: c.confirmation.status,
-            stage: c.confirmation.status,
-            round,
-          }, "findings");
+          report({ id: c.id, where: c.where, what: c.what, severity: c.severity, lens: "fix-review", status: c.confirmation.status, stage: c.confirmation.status, round }, "findings");
         }
       }
     }
 
-    if (tracked.every((t) => t.fix === "fixed")) {
-      break;
-    }
+    if (tracked.every((t) => t.fix === "fixed")) break;
   }
 }
 
@@ -1883,19 +864,13 @@ if (PROJECT) {
   finalChangedN = targetFiles.length;
   finalAdded = 0;
 } else if (roundsUsed > 0) {
-  try {
-    const d2 = await git.diff(BASE);
-    finalAdded = d2.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
-    finalChangedN = (await git.changedFiles(BASE)).length;
-  } catch {
-    // keep the pre-fix scope numbers
+  const again = await oracle("rescope-probe", ["scope", "--target", "diff", "--base", BASE, ...(REPO_ABS ? ["--repo", REPO_ABS] : [])]);
+  if (again && again.status === "ok") {
+    finalAdded = again.added;
+    finalChangedN = again.files.length;
   }
 }
 
-// Gate findings are confirmed by the check's own exit code, not an
-// independent reader — the verification counts cover reader-confirmed
-// findings only, so the report's re-check claim stays accurate on
-// red-gate project audits.
 const readerTracked = tracked.filter((t) => t.finding.lens !== "gate");
 const nVerified = readerTracked.filter((t) => t.finding.confirmation.status === "verified").length;
 const nUnconfirmed = readerTracked.length - nVerified;
@@ -1905,188 +880,105 @@ const nFixed = tracked.filter((t) => t.fix === "fixed").length;
 let assessmentOut: Assessment;
 let recommendation: "merge" | "fix-first" | "human" | "none";
 if (roundsUsed > 0) {
-  const fa = await triage.ask<FinalAssessment>(loopFinalAsk(tracked, roundsUsed, gateGreen, allChangedPaths));
+  const lfAsks = await askWave("loop-final-ask-probe", [{
+    kind: "loop-final",
+    ctx: { base: BASE, project: PROJECT, scout_map: scoutMap, tracked, rounds_used: roundsUsed, gate_green: gateGreen, changed_paths: allChangedPaths },
+  }]);
+  const fa = await triage.ask<FinalAssessment>(lfAsks ? lfAsks[0] : "");
   assessmentOut = fa;
   recommendation = fa.recommendation;
 } else {
-  assessmentOut = await triage.ask<Assessment>(
-    PROJECT ? finalAskProject(summary, GATE_LINE, targetFiles) : finalAsk(summary, GATE_LINE),
-  );
+  const fAsks = await askWave("final-ask-probe", [{
+    kind: PROJECT ? "final-project" : "final",
+    ctx: { ...askCtxBase, summary, gate_line: GATE_LINE, files: targetFiles },
+  }]);
+  assessmentOut = await triage.ask<Assessment>(fAsks ? fAsks[0] : "");
   recommendation = "none";
 }
 const assessment = assessmentOut;
 
-const reportedFindings: ReportedFinding[] = tracked.map((t) => ({
-  id: t.finding.id,
-  where: t.finding.where,
-  what: t.finding.what,
-  evidence: t.finding.evidence,
-  status: t.finding.confirmation.status,
-  severity: t.finding.severity,
-  lens: t.finding.lens,
-  impact: typeof t.finding.impact === "string" ? t.finding.impact : "",
-  fixStatus: t.fix,
-}));
-
-const reportMd = [
-  FIX_FROM
-    ? "# Code review — fix loop (" + tracked.length + " finding(s) carried from the previous review)"
-    : PROJECT
-      ? "# Code review — project (" + finalChangedN + " files)"
+// The report body renders in the oracle (D-014); the run keeps only the
+// title/mode lines (PR metadata lives here) and the result envelope.
+const title = FIX_FROM
+  ? "# Code review — fix loop (" + tracked.length + " finding(s) carried from the previous review)"
+  : PROJECT
+    ? "# Code review — project (" + finalChangedN + " files)"
     : PR
-      ? "# Code review — PR #" + (prMeta as PrMeta).number + ": " + mdSafe((prMeta as PrMeta).title) +
+      ? "# Code review — PR #" + (prMeta as PrMeta).number + ": " + (prMeta as PrMeta).title.replace(/[\\`*_[\]()!<>]/g, (ch) => "\\" + ch) +
         " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
-        : BRANCH_MODE
-          ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
-            " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
-          : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)",
-  "",
-  FIX_FROM
-    ? "Mode: fix-only — the review stages were skipped; findings carried from the previous review's report. fix_rounds: " + FIX_ROUNDS + "."
-    : "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
-      " · every kept non-gate finding confirmed by an independent reader." +
-      (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
-    (PR
-      ? " Target: pull request #" + (prMeta as PrMeta).number + " by " + mdSafe((prMeta as PrMeta).author) + " → " +
-        mdSafe((prMeta as PrMeta).baseRefName) + ((prMeta as PrMeta).url ? " — " + mdSafe((prMeta as PrMeta).url) : "") +
-        " — \"merge\" reads as the PR is ready."
-      : "") +
-    (BRANCH_MODE
-      ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the " +
-        "branch is ready to merge." +
-        (scopeDirty ? " Uncommitted work present in the working tree is included in the reviewed diff." : "")
-      : ""),
-    (!FIX_FROM && !PROJECT && (finalAdded > SUGGEST_SPLIT_LINES || finalChangedN > SUGGEST_SPLIT_FILES))
-      ? "Large change: ~" + finalAdded + " added lines across " + finalChangedN +
-        " files — consider splitting into smaller, independently reviewable chunks; reviewers read whole " +
-        "targets, and coverage thins as size grows."
-      : "",
-  roundsUsed > 0
-    ? "Fix loop: " + roundsUsed + " round(s) — " + nFixed + "/" + tracked.length + " findings fixed, checks " +
-      (gateGreen ? "green" : "RED") + ". Fixes sit uncommitted in the working tree."
-    : "",
-  "",
-  "## Verdict — " + assessment.risk + " risk" +
-    (roundsUsed > 0 ? " · recommendation: **" + recommendation + "**" : ""),
-  "",
-  assessment.verdict,
-  "",
-  "## Mechanical gate (" + finalGate.length + " detected check" + (finalGate.length === 1 ? "" : "s") + ") — " +
-    (finalGate.length === 0
-      ? "nothing detected in this repo — no mechanical floor"
-      : gateGreen
-        ? (roundsUsed > 0 ? "green after the final fix round" : "all passed")
-        : roundsUsed > 0
-          ? "RED after the final fix round"
-          : "RED"),
-  "",
-  ...finalGate.map((g) =>
-    g.exitCode === 0
-      ? "- pass — " + g.name
-      : "- **FAIL** — " + g.name + "\n\n  ```\n  " + g.tail + "\n  ```"),
-  "",
-  "## Findings (" + tracked.length + " confirmed · " + nHigh + " high · " + nFixed + " fixed)",
-  "",
-  ...(tracked.length ? findingsMd(reportedFindings) : ["None — the reviewers reported nothing that met the bar.", ""]),
-  ...(roundsUsed > 0
-    ? ["## What the fixer did", "", ...(fixerNotes.length ? fixerNotes.map((n) => "- " + n) : ["(no changes)"]), ""]
-    : []),
-  "## Dropped at triage (" + allDropped.length + ")",
-  "",
-  ...(allDropped.length
-    ? allDropped.map((d) => "- `" + d.where + "` — " + d.what + " — _" + d.reason + "_")
-    : ["None."]),
-  "",
-  "## Test gaps",
-  "",
-  ...(assessment.testGaps.length ? assessment.testGaps.map((t) => "- " + t) : ["None identified."]),
-  "",
-  "## Residual risks",
-  "",
-  ...(assessment.residualRisks.length ? assessment.residualRisks.map((r) => "- " + r) : ["None identified."]),
-  "",
-  "## How this was checked",
-  "",
-  ...(PROJECT
-    ? ["- Project review target: all " + targetCandidates + " tracked source files of " +
-        (REPO_ABS ? "the sub-repo at " + REPO_ABS : "the repository") + ", covered by " + targetParts.length +
-        " reviewer part(s) per lens (contiguous, directory-coherent, byte-balanced runs of the path-sorted " +
-        "file list); lockfiles, generated and vendored files are excluded by type" +
-        (PATHS_ARG ? "; paths filter: " + PATHS_ARG : "") + "."]
-    : []),
-  ...(finalGate.length > 0
-    ? (gateGreen
-      ? ["- The repo's own detected checks all ran and passed: " + finalGate.map((g) => g.name).join("; ") + "."]
-      : ["- The repo's own detected checks: " + finalGate.filter((g) => g.exitCode === 0).length + " of " +
-          finalGate.length + " passed — failing: " +
-          finalGate.filter((g) => g.exitCode !== 0).map((g) => g.name).join("; ") + " (see FAIL rows above)."])
-    : []),
-  ...(!FIX_FROM && scoutMap
-    ? ["- Preflight scout mapped the ground before the reviewers started: " + scoutMap.modules.length +
-        " module(s), " + scoutMap.conventions.length + " convention(s), " + scoutMap.riskAreas.length + " risk area(s)."]
-    : []),
-  "- Each non-gate finding was re-checked by an independent reader that did not write it (" + nVerified +
-    " verified, " + nUnconfirmed + " unconfirmed).",
-  ...(roundsUsed > 0
-    ? [
-        "- After each fix round the gate re-ran" + (gateGreen ? " and finished green" : " — still failing") +
-        ", every attempted fix was verified by an independent reader, and a fresh-eyes reviewer scanned the fix diff.",
-        "- The fixes are uncommitted in the working tree — inspect with `git diff` and commit when satisfied.",
-      ]
-    : []),
-].join("\n");
+      : BRANCH_MODE
+        ? "# Code review — branch " + branchName + " vs " + branchBaseRef +
+          " (" + finalChangedN + " files, ~" + finalAdded + " added lines)"
+        : "# Code review — " + BASE + " (" + finalChangedN + " files, ~" + finalAdded + " added lines)";
+const modeLine = FIX_FROM
+  ? "Mode: fix-only — the review stages were skipped; findings carried from the previous review's report. fix_rounds: " + FIX_ROUNDS + "."
+  : "Mode: " + modeUsed + (modeUsed === "fast" ? " — one general reviewer" : " — correctness, security, quality") +
+    " · every kept non-gate finding confirmed by an independent reader." +
+    (PROJECT ? " Target: the project's code as it stands — \"merge\" reads as ready-as-is." : "") +
+    (PR ? " Target: pull request #" + (prMeta as PrMeta).number + " by " + (prMeta as PrMeta).author + " → " + (prMeta as PrMeta).baseRefName +
+      ((prMeta as PrMeta).url ? " — " + (prMeta as PrMeta).url : "") + " — \"merge\" reads as the PR is ready." : "") +
+    (BRANCH_MODE ? " Target: the branch's changes vs " + branchBaseRef + " at the merge-base — \"merge\" reads as the branch is ready to merge." +
+      (scopeDirty ? " Uncommitted work present in the working tree is included in the reviewed diff." : "") : "") +
+    ((!FIX_FROM && !PROJECT && suggestSplit) ? " Large change: ~" + finalAdded + " added lines across " + finalChangedN +
+      " files — consider splitting into smaller, independently reviewable chunks; reviewers read whole targets, and coverage thins as size grows." : "") +
+    (roundsUsed > 0 ? " Fix loop: " + roundsUsed + " round(s) — " + nFixed + "/" + tracked.length + " findings fixed, checks " +
+      (gateGreen ? "green" : "RED") + ". Fixes sit uncommitted in the working tree." : "");
 
-try {
-  await artifact.markdown("review-report", reportMd, {
-    title: roundsUsed > 0 ? "Code review and fix report" : "Code review report",
-    description:
-      tracked.length === 0
-        ? "Clean change: the gate passed and no findings survived review."
-        : tracked.length + " confirmed finding(s), " + nFixed + " fixed — " + assessment.risk + " risk" +
-          (roundsUsed > 0 ? ", recommendation " + recommendation : ""),
-    primary: true,
-  });
-} catch (e) {
-  log("report not published: " + String(e));
-}
+const rep = await oracle("report-probe", ["report", "--kind", roundsUsed > 0 ? "fix" : "review", "--data", JSON.stringify({
+  title,
+  mode_line: modeLine,
+  verdict_line: "## Verdict — " + assessment.risk + " risk" + (roundsUsed > 0 ? " · recommendation: **" + recommendation + "**" : ""),
+  tracked,
+  gate_rows: finalGate,
+  gate_green: gateGreen,
+  assessment,
+  dropped: allDropped,
+  fixer_notes: fixerNotes,
+  rounds_used: roundsUsed,
+  checked: [
+    ...(PROJECT ? ["- Project review target: all " + targetCandidates + " tracked source files of " +
+      (REPO_ABS ? "the sub-repo at " + REPO_ABS : "the repository") + ", covered by " + targetParts.length +
+      " reviewer part(s) per lens (contiguous, directory-coherent, byte-balanced runs of the path-sorted file list); lockfiles, generated and vendored files are excluded by type" +
+      (PATHS_ARG ? "; paths filter: " + PATHS_ARG : "") + "."] : []),
+    ...(finalGate.length > 0
+      ? gateGreen
+        ? ["- The repo's own detected checks all ran and passed: " + finalGate.map((x) => x.name).join("; ") + "."]
+        : ["- The repo's own detected checks: " + finalGate.filter((x) => x.exitCode === 0).length + " of " + finalGate.length +
+            " passed — failing: " + finalGate.filter((x) => x.exitCode !== 0).map((x) => x.name).join("; ") + " (see FAIL rows above)."]
+      : ["- The gate detected no checks in this repo — the review ran without a mechanical floor."]),
+    ...(!FIX_FROM && scoutMap
+      ? ["- Preflight scout mapped the ground before the reviewers started: " + scoutMap.modules.length + " module(s), " +
+          scoutMap.conventions.length + " convention(s), " + scoutMap.riskAreas.length + " risk area(s)."]
+      : []),
+    "- Each non-gate finding was re-checked by an independent reader that did not write it (" + nVerified + " verified, " + nUnconfirmed + " unconfirmed).",
+  ],
+  fix_checked: roundsUsed > 0 ? [
+    "- After each fix round the gate re-ran" + (gateGreen ? " and finished green" : " — still failing") +
+    ", every attempted fix was verified by an independent reader, and a fresh-eyes reviewer scanned the fix diff.",
+    "- The fixes are uncommitted in the working tree — inspect with `git diff` and commit when satisfied.",
+  ] : [],
+})]);
+const reportedFindings: ReportedFinding[] = rep && rep.status === "ok" ? rep.reported_findings : [];
 
 return {
   conclusion:
     roundsUsed > 0
-      ? assessment.verdict +
-        " — recommendation: " + recommendation + ". " + nFixed + "/" + tracked.length + " findings fixed over " +
-        roundsUsed + " round(s); checks " + (gateGreen ? "green" : "RED") +
-        ". The fixes sit uncommitted in the working tree."
-      : assessment.verdict +
-        " — " + tracked.length + " confirmed finding(s), " + nHigh + " high, " + nUnconfirmed +
-        " unconfirmed; overall risk " + assessment.risk + "." +
+      ? assessment.verdict + " — recommendation: " + recommendation + ". " + nFixed + "/" + tracked.length + " findings fixed over " + roundsUsed + " round(s); checks " + (gateGreen ? "green" : "RED") + ". The fixes sit uncommitted in the working tree."
+      : assessment.verdict + " — " + tracked.length + " confirmed finding(s), " + nHigh + " high, " + nUnconfirmed + " unconfirmed; overall risk " + assessment.risk + "." +
         (allDropped.length ? " (" + allDropped.length + " dropped at triage as duplicates or out of scope.)" : ""),
   findings: reportedFindings,
   verified: [
-    ...(FIX_FROM
-      ? ["fix loop continuation — findings carried from the previous review's report; review stages skipped"]
-      : []),
-    ...(PROJECT
-      ? ["review target: " + (REPO_ABS ? "the sub-repo at " + REPO_ABS + " — its" : "the project's") +
-          " tracked source files — all " + targetCandidates + " matched, read as " + targetParts.length +
-          " reviewer part(s) per lens"]
-      : []),
-    ...(!FIX_FROM && PR
-      ? ["review target: PR #" + (prMeta as PrMeta).number + " (" + (prMeta as PrMeta).state + ") — the merge-base diff against " + (prMeta as PrMeta).baseRefName]
-      : []),
-    ...(!FIX_FROM && BRANCH_MODE
-      ? ["review target: branch " + branchName + " vs " + branchBaseRef + " — the merge-base diff (" + commitCount + " commit(s))"]
-      : []),
+    ...(FIX_FROM ? ["fix loop continuation — findings carried from the previous review's report; review stages skipped"] : []),
+    ...(PROJECT ? ["review target: " + (REPO_ABS ? "the sub-repo at " + REPO_ABS + " — its" : "the project's") +
+      " tracked source files — all " + targetCandidates + " matched, read as " + targetParts.length + " reviewer part(s) per lens"] : []),
+    ...(!FIX_FROM && PR ? ["review target: PR #" + (prMeta as PrMeta).number + " (" + (prMeta as PrMeta).state + ") — the merge-base diff against " + (prMeta as PrMeta).baseRefName] : []),
+    ...(!FIX_FROM && BRANCH_MODE ? ["review target: branch " + branchName + " vs " + branchBaseRef + " — the merge-base diff (" + commitCount + " commit(s))"] : []),
     ...(finalGate.length > 0
-      ? (gateGreen
-        ? ["the mechanical gate ran the repo's own detected checks (all passed): " + finalGate.map((g) => g.name).join("; ")]
-        : ["the mechanical gate ran the repo's own detected checks — " +
-            finalGate.filter((g) => g.exitCode !== 0).length + " of " + finalGate.length + " FAILED: " +
-            finalGate.filter((g) => g.exitCode !== 0).map((g) => g.name).join("; ")])
+      ? gateGreen
+        ? ["the mechanical gate ran the repo's own detected checks (all passed): " + finalGate.map((x) => x.name).join("; ")]
+        : ["the mechanical gate ran the repo's own detected checks — " + finalGate.filter((x) => x.exitCode !== 0).length + " of " + finalGate.length + " FAILED: " + finalGate.filter((x) => x.exitCode !== 0).map((x) => x.name).join("; ")]
       : []),
-    ...(!FIX_FROM && scoutMap
-      ? ["preflight scout mapped the codebase and modules before the panel started (" + scoutMap.modules.length + " module(s))"]
-      : []),
+    ...(!FIX_FROM && scoutMap ? ["preflight scout mapped the codebase and modules before the panel started (" + scoutMap.modules.length + " module(s))"] : []),
     "every reported non-gate finding was re-checked by an independent reader that did not write it",
     ...(roundsUsed > 0
       ? [
@@ -2096,16 +988,10 @@ return {
       : []),
   ],
   notCovered: [
-    ...(FIX_FROM
-      ? ["the review stages were skipped (fix_from) — coverage inherits the previous report's notCovered; anything it missed stays missed"]
-      : []),
-    ...(!FIX_FROM && !scoutMap
-      ? ["preflight scout returned no map — the review ran without the codebase and module context step"]
-      : []),
+    ...(FIX_FROM ? ["the review stages were skipped (fix_from) — coverage inherits the previous report's notCovered; anything it missed stays missed"] : []),
+    ...(!FIX_FROM && !scoutMap ? ["preflight scout returned no map — the review ran without the codebase and module context step"] : []),
     ...partCoverageGaps,
-    ...(finalGate.length === 0
-      ? ["no repo checks were detected by the gate — this review ran without a mechanical floor; ask the repo for its documented check command"]
-      : []),
+    ...(finalGate.length === 0 ? ["no repo checks were detected by the gate — this review ran without a mechanical floor; ask the repo for its documented check command"] : []),
     ...assessment.testGaps.map((t) => "test gap: " + t),
     ...assessment.residualRisks.map((r) => "residual: " + r),
     "runtime behavior beyond the repo's test suites was not exercised — this was a static review",
