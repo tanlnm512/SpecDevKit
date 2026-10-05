@@ -439,7 +439,7 @@ skills/
     ├── gates/              # dod (the 10-gate DoD scorecard)
     ├── templates/          # 7 scaffolded doc templates + assurance/release records
     ├── scripts/            # scaffold.sh · check.py · audit.py · graph.py · freeze.py · archive.sh · skill-dir.sh · specstate.py
-    ├── decisions/           # this skill's own ADRs (D-001…D-021)
+    ├── decisions/           # this skill's own ADRs (D-001…D-028)
     ├── diagrams/           # workflow graph (.mmd + 2 HTML renders)
     ├── references/         # quickstart, bugfix deltas, mermaid cheatsheet, harness mappings
     ├── evals/              # prepared eval cases

@@ -79,7 +79,9 @@ rule all live there.
 - **Tests that cannot fail**: assert-free tests, tautologies (asserting
   a mock's arrangement), over-mocked tests where the real contract
   changed, snapshots that would bless any output, tests skipping
-  silently on missing fixtures or env.
+  silently on missing fixtures or env. A test that cannot fail while the
+  behavior it names did change is `medium` at minimum — a fabricated
+  safety net is a real defect, not a nit.
 
 ## Output
 

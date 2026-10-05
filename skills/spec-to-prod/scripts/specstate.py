@@ -43,6 +43,7 @@ DEFINITIONS = {
 # spaces, hyphens only — real markdown like <br> or <a href> won't match).
 PLACEHOLDER = re.compile(r"<[a-z][a-z -]{2,}>")
 CODE_SPAN = re.compile(r"`[^`]*`")
+QUOTE_SPAN = re.compile(r'"[^"\n]*"')
 HTML_COMMENT = re.compile(r"<!--.*?-->")
 
 # spec.md lifecycle: `**Status**: <word>` (backticked words tolerated).

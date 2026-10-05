@@ -5,6 +5,26 @@ Release history. The skill began life 2026-09-23 as the validated
 review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
+## 0.13.1 — 2026-10-05
+
+Quality-lens severity calibration for test findings (serves eval case
+`spec-code-review/e2`). The 2026-10-04 baseline run found EXPECTED
+defect 4 — a test-facing helper that cannot fail — but rated it `low`
+against the answer key's `medium` floor: nothing in the quality brief
+told a lens that a fabricated safety net is a real defect rather than
+a nit. The brief's "Tests that cannot fail" rubric now pins the floor:
+a test that cannot fail while the behavior it names did change is
+`medium` at minimum. Brief-only fix, one source — both workflow
+dialects append the brief into every reviewer ask at run time, so
+inline and workflow paths get the calibration together. Verified live:
+a fresh panel re-run over the seeded-bug fixture reports all four
+EXPECTED rows at or above their floors (`evals/results/
+2026-10-05-e2.md`, 4/4 criteria pass; the pre-fix failure is recorded
+alongside it from the baseline run).
+
+Migration: none required — the calibration rides the brief every
+reviewer already reads; no workflow, argument, or report shape changed.
+
 
 ## 0.13.0 — 2026-10-02
 

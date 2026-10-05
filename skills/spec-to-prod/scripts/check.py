@@ -67,6 +67,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     DEFINITIONS,
     HTML_COMMENT,
     PLACEHOLDER,
+    QUOTE_SPAN,
     TaskEntry,
     defined_ids,
     lifecycle_shas,
@@ -998,7 +999,8 @@ def main(argv: list[str] | None = None) -> int:
         phit: list[str] = []
         vhit: list[str] = []
         for lineno, line in enumerate(texts[f].splitlines(), start=1):
-            s = HTML_COMMENT.sub(" ", CODE_SPAN.sub(" ", line))
+            s = HTML_COMMENT.sub(
+                " ", QUOTE_SPAN.sub(" ", CODE_SPAN.sub(" ", line)))
             m = PLACEHOLDER.search(s)
             if m or "YYYY-MM-DD" in s:
                 tok = m.group(0) if m else "YYYY-MM-DD"

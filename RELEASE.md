@@ -71,6 +71,12 @@ This suite carries the lifecycle evidence: the migration fixture tests
 evidence) and the acceptance-coverage checker (every FR and acceptance
 criterion maps to a test case).
 
+Live-eval gate: a skill whose behavior changed since its last release
+re-runs its affected live eval cases before tagging, recorded under
+that skill's `evals/results/` (`tools/evals.py validate
+<skill>/<case> <transcript>`). A changed panel brief, gate, or report
+contract without a matching eval result is a release blocker.
+
 ## 7. Clean tree
 
 `git status --porcelain` is empty again — the release changed nothing

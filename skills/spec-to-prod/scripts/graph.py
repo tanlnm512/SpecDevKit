@@ -112,7 +112,13 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from check import CODE_SPAN, HTML_COMMENT, INVISIBLE, PLACEHOLDER  # noqa: E402
+from check import (  # noqa: E402
+    CODE_SPAN,
+    HTML_COMMENT,
+    INVISIBLE,
+    PLACEHOLDER,
+    QUOTE_SPAN,
+)
 import specstate  # noqa: E402
 
 # The workflow graph's nodes, in canonical (dependency) order. Names are
@@ -251,12 +257,14 @@ def is_unfilled(text: str) -> bool:
 
 def unfilled_hits(text: str, cap: int = 5) -> str:
     """The evidence behind is_unfilled: `token@line` entries for every
-    placeholder-shaped token (or literal YYYY-MM-DD) outside code spans and
-    HTML comments. Fenced-block content IS scanned — matches hiding there
+    placeholder-shaped token (or literal YYYY-MM-DD) outside code spans,
+    quoted spans, and HTML comments. Fenced-block content IS scanned —
+    matches hiding there
     are the recurring false-'unfilled' failure. Empty string = filled."""
     hits: list[str] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        s = HTML_COMMENT.sub(" ", CODE_SPAN.sub(" ", line))
+        s = HTML_COMMENT.sub(
+            " ", QUOTE_SPAN.sub(" ", CODE_SPAN.sub(" ", line)))
         if "YYYY-MM-DD" in s:
             hits.append(f"YYYY-MM-DD@{lineno}")
         for m in PLACEHOLDER.finditer(s):

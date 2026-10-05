@@ -313,6 +313,36 @@ class Graph002SurveyWaveTests(unittest.TestCase):
                          ["plan", "qa", "tech"])
 
 
+class QuotedEvidenceSurveyTests(unittest.TestCase):
+    """A survey whose verbatim evidence quotes placeholder-shaped source
+    lines stays done — quoted spans carry citations, not template residue."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph-quote-"))
+        cls.spec_dir = scaffold(cls._tmp)
+        write(cls.spec_dir / "spec.md",
+              (FIXTURE / "spec.md").read_text(encoding="utf-8"))
+        survey = (FIXTURE / "survey.md").read_text(encoding="utf-8")
+        write(cls.spec_dir / "survey.md", survey +
+              '\n  evidence:   templates/design-spec.md:15 '
+              '"- Selected: <angle or blend>" :16 "<persona>"\n')
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_quoted_placeholder_evidence_keeps_survey_done(self):
+        state = compute(self.spec_dir)
+        self.assertEqual(state["nodes"]["survey"]["state"], "done")
+
+    def test_unquoted_placeholder_still_blocks_survey(self):
+        survey = (FIXTURE / "survey.md").read_text(encoding="utf-8")
+        write(self.spec_dir / "survey.md", survey + "\nsee <persona> above\n")
+        state = compute(self.spec_dir)
+        self.assertNotEqual(state["nodes"]["survey"]["state"], "done")
+
+
 class Graph003SkipMarkerTests(unittest.TestCase):
     """GRAPH-003: the canonical em-dash skip marker resolves the gate as
     skip — research reads SKIPPED (not blocked), tech goes READY."""

@@ -4,6 +4,29 @@ Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
 
+## 2.14.1 — 2026-10-05
+
+Quoted evidence no longer reads as template residue (serves eval case
+`spec-to-prod/e1`, the real-repo pass). The survey contract's evidence
+fields quote source lines verbatim — and a spec surveying
+placeholder-bearing source (the brainstorm template's `<persona>`-shaped
+stems) deadlocked the graph: the residue detector flagged the quoted
+stems, the survey node never read done, and the frontier froze. First
+real-repo run's discovery. The canonical residue bar (specstate's
+regexes, shared by check.py's template-hygiene check and graph.py's
+node done-signal) now strips double-quoted spans exactly as it strips
+code spans — an unfilled template never wraps its placeholders in
+quotes, so the bar holds where it must. Regression-pinned in
+tests/test_graph.py: a survey quoting placeholder-shaped evidence
+stays done; an unquoted placeholder still blocks. 139 graph tests
+green; verified live in the brainstorm-handoff-checker run — the
+stuck survey flipped to done and the frontier advanced to the
+authoring wave the moment the fix landed.
+
+Migration: none required — authored docs that quote placeholders in
+evidence now validate; genuinely unfilled templates still fail as
+before.
+
 ## 2.14.0 — 2026-10-01
 
 Kit-wide engineering rules (D-028): three rules now bind every agent
