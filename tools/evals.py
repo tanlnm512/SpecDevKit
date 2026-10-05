@@ -8,8 +8,10 @@ The runner records; the observer judges (D-005).
 
 Usage:
   evals.py list
-  evals.py run <skill>/<case-id>            mechanical cases only
+  evals.py run <skill>/<case-id> [--overwrite]
+                                            mechanical cases only
   evals.py validate <skill>/<case-id> [transcript] [--contract-bent T]
+                                            [--overwrite]
   evals.py procedure <skill>/<case-id>      print the session procedure
 
 Transcript verdict grammar (validate mode): any line naming a criterion

@@ -19,10 +19,12 @@ a decision, or strike it when resolved outright.
    not at spawn; refinement's soft cap of five is a convention
    the orchestrator enforces, not a mechanical guard; the
    template's and the green fixture's shapes are pinned by
-   `tests/test_flow_contracts.py`, but a live run's artifact is
-   validated by no checker — the handoff gate
-   (`gates/handoff.md`) is a judgment, and `/spec` treats the
-   doc as intent input with no parser; the panel wave's brief-
+   `tests/test_flow_contracts.py`, and a live run's artifact is
+   mechanically half-gated: `scripts/check.py` (exit 0 required
+   before `/spec` is named) validates the artifact-observable
+   criteria, while the digest-to-artifact dealbreaker mapping and
+   kill-criterion observability stay judgment — `/spec` still
+   treats the doc as intent input with no parser; the panel wave's brief-
    degrade path (a brief that fails to load) is pinned
    structurally by `tests/test_workflow_copies.py` but has never
    fired live.

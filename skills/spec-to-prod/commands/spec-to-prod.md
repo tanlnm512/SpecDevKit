@@ -1,6 +1,6 @@
 ---
-description: Spec-driven development - scaffold specs/<name>/ and run the multi-agent graph workflow (survey, plan, tech, tasks, tests, implement) with code-grounded evidence
-argument-hint: <scaffold|bugfix|survey|research|plan|tech|tasks|qa|review|check|freeze|converge|graph|run|implement|archive> <spec-name> [T###]
+description: Spec-driven development - scaffold specs/<name>/ and run the multi-agent graph workflow (survey, research, plan, tech, qa, tasks, implement) with code-grounded evidence
+argument-hint: <scaffold|bugfix|survey|research|plan|tech|tasks|qa|review|check|freeze|converge|graph|run|resume|implement|archive> <spec-name> [T###]
 skills: spec-to-prod
 ---
 

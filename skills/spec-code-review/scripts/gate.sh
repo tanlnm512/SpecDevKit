@@ -19,12 +19,14 @@
 #   package.json scripts (test, lint, typecheck)→ npm run <script>
 #   Cargo.toml                                  → cargo test
 #   go.mod                                      → go test ./...
-#   python (pyproject/setup.py + tests)         → pytest (PATH, repo
+#   python (pyproject/setup.py/setup.cfg + tests)→ pytest (PATH, repo
 #                                                venv, uv run, python3
 #                                                -m), else unittest
 #                                                discover
 #   always, when git is available: bash -n on every *.sh the diff
 #   against --base touches (committed or working-tree).
+#   always, on the change (git diff mode only): token-pattern secret
+#   scan (a line carrying "spec-review:allow" is skipped).
 # A family is skipped when its tool is not on PATH — a check that
 # cannot run is never silently invented. When nothing is detected the
 # JSON array is empty and the gate is green; the skill's SKILL.md tells

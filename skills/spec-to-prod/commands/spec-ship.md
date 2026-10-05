@@ -7,8 +7,8 @@ skills: spec-to-prod
 Run the spec-to-prod skill (auto-mounted) for this request: $ARGUMENTS
 
 SHIP entry of the lifecycle — the tick-commit node. Refuses unless the
-/test and /review steps are green (the three commands are the ONE
-delivery pass in steps, never three gates).
+/spec-test and /spec-review steps are green (the three commands are the
+ONE delivery pass in steps, never three gates).
 
 - tick every task with its done-note (proof command), recompute
   burndown (`scripts/tick.py`, then `scripts/check.py --fix-burndown`)
@@ -24,6 +24,6 @@ delivery pass in steps, never three gates).
   operator-facing work, copy `templates/release-handoff.md` into the spec
   and complete it before handing C1/C2 to the release owner
 
-Boundary: /ship ends at the verified commit. Push, PR, deploy, publish
+Boundary: /spec-ship ends at the verified commit. Push, PR, deploy, publish
 are human/CI actions by design (ADR-014) — the skill stop-and-asks
 before any out-of-workspace side effect; it never releases on its own.

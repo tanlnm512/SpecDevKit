@@ -370,10 +370,11 @@ mode, as the branch is ready to merge.
 `contracts/panel.md` is the canonical contract (this file summarizes;
 it arbitrates). `gates/recommendation.md` arbitrates stop conditions
 and recommendation criteria. `decisions/` holds the panel's ADRs
-(D-001…D-011 — gate-first, independent confirmation, advisory-only,
+(D-001…D-013 — gate-first, independent confirmation, advisory-only,
 targets-collapse-to-diffs, the fix loop, dialect parity,
 precision-over-recall, the preflight scout, sub-repo targets, sharded
-project coverage, audits continuing past red gates).
+project coverage, audits continuing past red gates, kit-wide
+engineering rules, finding ids and the report-markdown carrier).
 `references/quickstart.md` is navigation, not
 a second contract. `evals/cases.md` + `examples/review-target/` are
 the standing live-eval scenarios with a seeded-bug answer key;

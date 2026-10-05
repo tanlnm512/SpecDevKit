@@ -2,9 +2,10 @@
 
 Standing eval scenarios for a live panel run. Each case names the
 setup, the ask, and pass criteria an observer can check from the
-transcript and the artifact. There is no mechanical suite to prove
-here — the skill is instructions and briefs — so these cases are
-the whole evaluation surface: they prove the *flow* works (the
+transcript and the artifact. The mechanical suites (the handoff
+checker's own tests, the flow-contract and workflow-parity pins)
+prove the mechanics; these conversational cases prove the *flow*
+works (the
 rigid stage shapes, the panel's independence, the user-owned
 direction). Judging: run the case in a scratch repo, check the
 transcript and `brainstorms/<name>.md` against the criteria; a
@@ -46,7 +47,9 @@ average — aggregate.
   all five pinned sections (Direction with selected + rejected,
   Problem Statement, User Personas, Core MVP Features with an
   out-of-scope list, Potential Risk Mitigations with early
-  warnings); every Cynic dealbreaker from the panel appears in
+  warnings); the mechanical handoff check (`scripts/check.py`)
+  exits 0 on the artifact before `/spec` is named; every Cynic
+  dealbreaker from the panel appears in
   the risk table or is explicitly accepted; nothing was written
   under `specs/`; the final message names the artifact path and
   `/spec <name>` as the next step.

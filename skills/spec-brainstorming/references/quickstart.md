@@ -34,7 +34,8 @@ panel briefs remain canonical.
   `audience`, `constraints` — and it returns the three digests;
   stages 1, 3, 4 and 5 are always the session's (D-004).
 - **Any other agent**: the skill inline; `scripts/skill-dir.sh`
-  is the only executable it needs (bash).
+  (bash) and `scripts/check.py` (python3 — the handoff gate, run
+  before `/spec` is named) are the only executables it needs.
 
 ## Reading the artifact
 

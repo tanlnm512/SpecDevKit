@@ -17,4 +17,4 @@ BUILD entry of the lifecycle — the execute node (the router's
   task
 
 When every task is implemented, the delivery pass runs in three steps:
-/test, /review, /ship.
+/spec-test, /spec-review, /spec-ship.

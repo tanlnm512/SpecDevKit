@@ -148,7 +148,7 @@ class SyncShTests(SyncShBase):
                    if line.endswith(" spec-build")]
         self.assertEqual(
             entries,
-            [f"{hashlib.sha256(dest.read_bytes()).hexdigest()} build"])
+            [f"{hashlib.sha256(dest.read_bytes()).hexdigest()} spec-build"])
 
     def test_foreign_file_in_skills_tree_is_refused_and_kept(self):
         self.assertEqual(self.run_sync().returncode, 0)
@@ -225,13 +225,17 @@ class SyncShTests(SyncShBase):
         self.assertIn("clean", r.stdout)
         self.assertFalse(dest.exists())
 
-    def test_foreign_file_in_commands_root_is_refused(self):
+    def test_foreign_file_at_unclaimed_command_name_is_left_alone(self):
         self.assertEqual(self.run_sync().returncode, 0)
         cmd = self.home / ".claude" / "commands" / "plan.md"
         cmd.write_text("# a hand-written note, not the wrapper\n")
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("REFUSE", r.stdout)
+        # plan.md is a dropped name since D-029: not refused, not pruned
+        # — a foreign file at an unclaimed name is shared turf now (the
+        # name is no longer ours to defend); refusal still applies at
+        # claimed names (see DroidCommandsTests).
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("REFUSE", r.stdout)
         self.assertIn("hand-written note", cmd.read_text())
 
     def test_foreign_def_in_claude_agents_root_is_refused(self):
@@ -444,8 +448,8 @@ class DroidCommandsTests(SyncShBase):
         (self.home / ".factory").mkdir()
         r1 = self.run_sync()
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
-        for base in ("spec", "plan", "build", "test", "review", "ship",
-                     "spec-to-prod"):
+        for base in ("spec", "spec-plan", "spec-build", "spec-test",
+                     "spec-review", "spec-ship", "spec-to-prod"):
             self.assertTrue(
                 (self.home / ".factory" / "commands" / f"{base}.md").is_file(),
                 base)

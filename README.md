@@ -36,9 +36,10 @@ New-user entry point: `skills/spec-to-prod/references/quickstart.md`.
 
 ## How the workflow works
 
-Scheduling is a frontier computation over a graph of fourteen nodes (the
-eight role agents plus orchestrator/mechanical nodes: spec, clarify,
-research-gate, verify, approve, execute, tick-commit, archive):
+Scheduling is a frontier computation over a graph of fourteen nodes
+(six role-spawn nodes — survey, research, plan, tech, qa, tasks —
+plus orchestrator/mechanical nodes: spec, clarify, research-gate,
+execute, verify, approve, tick-commit, archive):
 
 1. **Compute the frontier** — `python3 scripts/graph.py specs/<name>`
    prints every node's state (`done` / `READY` / `blocked(reason)` /
@@ -320,6 +321,7 @@ single-agent repair runs, `review` is the docs reviewer — ADR-013).
 | `resume <spec>` | the same continuation, worked manually per SKILL.md § Resuming (orchestrator judgment at every step) |
 | `survey` `research` `plan` `tech` `qa` `tasks` `review` | single-agent runs of one node (repair/refresh; `check.py` after) |
 | `check <spec>` | `scripts/check.py specs/<spec>` and triage the output |
+| `freeze <spec>` | after an explicit user yes only: `scripts/freeze.py <spec> --record` writes the approval hash manifest |
 | `converge <spec>` | re-survey, then `scripts/audit.py converge specs/<spec> --repo <path>` (`--repo` defaults to the spec dir's grandparent); append a task per NEW GAP/REGRESSED |
 | `implement <spec> [T###]` | the execute node: waves of implementer agents; nothing commits until the plan-wide delivery pass proves every task |
 | `archive <spec>` | after `Status: done`: `scripts/archive.sh <spec>` moves the dir to `specs/archive/<date>-<name>/` and repoints INDEX |
@@ -439,9 +441,9 @@ skills/
     ├── contracts/docset.md # canonical doc-set/ownership/payload contract
     ├── gates/              # dod (the 10-gate DoD scorecard)
     ├── templates/          # 7 scaffolded doc templates + assurance/release records
-    ├── scripts/            # scaffold.sh · check.py · audit.py · graph.py · freeze.py · archive.sh · skill-dir.sh · specstate.py
-    ├── decisions/           # this skill's own ADRs (D-001…D-028)
-    ├── diagrams/           # workflow graph (.mmd + 2 HTML renders)
+    ├── scripts/            # scaffold.sh · check.py · audit.py · graph.py · freeze.py · tick.py · migrate.py · archive.sh · skill-dir.sh · specstate.py
+    ├── decisions/           # this skill's own ADRs (D-001…D-029)
+    ├── diagrams/           # workflow graph (.mmd + 1 HTML render)
     ├── references/         # quickstart, bugfix deltas, mermaid cheatsheet, harness mappings
     ├── evals/              # prepared eval cases
     ├── examples/mini-spec/ # green fixture used by the test suite
@@ -452,9 +454,15 @@ skills/
 └── spec-brainstorming/     # third resident skill — five-stage pre-spec brainstorm panel (panel-wave workflow dialects, own test suite)
 tools/
 ├── sync.sh                 # shared installer: every skills/<name>/ → every harness root, SHA-verified
+├── install-workflow.sh     # standalone install of the workflow dialects (zcode/claude; --project, --check)
 ├── omp-defs.py             # shared: Claude-style agents/*.md frontmatter → omp task-agent frontmatter
 ├── agent-defs.py           # shared: Claude-style agents/*.md frontmatter → opencode / droid / agy defs
+├── workflow-defs.py        # shared: generates the spec-run workflow dialect twins (zcode .dwf.ts / claude .js)
 ├── plugin-manifest.py      # shared: generates .claude-plugin/marketplace.json + per-skill plugin.json
+├── kit-rules.py            # shared: injects rules/engineering-rules.md into the § Engineering rules carriers
+├── drift-check.py          # shared: release-validate generated surfaces against their canonical sources
+├── evals.py                # shared: list/run/validate the skills' standing eval cases, record results
+├── ownership.py            # shared: ownership-plan primitives — classify destinations against the provenance ledger before sync writes
 └── tests/                  # suite for the shared tooling itself (bash tests/run.sh)
 ```
 

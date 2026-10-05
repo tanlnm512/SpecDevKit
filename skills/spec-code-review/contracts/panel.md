@@ -130,7 +130,9 @@ Recommendation semantics are canonical in `gates/recommendation.md`.
 ## Versioning
 
 `VERSION`, SKILL.md frontmatter `version`, and the generated
-`.claude-plugin/plugin.json` move together (sync.sh refuses drift);
+`.claude-plugin/plugin.json` move together (sync.sh refuses
+VERSION/frontmatter drift; `tools/plugin-manifest.py --check` and
+`tools/drift-check.py` pin plugin.json);
 CHANGELOG entries need their own `Migration:` paragraph. The two
 workflow masters under `workflows/` are hand-maintained dialects of
 this contract, pinned together by `tests/test_workflow_copies.py`

@@ -7,7 +7,7 @@ skills: spec-to-prod
 Run the spec-to-prod skill (auto-mounted) for this request: $ARGUMENTS
 
 REVIEW entry of the lifecycle — the delivery pass's review instruments
-(step 9). Same precondition as /test (execute node done).
+(step 9). Same precondition as /spec-test (execute node done).
 
 - scope diff: `scripts/audit.py scope specs/<spec>` — every UNMENTIONED
   file adjudicated (revert or record as deviation); the default base is

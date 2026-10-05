@@ -33,14 +33,15 @@ The checker validates the operator-named path without assuming
 `brainstorms/`, reports one located line per failed criterion,
 and exits 0 only when all of these pass:
 
-- the five template sections are present and non-empty;
+- the five template sections are present exactly once, in the
+  pinned order, and non-empty;
 - no pinned template placeholder survives;
 - Direction records a selection, rationale, rejection, and
   rejection reason;
 - Core MVP Features contains a numbered feature list and an
   explicit out-of-scope list;
-- every risk-table row names an early warning and a mitigation
-  or explicit acceptance;
+- the risk table has at least one data row, and every row names
+  an early warning and a mitigation or explicit acceptance;
 - kill criteria are present.
 
 ### Judgment-only checks

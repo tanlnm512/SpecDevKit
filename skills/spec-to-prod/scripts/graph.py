@@ -88,7 +88,7 @@ research-gate, tick-commit) are never auto-satisfied by this script.
 
 Usage: graph.py <spec-dir> [--repo <path>] [--state-json] [--mermaid]
                 [--explain <node>] [--wave-dir <dir>] [--launch-check]
-                [--emit-spawns]
+                [--emit-spawns] [--repair <node>]
                 [--run [--runner '<template>'] [--dry-run] [--max-waves N]]
 Exit:  0 = report produced (any workflow state) · 1 = unreadable spec-dir ·
        2 = usage error (unknown flag, unknown --explain node, missing args)

@@ -61,9 +61,9 @@ spec → clarify? → research-gate? → (research) → survey → plan ∥ tech
 loop edges:  clarify · fix-round (≤5/task) · re-brief · converge (survey staleness)
 ```
 
-- **Nodes** — one per role agent (survey, research, plan, tech, qa, tasks,
-  execute) plus orchestrator/mechanical nodes (spec, clarify, research-gate,
-  verify, approve, tick-commit, archive).
+- **Nodes** — one per role agent (survey, research, plan, tech, qa, tasks)
+  plus orchestrator/mechanical nodes (spec, clarify, research-gate,
+  execute, verify, approve, tick-commit, archive).
   Every node has one mechanical done-signal, read from doc state.
 - **Data edges** — a node is *ready* exactly when all of its inputs are
   done; *done* nodes are never re-run (except through a loop edge).

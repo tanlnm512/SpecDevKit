@@ -193,8 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="drift-check.py",
         description="Release-validate every generated surface against its "
-                    "canonical source: workflows, manifests, diagrams, "
-                    "examples.")
+                    "canonical source: workflows, manifests, kit-rules, "
+                    "diagrams, examples.")
     p.parse_args(argv)
 
     failed = []

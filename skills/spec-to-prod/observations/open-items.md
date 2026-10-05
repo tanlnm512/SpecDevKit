@@ -3,13 +3,15 @@
 Living list — move an item to `decisions/` when it's resolved with a
 decision, or strike it when resolved outright.
 
-1. **Not yet run on a production repo.** Live end-to-end
+1. **E2–E6 not yet run on a production repo.** Live end-to-end
    orchestration is validated — twice in scratch repos at 1.7.0
-   (2026-09-09), then all six eval cases live on 2026-10-04 (scratch
+   (2026-09-09), all six eval cases live on 2026-10-04 (scratch
    `/tmp` repos, transcripts in
-   `specs/archive/2026-10-04-kit-level-up/notes/`) — but never
-   against a real, working repo. `evals/cases.md` E1–E2 remain the
-   standing scenarios; next attempt targets this repo itself.
+   `specs/archive/2026-10-04-kit-level-up/notes/`), and the real-repo
+   E1 happy path on this repo itself (2026-10-05, result in
+   `evals/results/2026-10-05-e1.md` — its discovery fixed as 2.14.1's
+   quoted-evidence residue bar). Remaining gap: E2–E6 on a real,
+   working repo.
 2. ~~**INSTALL.md deleted** (user, 2026-08-25). Restore-or-repoint
    pending — `tools/sync.sh` now mechanizes install, so a short INSTALL
    pointing at it may be enough.~~ Resolved 2026-09-10: root `README.md`'s

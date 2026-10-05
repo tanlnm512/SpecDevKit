@@ -15,9 +15,9 @@ maps Droid's session modes onto the same graph.
   `subagent_type` targets, `model: inherit` always, briefs verbatim.
 - The skill: `~/.agents/skills/spec-to-prod/` (Droid's personal
   compatibility root) — SKILL.md playbook, scripts, templates.
-- Lifecycle commands: `~/.factory/commands/{spec,plan,build,test,
-  review,ship,spec-to-prod}.md` — installed only when `~/.factory`
-  exists (never fabricated; loud skip otherwise).
+- Lifecycle commands: `~/.factory/commands/{spec,spec-plan,spec-build,
+  spec-test,spec-review,spec-ship,spec-to-prod}.md` — installed only
+  when `~/.factory` exists (never fabricated; loud skip otherwise).
 
 ## Model tiering: Task complexity, not frontmatter
 

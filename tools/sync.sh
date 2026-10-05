@@ -16,7 +16,11 @@
 #                              names in shared roots are an explicit
 #                              per-skill opt-in, never a glob; a foreign
 #                              file at any destination is refused, not
-#                              clobbered; omp needs none —
+#                              clobbered — except at the flat command
+#                              roots, where a name no skill claims
+#                              anymore is pruned when the ledger proves
+#                              it was our deploy, left alone otherwise;
+#                              omp needs none —
 #                              /skill:<name> auto-registers)
 #                              — ~/.factory/commands/ too, gated on
 #                              ~/.factory existing (Factory Droid's
@@ -70,11 +74,13 @@
 # Run from anywhere: tools/sync.sh — edits always land in skills/<name>/
 # first; this script is the only thing that copies out.
 #
-# Modes (FR-009): plain `tools/sync.sh` applies the plan; `--dry-run`
-# prints the full plan — create/update/unchanged/delete/refuse per
-# destination — and exits; `--check` reports refusals plus drift between
-# the masters and what is installed. Neither mode writes a destination
-# or records ownership.
+# Modes (FR-009): plain `tools/sync.sh` applies the plan (pruning
+# stale flat-root command deploys the ledger proves it owns); `--dry-run`
+# prints the full plan — create/update/unchanged/delete/stale-delete/
+# refuse per destination — and exits; `--check` reports refusals, stale
+# command deploys (shipped names no skill claims anymore), plus drift
+# between the masters and what is installed. Neither mode writes a
+# destination or records ownership.
 set -euo pipefail
 
 PKG_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
