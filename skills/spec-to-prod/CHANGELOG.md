@@ -5,6 +5,21 @@ records — the changelog itself starts 2026-09-08.
 
 ## Unreleased
 
+Kilo harness support (D-033, extends D-015): `tools/agent-defs.py
+--target kilo` renders every role brief as a Kilo subagent
+(`mode: subagent` + permission map derived from the brief's own
+`tools:`, `task` always denied) into `~/.config/kilo/agent/`, and the
+router + lifecycle commands install to `~/.config/kilo/command/` —
+both gated on `~/.config/kilo` existing, never fabricated. Skills
+already reach Kilo through the `~/.agents/skills` compatibility root
+it scans natively. `scripts/skill-dir.sh` gains the `.kilo/` project
+root and `~/.config/kilo` home root. No workflow dialect — Kilo has
+no dynamic workflow runtime; the SKILL.md inline fallback runs the
+stages.
+
+Migration: none required — re-run `bash tools/sync.sh` on a machine
+with Kilo installed and the command + agent defs appear.
+
 Disciplines imported from mattpocock/skills (each with its ADR):
 expected values in tests come from an independent source of truth,
 never recomputed by the code under test's own logic (D-030, one

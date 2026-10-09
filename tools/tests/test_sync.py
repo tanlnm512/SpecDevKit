@@ -469,6 +469,51 @@ class DroidCommandsTests(SyncShBase):
         self.assertIn("hand-written note", dest.read_text())
 
 
+class KiloCommandsTests(SyncShBase):
+    """Kilo CLI's command + agent roots (~/.config/kilo/command,
+    ~/.config/kilo/agent) — gated on the harness's global config dir
+    existing (never fabricated), same provenance-ledger discipline as
+    every other root."""
+
+    def test_absent_kilo_home_skips_loudly(self):
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("skip  kilo commands", r.stdout)
+        self.assertIn("skip  kilo defs", r.stdout)
+        self.assertFalse((self.home / ".config" / "kilo").exists())
+
+    def test_commands_and_defs_install_when_kilo_home_exists(self):
+        (self.home / ".config" / "kilo").mkdir(parents=True)
+        r1 = self.run_sync()
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        for base in ("spec", "spec-plan", "spec-build", "spec-test",
+                     "spec-review", "spec-ship", "spec-to-prod"):
+            self.assertTrue(
+                (self.home / ".config" / "kilo" / "command"
+                 / f"{base}.md").is_file(), base)
+        self.assertTrue(
+            (self.home / ".config" / "kilo" / "command" / LEDGER).is_file())
+        # agent dialect: subagent mode + derived permission map
+        surveyor = (self.home / ".config" / "kilo" / "agent"
+                    / "spec-surveyor.md").read_text()
+        self.assertIn("mode: subagent", surveyor)
+        self.assertIn("  task: deny", surveyor)
+        self.assertIn("  edit: allow", surveyor)
+        r2 = self.run_sync()
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+
+    def test_foreign_file_in_kilo_commands_is_refused(self):
+        (self.home / ".config" / "kilo").mkdir(parents=True)
+        self.assertEqual(self.run_sync().returncode, 0)
+        dest = (self.home / ".config" / "kilo" / "command"
+                / "spec-build.md")
+        dest.write_text("# a hand-written note, not the wrapper\n")
+        r = self.run_sync()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("REFUSE", r.stdout)
+        self.assertIn("hand-written note", dest.read_text())
+
+
 class StaleCommandPruneTests(SyncShBase):
     """A name that leaves extra.txt must not linger in flat command
     roots (D-029's migration path); a foreign file at an unclaimed

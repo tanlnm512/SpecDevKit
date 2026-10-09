@@ -11,13 +11,13 @@
 # payload.
 set -euo pipefail
 
-for root in .omp .claude .zcode .agents; do
+for root in .omp .claude .zcode .agents .kilo; do
   if [ -d "$root/skills/spec-to-prod" ]; then
     cd "$root/skills/spec-to-prod" && pwd
     exit 0
   fi
 done
-for root in "$HOME/.omp/agent" "$HOME/.claude" "$HOME/.zcode" "$HOME/.agents"; do
+for root in "$HOME/.omp/agent" "$HOME/.claude" "$HOME/.zcode" "$HOME/.agents" "$HOME/.config/kilo"; do
   if [ -d "$root/skills/spec-to-prod" ]; then
     cd "$root/skills/spec-to-prod" && pwd
     exit 0
@@ -31,5 +31,5 @@ for root in .agents/plugins/spec-dev-kit "$HOME/.gemini/config/plugins/spec-dev-
     exit 0
   fi
 done
-echo "ERROR: no spec-to-prod skill dir (checked ./.omp, ./.claude, ./.zcode, ./.agents, then the same order under \$HOME with ~/.omp/agent for .omp, then the agy plugin roots)" >&2
+echo "ERROR: no spec-to-prod skill dir (checked ./.omp, ./.claude, ./.zcode, ./.agents, ./.kilo, then the same order under \$HOME with ~/.omp/agent for .omp and ~/.config/kilo, then the agy plugin roots)" >&2
 exit 1

@@ -34,6 +34,19 @@ Targets:
   Skills reach droid through the ~/.agents/skills personal-compatibility
   root it already scans.
 
+- kilo      --out ~/.config/kilo/agent — Kilo CLI subagents, spawned by
+  the task tool; the filename is the agent name. Frontmatter:
+  description, mode: subagent (every kit role is a Task-tool spawn,
+  never a primary), permission map derived from the source `tools:`
+  list (read/edit/bash/glob/grep/webfetch/websearch/skill allow iff
+  the source lists a matching Claude tool — Write and Edit both map to
+  edit; task always deny — "no agent spawns another" from
+  _shared-protocol, made mechanical). model omitted: Kilo wants
+  provider-prefixed model IDs the source briefs don't carry, so the
+  agent inherits the session default. Skills reach Kilo through the
+  ~/.agents/skills compatibility root it scans natively (verified on a
+  live Kilo session) — only defs need generating.
+
 - agy       --out <repo-root>/agents — Antigravity plugin personas.
   agy reads Claude-style frontmatter natively, so the def is a
   byte-verbatim copy of the brief. Unlike the other targets this output
@@ -62,6 +75,8 @@ Run by tools/sync.sh; standalone:
         --out ~/.config/opencode/agents
     tools/agent-defs.py --target droid    --skill-dir skills/spec-to-prod \
         --out ~/.factory/droids
+    tools/agent-defs.py --target kilo     --skill-dir skills/spec-to-prod \
+        --out ~/.config/kilo/agent
     tools/agent-defs.py --target agy      --skill-dir skills/spec-to-prod \
         --out agents
 """
@@ -87,6 +102,12 @@ DROID_READONLY = {"Read", "LS", "Grep", "Glob"}
 OPENCODE_PERMS = {  # opencode permission key <- enabling Claude tools
     "read": ("read",), "edit": ("write", "edit"), "bash": ("bash",),
     "glob": ("glob",), "grep": ("grep",),
+    "webfetch": ("webfetch",), "websearch": ("websearch",),
+}
+
+KILO_PERMS = {  # kilo permission tool key <- enabling Claude tools
+    "read": ("read",), "edit": ("write", "edit"), "bash": ("bash",),
+    "glob": ("glob",), "grep": ("grep",), "skill": ("skill",),
     "webfetch": ("webfetch",), "websearch": ("websearch",),
 }
 
@@ -152,7 +173,17 @@ def render_droid(name, desc, fields, body):
     return "---\n" + "\n".join(fm) + "\n---\n" + body
 
 
-TARGETS = {"opencode": render_opencode, "droid": render_droid, "agy": None}
+def render_kilo(name, desc, fields, body):
+    have = set(claude_names(fields.get("tools", "")))
+    lines = [f"description: {q(desc)}", "mode: subagent", "permission:"]
+    for key, srcs in KILO_PERMS.items():
+        lines.append(f"  {key}: {'allow' if have & set(srcs) else 'deny'}")
+    lines.append("  task: deny")  # no agent spawns another
+    return "---\n" + "\n".join(lines) + "\n---\n" + body
+
+
+TARGETS = {"opencode": render_opencode, "droid": render_droid,
+           "kilo": render_kilo, "agy": None}
 
 
 def put(stage: Path, outd: Path, name: str):
@@ -193,7 +224,7 @@ def main(argv=None):
         else:
             sys.exit(f"unknown arg: {a}")
     if target not in TARGETS or not skill or not out:
-        sys.exit("usage: agent-defs.py --target {opencode|droid|agy} "
+        sys.exit("usage: agent-defs.py --target {opencode|droid|kilo|agy} "
                  "--skill-dir <dir> --out <dir>")
 
     src = Path(skill) / "agents"

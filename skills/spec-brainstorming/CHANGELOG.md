@@ -5,6 +5,18 @@ resident skill of the SpecDevKit repo: the pre-spec front door —
 five rigid stages from a raw idea to a durable design
 specification that feeds spec-to-prod's `/spec` intake.
 
+## Unreleased
+
+Kilo harness support (spec-to-prod D-033): the `/spec-brainstorming`
+command installs to `~/.config/kilo/command/` and the three lens
+briefs render as Kilo subagent defs (`mode: subagent` + permission
+map) in `~/.config/kilo/agent/` — gated on `~/.config/kilo`
+existing. The skill already reaches Kilo via the `~/.agents/skills`
+root it scans natively.
+
+Migration: none required — re-run `bash tools/sync.sh` on a machine
+with Kilo installed.
+
 
 ## 0.1.0 — 2026-10-05 (re-baseline)
 

@@ -7,6 +7,13 @@ confirmation → synthesis), then became a portable sibling skill.
 
 ## Unreleased
 
+Kilo harness support (spec-to-prod D-033): the `/spec-code-review`
+router installs to `~/.config/kilo/command/` and the panel briefs
+render as Kilo subagent defs (`mode: subagent` + permission map) in
+`~/.config/kilo/agent/` — gated on `~/.config/kilo` existing. Skills
+already reach Kilo via the `~/.agents/skills` root; no workflow
+dialect (inline stages, like opencode/droid).
+
 Labelled design-smell baseline in the quality lens (D-015, serves
 eval cases E2/E5). The quality brief's rubric now carries a fixed
 twelve-smell baseline (Fowler, _Refactoring_, ch.3 — Mysterious Name

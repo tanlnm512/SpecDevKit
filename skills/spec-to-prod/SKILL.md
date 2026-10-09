@@ -240,13 +240,15 @@ next wave). `--repair` always emits single-role payloads.
 
 ## Spawn mechanics (how to launch a role agent)
 
-1. **Resolve `skill_dir` once per session, before the first spawn.** Check,
-   in priority order: omp-native roots first — project
-   `.omp/skills/spec-to-prod/`, then `~/.omp/agent/skills/spec-to-prod/`
-   — then a project-level `.claude/skills/spec-to-prod/`,
-   `.zcode/skills/spec-to-prod/`, or `.agents/skills/spec-to-prod/`, then
-   the same three roots under `~` — use whichever exists first
-   (`scripts/skill-dir.sh` prints it; in omp, a `/skill:spec-to-prod`
+ 1. **Resolve `skill_dir` once per session, before the first spawn.** Check,
+    in priority order: omp-native roots first — project
+    `.omp/skills/spec-to-prod/`, then `~/.omp/agent/skills/spec-to-prod/`
+    — then a project-level `.claude/skills/spec-to-prod/`,
+    `.zcode/skills/spec-to-prod/`, `.agents/skills/spec-to-prod/`, or
+    `.kilo/skills/spec-to-prod/`, then
+    the same roots under `~` (kilo's home root is
+    `~/.config/kilo/skills/`) — use whichever exists first
+    (`scripts/skill-dir.sh` prints it; in omp, a `/skill:spec-to-prod`
    invocation names its skill directory in the injected prompt — prefer
    that when present). Carry this resolved absolute path in every spawn
    payload below; agent defs and briefs never hardcode one, since the

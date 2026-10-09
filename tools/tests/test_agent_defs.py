@@ -146,6 +146,58 @@ class DroidDefsTests(unittest.TestCase):
                 self.assertIn("model: inherit", fm)
 
 
+class KiloDefsTests(unittest.TestCase):
+    def gen(self, tmp):
+        return run("kilo", SKILL, tmp / "ki")
+
+    def test_permissions_follow_source_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.gen(Path(tmp))
+            for src in source_roles():
+                name, _, fields, _ = agent_defs.parse(src)
+                text = (out / f"{name}.md").read_text()
+                fm = FM.match(text).group(1)
+                self.assertIn("mode: subagent", fm)
+                have = set(agent_defs.claude_names(fields.get("tools", "")))
+                for key, srcs in agent_defs.KILO_PERMS.items():
+                    want = "allow" if have & set(srcs) else "deny"
+                    self.assertIn(f"  {key}: {want}", fm,
+                                  f"{name}: {key} should be {want}")
+                self.assertIn("  task: deny", fm)  # no agent spawns another
+
+    def test_readonly_role_denies_edit_and_bash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.gen(Path(tmp))
+            reviewer = (out / "spec-reviewer.md").read_text()
+            fm = FM.match(reviewer).group(1)
+            self.assertIn("  edit: deny", fm)
+            self.assertIn("  bash: deny", fm)
+            self.assertIn("  read: allow", fm)
+            self.assertIn("  glob: allow", fm)
+            self.assertIn("  grep: allow", fm)
+
+    def test_model_omitted_and_body_verbatim(self):
+        # Kilo wants provider-prefixed model IDs the briefs don't
+        # carry, so the def carries none and the agent inherits the
+        # session default; the body is the brief, verbatim.
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.gen(Path(tmp))
+            for src in source_roles():
+                name, _, _, body = agent_defs.parse(src)
+                fm = FM.match((out / f"{name}.md").read_text()).group(1)
+                self.assertNotIn("model:", fm)
+                self.assertTrue(
+                    (out / f"{name}.md").read_text().endswith(body))
+
+    def test_qa_keeps_skill_allow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.gen(Path(tmp))
+            qa = (out / "spec-qa.md").read_text()
+            fm = FM.match(qa).group(1)
+            self.assertIn("  skill: allow", fm)
+            self.assertIn("  edit: allow", fm)  # writes test.md
+
+
 class AgyDefsTests(unittest.TestCase):
     def test_personas_are_byte_verbatim_copies(self):
         with tempfile.TemporaryDirectory() as tmp:
