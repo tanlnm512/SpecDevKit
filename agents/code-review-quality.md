@@ -73,15 +73,56 @@ rule all live there.
   neighbors follow one; a utility reimplemented instead of reused;
   structure that fights the module's established seams. Judge against
   what the surrounding code actually does, not an idealized layout.
+- **Design smells — the labelled baseline**: on top of the repo's own
+  patterns, check the diff against this fixed baseline (Fowler,
+  _Refactoring_, ch.3 — each name labels a class of thing to look
+  for; each reads what it is → how to fix):
+  - **Mysterious Name** — a function, variable, or type whose name
+    doesn't reveal what it does or holds → rename it; if no honest
+    name comes, the design's murky.
+  - **Duplicated Code** — the same logic shape in more than one hunk
+    or file of the change → extract the shared shape, call it from
+    both.
+  - **Feature Envy** — a method reaching into another object's data
+    more than its own → move the method onto the data it envies.
+  - **Data Clumps** — the same few fields or params travelling
+    together, a type wanting to be born → bundle them into one type.
+  - **Primitive Obsession** — a primitive or string standing in for a
+    domain concept that deserves its own type → give it a small type.
+  - **Repeated Switches** — the same `switch`/`if`-cascade on the same
+    type recurring across the change → polymorphism, or one map both
+    sites share.
+  - **Shotgun Surgery** — one logical change forcing scattered edits
+    across many files → gather what changes together into one module.
+  - **Divergent Change** — one file or module edited for several
+    unrelated reasons → split so each module changes for one reason.
+  - **Speculative Generality** — abstraction, parameters, or hooks
+    added for needs the change doesn't have → delete it; inline back
+    until a real need shows.
+  - **Message Chains** — long `a.b().c().d()` navigation the caller
+    shouldn't depend on → hide the walk behind one method.
+  - **Middle Man** — a class or function that mostly delegates onward
+    → cut it, call the real target direct.
+  - **Refused Bequest** — a subclass or implementer that ignores most
+    of what it inherits → drop the inheritance, use composition.
+
+  Two rules bind the baseline. **Always a judgement call**: report a
+  smell as "possible <smell name>", never a hard violation — it still
+  passes the flagging bar like any finding. **The repo overrides**: a
+  documented repo standard or an established surrounding pattern that
+  endorses what the baseline would flag suppresses the smell —
+  Principle 8, the same rule design fit already judges by.
 - **Test coverage**: changed or new behavior with no test pinning it —
   name the unpinned behavior, not just "missing tests"; regression
   risk of the OLD behavior nowhere asserted after the change.
-- **Tests that cannot fail**: assert-free tests, tautologies (asserting
-  a mock's arrangement), over-mocked tests where the real contract
-  changed, snapshots that would bless any output, tests skipping
-  silently on missing fixtures or env. A test that cannot fail while the
-  behavior it names did change is `medium` at minimum — a fabricated
-  safety net is a real defect, not a nit.
+- **Tests that cannot fail**: assert-free tests, tautologies
+  (asserting a mock's arrangement, or an expected value recomputed by
+  the same logic the code under test uses instead of coming from a
+  known-good literal, worked example, or the spec), over-mocked tests
+  where the real contract changed, snapshots that would bless any
+  output, tests skipping silently on missing fixtures or env. A test
+  that cannot fail while the behavior it names did change is `medium`
+  at minimum — a fabricated safety net is a real defect, not a nit.
 
 ## Output
 

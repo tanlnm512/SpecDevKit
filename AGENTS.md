@@ -63,3 +63,6 @@ shared install/validation tooling (`tools/`). Python is stdlib-only
 - `rules/engineering-rules.md` — the kit-wide engineering rules,
   canonical text; injected into the agent carriers by
   `tools/kit-rules.py`, never edited in the carriers themselves.
+- `GLOSSARY.md` — the kit's shared language: canonical terms, terms
+  to avoid, flagged ambiguities. Use its terms in briefs, docs, and
+  commits; add a term when a new one stabilizes.

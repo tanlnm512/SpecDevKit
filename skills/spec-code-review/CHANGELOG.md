@@ -7,6 +7,21 @@ confirmation → synthesis), then became a portable sibling skill.
 
 ## Unreleased
 
+Labelled design-smell baseline in the quality lens (D-015, serves
+eval cases E2/E5). The quality brief's rubric now carries a fixed
+twelve-smell baseline (Fowler, _Refactoring_, ch.3 — Mysterious Name
+through Refused Bequest, each what → how-to-fix) with two binding
+rules: every smell is always a judgement call ("possible <smell>",
+never a hard violation), and a documented repo standard or
+established surrounding pattern overrides the baseline. Also
+sharpens the "tests that cannot fail" tautology shape: an expected
+value recomputed by the same logic the code under test uses (instead
+of a known-good literal, worked example, or the spec) is named
+explicitly. Brief-only fix, one source — both workflow dialects
+append the brief into every reviewer ask at run time (the 0.13.1
+pattern), so inline, workflow and general-reviewer paths get it
+together.
+
 Shared review oracle (D-014): target resolution, the mechanical gate,
 project sharding, finding IDs, carried-findings parsing, report
 assembly, panel systems and ask text move from the two workflow

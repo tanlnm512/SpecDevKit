@@ -210,9 +210,11 @@ parallel where you can:
   permissions, destructive operations;
 - **quality & tests** — complexity the next reader pays for,
   misleading names, doc drift, design fit (whether the change follows
-  the patterns the surrounding code establishes instead of inventing a
-  parallel way), and tests: changed behavior with no covering test,
-  tests that cannot fail.
+  the patterns the surrounding code establishes instead of inventing
+  a parallel way, checked against a labelled design-smell baseline —
+  Fowler shapes, always judgement calls, the repo overriding), and
+  tests: changed behavior with no covering test, tests that cannot
+  fail.
 
 Each side of this rubric is materialized as an agent brief inside the
 skill — `agents/code-review-correctness.md`, `-security.md`,

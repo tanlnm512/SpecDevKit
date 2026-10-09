@@ -17,6 +17,17 @@ Expected-behavior requirements are FR-### like any feature. The
 unchanged-behavior clauses carry FR-### too so each traces to a regression
 test case — a fix that breaks them must fail a named test, not a hunch.
 
+The repro must be **red-capable**: one command that asserts the user's
+exact symptom, goes red on this bug, and will go green on the fix — not
+"runs without erroring". Deterministic where possible; a flaky bug gets
+its reproduction rate raised (loop the trigger, narrow the timing window)
+until the red is reliable enough to schedule around. **Minimise before
+authoring**: shrink the repro to the smallest scenario that still goes
+red — cut inputs, callers, config, and steps one at a time, keeping only
+what is load-bearing — so the spec's cause analysis starts from the
+smallest hypothesis space. No red-capable repro, no bugfix spec: a bug
+that cannot be made red cannot be proven fixed.
+
 ## researcher — usually gated off
 
 A bugfix's cause and fix are almost always already known while the spec is
@@ -34,12 +45,24 @@ shape.
 Survey the bug itself: location (file:symbol, verbatim), suspected cause
 evidence, existing regression coverage (there usually is none — that is the
 finding). Same evidence/status/verify/gap shape; status of "bug exists" is
-proven by the repro command failing.
+proven by the repro command failing — run it and paste the red output.
 
 ## tech agent — insert § Root-cause analysis before § Solution
 
 Symptom · Location (survey evidence, verbatim) · Cause · Fix approach (why
 minimal) · Regression risk (naming the unchanged-behavior FRs at risk).
+
+The Cause is stated as **ranked falsifiable causes**: 2–4 candidates,
+each with the prediction that would confirm or kill it ("if X is the
+cause, then <probe> shows Y") — never a single plausible story, which
+anchors on the first idea. The confirmed cause carries its proof (the
+probe output or the red repro narrowing to it); the Fix approach
+addresses the confirmed cause only. If the regression test cannot be
+written at a seam where the real bug pattern occurs as it does at the
+call site, say so in Regression risk — **no correct seam is itself a
+finding** (the architecture prevents locking this bug down; a shallower
+test elsewhere would be false confidence), and it belongs in the
+survey gap or this section, never papered over.
 
 ## planner — plan.md's first phase is always the regression
 

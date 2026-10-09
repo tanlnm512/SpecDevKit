@@ -3,6 +3,28 @@
 Release history. Versions earlier than 1.2 are retrofitted from session
 records — the changelog itself starts 2026-09-08.
 
+## Unreleased
+
+Disciplines imported from mattpocock/skills (each with its ADR):
+expected values in tests come from an independent source of truth,
+never recomputed by the code under test's own logic (D-030, one
+bullet in the kit-wide engineering rules, carriers regenerated via
+`tools/kit-rules.py` — the spec-code-review quality lens names the
+same tautology shape); bugfix specs require a red-capable, minimised
+repro before authoring, ranked falsifiable causes in the tech
+agent's root-cause analysis, and treat a missing correct regression
+seam as a finding rather than a shallower test (D-031,
+`references/bugfix.md` deltas only — serves eval case
+`spec-to-prod/e2`); the surveyor reads the repo's domain glossary
+when one exists and words the survey and context files in the
+project's own terms (D-032). The clarify pass also gains one
+question-shape rule: word each question so "yes" accepts the
+recommended answer.
+
+Migration: none required — brief, reference, and rules-text changes
+ride the payloads every spawn already reads; no workflow, argument,
+or doc-shape change.
+
 
 ## 0.1.0 — 2026-10-05
 

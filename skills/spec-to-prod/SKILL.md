@@ -834,7 +834,9 @@ approval and delivery, not inside a proof pass of its own.
    ```
 
    A question whose answer depends on another still-open question belongs
-   to a *later* round, not this one. **Finding facts is never the user's
+   to a *later* round, not this one. Word each question so "yes"
+   accepts the recommended answer — the user can confirm the ➡️ with
+   one word. **Finding facts is never the user's
    job** — "does X already exist / is Y already handled" is a fact, not a
    decision: grep/read the repo yourself (or spawn a scoped surveyor probe
    for anything substantial) instead of asking, and put only genuine

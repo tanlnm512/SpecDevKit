@@ -56,6 +56,10 @@ taking right now binds absolutely.
 - Each contract has one owner test at the strongest boundary. Prefer
   extending an existing case or table over a near-duplicate test; avoid
   combinatorial matrices.
+- Expected values come from an independent source of truth — a
+  known-good literal, a worked example, or the spec — never from
+  recomputing them with the same logic the code under test uses; a
+  test whose assertion cannot disagree with the code proves nothing.
 - Do not create exports, wrappers, or seams that only tests use.
 - Bug fixes: the regression test must fail on the pre-fix code for the
   intended reason.
