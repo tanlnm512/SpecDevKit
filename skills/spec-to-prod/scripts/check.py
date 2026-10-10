@@ -593,6 +593,74 @@ def lifecycle_integrity_problems(task: str, repo: Path) -> list[str]:
     return problems
 
 
+def tiny_check(spec_dir: Path) -> int:
+    """The ONE-FILE contract gate (D-037): spec.md carries the task list
+    in § Tasks; no other docset file exists or is required. Checks the
+    in-file contract only — placeholders, open clarify markers, task
+    grammar (IDs, FR citations, unique, Accept lines on code tasks),
+    tick proof notes — then reports like the full checker. The gates
+    that need the seven-file surface (traceability to TCs, burndown
+    table, freeze) do not exist at this tier by design; approval and
+    the human proof pass still bind."""
+    import specstate
+    fails: list[str] = []
+    warns: list[str] = []
+    text = (spec_dir / "spec.md").read_text(encoding="utf-8",
+                                            errors="replace")
+    clean = INVISIBLE.sub("", text)
+    if not clean.strip() or PLACEHOLDER.search(clean):
+        fails.append("spec.md is unfilled or carries template placeholders")
+
+    if "NEEDS CLARIFICATION" in clean:
+        fails.append("open NEEDS CLARIFICATION markers in spec.md")
+
+    section = specstate.tasks_section(clean)
+    if section is None:
+        fails.append("spec.md has no `## Tasks` section — the tier's "
+                     "status holder (Tier: tiny)")
+    else:
+        wrapped = specstate.tiny_task_text(clean) or ""
+        entries = specstate.task_entries(wrapped)
+        if not entries:
+            fails.append("§ Tasks has no task entries")
+        seen: set[str] = set()
+        frs = set(re.findall(r"\bFR-\d{3}\b", clean))
+        for e in entries:
+            if e.id is None:
+                fails.append(f"task without a bare T### id: {e.first_line}")
+            elif e.id in seen:
+                fails.append(f"duplicate task id {e.id}")
+            else:
+                seen.add(e.id)
+            if e.id and e.done and "done 20" not in e.block:
+                fails.append(f"{e.id} ticked without a `done <date> — proof` "
+                             "sub-line")
+            if e.id and not re.search(r"\((?:FR|NFR)-\d{3}\)", e.block):
+                fails.append(f"{e.id} cites no FR/NFR id")
+            if e.id and "Touches:" not in e.block:
+                warns.append(f"{e.id} has no Touches: block (code tasks "
+                             "need one)")
+        for fr in frs:
+            if fr not in wrapped:
+                fails.append(f"{fr} defined but no task cites it")
+
+    if not re.search(r"^\*\*Status\*\*", clean, re.M):
+        fails.append("spec.md has no Status header")
+
+    print(f"check: {spec_dir} (tier: tiny — one-file contract)")
+    print(f"  {'PASS' if not fails else 'FAIL'} ({len(fails)} fail, "
+          f"{len(warns)} warn)")
+    for w in warns:
+        print(f"  WARN  {w}")
+    for f_ in fails:
+        print(f"  FAIL  {f_}")
+    from telemetry import record
+    record("spec-to-prod", "check_run", spec=spec_dir.name,
+           fails=len(fails), warns=len(warns), frs=len(frs),
+           tasks=len(entries) if section else 0)
+    return 1 if fails else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # argv is optional so a persistent process (e.g. an orchestrator's
     # eval kernel, importing this module once and calling main() across
@@ -624,6 +692,13 @@ def main(argv: list[str] | None = None) -> int:
         return survey_only_check(spec_dir, repo_root)
     if constitution_only:
         return constitution_only_check(repo_root)
+
+    spec_raw = (spec_dir / "spec.md")
+    if spec_raw.exists():
+        from specstate import spec_tier
+        if spec_tier(spec_raw.read_text(encoding="utf-8",
+                                        errors="replace")) == "tiny":
+            return tiny_check(spec_dir)
 
     fails: list[str] = []
     warns: list[str] = []
@@ -1199,6 +1274,10 @@ def main(argv: list[str] | None = None) -> int:
     for f_ in fails:
         print(f"  FAIL  {f_}")
     print(f"  {'PASS' if not fails else 'FAIL'} ({len(fails)} fail, {len(warns)} warn)")
+    from telemetry import record  # fire-and-forget local telemetry
+    record("spec-to-prod", "check_run", spec=spec_dir.name,
+           fails=len(fails), warns=len(warns),
+           frs=len(frs), tasks=total_tasks)
     return 1 if fails else 0
 
 

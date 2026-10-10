@@ -17,8 +17,8 @@ shared install/validation tooling (`tools/`). Python is stdlib-only
 
 - Skill suites: `skills/<name>/tests/run.sh` for all three skills
 - Tooling suite: `tools/tests/run.sh`
-- Generated-surface drift: `python3 tools/drift-check.py` (workflows,
-  manifests, kit-rules, diagrams, examples)
+- Generated-surface drift: `python3 tools/drift-check.py` (manifests,
+  kit-rules, diagrams, examples)
 - Docset contract: `python3 skills/spec-to-prod/scripts/check.py
   skills/spec-to-prod/examples/mini-spec/specs/mini-spec`
 - Install to machine harness roots + verify: `bash tools/sync.sh`, then
@@ -30,7 +30,6 @@ shared install/validation tooling (`tools/`). Python is stdlib-only
   the source, regenerate, re-run drift-check:
   - root `agents/` personas ← `skills/*/agents/*.md` via
     `tools/agent-defs.py`
-  - `skills/spec-to-prod/workflows/spec-run.*` ← `tools/workflow-defs.py`
   - `plugin.json` / `marketplace.json` ← `tools/plugin-manifest.py`
   - the `§ Engineering rules` sections in `skills/spec-to-prod/agents/
     _shared-protocol.md` and `skills/spec-code-review/agents/
@@ -42,7 +41,7 @@ shared install/validation tooling (`tools/`). Python is stdlib-only
   thin hand-maintained orchestration over the shared review oracle
   (`scripts/review_orchestrator.py`, D-014): shared state, systems,
   asks and report assembly live once there, fetched through one probe
-  per phase; `tests/test_workflow_copies.py` pins the split.
+  per phase.
   `spec-brainstorming.*` remains a hand-maintained twin pair.
 - **Skills are self-contained by packaging** — each `skills/<name>/`
   ships alone (marketplace `source: ./skills/<name>`), so content used

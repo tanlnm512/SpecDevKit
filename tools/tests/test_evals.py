@@ -62,7 +62,7 @@ class RealCorpusTests(unittest.TestCase):
 
     def test_discovers_every_conversational_case(self):
         # 16 since E5 (real-repo inline review) joined the corpus
-        self.assertEqual(len(self.cases), 16)
+        self.assertEqual(len(self.cases), 17)
         self.assertTrue(all(c.conversational for c in self.cases))
         selectors = {c.selector for c in self.cases}
         self.assertIn("spec-code-review/e2", selectors)

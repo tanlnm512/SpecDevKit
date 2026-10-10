@@ -517,6 +517,18 @@ def cmd_report(a):
     lines += ["", "## Residual risks", ""]
     lines += [f"- {r}" for r in assessment.get("residualRisks", [])] or ["None identified."]
     lines += ["", "## How this was checked", ""] + d.get("checked", []) + [""] + d.get("fix_checked", [])
+    try:  # fire-and-forget local telemetry (see scripts/telemetry.py)
+        import sys as _sys
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).resolve().parent))
+        from telemetry import record
+        record("spec-code-review", "review_report", kind=kind,
+               conclusion=d.get("conclusion", ""),
+               findings=len(reported),
+               unconfirmed=sum(1 for f in reported
+                               if f.get("status") == "unconfirmed"))
+    except Exception:
+        pass
     return out(True, markdown="\n".join(lines), reported_findings=reported,
                conclusion=d.get("conclusion", ""))
 

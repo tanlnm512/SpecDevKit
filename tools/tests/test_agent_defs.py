@@ -76,21 +76,21 @@ class OpencodeDefsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
             for src in source_roles():
-                name, _, fields, _ = agent_defs.parse(src)
-                text = (out / f"{name}.md").read_text()
+                _, _, fields, _ = agent_defs.parse(src)
+                text = (out / src.name).read_text()
                 fm = FM.match(text).group(1)
                 self.assertIn("mode: subagent", fm)
                 have = set(agent_defs.claude_names(fields.get("tools", "")))
                 for key, srcs in agent_defs.OPENCODE_PERMS.items():
                     want = "allow" if have & set(srcs) else "deny"
                     self.assertIn(f"  {key}: {want}", fm,
-                                  f"{name}: {key} should be {want}")
+                                  f"{src.name}: {key} should be {want}")
                 self.assertIn("  task: deny", fm)  # no agent spawns another
 
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "spec-reviewer.md").read_text()
+            reviewer = (out / "reviewer.md").read_text()
             fm = FM.match(reviewer).group(1)
             self.assertIn("  edit: deny", fm)
             self.assertIn("  bash: deny", fm)
@@ -100,16 +100,16 @@ class OpencodeDefsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
             for src in source_roles():
-                name, _, _, body = agent_defs.parse(src)
+                _, _, _, body = agent_defs.parse(src)
                 self.assertTrue(
-                    (out / f"{name}.md").read_text().endswith(body))
+                    (out / src.name).read_text().endswith(body))
 
 
 
     def test_researcher_gets_web_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            researcher = (out / "spec-researcher.md").read_text()
+            researcher = (out / "scout.md").read_text()
             fm = FM.match(researcher).group(1)
             self.assertIn("  websearch: allow", fm)
             self.assertIn("  webfetch: allow", fm)
@@ -123,13 +123,13 @@ class DroidDefsTests(unittest.TestCase):
     def test_readonly_set_collapses_to_category(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "spec-reviewer.md").read_text()
+            reviewer = (out / "reviewer.md").read_text()
             self.assertIn("tools: read-only", reviewer)
 
     def test_tool_ids_map_to_factory_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            imp = (out / "spec-implementer.md").read_text()
+            imp = (out / "builder.md").read_text()
             for tid in ("Read", "Execute", "Create", "Edit"):
                 self.assertIn(f'"{tid}"', imp)
             self.assertNotIn('"Bash"', imp)
@@ -154,21 +154,21 @@ class KiloDefsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
             for src in source_roles():
-                name, _, fields, _ = agent_defs.parse(src)
-                text = (out / f"{name}.md").read_text()
+                _, _, fields, _ = agent_defs.parse(src)
+                text = (out / src.name).read_text()
                 fm = FM.match(text).group(1)
                 self.assertIn("mode: subagent", fm)
                 have = set(agent_defs.claude_names(fields.get("tools", "")))
                 for key, srcs in agent_defs.KILO_PERMS.items():
                     want = "allow" if have & set(srcs) else "deny"
                     self.assertIn(f"  {key}: {want}", fm,
-                                  f"{name}: {key} should be {want}")
+                                  f"{src.name}: {key} should be {want}")
                 self.assertIn("  task: deny", fm)  # no agent spawns another
 
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "spec-reviewer.md").read_text()
+            reviewer = (out / "reviewer.md").read_text()
             fm = FM.match(reviewer).group(1)
             self.assertIn("  edit: deny", fm)
             self.assertIn("  bash: deny", fm)
@@ -183,16 +183,16 @@ class KiloDefsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
             for src in source_roles():
-                name, _, _, body = agent_defs.parse(src)
-                fm = FM.match((out / f"{name}.md").read_text()).group(1)
+                _, _, _, body = agent_defs.parse(src)
+                fm = FM.match((out / src.name).read_text()).group(1)
                 self.assertNotIn("model:", fm)
                 self.assertTrue(
-                    (out / f"{name}.md").read_text().endswith(body))
+                    (out / src.name).read_text().endswith(body))
 
     def test_qa_keeps_skill_allow(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            qa = (out / "spec-qa.md").read_text()
+            qa = (out / "qa.md").read_text()
             fm = FM.match(qa).group(1)
             self.assertIn("  skill: allow", fm)
             self.assertIn("  edit: allow", fm)  # writes test.md

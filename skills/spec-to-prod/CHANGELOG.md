@@ -5,6 +5,45 @@ records — the changelog itself starts 2026-09-08.
 
 ## Unreleased
 
+The 2.0 leap, in five shippable steps (each with its ADR):
+
+- **D-035 — one engine, no dialects**: the per-harness workflow
+  dialects (`workflows/`, `tools/workflow-defs.py`,
+  `install-workflow.sh`, both `test_workflow_copies.py` suites) are
+  deleted; `graph.py --run` is the ONE frontier-loop engine on every
+  harness (`--launch-check` still says when automation pays).
+- **D-036 — five archetypes**: the eight role briefs collapse to
+  scout · designer · qa · builder · reviewer, with lens
+  specializations (survey/research, plan/tech/tasks) riding the
+  spawn payload from `agents/_lenses.md`. Node names, digests, doc
+  ownership, and check.py contracts unchanged.
+- **D-037 — the thin floor**: `**Tier**: tiny` (the scaffold
+  default) is the ONE-FILE contract — the task list lives in
+  spec.md § Tasks (same grammar as task.md), authoring nodes are
+  SKIPPED, verify gates on the tiny checker, ticks land inside
+  spec.md, and `migrate.py grow` promotes to the full docset with
+  ids preserved. Absent Tier reads full: pre-existing docsets keep
+  today's graph.
+- **D-038 — the contract table**: `scripts/contract.py` is the
+  single source for every node's identity/readiness/done-signal;
+  graph.py imports it, SKILL.md's node table is generated from it,
+  and drift-check pins the pair (new `contract` category).
+- **D-039 — primitives**: grilling (`references/grilling.md`),
+  diagnosing (`references/diagnosing.md`), and domain language
+  (`references/domain-language.md`) extracted as model-invoked
+  primitives the playbook and bugfix deltas invoke instead of
+  embedding. Also: local run telemetry (`scripts/telemetry.py` —
+  waves, gate pauses, check/audit outcomes to
+  `~/.spec-dev-kit/telemetry/`, `KIT_TELEMETRY=off` disables).
+
+Migration: delete any installed workflow dialect copies
+(`~/.zcode/workflows/`, `~/.claude/workflows/`) after upgrading —
+sync no longer installs or verifies them; agent def names change
+(`spec-scout`, `spec-designer`, `spec-qa`, `spec-builder`,
+`spec-reviewer`) — re-run `bash tools/sync.sh` to regenerate every
+harness's defs; existing specs run unchanged (no Tier header reads
+full).
+
 Kilo harness support (D-033, extends D-015): `tools/agent-defs.py
 --target kilo` renders every role brief as a Kilo subagent
 (`mode: subagent` + permission map derived from the brief's own

@@ -7,6 +7,25 @@ specification that feeds spec-to-prod's `/spec` intake.
 
 ## Unreleased
 
+- **D-006 — one panel-wave form**: the per-harness workflow dialects
+  are deleted (with the kit-wide move, spec-to-prod D-035); stage 2
+  always runs as the session's own wave — evidence pack first, then
+  the three lenses spawned fresh and in parallel. One contract
+  (`contracts/run.md`), one form.
+- **D-007 — one panelist archetype**: the three lens briefs collapse
+  into `agents/panelist.md` (the seat spine) with the lens
+  specializations riding the spawn payload from
+  `agents/_lenses.md`; independence stays the spawn mechanics
+  (fresh contexts, D-002), which did not move.
+- Local run telemetry (`scripts/telemetry.py`): handoff-check
+  outcomes record to `~/.spec-dev-kit/telemetry/
+  spec-brainstorming.jsonl`; `KIT_TELEMETRY=off` disables.
+
+Migration: delete installed workflow copies
+(`~/.zcode/workflows/spec-brainstorming.*`, `~/.claude/workflows/`)
+after upgrading — sync no longer installs or verifies them; the
+panel spawns come from the session (same payload contract).
+
 Kilo harness support (spec-to-prod D-033): the `/spec-brainstorming`
 command installs to `~/.config/kilo/command/` and the three lens
 briefs render as Kilo subagent defs (`mode: subagent` + permission

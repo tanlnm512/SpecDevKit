@@ -10,9 +10,9 @@ description: >-
   spec", "refresh the tech spec", "rebuild the task list"), scaffold specs/ for a project, or
   execute an approved task.md through
   implementer agents. Recognise its specs on disk by tech-spec.md + survey.md and the singular
-  task.md / test.md names. Invoked as /spec-to-prod <verb> <spec-name>, or as
-  the native /spec-run workflow ("run the auth spec pipeline", "continue the
-  spec").
+  task.md / test.md names. Invoked as /spec-to-prod <verb> <spec-name>, via the six
+  lifecycle commands, or naturally ("run the auth spec pipeline", "continue the
+  spec") — driven by graph.py --run, one engine on every harness.
 metadata:
   owner: platform-core
   version: "0.1.0"
@@ -90,22 +90,24 @@ Node states use one vocabulary everywhere (report, `--state-json`, this
 doc): `done` · `READY` · `blocked(<reason>)` · `gate:undetermined` ·
 `SKIPPED`.
 
-| Node | Ready when | Done when |
-|------|------------|-----------|
-| `spec` | always (entry) | spec.md filled; no open `NEEDS CLARIFICATION` markers |
-| `clarify` | open markers exist | markers resolved (removed/answered in spec.md) |
-| `research-gate` | spec done | research.md exists — real content → ran, skip marker → skipped |
-| `research` | gate resolved `run` | research.md non-marker, non-empty |
-| `survey` | spec done | survey.md filled AND `check.py --survey-only` exits 0 |
-| `plan` | spec + survey done | plan.md filled |
-| `tech` | spec + survey done AND research resolved (either form) | tech-spec.md filled |
-| `qa` | spec + survey done (never reads plan/tech — parallel-safe) | test.md filled |
-| `tasks` | plan + tech + survey done | task.md filled |
-| `verify` | plan, tech, qa, tasks, survey all done | `check.py <spec-dir>` exits 0 |
-| `approve` (HUMAN) | verify done | spec.md `Status: approved` (or later) |
-| `execute` | approved | every task entry landed — `(implemented)`, ticked `[x]`, or struck `~~` |
-| `tick-commit` | execute done — 0 open tasks | tasks ticked with proof notes + burndown consistent; `Delivered: commit @ <sha-or-dash>` recorded (non-git: SKIPPED-noted) |
-| `archive` | tick-commit done AND spec `Status: done` | dir moved to `specs/archive/<date>-<name>/`, INDEX repointed |
+<!-- BEGIN generated: node-table (scripts/contract.py --render skill-table) -->
+| Node | Kind | Ready when | Done when |
+|------|------|------------|-----------|
+| `spec` | entry | always (entry node) | spec.md exists, non-empty, no open NEEDS CLARIFICATION markers |
+| `clarify` | loop | open NEEDS CLARIFICATION markers exist in spec.md | markers resolved (removed/answered in spec.md) |
+| `research-gate` | gate | spec.md done | research.md exists (real content → ran, or the skip marker → skipped) |
+| `research` | agent | the research gate is resolved `run` | research.md exists, non-marker, non-empty |
+| `survey` | agent | spec.md done — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
+| `plan` | agent | spec + survey done — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
+| `tech` | agent | spec + survey done AND research resolved (either form) — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
+| `qa` | agent | spec + survey done (never reads plan/tech — parallel-safe) — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
+| `tasks` | agent | plan + tech + survey done — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
+| `verify` | mechanical | plan, tech, qa, tasks, survey all done | `check.py <spec-dir>` exits 0 |
+| `approve` | human | verify done (HUMAN gate) | spec.md Status: approved (or later) |
+| `execute` | mechanical | approved | every task entry implemented, ticked [x], or struck ~~ |
+| `tick-commit` | human | execute done (HUMAN gate: the tick, then the delivery) | durable task-tick evidence (every task ticked/struck, every tick with its proof note) plus the delivery record — `Delivered: commit @ <sha>` in task.md, or the explicit non-git skip |
+| `archive` | terminal | tick-commit done AND spec Status: done | dir moved to specs/archive/<date>-<name>/, INDEX repointed |
+<!-- END generated: node-table -->
 
 The per-task frontier inside `execute`: a task is runnable when it is
 `- [ ]`, its `(after T###)` dependencies are all implemented, ticked, or
@@ -205,8 +207,22 @@ never a silent false result). Modes:
 
 ## Effort scaling (right-size the artifacts, never the gates)
 
-Spec discipline is mandatory at every size; agent count is not. Choose the
-tier from FR/NFR count, touched areas, and unknowns — then keep check.py
+Spec discipline is mandatory at every size; agent count is not — and
+neither is the FILE COUNT: spec.md's `**Tier**:` header (D-037) owns
+the contract shape. `tiny` (the scaffold default) is the ONE-FILE
+contract — the task list lives in spec.md `## Tasks` (the same
+checkbox grammar task.md uses), the graph SKIPPEDs the authoring
+nodes with `tier: tiny` reasons, verify gates on the tiny checker,
+ticks land inside spec.md, and the Evidence section carries the
+delivery record. Grow when risk appears (multi-area, auth,
+persistence, migration, research-heavy): `migrate.py grow
+<spec-dir>` moves the task blocks verbatim into task.md (ids never
+renumbered) and scaffolds the authoring docs for re-authoring.
+`full` (or no Tier header — every pre-existing docset) is the
+seven-file contract, unchanged.
+
+Within the full tier, choose the effort tier from FR/NFR count,
+touched areas, and unknowns — then keep check.py
 and user approval intact. The tier is
 mechanical (D-024): spec.md's `**Effort**:` header field
 (`tiny | standard | large`; docsets without the field read `large` — the
@@ -214,7 +230,8 @@ full-wave legacy behavior), chosen with the user at authoring and read by
 graph.py: at `standard`, `--emit-spawns` collapses the plan ∥ tech wave
 (plus the tasks wave it feeds) into ONE merged designer payload — one
 spawn authors plan.md → tech-spec.md → task.md in that order, carrying
-three briefs and the shared protocol once; **qa stays its own
+the archetype and three lens sections with the shared protocol once;
+**qa stays its own
 implementation-blind spawn in the same wave** (D-027), so test.md always
 comes from qa alone at every tier. A partial write self-heals (whatever
 doc is missing still spawns individually the
@@ -256,9 +273,12 @@ next wave). `--repair` always emits single-role payloads.
    install, and only the orchestrator's own session can reliably tell
    which root is actually active.
 2. **Preferred where the harness supports custom agent types**: spawn with
-   `subagent_type: spec-<role>` — one file per role, `agents/spec-*.md`:
-   harness frontmatter (tools, readonly, model) on top of the full brief
-   body. Install copies where the harness reads agent defs
+   the archetype's `subagent_type` (`spec-scout`, `spec-designer`,
+   `spec-qa`, `spec-builder`, `spec-reviewer`) — one file per archetype,
+   `agents/{scout,designer,qa,builder,reviewer}.md`: harness frontmatter
+   (tools, readonly, model) on top of the archetype body; the lens
+   section from `agents/_lenses.md` rides the payload (D-036) and names
+   which specialization the spawn runs. Install copies where the harness reads agent defs
    (`~/.claude/agents/` on Claude Code). The frontmatter mechanically
    enforces what used to be prose only (e.g. the reviewer physically
    cannot write; no agent can spawn another) — a guarantee that holds only
@@ -273,7 +293,8 @@ next wave). `--repair` always emits single-role payloads.
    `_shared-protocol.md` relative to that, never a path baked into the
    file itself.
 3. **Fallback** (defs not installed, or spawning a generic agent type):
-   read `<skill_dir>/agents/spec-<role>.md` and strip its frontmatter —
+   read the archetype's file `<skill_dir>/agents/<archetype>.md` and
+   strip its frontmatter —
    the body IS the
    system prompt — and build a self-contained prompt: `<body contents> +
    <skill_dir>/agents/_shared-protocol.md (verbatim — the reviewer is the
@@ -375,7 +396,7 @@ instantiation of that generic prose, not a new set of rules.
   repeated top-level calls, the ones the recompute loop actually pays for.
 - **`xd://lsp`/`ast_edit` are orchestrator-session devices, not
   automatically a spawned subagent's.** Verified empirically, not
-  assumed: a `spec-surveyor` spawned via the `task` tool reports
+  assumed: a `spec-scout` spawned via the `task` tool reports
   `Mounted devices: .` (empty) even though its frontmatter grants
   `write` — device mounting is a separate mechanism from the base tool
   allowlist, and a default spawn gets none. Where the orchestrator's own
@@ -399,71 +420,46 @@ mapping lives in `references/droid-modes.md`; the mission-planning
 skeleton is `references/mission-brief.md`. The graph, gates, and doc
 state are unchanged.
 
-## Dynamic workflow runs (zcode · claude code)
+## The engine — graph.py --run (one loop, every harness)
 
-Where the harness has a script-driven workflow runtime, the frontier
-loop has a native instantiation: the generated `spec-run` workflow
-(ADR-019) computes the ready wave from doc state, spawns it as
-subagents, recomputes, and stops `AWAITING HUMAN` at every judgment
-gate — the same loop, gates, and resume contract as this playbook; the
-workflow is `graph.py --run`'s runner seam made native, and it decides
-nothing the orchestrator wouldn't.
+The frontier loop has one engine: `graph.py --run` (D-035). It computes
+the ready wave from doc state, emits self-contained payloads, invokes
+the `--runner` per payload (a command template with `{prompt_file}`,
+`{role}`, `{spec_dir}`, `{skill_dir}` substituted; the default `print`
+runner echoes the invocation — `--dry-run` with payloads written),
+recomputes, and stops `AWAITING HUMAN: <node>` at every judgment gate —
+clarify, an undetermined research-gate, approve, tick-commit. It decides
+nothing the orchestrator wouldn't; the loop itself mutates no doc state.
+Any harness session — the orchestrator itself — drives it identically;
+there are no per-harness workflow dialects to install or drift.
 
-- **Launch weight — preflight before every launch (D-022)** —
+- **Launch weight — preflight before automation (D-022)** —
   `python3 <skill-dir>/scripts/graph.py specs/<name> --launch-check`
   prints the advisory `{weight, launch_workflow, gate, frontier_agents,
-  payloads, reason}`: launch the workflow only on `weight: "wave"` — a
-  multi-payload wave or an execute span, the heavy spans the loop
-  automation exists for. Every other weight is an inline move: `gate`
-  (a human gate is pending — the launch would read state once and stop
-  AWAITING HUMAN seconds later, deciding nothing; on Claude Code that
-  one fetch is a whole probe agent), `single` (exactly one light doc
-  node — the single-agent run mode: `--emit-spawns` + one spawn),
-  `complete` (archive inline), `held` (unblock inline). The weight is
-  the default decision rule, never a refusal of an explicit user ask
-  for the workflow.
-- **Installed per harness** — `~/.zcode/workflows/spec-run.dwf.ts`
-  (zcode: run via the harness's workflow surface with
-  `{"spec": "<name>"}`) and `~/.claude/workflows/spec-run.js`
-  (claude code: `/spec-run` with the spec in args).
-  `tools/install-workflow.sh zcode|claude|all` installs one or both
-  (`--project` for `<repo>/.<harness>/workflows/`); `tools/sync.sh`
-  installs and verifies both where the harness home exists. Each
-  installed copy carries its root's own `skill_dir` baked in; a runtime
-  `skill_dir` arg overrides it.
-- **Sources** — `skills/spec-to-prod/workflows/` are committed
-  regenerate-only artifacts of `tools/workflow-defs.py` (its templates
-  are the single representation; `--check` catches hand-edits). Never
-  edit the generated files; edit the generator and regenerate.
-- **Run semantics** — state comes only from `graph.py --state-json`,
+  payloads, reason}`: hand the loop to `--run` only on
+  `weight: "wave"` — a multi-payload wave or an execute span, the heavy
+  spans the automation exists for. Every other weight is an inline
+  move: `gate` (a human gate is pending — the loop would read state
+  once and stop AWAITING HUMAN seconds later, deciding nothing),
+  `single` (exactly one light doc node — the single-agent run mode:
+  `--emit-spawns` + one spawn), `complete` (archive inline), `held`
+  (unblock inline). The weight is the default decision rule, never a
+  refusal of an explicit user ask for automation.
+- **Run semantics** — state comes only from doc state via graph.py;
   waves from `--emit-spawns` payloads (each subagent reads its payload
-  file and writes its artifact to disk); the run stops at a gate
-  (clarify · undetermined research-gate · approve · tick-commit), on
-  completion, on a held frontier, at
-  the wave cap (default 12), or on a no-change wave — answer the gate,
-  rerun, and the loop resumes from doc state. At `Effort: standard`
-  the plan ∥ tech ∥ qa wave arrives as ONE merged designer payload
-  (D-024). The zcode dialect
-  publishes a markdown run summary; the claude dialect logs the same
-  report. A wave that changed no doc state gets exactly one re-brief
-  round for its failed payloads (failure digest verbatim in the retry
-  ask; D-020) — rounds 2+ are yours.
-- **Cost & unattended levers** (D-020) — staged tiering on zcode:
-  launch the analysis waves (survey/research — cheap-tier roles per
-  D-016) with the workflow run's subagent-model override on a cheap
-  model, and the execute waves at the default; per-role tiering is not
-  possible on either facade. Scheduled / off-peak runs: wrap the
-  workflow with the harness's scheduler (cron / off-peak queue) — only
-  spans with no gate ahead (post-approve) are safe to run unattended;
-  the run parks at the tick-commit gate by design. On Claude Code,
-  pre-approve the probe's `python3 …/graph.py` command in the project's
-  permission rules so mid-wave permission prompts don't stall the run.
-- **Limit** — per-role cost tiers do not ride into workflow runs (the
-  facades expose no per-spawn model knob); every spawned role runs the
-  run's model — per-run tier choice exists on zcode (see the cost
-  levers above), per-role does not. The authoring half (spec node +
-  clarify loop) stays with you and the user — a workflow run on an
-  unauthored spec reports `held` and names why.
+  file and writes its artifact to disk); the run stops at a gate, on
+  completion, on a held frontier, at the wave cap (default 12), or on a
+  no-change wave — answer the gate, rerun, and the loop resumes from
+  doc state. At `Effort: standard` the plan ∥ tech ∥ qa wave arrives
+  as ONE merged designer payload (D-024). A wave that changed no doc
+  state gets exactly one re-brief round for its failed payloads
+  (failure digest verbatim in the retry ask; D-020) — rounds 2+ are
+  yours.
+- **Unattended spans** — only spans with no gate ahead (post-approve)
+  are safe to run unattended (cron / scheduler wrapping `--run` with a
+  real runner); the run parks at the tick-commit gate by design. The
+  authoring half (spec node + clarify loop) stays with you and the
+  user — a run on an unauthored spec reports `held` and names why.
 
 ## Independent spawns (no cross-agent coordination)
 
@@ -487,16 +483,19 @@ re-briefs whoever needs it (§ Spawn mechanics, step 6).
 
 | Agent | File | subagent_type | Type | Readiness (node) | Produces | Loads skill |
 |-------|------|---------------|------|------------------|----------|-------------|
-| surveyor | `agents/spec-surveyor.md` | `spec-surveyor` | Explore | spec done → survey | survey.md (+ specs/context/ first run) | — (workspace graph/code-intel tool if present) |
-| researcher | `agents/spec-researcher.md` | `spec-researcher` | Explore | research-gate resolved `run` → research | research.md | paper-fetch / semanticscholar (if apt) |
-| planner | `agents/spec-planner.md` | `spec-planner` | GP | spec + survey done → plan | plan.md | — (workspace graph/code-intel tool if present) |
-| tech | `agents/spec-tech.md` | `spec-tech` | GP | spec + survey done AND research resolved (either form) → tech | tech-spec.md | mermaid cheatsheet (vendored) · creating-mermaid-diagrams for image export only |
-| qa | `agents/spec-qa.md` | `spec-qa` | GP | spec + survey done → qa (never reads plan/tech) | test.md | web-gui-tester (UI specs), agent-native-design (agent CLIs) |
-| task-breaker | `agents/spec-task-breaker.md` | `spec-task-breaker` | GP | plan + tech + survey done → tasks | task.md | — |
-| implementer | `agents/spec-implementer.md` | `spec-implementer` | GP | approved → execute, per-task frontier | code/tests only | repo's own conventions |
-| reviewer | `agents/spec-reviewer.md` | `spec-reviewer` | Explore | never a frontier node — contract review during verification; implementation-diff review before tick/delivery | nothing — findings only | — |
+| scout · survey | `agents/scout.md` + `_lenses.md` § survey | `spec-scout` | Explore | spec done → survey | survey.md (+ specs/context/ first run) | — (workspace graph/code-intel tool if present) |
+| scout · research | `agents/scout.md` + `_lenses.md` § research | `spec-scout` | Explore | research-gate resolved `run` → research | research.md | paper-fetch / semanticscholar (if apt) |
+| designer · plan | `agents/designer.md` + `_lenses.md` § plan | `spec-designer` | GP | spec + survey done → plan | plan.md | — (workspace graph/code-intel tool if present) |
+| designer · tech | `agents/designer.md` + `_lenses.md` § tech | `spec-designer` | GP | spec + survey done AND research resolved (either form) → tech | tech-spec.md | mermaid cheatsheet (vendored) · creating-mermaid-diagrams for image export only |
+| qa | `agents/qa.md` | `spec-qa` | GP | spec + survey done → qa (never reads plan/tech) | test.md | web-gui-tester (UI specs), agent-native-design (agent CLIs) |
+| designer · tasks | `agents/designer.md` + `_lenses.md` § tasks | `spec-designer` | GP | plan + tech + survey done → tasks | task.md | — |
+| builder | `agents/builder.md` | `spec-builder` | GP | approved → execute, per-task frontier | code/tests only | repo's own conventions |
+| reviewer | `agents/reviewer.md` | `spec-reviewer` | Explore | never a frontier node — contract review during verification; implementation-diff review before tick/delivery | nothing — findings only | — |
 
-defs and briefs are the same file: `agents/spec-*.md` = frontmatter + brief body; install
+Five archetypes (scout · designer · qa · builder · reviewer; D-036) —
+briefs and defs are the same file: `agents/*.md` = frontmatter +
+archetype body, and the lens specialization rides the payload from
+`agents/_lenses.md`; install
 them where the harness reads agent defs (`~/.claude/agents/` on Claude
 Code). Harnesses without user-installable agent types (e.g. ZCode)
 use the fallback spawn — same briefs, rules carried in the prompt
@@ -559,9 +558,9 @@ spec-to-prod.md` router), via the six bare lifecycle commands (§
 Lifecycle commands), or naturally ("re-survey the auth spec"). Three
 ways to run, chosen by the user's ask or the state of the graph:
 
-**Full workflow** — default for a new large spec — launch the spec-run
-workflow once the `--launch-check` preflight says `wave` (§ Dynamic
-workflow runs): compute the frontier,
+**Full workflow** — default for a new large spec — drive the frontier
+loop (inline, or via `graph.py --run` with a runner once the
+`--launch-check` preflight says `wave`): compute the frontier,
 run the ready wave, recompute, repeat until the graph completes
 (archive).
 
@@ -817,63 +816,16 @@ approval and delivery, not inside a proof pass of its own.
    specs/CONSTITUTION.md on the repo's first scaffold: fill it WITH the
    user (non-negotiable articles; approval and every implementer payload
    carry them).
-2. **Clarify pass (grilling)** — the clarify node, before any wave spawns:
-   map the draft's gaps (missing ACs, undefined edge cases, vague FRs,
-   open NEEDS CLARIFICATION markers) as a **design tree** — every open
-   decision branches into the decisions that hang off it. Work it in
-   **rounds**: the **frontier** is every question whose prerequisites are
-   already settled — askable now without guessing at an answer you haven't
-   heard yet. Ask the *whole* frontier in one batched round, each question
-   numbered with why it matters, 2–3 viable options where useful, and a
-   recommended answer:
-
-   ```
-   ❓ **Q1** — **<question title>**: <body>
-   ➡️ <recommended answer>
-   ---
-   ❓ **Q2** — **<question title>**: <body>
-   ➡️ <recommended answer>
-   ```
-
-   A question whose answer depends on another still-open question belongs
-   to a *later* round, not this one. Word each question so "yes"
-   accepts the recommended answer — the user can confirm the ➡️ with
-   one word. **Finding facts is never the user's
-   job** — "does X already exist / is Y already handled" is a fact, not a
-   decision: grep/read the repo yourself (or spawn a scoped surveyor probe
-   for anything substantial) instead of asking, and put only genuine
-   judgment calls to the user. Don't block the round on a running check —
-   only the questions downstream of it wait; ask the rest of the frontier
-   now.
-
-   **A round put to the user is a HUMAN gate — an unanswered round is
-   not an answer.** Where the harness has an interactive question tool,
-   ask through it; but some modes resolve the call without ever waiting
-   (ZCode autonomous runs return "user did not provide answers" in under
-   a second), and an empty or skipped reply is the same thing. On any
-   non-answer, print the round in chat exactly as formatted above and
-   **end the turn there**: do not adopt the ➡️ recommendations, do not
-   resolve the NEEDS CLARIFICATION markers yourself, do not spawn
-   anything. Stopping is safe by construction — open markers keep the
-   spec node blocked and graph.py holds the frontier at `clarify`, so
-   the run resumes from doc state the moment the user's next message
-   carries the answers. The recommended answer exists to make answering
-   one glance cheap, not to make the round optional. Proceeding on
-   recorded defaults is Execution mode's mid-implementation rule
-   (§ Execution mode) and never applies here or at the approve gate
-   (D-018).
-
-   Each round's answers reshape the tree and push the frontier
-   outward; recompute it and ask the next round. The pass ends when the
-   frontier is empty — not at a fixed question count, though a tree that
-   keeps sprouting new branches instead of closing is a signal to split
-   the feature, not to push through more rounds. Every question still
-   closes in one of three states — answered (resolved into spec.md),
-   explicitly deferred (Scope out), or a named assumption (Assumptions &
-   risks) — never left open. Do not spawn the analysis wave until the user
-   has confirmed the shared understanding (open markers keep the spec node
-   blocked, and graph.py holds the frontier there). An ambiguity caught
-   here never reaches a downstream agent.
+2. **Clarify pass** — the clarify node, before any wave spawns: run the
+   **grilling** primitive (`references/grilling.md` — the design tree,
+   frontier rounds with ➡️ recommended answers worded so "yes"
+   accepts them, facts-are-yours/judgment-is-the-user's, and the hard
+   stop: a non-answered round ends the turn, never adopts its own
+   recommendations, never resolves markers itself — D-018). Every
+   question closes answered, deferred (Scope out), or as a named
+   assumption — never left open; do not spawn the analysis wave until
+   the user has confirmed the shared understanding (open markers hold
+   the spec node blocked).
 3. Fill spec.md WITH the user: what/why/business, stories+ACs, FR-###,
    NFR-### quality triage, scope in/out. Unresolved ambiguity → `NEEDS CLARIFICATION: <question>`
    inline — collect answers before the task list is written (check.py and

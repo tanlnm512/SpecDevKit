@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 # Scaffold a spec folder from the skill's templates.
-# Usage: scaffold.sh <kebab-case-spec-name> [target-root]
-# Creates <target-root>/specs/<name>/ with the 7 template files
-# and registers it in <target-root>/specs/INDEX.md.
+# Usage: scaffold.sh [--tier tiny|full] <kebab-case-spec-name> [target-root]
+# Default tier: tiny — the ONE-FILE contract (spec.md carries the task
+# list in § Tasks; D-037). --tier full scaffolds the 7-file docset (the
+# pre-D-037 shape). Both register in <target-root>/specs/INDEX.md.
 set -euo pipefail
 
-name="${1:?usage: scaffold.sh <kebab-case-spec-name> [target-root]}"
+tier=tiny
+if [ "${1:-}" = "--tier" ]; then
+  tier="${2:?--tier needs tiny|full}"
+  case "$tier" in tiny|full) ;; *) echo "ERROR: --tier must be tiny|full" >&2; exit 2 ;; esac
+  shift 2
+fi
+
+name="${1:?usage: scaffold.sh [--tier tiny|full] <kebab-case-spec-name> [target-root]}"
 root="${2:-.}"
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target="$root/specs/$name"
@@ -20,9 +28,13 @@ if [[ -e "$target" ]]; then
 fi
 
 mkdir -p "$target"
-for f in spec plan tech-spec task test survey; do
-  cp "$skill_dir/templates/$f.md" "$target/$f.md"
-done
+if [ "$tier" = tiny ]; then
+  cp "$skill_dir/templates/spec-tiny.md" "$target/spec.md"
+else
+  for f in spec plan tech-spec task test survey; do
+    cp "$skill_dir/templates/$f.md" "$target/$f.md"
+  done
+fi
 # research.md ships as the resolved skip marker, not the template: the
 # research-gate's common case (no real open questions — most bugfixes) is
 # the default, so no run ever pauses "undetermined" on a fresh scaffold
@@ -48,10 +60,17 @@ if [[ ! -e "$constitution" ]]; then
   cp "$skill_dir/templates/constitution.md" "$constitution"
 fi
 
-echo "Scaffolded $target"
+echo "Scaffolded $target (tier: $tier)"
 echo "Note: check.py FAILs on a fresh scaffold by design — templates ship"
 echo "      example IDs (FR-001…) that must be replaced. It verifies the"
 echo "      finished docset."
 echo "Next: 0) fill specs/CONSTITUTION.md with the user (articles bind every spec)"
 echo "      1) fill spec.md with the user (intent is human)"
-echo "      2) spawn the analysis wave (see SKILL.md workflow graph)"
+if [ "$tier" = tiny ]; then
+  echo "      2) author § Tasks with the user, then run the graph — the"
+  echo "         analysis/authoring nodes are SKIPPED at this tier"
+  echo "      Grow to the full docset when risk appears:"
+  echo "         python3 $skill_dir/scripts/migrate.py grow $target"
+else
+  echo "      2) spawn the analysis wave (see SKILL.md workflow graph)"
+fi

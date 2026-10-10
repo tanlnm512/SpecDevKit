@@ -225,6 +225,14 @@ def main(argv=None):
     if not failures:
         print(f"PASS {named}: {GREEN_SUMMARY}")
     print(JUDGMENT)
+    try:  # fire-and-forget local telemetry (see scripts/telemetry.py)
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from telemetry import record
+        record("spec-brainstorming", "handoff_check", artifact=named,
+               failures=len(failures))
+    except Exception:
+        pass
     return 1 if failures else 0
 
 

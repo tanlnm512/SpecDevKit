@@ -27,21 +27,21 @@ Spawns are fresh — no conversation context carries over:
    `scripts/skill-dir.sh`, never hardcoded.
 2. The problem restatement: the idea, the audience, the
    constraints, in the user's own words where possible.
-3. The brief body (frontmatter stripped) byte-verbatim, then
+3. The panelist archetype body (frontmatter stripped)
+   byte-verbatim, the spawn's ONE lens section from
+   `agents/_lenses.md` byte-verbatim, then
    `agents/_panel-protocol.md` verbatim.
 4. The evidence pack: external grounding gathered before the
    spawns — GitHub signals (prior art, competing tools, stars and
    activity, maintenance state) and authoritative web sources,
-   each finding with its URL and access date. The workflow form
-   gathers it mechanically in its own phase; inline, the session
-   gathers it before spawning. A failed gather is logged and the
-   payload says so — the lenses then treat every external claim
-   as an assumption and never invent a source.
+   each finding with its URL and access date. The session
+   gathers it before spawning — a neutral researcher subagent
+   where the harness can spawn one, itself otherwise. A failed
+   gather is logged and the payload says so — the lenses then
+   treat every external claim as an assumption and never invent a
+   source.
 5. The return contract below — decisions come from digest
    fields, never from prose.
-
-The workflow form builds the same payload mechanically; inline
-and workflow are one contract, not two.
 
 ## The digest grammar (every lens, pinned)
 
@@ -84,24 +84,23 @@ dealbreaker mapping — remains judgment because the digest is not
 part of the artifact; a green check never claims that mapping
 was proved.
 
-## The workflow form (the panel wave)
+## The panel wave (one form, every harness)
 
-Where the harness has a workflow runtime, stage 2 runs as the
-`spec-brainstorming` workflow (`workflows/spec-brainstorming.dwf.ts`
-on zcode, `workflows/spec-brainstorming.js` on Claude Code; D-004):
+Stage 2 always runs as the session's own wave (D-006 superseding
+D-004's dialect split):
 
-- Args: `name`, `problem`, `audience`, `constraints` (stage 1's
-  output), optional `skill_dir`.
-- It gathers the external evidence pack from GitHub and the web
+- Ground: `name`, `problem`, `audience`, `constraints` (stage 1's
+  output).
+- The external evidence pack is gathered from GitHub and the web
   before spawning the lenses (one neutral researcher, never a
   lens seat — the pack is shared input, the digests stay
   independent); a failed gather degrades to "no external
   evidence", logged — never an error, never a skipped lens.
-- It loads the three briefs and `_panel-protocol.md` from the
-  skill dir at run time — one source of truth for the lenses —
-  spawns them in parallel, and returns the three digests verbatim.
-- A brief that fails to load degrades to the workflow's inline
+- The three briefs and `_panel-protocol.md` load from the
+  skill dir — one source of truth for the lenses — and spawn
+  in parallel, each digest returned verbatim.
+- A brief that fails to load degrades to its inline
   mission line, logged — never an error, never a skipped lens.
-- Stages 1, 3, 4 and 5 are ALWAYS the session's: the runtimes
+- Stages 1, 3, 4 and 5 are ALWAYS the session's: spawned jobs
   have no user-turn primitive, and the matrix, refinement and
   handoff are judgment, not mechanics.

@@ -10,8 +10,7 @@ sheds a pinned section, or the green example stops satisfying the
 handoff gate.
 
 The version triple (VERSION · SKILL.md frontmatter · plugin.json)
-is owned by tools/tests/test_manifests.py; the workflow dialect
-parity is owned by tests/test_workflow_copies.py.
+is owned by tools/tests/test_manifests.py.
 """
 import os
 import re
@@ -39,9 +38,9 @@ TEMPLATE_SECTIONS = [
 ]
 
 LENSES = [
-    ("brainstorm-visionary.md", "The Visionary"),
-    ("brainstorm-cynic.md", "The Cynic"),
-    ("brainstorm-minimalist.md", "The Minimalist"),
+    ("visionary", "The Visionary"),
+    ("cynic", "The Cynic"),
+    ("minimalist", "The Minimalist"),
 ]
 
 # Template placeholders that must never survive into a filled artifact
@@ -79,24 +78,23 @@ class StageContractTests(unittest.TestCase):
 
 
 class PanelContractTests(unittest.TestCase):
-    def test_every_lens_brief_carries_the_digest_contract(self):
-        for file, name in LENSES:
+    def test_every_lens_section_carries_the_digest_contract(self):
+        lenses = read("agents/_lenses.md")
+        for _, name in LENSES:
             with self.subTest(lens=name):
-                body = read(f"agents/{file}")
                 for field in ("`angle:", "`pitch:`", "`points:`", "`watch:`"):
-                    self.assertIn(field, body, f"{file}: digest field {field} not pinned")
+                    self.assertIn(field, lenses,
+                                  f"{name}: digest field {field} not pinned")
 
-    def test_lens_briefs_are_def_generator_compatible(self):
-        for file, name in LENSES:
-            with self.subTest(lens=name):
-                body = read(f"agents/{file}")
-                self.assertTrue(body.startswith("---\n"), f"{file}: no frontmatter")
-                fm = body.split("---", 2)[1]
-                self.assertIn(f"name: brainstorm-", fm, f"{file}: role prefix")
-                self.assertIn("model: inherit", fm, f"{file}: model")
-                self.assertIn("tools: Read, Grep, Glob", fm, f"{file}: tools")
-                for banned in ("  - Write\n", "  - Edit\n", "  - Agent\n"):
-                    self.assertIn(banned, fm, f"{file}: lenses never edit or spawn")
+    def test_panelist_brief_is_def_generator_compatible(self):
+        body = read("agents/panelist.md")
+        self.assertTrue(body.startswith("---\n"), "no frontmatter")
+        fm = body.split("---", 2)[1]
+        self.assertIn("name: brainstorm-panelist", fm)
+        self.assertIn("model: inherit", fm)
+        self.assertIn("tools: Read, Grep, Glob", fm)
+        for banned in ("  - Write\n", "  - Edit\n", "  - Agent\n"):
+            self.assertIn(banned, fm, "lenses never edit or spawn")
 
     def test_shared_protocol_carries_lens_rules(self):
         body = read("agents/_panel-protocol.md")

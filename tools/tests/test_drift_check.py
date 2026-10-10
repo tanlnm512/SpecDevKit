@@ -1,6 +1,6 @@
-"""Tests for tools/drift-check.py — release validation of the four
-generated surfaces (workflows, manifests, diagrams, examples) against
-their canonical sources (FR-006).
+"""Tests for tools/drift-check.py — release validation of the generated
+surfaces (manifests, diagrams, examples) against their canonical sources
+(FR-006).
 
 Per surface, the same contract: a clean tree passes; a mutated generated
 output fails nonzero with the canonical generator named; regeneration
@@ -77,32 +77,18 @@ class DriftTests(unittest.TestCase):
         # work; a copy made clean here isolates this suite from it
         r = run_py(repo / "tools" / "plugin-manifest.py")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        r = run_py(repo / "tools" / "workflow-defs.py")
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return repo
 
     def run_drift_check(self, repo: Path) -> subprocess.CompletedProcess:
         return run_py(repo / "tools" / "drift-check.py")
 
-    def test_clean_copy_passes_with_all_four_sections(self):
+    def test_clean_copy_passes_with_all_sections(self):
         r = self.run_drift_check(self.clean_copy())
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("drift check: OK", r.stdout)
-        for section in ("== workflows", "== manifests", "== diagrams",
-                        "== examples"):
+        for section in ("== contract", "== manifests", "== kit-rules",
+                        "== diagrams", "== examples"):
             self.assertIn(section, r.stdout)
-
-    def test_workflow_drift_fails_and_regeneration_repairs(self):
-        repo = self.clean_copy()
-        victim = repo / "skills" / "spec-to-prod" / "workflows" / "spec-run.js"
-        victim.write_text(victim.read_text() + "\n// hand edit\n")
-        r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("workflows", r.stdout)
-        self.assertIn("tools/workflow-defs.py", r.stdout)
-        r = run_py(repo / "tools" / "workflow-defs.py")
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
 
     def test_manifest_drift_fails_and_regeneration_repairs(self):
         repo = self.clean_copy()
@@ -155,3 +141,32 @@ class DriftTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ContractTableTests(unittest.TestCase):
+    """D-038: scripts/contract.py is the node table's single source;
+    graph.py imports it and SKILL.md's block is generated from it."""
+
+    def test_mutation_fails_and_regeneration_repairs(self):
+        repo = DriftMutationBase.clean_copy()
+        victim = repo / "skills" / "spec-to-prod" / "SKILL.md"
+        victim.write_text(
+            victim.read_text().replace("| `spec` | entry |",
+                                       "| `spec` | HAND-EDIT |", 1))
+        r = run_py(repo / "tools" / "drift-check.py")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("contract", r.stdout)
+        mod = repo / "skills" / "spec-to-prod" / "scripts" / "contract.py"
+        gen = run_py(mod, "--render", "skill-table")
+        self.assertEqual(gen.returncode, 0)
+        text = victim.read_text()
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("c", mod)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        start, end = text.find(m.BEGIN), text.find(m.END)
+        victim.write_text(
+            text[:start] + gen.stdout.strip("\n")
+            + text[end + len(m.END):])
+        self.assertEqual(
+            run_py(repo / "tools" / "drift-check.py").returncode, 0)

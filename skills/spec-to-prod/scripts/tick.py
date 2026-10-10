@@ -211,7 +211,18 @@ def main(argv=None) -> int:
     import datetime
     date = date or datetime.date.today().isoformat()
 
-    task_path = Path(spec_dir) / "task.md"
+    # D-037: at tiny tier the task list lives in spec.md § Tasks —
+    # tick rewrites spec.md in place; the burndown-table recompute is
+    # a no-op there (no table by design).
+    spec_path = Path(spec_dir) / "spec.md"
+    tier = "full"
+    if spec_path.is_file():
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import specstate
+        tier = specstate.spec_tier(
+            spec_path.read_text(encoding="utf-8", errors="replace"))
+    task_path = (Path(spec_dir) / "spec.md" if tier == "tiny"
+                 else Path(spec_dir) / "task.md")
     if not task_path.is_file():
         print(f"no task.md under {spec_dir}", file=sys.stderr)
         return 1

@@ -54,6 +54,11 @@ STATUS_LINE = re.compile(r"^\*\*Status\*\*:\s*`?([A-Za-z]+)", re.M)
 # pre-field docset keeps the full-wave graph unchanged.
 EFFORT_LINE = re.compile(r"^\*\*Effort\*\*:\s*`?([A-Za-z]+)", re.M)
 EFFORT_TIERS = ("tiny", "standard", "large")
+# D-037 thin floor: `**Tier**: tiny` on spec.md — the contract is ONE
+# file (tasks live in spec.md § Tasks); absent/unknown reads "full",
+# so every docset predating the field keeps today's graph.
+TIER_LINE = re.compile(r"^\*\*Tier\*\*:\s*`?([A-Za-z]+)", re.M)
+TASKS_HEADING = "## Tasks"
 
 # task.md entry shapes (the Conventions block in templates/task.md is the
 # normative wording): `- [x]` done, `(in-progress)` claimed, `~~T###~~`
@@ -198,6 +203,41 @@ def spec_effort(spec_md: str) -> str:
     return word if word in EFFORT_TIERS else "large"
 
 
+def spec_tier(spec_md: str) -> str:
+    """The spec.md contract tier — `tiny` (one file: the task list lives
+    in spec.md § Tasks) or `full` (the seven-file docset). Absent or
+    unknown reads `full`: docsets predating the field keep today's
+    graph (D-037)."""
+    m = TIER_LINE.search(spec_md) if spec_md else None
+    word = m.group(1).lower() if m else ""
+    return word if word in ("tiny", "full") else "full"
+
+
+def tasks_section(spec_md: str) -> str | None:
+    """The text of spec.md's `## Tasks` section (the tiny tier's task
+    list), or None when the spec carries no such section. Section ends
+    at the next `## ` heading."""
+    if not spec_md:
+        return None
+    start = spec_md.find(TASKS_HEADING)
+    if start < 0:
+        return None
+    body = spec_md[start + len(TASKS_HEADING):]
+    end = body.find("\n## ")
+    return body[:end] if end >= 0 else body
+
+
+def tiny_task_text(spec_md: str) -> str | None:
+    """The tiny tier's task-source text: the § Tasks section wrapped in
+    a `## Phase 1` header so task_entries/tick_evidence — the same
+    parsers task.md uses — read it unchanged (D-037: one grammar, two
+    homes)."""
+    section = tasks_section(spec_md)
+    if section is None:
+        return None
+    return "## Phase 1\n" + section.lstrip("\n")
+
+
 def coverage_floor(spec_md: str, default: int = 80) -> int:
     """The spec.md coverage floor (`**Coverage**: <int>` percent), clamped
     to 0–100; `default` (80) when the header is absent — the minimum line
@@ -220,10 +260,16 @@ def task_entries(task_md: str) -> list[TaskEntry]:
     entries: list[TaskEntry] = []
     for sec in re.split(r"^## ", task_md, flags=re.M):
         header = sec.split("\n", 1)[0].strip()
-        if not header.lower().startswith("phase"):
+        # `## Tasks` is the tiny tier's phase-1 section inside spec.md
+        # (D-037) — task.md parsers read either home unchanged. An
+        # unnumbered `## Phase …` header keeps its legacy phase=None.
+        if header == "Tasks":
+            phase = 1
+        elif header.lower().startswith("phase"):
+            hm = re.match(r"phase\s+(\d+)", header, re.I)
+            phase = int(hm.group(1)) if hm else None
+        else:
             continue
-        hm = re.match(r"phase\s+(\d+)", header, re.I)
-        phase = int(hm.group(1)) if hm else None
         for block in re.split(r"^(?=- \[)", sec, flags=re.M):
             if not re.match(r"- \[", block):
                 continue

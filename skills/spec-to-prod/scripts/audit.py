@@ -1104,20 +1104,25 @@ def main(argv: list[str] | None = None) -> int:
     else:
         repo = Path(repo_arg) if repo_arg else spec_dir.parent.parent
     if mode == "scope":
-        return mode_scope(spec_dir, repo, base)
-    if mode == "clean":
-        return mode_clean(repo, base)
-    if mode == "archived":
-        return mode_archived(repo)
-    if mode == "mutate":
-        return mode_mutate(spec_dir, repo, base, max_mutants)
-    if mode == "coverage":
-        return mode_coverage(spec_dir, repo, threshold)
-    if mode == "dod":
-        return mode_dod(spec_dir, repo, base, dry)
-    if mode == "converge":
-        return mode_converge(spec_dir, repo, base)
-    return mode_proofs(spec_dir, repo, run)
+        rc = mode_scope(spec_dir, repo, base)
+    elif mode == "clean":
+        rc = mode_clean(repo, base)
+    elif mode == "archived":
+        rc = mode_archived(repo)
+    elif mode == "mutate":
+        rc = mode_mutate(spec_dir, repo, base, max_mutants)
+    elif mode == "coverage":
+        rc = mode_coverage(spec_dir, repo, threshold)
+    elif mode == "dod":
+        rc = mode_dod(spec_dir, repo, base, dry)
+    elif mode == "converge":
+        rc = mode_converge(spec_dir, repo, base)
+    else:
+        rc = mode_proofs(spec_dir, repo, run)
+    from telemetry import record  # fire-and-forget local telemetry
+    record("spec-to-prod", "audit", mode=mode, rc=rc,
+           spec=spec_dir.name if spec_dir else "")
+    return rc
 
 
 if __name__ == "__main__":

@@ -86,9 +86,7 @@ class ModelTierTests(unittest.TestCase):
         — read from the shipped files, not a hand-maintained name list."""
         tiered = {n for n, f in _ROLE_FIELDS.items()
                   if f.get("model") and f["model"] != "inherit"}
-        self.assertEqual(tiered, {"spec-surveyor", "spec-researcher",
-                                  "spec-task-breaker",
-                                  "spec-implementer"})
+        self.assertEqual(tiered, {"spec-scout", "spec-builder"})
 
     def test_reviewer_never_tiered(self):
         """The one safety-critical role left above the cheap tier:
@@ -102,32 +100,27 @@ class ModelTierTests(unittest.TestCase):
         """`@`-prefixed values are not valid unquoted YAML plain scalars
         (`@` is a reserved indicator) — an unquoted line is a parse
         hazard, not just a style nit."""
-        model_line = next(l for l in fm_lines("spec-surveyor")
+        model_line = next(l for l in fm_lines("scout")
                            if l.startswith("model:"))
         self.assertEqual(model_line, 'model: "@smol"')
 
     def test_non_tiered_roles_have_no_model_line(self):
-        for name in ("spec-reviewer", "spec-planner", "spec-tech",
-                     "spec-qa"):
+        for name in ("reviewer", "designer", "qa"):
             self.assertFalse(
                 any(l.startswith("model:") for l in fm_lines(name)), name)
 
     def test_thinking_level_unaffected_by_model_tier(self):
-        """spec-surveyor and spec-task-breaker get both (cheap model +
-        low effort); spec-researcher gets model only (its Claude-side
-        def has no `effort: low`); spec-implementer gets the model
-        override with no thinking-level cap (D-016 tiers the model, not
-        the reasoning-depth setting it never had)."""
-        self.assertIn("thinking-level: low", fm_lines("spec-surveyor"))
-        self.assertFalse(any(l.startswith("thinking-level:")
-                              for l in fm_lines("spec-researcher")))
-        self.assertIn("thinking-level: low", fm_lines("spec-task-breaker"))
+        """spec-scout and spec-builder get the cheap model;
+        designer/qa/reviewer inherit (D-012/D-016, with D-036 folding
+        the old per-role effort caps away — the cheap tier rides the
+        model alone)."""
         self.assertTrue(any(l.startswith("model:")
-                            for l in fm_lines("spec-task-breaker")))
-        self.assertTrue(any(l.startswith("model:")
-                            for l in fm_lines("spec-implementer")))
-        self.assertFalse(any(l.startswith("thinking-level:")
-                              for l in fm_lines("spec-implementer")))
+                            for l in fm_lines("builder")))
+        # D-036: no archetype carries `effort:` — the cheap tier rides
+        # the model alone; thinking depth stays the harness default
+        for name in ("scout", "builder", "designer", "qa", "reviewer"):
+            self.assertFalse(any(l.startswith("thinking-level:")
+                                 for l in fm_lines(name)), name)
 
 
 
@@ -148,14 +141,11 @@ class ToolMappingTests(unittest.TestCase):
 
     def test_every_shipped_role_tools_line_matches_expected(self):
         expected = {
-            "spec-surveyor": "read, grep, glob, bash, write, edit",
-            "spec-researcher": "read, grep, glob, bash, write, edit, web_search",
-            "spec-planner": "read, grep, glob, bash, write, edit",
-            "spec-tech": "read, grep, glob, bash, write, edit",
-            "spec-qa": "read, grep, glob, bash, write, edit",
-            "spec-task-breaker": "read, grep, glob, bash, write, edit",
-            "spec-implementer": "read, grep, glob, bash, write, edit",
-            "spec-reviewer": "read, grep, glob",
+            "scout": "read, grep, glob, bash, write, edit, web_search",
+            "designer": "read, grep, glob, bash, write, edit",
+            "qa": "read, grep, glob, bash, write, edit",
+            "builder": "read, grep, glob, bash, write, edit",
+            "reviewer": "read, grep, glob",
         }
         for name, want in expected.items():
             tools_line = next(l for l in fm_lines(name) if l.startswith("tools:"))

@@ -303,11 +303,11 @@ When the user asked to fix as well, run bounded rounds (default 2):
    touched, for NEW defects the fixes introduce.
 5. Loop until everything is fixed or rounds run out.
 
-**The review-then-ask flow.** A dynamic workflow cannot pause mid-run
-to ask the user, so the decision gate is a second run, and `fix_from`
+**The review-then-ask flow.** An unattended run cannot pause mid-run to
+ask the user, so the decision gate is a second run, and `fix_from`
 makes it cheap: run a review first (`fix_rounds: 0`), present the
 findings with their severity and impact, and let the user decide. If
-they fix, run the workflow again with `fix_from` — the previous
+they fix, run again with `fix_from` — the previous
 report's markdown (the saved report file; its findings section parses
 back, ids included), or its findings JSON inline or as a file path
 (each item `{id, where, what, evidence, severity, lens, status,
@@ -324,33 +324,20 @@ commit decision and message are the user's.
 
 ## Launch discipline
 
-- **Any harness**: the `/spec-code-review` router command
-  (`commands/spec-code-review.md`, installed by tools/sync.sh) routes
-  review/fix/gate/plan asks into this skill; `scripts/skill-dir.sh`
-  prints the active skill dir per this priority order.
-- **zcode harness**: run the installed workflow by name —
-  `spec-code-review` (args: `base`, `target` `diff`/`branch`/`pr`/
-  `project`, `pr` (the pull request, pr mode), `intent` (what the
-  change is supposed to do — the author's stated intent), `fix_from`
-  (the previous report's markdown or its findings JSON — fix-only
-  continuation),
-  `paths` (project mode), `mode` fast/full/auto, `fix_rounds`, optional
-  `skill_dir` override).
-  A repo may keep its own
-  project-scoped copy tuned to its exact CI set; the project copy wins
-  there. The zcode facade has no user-installable agent types, so the
-  workflow reads the panel briefs from the skill dir at run time and
-  injects them into the reviewer, triage and fixer personas. Without
-  the workflow, execute the stages inline as above.
-- **Claude Code**: run the installed dynamic workflow `spec-code-review`
-  (same args) — `tools/install-workflow.sh claude` bakes
-  `workflows/spec-code-review.js` into `~/.claude/workflows/` (a
-  project-scoped `.claude/workflows/` copy wins locally, same rule).
-  Its agents are one-shot: cross-lens dedup runs as one explicit merge
-  pass instead of a shared triage conversation, and the report returns
-  as the run result's `markdown` field.
-- **Other agents**: follow the stages inline; `scripts/gate.sh` is
-  plain bash + python3 and is the only script you need.
+- **Any harness** (one shape — D-017): the `/spec-code-review` router
+  command (`commands/spec-code-review.md`, installed by tools/sync.sh)
+  routes review/fix/gate/plan asks into this skill, and the session
+  executes the stages inline as written — the shared review oracle
+  (`scripts/review_orchestrator.py`, D-014) resolves targets, runs the
+  gate plan, parses findings and assembles the report for any caller
+  (args: `base`, `target` `diff`/`branch`/`pr`/`project`, `pr` (the
+  pull request, pr mode), `intent` (the author's stated intent),
+  `fix_from` (the previous report's markdown or its findings JSON —
+  fix-only continuation), `paths` (project mode), `mode` fast/full/
+  auto, `fix_rounds`). A repo may keep its own project-scoped copy
+  tuned to its exact CI set; the project copy wins there. Harnesses
+  with subagent dispatch spawn the panel briefs; harnesses without run
+  the lenses inline from the same briefs' rubric sections.
 - **Long foreground calls** (this skill runs none itself, but a fix
   loop may) may be auto-backgrounded by the harness; the result
   arrives as a follow-up when the job finishes. NEVER poll a
@@ -373,7 +360,8 @@ mode, as the branch is ready to merge.
 it arbitrates). `gates/recommendation.md` arbitrates stop conditions
 and recommendation criteria. `decisions/` holds the panel's ADRs
 (D-001…D-013 — gate-first, independent confirmation, advisory-only,
-targets-collapse-to-diffs, the fix loop, dialect parity,
+targets-collapse-to-diffs, the fix loop, dialect retirement
+(D-017 — the oracle is the one executable form),
 precision-over-recall, the preflight scout, sub-repo targets, sharded
 project coverage, audits continuing past red gates, kit-wide
 engineering rules, finding ids and the report-markdown carrier).

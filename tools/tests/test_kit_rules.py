@@ -137,8 +137,8 @@ class KitRulesWiringTests(unittest.TestCase):
         self.assertIn("NEVER poll a", text)
         self.assertIn("_shared-protocol.md", text)
 
-    def test_implementer_brief_defers_to_the_canonical_section(self):
-        text = flat((S2P / "agents" / "spec-implementer.md").read_text(
+    def test_builder_brief_defers_to_the_canonical_section(self):
+        text = flat((S2P / "agents" / "builder.md").read_text(
             encoding="utf-8"))
         self.assertIn("§ Engineering rules", text)
         self.assertIn("they win", text)
@@ -146,8 +146,8 @@ class KitRulesWiringTests(unittest.TestCase):
     def test_brainstorming_panel_carries_no_engineering_rules(self):
         # D-005: the lenses are read-only — the rules must NOT ride
         # their briefs or the panel protocol
-        for name in ("brainstorm-visionary.md", "brainstorm-cynic.md",
-                     "brainstorm-minimalist.md", "_panel-protocol.md"):
+        for name in ("panelist.md", "_lenses.md",
+                     "_panel-protocol.md"):
             text = flat((SBR / "agents" / name).read_text(encoding="utf-8"))
             self.assertNotIn(SECTION_HEADING, text, name)
 

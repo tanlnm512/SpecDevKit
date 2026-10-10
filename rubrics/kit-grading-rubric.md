@@ -1,7 +1,7 @@
 # Kit grading rubric
 
 Canonical method for grading every unit of this kit — each **skill**,
-each **agent brief**, each **workflow** — the same way, in any future
+each **agent brief** — the same way, in any future
 session. `tools/grade.py` computes the mechanical half; an assessor
 scores the judgment half with quoted evidence. The two together
 produce a 0–10 composite per unit.
@@ -70,16 +70,6 @@ functional · 6.0–6.9 weak · <6 failing.**
 | A4 | Anti-theater & precision language | 20 | 0 | 20 |
 | A5 | Method breadth & actionability | 15 | 0 | 15 |
 
-### 3.3 Workflow (weights sum to 100)
-
-| ID | Dimension | Weight | Mechanical pts | Judgment pts |
-|----|-----------|--------|----------------|--------------|
-| W1 | Oracle discipline | 20 | 10 | 10 |
-| W2 | Gate integrity | 20 | 15 | 5 |
-| W3 | Dialect parity | 20 | 20 | 0 |
-| W4 | Execution validation | 20 | 15 | 5 |
-| W5 | Size & generation governance | 20 | 15 | 5 |
-
 ## 4. Mechanical inventory (`tools/grade.py`)
 
 The grader computes exactly these checks. Each maps to the dimension
@@ -127,29 +117,6 @@ concrete miss. `--skip-suites` / `--skip-sync` mark those checks
   frontmatter (`sonnet`, `opus`, `haiku`, `gpt-*`, `glm-*`,
   `gemini-*`, `claude-*`), floor 0.
 
-### Workflow (per skill dialect pair)
-
-- **W1 (10)** — oracle anchor: `spec-run` carries the only-oracle
-  phrase; review workflows carry the `__SKILL_DIR__` placeholder plus
-  the shared oracle path (D-014); brainstorm carries the placeholder
-  plus run-time brief loading.
-- **W2 (15)** — enforced human-judgment boundary in the workflow
-  source 5: either a mid-run pause (`AWAITING HUMAN`) or user turns
-  structurally outside the run ("a stop is not a question", "cannot
-  pause mid-run", decision-gate-as-second-run); parity tests assert
-  the boundary 5; a never-automated-decision statement 5 ("never
-  auto-satisfied", "the commit is the user's").
-- **W3 (20)** — dialect twins exist 8; parity test file exists 7;
-  parity test passes 5 (requires suites).
-- **W4 (15)** — a workflow runtime-execution test exists anywhere in
-  the kit (a test that executes a workflow against scripted agent
-  responses). Absent today by design; this check is what Phase 1 of
-  the level-up plan turns on.
-- **W5 (15)** — size bucket on the larger dialect 8 (≤400 lines 8 ·
-  ≤800 6 · ≤1200 4 · ≤1600 2 · else 0); generation governance 7
-  (generated marker 7, or a hand-maintained + dialect-parity ADR 4,
-  else 0).
-
 ## 5. Judgment checklist
 
 The assessor scores these with a verbatim quote as evidence. Anchor
@@ -187,18 +154,6 @@ guidance:
   what to check without anchoring to only the enumerated; steps are
   executable as written.
 
-### Workflow
-
-- **W1 judgment (10)** — no readiness/gate rule is re-implemented in
-  dialect code; the oracle is genuinely single.
-- **W2 judgment (5)** — auditing the source finds no path where a
-  gate is satisfied without the human.
-- **W4 judgment (5)** — execution tests exercise failure paths, not
-  just the happy wave.
-- **W5 judgment (5)** — change-risk is proportionate to size (a
-  2,000-line hand-maintained twin needs stronger governance than a
-  300-line generated one).
-
 ## 6. Composite
 
 For each unit: `composite = Σ(dimension_mechanical_or_judgment_score
@@ -213,7 +168,7 @@ composite is computed once judgment scores exist.
    `--skip-suites`/`--skip-sync` only when those environments are
    unavailable — skipped checks are reported, never credited).
 2. Read every unit graded: all SKILL.md files in full, every agent
-   brief, both dialects of every workflow.
+   brief.
 3. Verify ≥3 sampled claims per unit against reality (a README claim,
    a changelog claim, an in-doc cross-reference).
 4. Hunt ≥1 dogfood violation per session: a checker the repo fails, a
@@ -243,3 +198,4 @@ the assessor fills defects and judgment columns.
 | 2026-10-05 | W2 recalibrated: user-turn-refusal workflows (no mid-run gates by design) earn the boundary points their artifacts enforce |
 | 2026-10-05 | S4 real-repo evidence now reads the eval runner's self-labeling `- repo:` line (scratch runs are labeled scratch and never count) |
 | 2026-10-06 | W1/W2 anchors updated for D-014: review twins anchor on the shared oracle path; the commit-stays-yours line is an enforced boundary form |
+| 2026-10-09 | Workflow unit type retired (dialects deleted, spec-to-prod D-035): skills + agent briefs remain, 11 dimensions |

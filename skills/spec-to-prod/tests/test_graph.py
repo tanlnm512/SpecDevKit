@@ -43,8 +43,8 @@ def write(path: Path, text: str) -> Path:
 
 
 def scaffold(tmp: Path, name: str = "demo") -> Path:
-    r = subprocess.run(["bash", str(SCAFFOLD), name, str(tmp)],
-                       capture_output=True, text=True)
+    r = subprocess.run(["bash", str(SCAFFOLD), "--tier", "full", name,
+                        str(tmp)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     return tmp / "specs" / name
 
@@ -1287,9 +1287,9 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
         self.assertIn("wave-2", self.r.stdout)
 
     def test_brief_body_is_contiguous_verbatim_frontmatter_stripped(self):
-        for name, brief in (("planner.md", "spec-planner.md"),
-                            ("tech.md", "spec-tech.md"),
-                            ("qa.md", "spec-qa.md")):
+        for name, brief in (("planner.md", "designer.md"),
+                            ("tech.md", "designer.md"),
+                            ("qa.md", "qa.md")):
             raw = (SKILL / "agents" / brief).read_text(encoding="utf-8")
             body = graph.strip_frontmatter(raw)
             payload = (self.wave / name).read_text(encoding="utf-8")
@@ -2044,7 +2044,7 @@ class ExecutorCliValidationTests(unittest.TestCase):
 
 
     def test_strip_frontmatter(self):
-        raw = (SKILL / "agents" / "spec-reviewer.md").read_text(
+        raw = (SKILL / "agents" / "reviewer.md").read_text(
             encoding="utf-8")
         body = graph.strip_frontmatter(raw)
         self.assertTrue(body.lstrip().startswith("# Reviewer agent"))
@@ -2248,9 +2248,11 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         text = next(self.standard.glob("spawns/*/designer.md")).read_text(
             encoding="utf-8")
         # three briefs in authoring order, the protocol exactly once
-        self.assertEqual(text.count("### agents/"), 3)
+        self.assertEqual(text.count("### agents/"), 1)  # designer once
+        for lens in ("plan", "tech", "tasks"):
+            self.assertIn(f"## Carried lens — {lens} ", text)
         self.assertEqual(text.count("## Shared protocol"), 1)
-        self.assertIn("## Briefs — the three design roles", text)
+        self.assertIn("## Briefs — the designer archetype", text)
         self.assertIn("Tier: standard", text)
         self.assertIn("test.md belongs to the parallel qa spawn", text)
         # qa's own payload keeps the implementation-blindness contract
@@ -2261,23 +2263,23 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
     def test_merged_missing_brief_skip_names_the_real_file(self):
         # the merged designer item's brief field is None (it carries
         # briefs[]): a missing brief file must be named in the skip line,
-        # never "agents/None" — here one of the designer's own three
-        # briefs and qa's brief are both unreadable, so every payload
+        # never "agents/None" — here the designer archetype's brief
+        # and qa's brief are both unreadable, so every payload
         # takes the skip path
         real = graph.read_raw
         buf = io.StringIO()
         with unittest.mock.patch.object(
                 graph, "read_raw",
-                lambda p: None if p.name in ("spec-tech.md", "spec-qa.md")
+                lambda p: None if p.name in ("designer.md", "qa.md")
                 else real(p)), \
              contextlib.redirect_stdout(buf):
             written = graph.write_wave_payloads(
                 compute(self.standard), self.standard,
                 self.standard.parents[1], self._tmp / "skip-wave")
         self.assertEqual(written, [])
-        self.assertIn("SKIPPED (brief not found: agents/spec-tech.md)",
+        self.assertIn("SKIPPED (brief not found: agents/designer.md)",
                       buf.getvalue())
-        self.assertIn("SKIPPED (brief not found: agents/spec-qa.md)",
+        self.assertIn("SKIPPED (brief not found: agents/qa.md)",
                       buf.getvalue())
         self.assertNotIn("agents/None", buf.getvalue())
 

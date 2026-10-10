@@ -88,3 +88,22 @@ part of the evidence — the frontier is the only scheduler being judged.
   commit lands.
 - **Run**: session: replay E1 with one implementer leaving a debug print and touching an out-of-scope file per **Setup**; judge the delivery pass against the pass criteria above
 
+## E7 — Thin floor: one-file contract end-to-end
+
+- **Setup**: `scaffold.sh --tier tiny demo` (the new default); fill
+  spec.md (What/Why/ACs/FR-001 + two § Tasks entries with Touches and
+  Accept lines).
+- **Pass criteria**: `check.py` passes in tiny mode (task grammar,
+  FR citations, proof-note ticks enforced); `graph.py` shows
+  survey/plan/tech/qa/tasks SKIPPED with `tier: tiny` reasons and
+  verify done from spec.md alone; approve → execute reads § Tasks
+  (per-task frontier); `tick.py --note 'T001 :: <proof>'` ticks
+  inside spec.md (no task.md ever exists); `migrate.py grow` moves
+  both blocks verbatim into task.md Phase 1 with ids preserved, Tier
+  flips to full, and the authoring nodes are READY again. A docset
+  with no Tier header behaves exactly as before (no "tier: tiny"
+  anywhere in its graph).
+- **Run**: session: the thin-floor suite
+  (`tests/test_thin_floor.py`, 9 tests) is the mechanical half; the
+  session half is a real small fix driven end-to-end at tiny tier and
+  judged against the pass criteria above

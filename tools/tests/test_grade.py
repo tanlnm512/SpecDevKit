@@ -30,18 +30,18 @@ class RubricContractTests(unittest.TestCase):
 
     def test_rubric_exists_and_pins_every_dimension(self):
         text = RUBRIC.read_text(encoding="utf-8")
-        for dims in (grade.SKILL_DIMS, grade.AGENT_DIMS, grade.WORKFLOW_DIMS):
+        for dims in (grade.SKILL_DIMS, grade.AGENT_DIMS):
             for did, name, weight, mech in dims:
                 self.assertIn(did, text)
                 self.assertIn(name, text)
                 self.assertIn(f"| {did} | {name} | {weight} | {mech} |", text)
 
     def test_weights_sum_to_one_hundred_per_unit_type(self):
-        for dims in (grade.SKILL_DIMS, grade.AGENT_DIMS, grade.WORKFLOW_DIMS):
+        for dims in (grade.SKILL_DIMS, grade.AGENT_DIMS):
             self.assertEqual(sum(d[2] for d in dims), 100)
 
     def test_mechanical_points_never_exceed_dimension_weight(self):
-        for dims in (grade.SKILL_DIMS, grade.AGENT_DIMS, grade.WORKFLOW_DIMS):
+        for dims in (grade.SKILL_DIMS, grade.AGENT_DIMS):
             for _, _, weight, mech in dims:
                 self.assertLessEqual(mech, weight)
 
@@ -71,24 +71,6 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(grade.bucket(301, [(300, 5), (600, 4)], 2), 4)
         self.assertEqual(grade.bucket(9999, [(300, 5), (600, 4)], 2), 2)
 
-    def test_runtime_detection_requires_execution_not_parity(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tests_dir = Path(tmp) / "tools" / "tests"
-            tests_dir.mkdir(parents=True)
-            fake = tests_dir / "test_workflow_runtime.py"
-            fake.write_text("executes the workflow against stubs", encoding="utf-8")
-            orig_root = grade.ROOT
-            grade.ROOT = Path(tmp)
-            try:
-                # No skills dir here: discovery degrades to empty, the
-                # single candidate file is what the check must find.
-                self.assertEqual(
-                    grade.workflow_runtime_test_exists(),
-                    "tools/tests/test_workflow_runtime.py",
-                )
-            finally:
-                grade.ROOT = orig_root
-
 
 class RepoSmokeTests(unittest.TestCase):
     """Grader runs against the real repo (fast checks only) and its
@@ -111,10 +93,9 @@ class RepoSmokeTests(unittest.TestCase):
     def test_grader_exits_clean_and_reports_every_unit(self):
         self.assertEqual(self.rc, 0)
         for unit in ("skill:spec-to-prod", "skill:spec-code-review",
-                     "skill:spec-brainstorming", "agent:spec-surveyor",
-                     "agent:code-review-correctness", "agent:brainstorm-cynic",
-                     "workflow:spec-to-prod", "workflow:spec-code-review",
-                     "workflow:spec-brainstorming"):
+                     "skill:spec-brainstorming",
+                     "agent:scout", "agent:code-review-correctness",
+                     "agent:panelist"):
             self.assertIn(unit, self.report)
 
     def test_report_discloses_skipped_checks_and_judgment_worksheet(self):

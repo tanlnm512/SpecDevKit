@@ -4,10 +4,6 @@ tool regenerates must match a fresh regeneration, and every derived
 surface must agree with its canonical source. One command, one verdict —
 exit 0 releases; exit 1 names what drifted and what owns it:
 
-  workflows   skills/spec-to-prod/workflows/*        vs the dialect
-                                                     templates in
-                                                     tools/workflow-defs.py
-                                                     (--check)
   manifests   .claude-plugin/marketplace.json and    vs the regeneration
               skills/*/.claude-plugin/plugin.json    from SKILL.md
                                                      frontmatter + VERSION
@@ -152,9 +148,30 @@ def diagram_problems(g) -> list[str]:
     return bad
 
 
-def check_workflows() -> int:
-    print("== workflows — canonical source: tools/workflow-defs.py")
-    return run_tool(PKG_ROOT / "tools" / "workflow-defs.py", "--check")
+def check_contract() -> int:
+    """The spec-to-prod node table: SKILL.md's generated block must
+    match a fresh render of scripts/contract.py (D-038)."""
+    print("== contract — canonical source: skills/spec-to-prod/"
+          "scripts/contract.py")
+    skill = PKG_ROOT / "skills" / "spec-to-prod"
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "s2p_contract", skill / "scripts" / "contract.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = (skill / "SKILL.md").read_text(encoding="utf-8")
+    start, end = text.find(mod.BEGIN), text.find(mod.END)
+    if start < 0 or end < 0:
+        print("  DRIFT: SKILL.md lost the generated node-table sentinels")
+        return 1
+    committed = text[start:end + len(mod.END)]
+    if committed != mod.render_skill_table():
+        print("  DRIFT: SKILL.md node table differs from contract.py")
+        print("  regenerate: python3 skills/spec-to-prod/scripts/"
+              "contract.py --render skill-table (replace the block)")
+        return 1
+    print("  OK  skills/spec-to-prod/SKILL.md node table")
+    return 0
 
 
 def check_manifests() -> int:
@@ -193,12 +210,12 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="drift-check.py",
         description="Release-validate every generated surface against its "
-                    "canonical source: workflows, manifests, kit-rules, "
+                    "canonical source: contract, manifests, kit-rules, "
                     "diagrams, examples.")
     p.parse_args(argv)
 
     failed = []
-    for name, check in (("workflows", check_workflows),
+    for name, check in (("contract", check_contract),
                         ("manifests", check_manifests),
                         ("kit-rules", check_kit_rules),
                         ("diagrams", check_diagrams),
@@ -209,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"drift check: FAILED — {', '.join(failed)} differ from their "
               f"canonical sources")
         return 1
-    print("drift check: OK — workflows, manifests, kit-rules, diagrams, "
+    print("drift check: OK — contract, manifests, kit-rules, diagrams, "
           "examples match their canonical sources")
     return 0
 

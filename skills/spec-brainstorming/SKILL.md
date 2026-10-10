@@ -108,30 +108,33 @@ to change it" — never as a separate question.
 
 ### Stage 2 — the perspective panel
 
-Spawn the three lenses in one message, in parallel:
+Spawn the three lenses in one message, in parallel — one archetype,
+three lens payloads (D-007): every spawn carries
+`agents/panelist.md` plus exactly one lens section from
+`agents/_lenses.md`:
 
-- `agents/brainstorm-visionary.md` — the generous reading: what
-  this becomes if it works, what compounds, who falls in love
-  with it.
-- `agents/brainstorm-cynic.md` — the pre-mortem: why this dies,
-  the weakest load-bearing assumption, the hidden costs, the
-  steelman for not building it at all.
-- `agents/brainstorm-minimalist.md` — the smallest honest cut:
-  the one core value, the thinnest delivery, what NOT to build on
-  day one.
+- **visionary** — the generous reading: what this becomes if it
+  works, what compounds, who falls in love with it.
+- **cynic** — the pre-mortem: why this dies, the weakest
+  load-bearing assumption, the hidden costs, the steelman for not
+  building it at all.
+- **minimalist** — the smallest honest cut: the one core value,
+  the thinnest delivery, what NOT to build on day one.
 
 Before the lenses spawn, gather the external evidence pack: what
 the outside world already knows about the idea's territory —
 prior art and competing tools on GitHub (stars, activity,
 maintenance signals), plus 2–4 authoritative web sources, each
-finding with its URL and access date. The workflow form gathers
-it mechanically; inline, the session gathers it. A failed gather
+finding with its URL and access date. The session gathers it
+before the spawns — a neutral researcher subagent where the
+harness can spawn one, itself otherwise. A failed gather
 is named as such — the lenses then treat every external claim as
 an assumption.
 
 Each spawn carries the payload contract below (skill_dir, the
 problem restatement in the user's own words where possible, the
-frontmatter-stripped brief body, `_panel-protocol.md` verbatim,
+frontmatter-stripped panelist body, the spawn's one lens section
+from `agents/_lenses.md` verbatim, `_panel-protocol.md` verbatim,
 the evidence pack) and returns only its digest. Present the three
 angles distinctly labeled — `### The Visionary`, `### The Cynic`,
 `### The Minimalist` — faithful to the digests, with at most a
@@ -237,24 +240,20 @@ conversation context carries over:
    digest — `angle:`, `pitch:`, `points:` (2–3 lines), `watch:`
    — decisions come from digest fields, never from prose.
 
-## The workflow form (the panel wave)
+## The panel wave (one form, every harness)
 
-Where the harness has a workflow runtime, stage 2 runs as the
-`spec-brainstorming` workflow (`workflows/spec-brainstorming.dwf.ts`
-on zcode, `workflows/spec-brainstorming.js` on Claude Code;
-D-004): dispatch it with stage 1's ground — `name`, `problem`,
-`audience`, `constraints` — and it gathers the external evidence
-pack from GitHub and the web with one neutral researcher, loads
-the briefs and protocol
-from the skill dir at run time, spawns the three lenses fresh and
-in parallel, and returns the three digests verbatim for the
-session's matrix. The payload and digest contract is the one
-`contracts/run.md` pins — inline and workflow are one contract,
-not two (`tests/test_workflow_copies.py` keeps the dialects
-honest). Stages 1, 3, 4 and 5 are ALWAYS the session's: a
-workflow has no user-turn primitive, and a stop is not a
-question. A brief that fails to load degrades to the workflow's
-inline mission line, logged — never a skipped lens.
+Stage 2 always runs as the session's own wave (D-006 superseding
+D-004's dialect split): gather the external evidence pack — one
+neutral researcher subagent where the harness can spawn (never a lens
+seat — the pack is shared input, the digests stay independent), the
+session itself where it cannot — then load the three briefs and
+`_panel-protocol.md` from the skill dir and spawn the three lenses
+fresh and in parallel, returning each digest verbatim for the matrix.
+The payload and digest contract is the one `contracts/run.md` pins —
+one contract, one form. Stages 1, 3, 4 and 5 are ALWAYS the session's:
+a spawned job has no user-turn primitive, and a stop is not a
+question. A brief that fails to load degrades to its inline mission
+line, logged — never a skipped lens.
 
 ## Operator rules
 

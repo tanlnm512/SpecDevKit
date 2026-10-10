@@ -114,12 +114,77 @@ def verify_text(original: str, candidate: str, additions: list[str]) -> list[str
     return problems
 
 
+# ------------------------------------------------------------- grow ----
+def grow(spec_dir: Path) -> int:
+    """tiny -> full (D-037): move the § Tasks blocks into task.md
+    verbatim (Phase 1 — IDs never renumbered), scaffold the four
+    authoring docs from templates, flip the Tier header to full, and
+    drop § Tasks. Structure moves; CONTENT re-enters authoring: the
+    fresh templates fail check.py by design, and the graph's authoring
+    nodes are READY again. Nothing is inferred."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import specstate
+    spec_path = spec_dir / "spec.md"
+    text = spec_path.read_text(encoding="utf-8")
+    if specstate.spec_tier(text) != "tiny":
+        print("grow: spec is not Tier: tiny — nothing to do", file=sys.stderr)
+        return 1
+    section = specstate.tasks_section(text)
+    if section is None or not specstate.task_entries(
+            specstate.tiny_task_text(text) or ""):
+        print("grow: spec.md § Tasks has no task entries — author them "
+              "before growing", file=sys.stderr)
+        return 1
+
+    skill_dir = Path(__file__).resolve().parent.parent
+    blocks = section.strip("\n")
+    task_md = (
+        f"# Task — {spec_dir.name}\n\n"
+        f"**Watershed**: implementation commit C1\n\n"
+        f"## Phase 1\n\n{blocks}\n\n"
+        f"| Phase | Total | Done |\n"
+        f"|---|---|---|\n"
+        f"| 1 | 0 | 0 |\n\n"
+        f"**Σ** 0 / 0\n"
+    )
+    n_tasks = len(specstate.task_entries(
+        specstate.tiny_task_text(text) or ""))
+    task_md = task_md.replace("| 1 | 0 | 0 |", f"| 1 | {n_tasks} | 0 |")
+    task_md = task_md.replace("**Σ** 0 / 0", f"**Σ** {n_tasks} / 0")
+
+    (spec_dir / "task.md").write_text(task_md, encoding="utf-8")
+    for f in ("plan", "tech-spec", "test", "survey"):
+        src = skill_dir / "templates" / f"{f}.md"
+        if not (spec_dir / f"{f}.md").exists():
+            (spec_dir / f"{f}.md").write_text(
+                src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    start = text.find(specstate.TASKS_HEADING)
+    end = text.find("\n## ", start + 3)
+    grown = text[:start].rstrip("\n")
+    if end >= 0:
+        grown += "\n" + text[end + 1:]
+    grown = grown.replace("**Tier**: tiny", "**Tier**: full", 1)
+    spec_path.write_text(grown.rstrip("\n") + "\n", encoding="utf-8")
+    print(f"grown: {n_tasks} task(s) moved to task.md (Phase 1, ids "
+          f"preserved); plan/tech-spec/test/survey scaffolded from "
+          f"templates; Tier: full")
+    print("next: the authoring nodes are READY — re-run the graph; "
+          "check.py fails on the fresh templates by design")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if any(a in ("-h", "--help") for a in argv):
         print(__doc__)
         return 0
+    if argv and argv[0] == "grow":
+        if len(argv) != 2:
+            print("usage: migrate.py grow <spec-dir>", file=sys.stderr)
+            return 2
+        return grow(Path(argv[1]))
     spec_dir_arg = None
     template_arg = None
     dry = False

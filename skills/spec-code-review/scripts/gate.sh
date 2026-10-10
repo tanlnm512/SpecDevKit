@@ -175,6 +175,9 @@ if command -v git >/dev/null 2>&1 \
       n=0
       while IFS= read -r f; do
         [ -n "$f" ] || continue
+        # a deletion in the diff leaves a path with no file to read —
+        # nothing to syntax-check, never a red
+        [ -f "$REPO/$f" ] || continue
         n=$((n + 1))
         bash -n "$REPO/$f" 2>"$LAST_OUT" || BAD="${BAD}${f} "
       done <<EOF
@@ -257,6 +260,14 @@ PY
 if [ "$PLAN" = 1 ]; then
   exit 0
 fi
+
+# Fire-and-forget local telemetry: per-family exit-code counts only,
+# never tails/contents. KIT_TELEMETRY=off disables; failures are silent.
+python3 "$(dirname "$0")/telemetry.py" record spec-code-review review_gate \
+  "$(awk -F'\t' 'NF {n++; if ($2 != "PLAN" && $2 != 0) r++}
+                 END {printf "{\"families\": %d, \"red\": %d}", n+0, r+0}' \
+      "$TALLY")" 2>/dev/null || true
+
 FAILS="$(awk -F'\t' '$2 != "PLAN" && $2 != 0 {n++} END {print n+0}' "$TALLY")"
 echo "gate: $FAILS failing check(s)" >&2
 [ "$FAILS" -eq 0 ]

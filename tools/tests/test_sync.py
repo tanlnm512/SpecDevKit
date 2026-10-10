@@ -29,7 +29,7 @@ LEDGER = ".spec-dev-kit-deployed"
 # Bounded corpus: exactly what sync.sh consumes, so a run costs spawns
 # not bytes. The invoked tools; the skill's consumable surfaces (tree
 # files the tests reference, the allowlisted command set, one role plus
-# its shared prose, the workflow masters); the committed agy persona
+# its shared prose); the committed agy persona
 # the verify pass byte-compares; and the kit-rules surfaces sync
 # refreshes and drift-checks (rules source, the injector, both carrier
 # files). Behavior fidelity is per-file; corpus size is not load-bearing.
@@ -39,8 +39,6 @@ SYNC_CORPUS = (
     "tools/ownership.py",
     "tools/omp-defs.py",
     "tools/agent-defs.py",
-    "tools/workflow-defs.py",
-    "tools/install-workflow.sh",
     "tools/kit-rules.py",
     "rules/engineering-rules.md",
     f"{SKILL}/SKILL.md",
@@ -55,12 +53,10 @@ SYNC_CORPUS = (
     f"{SKILL}/commands/spec-test.md",
     f"{SKILL}/commands/spec-review.md",
     f"{SKILL}/commands/spec-ship.md",
-    f"{SKILL}/agents/spec-surveyor.md",
+    f"{SKILL}/agents/scout.md",
     f"{SKILL}/agents/_shared-protocol.md",
-    f"{SKILL}/workflows/spec-run.dwf.ts",
-    f"{SKILL}/workflows/spec-run.js",
     "skills/spec-code-review/agents/code-review-fixer.md",
-    "agents/spec-surveyor.md",
+    "agents/scout.md",
 )
 
 
@@ -240,8 +236,8 @@ class SyncShTests(SyncShBase):
 
     def test_foreign_def_in_claude_agents_root_is_refused(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        dest = self.home / ".claude" / "agents" / "spec-surveyor.md"
-        dest.write_text("---\nname: spec-surveyor\n---\nhand-edited\n")
+        dest = self.home / ".claude" / "agents" / "scout.md"
+        dest.write_text("---\nname: spec-scout\n---\nhand-edited\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("REFUSE", r.stdout)
@@ -301,7 +297,7 @@ class SyncShTests(SyncShBase):
         master = (self.repo / "skills" / "spec-to-prod"
                   / "scripts" / "tick.py")
         master.write_text(master.read_text() + "# touched by master\n")
-        late = self.home / ".omp" / "agent" / "agents" / "spec-surveyor.md"
+        late = self.home / ".omp" / "agent" / "agents" / "scout.md"
         late.write_text(late.read_text() + "\nhand-edited\n")
         before = self.home_snapshot()
         r = self.run_sync()
@@ -332,11 +328,11 @@ class SyncShTests(SyncShBase):
         # preflight before the first write — not mid-apply with the
         # skill roots already updated.
         for foreign_rel in (
-                ".factory/droids/spec-surveyor.md",
-                ".config/opencode/agents/spec-surveyor.md"):
+                ".factory/droids/scout.md",
+                ".config/opencode/agents/scout.md"):
             foreign = self.home / foreign_rel
             foreign.parent.mkdir(parents=True, exist_ok=True)
-            foreign.write_text("---\nname: spec-surveyor\nstale: old deploy\n")
+            foreign.write_text("---\nname: spec-scout\nstale: old deploy\n")
             before = self.home_snapshot()
             r = self.run_sync()
             self.assertNotEqual(r.returncode, 0, foreign_rel)
@@ -495,7 +491,7 @@ class KiloCommandsTests(SyncShBase):
             (self.home / ".config" / "kilo" / "command" / LEDGER).is_file())
         # agent dialect: subagent mode + derived permission map
         surveyor = (self.home / ".config" / "kilo" / "agent"
-                    / "spec-surveyor.md").read_text()
+                    / "scout.md").read_text()
         self.assertIn("mode: subagent", surveyor)
         self.assertIn("  task: deny", surveyor)
         self.assertIn("  edit: allow", surveyor)

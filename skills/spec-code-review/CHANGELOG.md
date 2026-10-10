@@ -7,6 +7,28 @@ confirmation → synthesis), then became a portable sibling skill.
 
 ## Unreleased
 
+- **D-016 — dialect retirement**: the per-harness workflow dialects
+  and their parity suite are deleted; the shared review oracle
+  (`scripts/review_orchestrator.py`) is the ONE executable form of
+  `contracts/panel.md` — every caller, inline or scripted, probes it
+  per phase and spawns the panel briefs its asks name.
+- **D-017 — archetype reading recorded**: `_panel-protocol.md` is
+  the seat spine, each lens brief is the lens payload, lens metadata
+  lives as data in the oracle — the panel already runs the
+  archetype+lens pattern; no file merge needed.
+- Local run telemetry (`scripts/telemetry.py`): gate outcomes
+  (per-family exit-code counts) and review reports (conclusion,
+  findings, unconfirmed counts) record to
+  `~/.spec-dev-kit/telemetry/spec-code-review.jsonl`;
+  `KIT_TELEMETRY=off` disables.
+- The gate's bash-syntax family no longer reds on deleted paths in a
+  diff (nothing to syntax-check when the file is gone).
+
+Migration: delete installed workflow copies
+(`~/.zcode/workflows/spec-code-review.*`, `~/.claude/workflows/`)
+after upgrading — sync no longer installs or verifies them; the
+oracle CLI is unchanged.
+
 Kilo harness support (spec-to-prod D-033): the `/spec-code-review`
 router installs to `~/.config/kilo/command/` and the panel briefs
 render as Kilo subagent defs (`mode: subagent` + permission map) in

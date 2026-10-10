@@ -133,7 +133,8 @@ Recommendation semantics are canonical in `gates/recommendation.md`.
 `.claude-plugin/plugin.json` move together (sync.sh refuses
 VERSION/frontmatter drift; `tools/plugin-manifest.py --check` and
 `tools/drift-check.py` pin plugin.json);
-CHANGELOG entries need their own `Migration:` paragraph. The two
-workflow masters under `workflows/` are hand-maintained dialects of
-this contract, pinned together by `tests/test_workflow_copies.py`
-(D-006).
+CHANGELOG entries need their own `Migration:` paragraph. The per-
+harness workflow dialects are retired (D-017): every caller — inline
+session or scripted wrapper — drives the shared review oracle
+(`scripts/review_orchestrator.py`, D-014), which is the one
+executable form of this contract.

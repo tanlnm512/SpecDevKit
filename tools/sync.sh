@@ -498,30 +498,11 @@ for name in "${SKILLS[@]}"; do
       [ -e "$f" ] || continue
       plan_file_dest "$f" "$OMP_AGENTS_ROOT/$(basename "$f")" \
         --ledger "$OMP_AGENTS_ROOT/.spec-dev-kit-omp-defs-$name"
-    done
-  fi
-
-  # Workflow dialects: bake each master against the skill copy the
-  # install step will create (the bake is a pure text transform, so the
-  # copy need not exist yet) and plan the harness's workflow root.
-  if [ -d "$skill_dir/workflows" ]; then
-    for wf in "$skill_dir"/workflows/*; do
-      [ -f "$wf" ] || continue
-      case "$wf" in
-        *.dwf.ts) wf_h=zcode ;;
-        *.js)     wf_h=claude ;;
-        *) continue ;;  # unknown extensions: install-workflow.sh notes them
-      esac
-      if [ -d "$HOME/.$wf_h" ]; then
-        expected="$preflight_stage/$name-wf-$(basename "$wf")"
-        python3 "$PKG_ROOT/tools/workflow-defs.py" --bake "$wf" \
-            --skill-dir "$HOME/.$wf_h/skills/$name" > "$expected" \
-            || { PREFLIGHT_FAIL=1; continue; }
-        plan_file_dest "$expected" "$HOME/.$wf_h/workflows/$(basename "$wf")"
-      fi
-    done
+     done
   fi
 done
+
+
 
 if [ "$PREFLIGHT_FAIL" -ne 0 ]; then
   echo "PREFLIGHT FAILED — nothing was written; resolve the refusals above and rerun"
@@ -602,26 +583,9 @@ if [ "$CHECK" = 0 ]; then
         fi
         install_command "$f" "$base" "$KILO_COMMANDS_ROOT" || fail=1
       done
-    else
-      echo "skip  kilo commands — ~/.config/kilo absent (harness not installed)"
-    fi
-
-    # Dynamic workflows (ADR-019): each dialect file under
-    # skills/<name>/workflows/ installs into its own harness's workflow
-    # root via the dedicated installer, which bakes that root's own skill
-    # copy as skill_dir (and refuses foreign destinations per the same
-    # ledger discipline). Gated on the harness home existing — user roots
-    # are never fabricated here either.
-    if [ -d "$skill_dir/workflows" ]; then
-      for wf_h in zcode claude; do
-        if [ -d "$HOME/.$wf_h" ]; then
-          bash "$PKG_ROOT/tools/install-workflow.sh" "$wf_h" \
-            --skill-dir "$HOME/.$wf_h/skills/$name" || fail=1
-        else
-          echo "skip  $wf_h workflows — ~/.$wf_h absent (harness not installed)"
-        fi
-      done
-    fi
+     else
+       echo "skip  kilo commands — ~/.config/kilo absent (harness not installed)"
+     fi
 
     if [ -d "$skill_dir/agents" ]; then
       mkdir -p "$CLAUDE_AGENTS_ROOT"
@@ -751,17 +715,6 @@ for name in "${SKILLS[@]}"; do
       fi
       if [ -d "$KILO_HOME" ]; then
         verify_command "$f" "$base" "$KILO_COMMANDS_ROOT"
-      fi
-    done
-  fi
-
-  # Dynamic-workflow verify (mirror of the install block above): the
-  # installed copies must match a fresh bake at the same skill_dir.
-  if [ -d "$skill_dir/workflows" ]; then
-    for wf_h in zcode claude; do
-      if [ -d "$HOME/.$wf_h" ]; then
-        bash "$PKG_ROOT/tools/install-workflow.sh" "$wf_h" \
-          --skill-dir "$HOME/.$wf_h/skills/$name" --check || fail=1
       fi
     done
   fi

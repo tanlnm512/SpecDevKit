@@ -112,6 +112,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from telemetry import record as _record  # noqa: E402 - local run telemetry
+
 from check import (  # noqa: E402
     CODE_SPAN,
     HTML_COMMENT,
@@ -173,38 +175,11 @@ LOOP_EDGES = [
 
 # The node/ready/done contract (architecture §2.1), kept as data so --explain
 # states it exactly and CROSS-001 has one comparable surface.
-READY_WHEN = {
-    "spec": "always (entry node)",
-    "clarify": "open NEEDS CLARIFICATION markers exist in spec.md",
-    "research-gate": "spec.md done",
-    "research": "the research gate is resolved `run`",
-    "survey": "spec.md done",
-    "plan": "spec + survey done",
-    "tech": "spec + survey done AND research resolved (either form)",
-    "qa": "spec + survey done (never reads plan/tech — parallel-safe)",
-    "tasks": "plan + tech + survey done",
-    "verify": "plan, tech, qa, tasks, survey all done",
-    "approve": "verify done (HUMAN gate)",
-    "execute": "approved",
-    "tick-commit": "execute done (HUMAN gate: the tick, then the delivery)",
-    "archive": "tick-commit done AND spec Status: done",
-}
-DONE_WHEN = {
-    "spec": "spec.md exists, non-empty, no open NEEDS CLARIFICATION markers",
-    "clarify": "markers resolved (removed/answered in spec.md)",
-    "research-gate": "research.md exists (real content → ran, or the skip marker → skipped)",
-    "research": "research.md exists, non-marker, non-empty",
-    "survey": "survey.md filled AND `check.py <spec-dir> --survey-only` exits 0",
-    "plan": "plan.md exists, non-empty, filled",
-    "tech": "tech-spec.md exists, non-empty, filled",
-    "qa": "test.md exists, non-empty, filled",
-    "tasks": "task.md exists, non-empty, filled",
-    "verify": "`check.py <spec-dir>` exits 0",
-    "approve": "spec.md Status: approved (or later)",
-    "execute": "every task entry implemented, ticked [x], or struck ~~",
-    "tick-commit": "durable task-tick evidence (every task ticked/struck, every tick with its proof note) plus the delivery record — `Delivered: commit @ <sha>` in task.md, or the explicit non-git skip",
-    "archive": "dir moved to specs/archive/<date>-<name>/, INDEX repointed",
-}
+# Single source: scripts/contract.py owns every node's identity,
+# readiness, and done-signal (D-038) — SKILL.md's node table is
+# generated from the same table (`contract.py --render skill-table`).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from contract import DONE_WHEN, READY_WHEN  # noqa: E402
 
 # Report token per node state — the same vocabulary --state-json carries.
 DONE, READY, BLOCKED, UNDETERMINED, SKIPPED = (
@@ -215,12 +190,14 @@ DONE, READY, BLOCKED, UNDETERMINED, SKIPPED = (
 # frontier node — it rides the tick-commit orchestrator judgment — but the
 # payload builder still knows its protocol exemption (C1).
 AGENT_BRIEFS = {
-    "survey": ("surveyor", "spec-surveyor.md"),
-    "plan": ("planner", "spec-planner.md"),
-    "tech": ("tech", "spec-tech.md"),
-    "qa": ("qa", "spec-qa.md"),
-    "tasks": ("task-breaker", "spec-task-breaker.md"),
-    "execute": ("implementer", "spec-implementer.md"),
+    # node -> (role, archetype brief, lens) — D-036: five archetypes,
+    # lens specializations ride the payload from agents/_lenses.md
+    "survey": ("surveyor", "scout.md", "survey"),
+    "plan": ("planner", "designer.md", "plan"),
+    "tech": ("tech", "designer.md", "tech"),
+    "qa": ("qa", "qa.md", "qa"),
+    "tasks": ("task-breaker", "designer.md", "tasks"),
+    "execute": ("implementer", "builder.md", "build"),
 }
 
 # This script IS the running skill's — its own root is the resolved skill_dir
@@ -778,7 +755,7 @@ def frontier_payloads(state: dict, spec_dir: Path,
             continue
         if merge_design and node in ("plan", "tech"):
             continue
-        role, brief = AGENT_BRIEFS[node]
+        role, brief, lens = AGENT_BRIEFS[node]
         if node == "execute":
             entries = specstate.task_entries(
                 read_doc(spec_dir / "task.md") or "")
@@ -789,39 +766,57 @@ def frontier_payloads(state: dict, spec_dir: Path,
                 entry = next((e for e in entries if e.id == t["id"]), None)
                 items.append({
                     "node": node, "role": role, "brief": brief,
+                    "lens": lens,
                     "filename": (f"implementer-{t['id']}.md" if multi
                                  else "implementer.md"),
                     "entry": entry,
                 })
         else:
             items.append({"node": node, "role": role, "brief": brief,
+                          "lens": lens,
                           "filename": f"{role}.md", "entry": None})
     if merge_design:
         items.insert(0, {
             "node": "design", "role": "designer", "brief": None,
-            "briefs": [AGENT_BRIEFS[n][1]
+            "briefs": ["designer.md"],
+            "lenses": [AGENT_BRIEFS[n][2]
                        for n in ("plan", "tech", "tasks")],
             "filename": "designer.md", "entry": None,
         })
     if state["nodes"]["research-gate"]["state"] == UNDETERMINED:
         items.append({"node": "research", "role": "researcher",
-                      "brief": "spec-researcher.md",
+                      "brief": "scout.md", "lens": "research",
                       "filename": "researcher.md", "entry": None})
     if (state["nodes"]["execute"]["state"] == DONE
             and state["nodes"]["tick-commit"]["state"] != DONE):
         items.append({"node": "tick-commit", "role": "reviewer",
-                      "brief": "spec-reviewer.md",
+                      "brief": "reviewer.md",
                       "filename": "reviewer-diff.md", "entry": None})
     return items
+
+
+def lens_section(lens: str) -> str | None:
+    """The `## Lens: <name>` section from agents/_lenses.md, verbatim
+    (D-036) — the archetype's specialization riding the payload."""
+    raw = read_raw(SKILL_DIR / "agents" / "_lenses.md")
+    if raw is None:
+        return None
+    marker = f"## Lens: {lens}"
+    start = raw.find(marker)
+    if start < 0:
+        return None
+    end = raw.find("\n## ", start + len(marker))
+    return raw[start:end if end >= 0 else len(raw)].rstrip() + "\n"
 
 
 def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | None:
     """One self-contained spawn payload: header (spec_dir / repo /
     skill_dir) + filled input payload + the frontmatter-stripped brief body
-    byte-verbatim + `_shared-protocol.md` verbatim — except the reviewer,
-    the one exempt role (its brief states it needs no shared protocol).
-    A merged-design item (D-024) carries several briefs concatenated in
-    authoring order with the protocol once."""
+    byte-verbatim + the carried lens sections from `_lenses.md` +
+    `_shared-protocol.md` verbatim — except the reviewer, the one exempt
+    role (its brief states it needs no shared protocol). A merged-design
+    item (D-024) carries the designer archetype once with its three lens
+    sections in authoring order and the protocol once."""
     if item.get("briefs") is not None:
         bodies = []
         for bf in item["briefs"]:
@@ -830,8 +825,8 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
                 return None
             bodies.append(f"### agents/{bf} (body; frontmatter stripped)\n\n"
                           + strip_frontmatter(raw))
-        brief_title = ("## Briefs — the three design roles in authoring "
-                       "order (bodies; frontmatter stripped)")
+        brief_title = ("## Briefs — the designer archetype "
+                       "(body; frontmatter stripped)")
         brief_body = "\n\n".join(bodies)
     else:
         brief_raw = read_raw(SKILL_DIR / "agents" / item["brief"])
@@ -861,6 +856,17 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
         "",
         brief_body,
     ]
+    for lens in item.get("lenses") or ([item["lens"]] if item.get("lens") else []):
+        section = lens_section(lens)
+        # qa/build carry no lens section — their archetypes ARE the
+        # whole contract; the scout/designer lenses must exist
+        # (test_graph pins the set).
+        if section is not None:
+            parts += ["",
+                      f"## Carried lens — {lens} (from agents/_lenses.md, "
+                      "verbatim)",
+                      "",
+                      section]
     if protocol is not None and item["role"] != "reviewer":
         parts += ["",
                   "## Shared protocol — agents/_shared-protocol.md "
@@ -887,8 +893,9 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     written: list[tuple[Path, str, str]] = []
     items = frontier_payloads(state, spec_dir, repo, merge=not repair)
     if repair and repair not in {i["node"] for i in items}:
-        role, brief = AGENT_BRIEFS[repair]
+        role, brief, lens = AGENT_BRIEFS[repair]
         items.append({"node": repair, "role": role, "brief": brief,
+                      "lens": lens,
                       "filename": f"{role}.md", "entry": None})
     for item in items:
         text = build_payload(item, spec_dir, repo, wave)
@@ -1087,10 +1094,14 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
         pause = find_pause(state, wave_dir)
         if pause:
             print(f"AWAITING HUMAN: {pause[0]}: {pause[1]}")
+            _record("spec-to-prod", "gate_pause", node=pause[0],
+                    wave=waves_done + 1)
             return 0
         frontier = state["frontier"]
         if not any(node in AGENT_BRIEFS for node in frontier):
             print_complete_or_held(state)
+            _record("spec-to-prod", "run_end", waves=waves_done,
+                    complete=True)
             return 0
         wave = wave_number(state)
         print(f"== wave {wave} — frontier: {', '.join(frontier)}")
@@ -1098,6 +1109,8 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
                                       resolved_repo(Path(spec_dir),
                                                     repo_override),
                                       Path(wave_dir) if wave_dir else None)
+        _record("spec-to-prod", "wave", wave=wave,
+                roles=sorted(frontier), payloads=len(written))
         if not written:
             print("   no runnable payloads this wave — nothing to invoke")
         for path, role, node in written:
@@ -1184,8 +1197,12 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     spec_text = docs["spec.md"]
     status = specstate.spec_status(spec_text) if spec_text is not None else None
     effort = specstate.spec_effort(spec_text)
+    tier = specstate.spec_tier(spec_text) if spec_text is not None else "full"
     markers = spec_text.count("NEEDS CLARIFICATION") if spec_text else 0
-    task_text = docs["task.md"]
+    # D-037 thin floor: at tiny tier the task list lives in spec.md
+    # § Tasks — same parsers, one grammar, two homes.
+    task_text = docs["task.md"] if tier == "full" else (
+        specstate.tiny_task_text(spec_text) if spec_text else None)
     entries = specstate.task_entries(task_text) if task_text else []
     rstate = specstate.research_state(spec_dir / "research.md")
 
@@ -1254,7 +1271,12 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     research_done = nodes["research"]["state"] == DONE
 
     # -- survey ------------------------------------------------------------
-    if not spec_done:
+    if tier == "tiny":
+        nodes["survey"] = {"state": SKIPPED, "reason":
+                           "tier: tiny — no survey doc; evidence lives in "
+                           "the spec's task Accept lines (grow to full "
+                           "when the change outgrows one file)"}
+    elif not spec_done:
         nodes["survey"] = {"state": BLOCKED,
                            "reason": "waiting on: spec"}
     elif docs["survey.md"] is None:
@@ -1303,17 +1325,24 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
             nodes[node] = {"state": DONE,
                            "reason": f"{filename} present and filled"}
 
-    authored("plan", "plan.md", ["survey"])
-    authored("tech", "tech-spec.md", ["survey"],
-             None if research_done or rstate == "skip"
-             else ["research (research-gate undetermined — decide run or "
-                   "skip)"])
-    authored("qa", "test.md", ["survey"])
-    authored("tasks", "task.md", ["plan", "tech", "survey"])
+    if tier == "tiny":
+        for node, doc in (("plan", "plan.md"), ("tech", "tech-spec.md"),
+                          ("qa", "test.md"), ("tasks", "task.md")):
+            nodes[node] = {"state": SKIPPED, "reason":
+                           f"tier: tiny — no {doc}; the one-file contract "
+                           "holds tasks in spec.md § Tasks (D-037)"}
+    else:
+        authored("plan", "plan.md", ["survey"])
+        authored("tech", "tech-spec.md", ["survey"],
+                 None if research_done or rstate == "skip"
+                 else ["research (research-gate undetermined — decide run or "
+                       "skip)"])
+        authored("qa", "test.md", ["survey"])
+        authored("tasks", "task.md", ["plan", "tech", "survey"])
 
     # -- verify (mechanical: runs check.py) --------------------------------
     verify_deps = [d for d in ("plan", "tech", "qa", "tasks", "survey")
-                   if nodes[d]["state"] != DONE]
+                   if nodes[d]["state"] not in (DONE, SKIPPED)]
     if verify_deps:
         nodes["verify"] = {"state": BLOCKED,
                            "reason": f"waiting on: {', '.join(verify_deps)}"}
@@ -1355,8 +1384,10 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                             f"{status or 'none'} — approval is a human gate)"}
     elif not entries:
         nodes["execute"] = {"state": BLOCKED, "reason":
-                            "task.md has no task entries — spawn the "
-                            "task-breaker"}
+                            ("spec.md § Tasks has no task entries — "
+                             "author them with the user" if tier == "tiny"
+                             else "task.md has no task entries — spawn "
+                                  "the task-breaker")}
     else:
         per_task = task_frontier(entries)
         open_tasks = [t for t in per_task
