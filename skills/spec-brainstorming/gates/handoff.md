@@ -1,7 +1,7 @@
 # Handoff gate: stop conditions and readiness criteria
 
 The canonical criteria for when a run stops and when the design
-spec is ready to point `/spec` at. SKILL.md summarizes; this file
+spec is ready to point `/spec-idea` at. SKILL.md summarizes; this file
 arbitrates. All criteria are observer-checkable — an onlooker
 with the transcript and the artifact can verify each one.
 
@@ -12,10 +12,10 @@ with the transcript and the artifact can verify each one.
 | Idea still fuzzy after one follow-up | NOT a stop: proceed on what is known, naming every assumption in the artifact |
 | User redirects the idea mid-run | Restart stage 1 with the redirect as the new ask |
 | Existing `brainstorms/<name>.md` | ONE question — overwrite, or version the name; never a silent clobber |
-| A path under `specs/` requested for the artifact | Refusal — the artifact lives at `brainstorms/` (D-003); scaffolding is `/spec`'s move |
+| A path under `specs/` requested for the artifact | Refusal — the artifact lives at `brainstorms/` (D-003); scaffolding is `/spec-idea`'s move |
 | A lens brief fails to load (workflow form) | Degrade to the inline mission line, logged — never an error, never a skipped lens |
 
-## Handoff-readiness criteria (ALL must hold before `/spec` is named)
+## Handoff-readiness criteria (ALL must hold before `/spec-idea` is named)
 
 Run the mechanical gate first, on the exact default or
 user-named artifact path:
@@ -64,4 +64,4 @@ and exits 0 only when all of these pass:
 
 When any criterion fails, the run is not handed off — fix the
 artifact and re-check. A handed-off spec is pre-spec intent:
-`/spec` consumes it as input, never as a contract.
+`/spec-idea` consumes it as input, never as a contract.

@@ -1,5 +1,5 @@
 ---
-description: Spec intake verb - /spec <name> runs spec-intent: scout + grill the idea into a validated intent.md before any docset exists
+description: Spec intake verb - /spec-idea <name> runs spec-intent: scout + grill the idea into a validated intent.md before any docset exists
 argument-hint: <new-spec-name>
 skills: spec-intent
 ---
@@ -17,5 +17,5 @@ idea name, run the spec-intent skill —
   stops; recommended answers are never adopted silently),
 - gate: `scripts/check.py specs/<name> --intent-only` exits 0, Status
   flips to validated,
-- name the next step: `/spec-shape <name>` — docset authoring and
+- name the next step: `/spec-gen <name>` — docset authoring and
   execution are not this command's.

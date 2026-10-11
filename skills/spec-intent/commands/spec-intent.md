@@ -15,12 +15,12 @@ Routing (`$1` = verb or ask; a bare idea is the default intake run):
   (references/grilling.md — recommended answers, non-answer = hard
   stop) until the question frontier is empty, gate on
   `scripts/check.py specs/<name> --intent-only` exiting 0, then hand
-  off: `/spec-shape <name>`.
+  off: `/spec-gen <name>`.
 - a `brainstorms/<name>.md` handoff → same run, seeded from the
   design spec verbatim (Problem/Audience/FR seeds), then pressured
   against the actual repo.
 - repair ask (stale baseline, open markers on an existing intent.md)
   → re-scout the gap, re-grill, re-gate; never rewrite from blank.
 
-The stop is hard: never spec.md or the docset (that is /spec-shape),
+The stop is hard: never spec.md or the docset (that is /spec-gen),
 never execution (/spec-execute).

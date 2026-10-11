@@ -5,6 +5,13 @@ door of the split spec suite (spec-to-prod-split): repo scouting +
 requirement grilling to a validated `specs/<name>/intent.md`, hard
 stop — the docset is spec-shape's, execution spec-execute's.
 
+## Unreleased
+
+- `/spec` → `/spec-idea` (D-003): the intake command renames; the
+  skill name, scripts, and flow are unchanged. Migration: re-run
+  `bash tools/sync.sh` — the stale prune removes the old `spec.md`
+  from every root.
+
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (scaffold-lite → scout → grill → gate →

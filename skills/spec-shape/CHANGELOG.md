@@ -5,6 +5,12 @@ middle phase of the split spec suite (spec-to-prod-split): gated intake
 over a validated intent, the authoring waves to the approve handoff —
 execution is spec-execute's, intake spec-intent's.
 
+## Unreleased
+
+- `/spec-shape` → `/spec-gen` and the `/spec-to-prod` alias is
+  removed early (D-006): eleven commands install; a skill may name
+  no self-titled command. Migration: re-run `bash tools/sync.sh`.
+
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (`graph.py --span shape` — intake gate,

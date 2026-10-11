@@ -35,14 +35,14 @@ panel briefs remain canonical.
   stages 1, 3, 4 and 5 are always the session's (D-004).
 - **Any other agent**: the skill inline; `scripts/skill-dir.sh`
   (bash) and `scripts/check.py` (python3 — the handoff gate, run
-  before `/spec` is named) are the only executables it needs.
+  before `/spec-idea` is named) are the only executables it needs.
 
 ## Reading the artifact
 
 `brainstorms/<name>.md` is pre-spec by design: the Direction
 section records what was chosen and why (and what lost); Problem /
 Personas / MVP / Risks carry the panel's surviving material. It
-never holds requirements — those are `/spec`'s to shape with you.
+never holds requirements — those are `/spec-idea`'s to shape with you.
 When it says a risk is "accepted", that acceptance is as binding
 as anything pre-spec is; revisit it only with new evidence, and
 the kill criteria are literal: observed evidence stops the

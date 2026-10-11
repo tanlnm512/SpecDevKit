@@ -59,11 +59,11 @@ it.
 - Default `brainstorms/<name>.md` at the repository root; a
   user-named path wins.
 - Nothing is ever written under `specs/` (D-003) — scaffolding is
-  `/spec`'s move.
+  `/spec-idea`'s move.
 - An existing file is read first: a prior round of the same idea
   triggers ONE question — overwrite, or version the name
   (`<name>-v2`); never a silent clobber.
-- Before `/spec` is named, run this on the exact artifact path:
+- Before `/spec-idea` is named, run this on the exact artifact path:
 
   ```sh
   python3 skills/spec-brainstorming/scripts/check.py ARTIFACT

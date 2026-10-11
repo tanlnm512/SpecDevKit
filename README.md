@@ -23,7 +23,7 @@ grill the user, produce a validated `intent.md`), `spec-shape` (gated
 authoring — the docset waves through verify, stopping at the human
 approve gate; the shared-core master and the workflow graph's node
 table live here), and `spec-execute` (post-approve implementer waves,
-the delivery pass, the lifecycle commands). `/spec-to-prod` survives
+the delivery pass, the lifecycle commands). `/spec-idea` (intake) or `/spec-gen` survives
 one release as a thin verb-only alias routing to the three. Beside
 them: `spec-code-review` — the portable three-stage code review (the
 repo's own detected checks as a mechanical gate, then a preflight
@@ -33,7 +33,7 @@ plus an optional author-fix loop ending in a merge recommendation) —
 and `spec-brainstorming` — the pre-spec front door (one clarifying
 question, a spawned three-lens panel of Visionary / Cynic /
 Minimalist, a trade-off matrix, socratic refinement, then a durable
-design specification at `brainstorms/<name>.md` that feeds `/spec` as
+design specification at `brainstorms/<name>.md` that feeds `/spec-idea` as
 intent input). § Adding a skill to this repo below is the contract any
 further one follows.
 
@@ -43,7 +43,7 @@ else (no session log, no step ledger) is consulted.
 
 New-user entry point: `skills/spec-shape/SKILL.md` (the authoring
 playbook and the workflow graph's node table); the phase routers are
-`/spec-intent`, `/spec-shape`, `/spec-execute`.
+`/spec-intent`, `/spec-gen`, `/spec-execute`.
 
 ## How the workflow works
 
@@ -93,12 +93,12 @@ rollback design, and both reviewer modes).
 
 | Harness | Skills | Agent defs | Entry |
 |---------|--------|-----------|-------|
-| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | `/spec-intent`, `/spec-shape`, `/spec-execute` routers + `/spec`…`/spec-ship` (and the one-release `/spec-to-prod` alias); stages inline or via `graph.py --run` |
+| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | `/spec-intent`, `/spec-gen`, `/spec-execute` routers + `/spec-idea`…`/spec-ship` (and the one-release `/spec-idea` (intake) or `/spec-gen` alias); stages inline or via `graph.py --run` |
 | omp | native root / marketplace | `~/.omp/agent/agents/` regenerated (omp dialect) | `/skill:spec-intent`, `/skill:spec-shape`, `/skill:spec-execute` |
-| zcode | plugin / sync | none — fallback spawn carries briefs in the payload | `/spec-intent`, `/spec-shape`, `/spec-execute`; stages inline or via `graph.py --run` |
+| zcode | plugin / sync | none — fallback spawn carries briefs in the payload | `/spec-intent`, `/spec-gen`, `/spec-execute`; stages inline or via `graph.py --run` |
 | opencode | `~/.agents/skills/` (compatibility root it scans) | `~/.config/opencode/agents/` regenerated (permission map) | `skill` tool / `@spec-scout`-style archetype names |
-| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | `/spec`…`/spec-ship` via `~/.factory/commands` (gated) |
-| Kilo | `~/.config/kilo/skills/` (native config-dir scan; D-040) + `~/.agents/skills/` (compatibility root) | `~/.config/kilo/agent/` regenerated (subagent permission map) | `/spec-intent`, `/spec-shape`, `/spec-execute` + `/spec`…`/spec-ship` via `~/.config/kilo/command/` (gated); stages run inline — no dynamic workflow runtime |
+| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | `/spec-idea`…`/spec-ship` via `~/.factory/commands` (gated) |
+| Kilo | `~/.config/kilo/skills/` (native config-dir scan; D-040) + `~/.agents/skills/` (compatibility root) | `~/.config/kilo/agent/` regenerated (subagent permission map) | `/spec-intent`, `/spec-gen`, `/spec-execute` + `/spec-idea`…`/spec-ship` via `~/.config/kilo/command/` (gated); stages run inline — no dynamic workflow runtime |
 | Antigravity (agy) | this repo as a plugin | committed root `agents/` personas (byte-verbatim) | `agy plugin install` |
 
 ADR-015 records the model: one skill copy at `~/.agents/skills/` feeds
@@ -286,9 +286,9 @@ that copies out:
   in-tree; sync.sh regenerates and verifies them every run.
 - **Commands** — a skill's `commands/<name>.md` router (only if it
   ships one) plus each skill's bare names opted into via its own
-  `commands/extra.txt` (ADR-013 — `/spec` claims spec-intent, the five
+  `commands/extra.txt` (ADR-013 — `/spec-idea` claims spec-intent, the five
   `/spec-plan`…`/spec-ship` wrappers claim spec-execute, the
-  one-release `/spec-to-prod` alias claims spec-shape) →
+  one-release `/spec-idea` (intake) or `/spec-gen` alias claims spec-shape) →
   `~/.agents/commands/`, `~/.claude/commands/`,
   `~/.zcode/commands/` (omp needs none — `/skill:<name>`
   auto-registers); a foreign file at a destination is refused, not
@@ -334,7 +334,7 @@ human/CI gates. On omp the entries are `/skill:spec-intent`,
 
 ### Router verbs
 
-`/spec-intent`, `/spec-shape`, `/spec-execute` each take
+`/spec-intent`, `/spec-gen`, `/spec-execute` each take
 `<verb> <spec-name>` — single nodes and repair runs (or naturally:
 "re-survey the auth spec"):
 
@@ -353,7 +353,7 @@ human/CI gates. On omp the entries are `/skill:spec-intent`,
 
 `/spec-to-prod <verb> <spec-name>` survives exactly one release as a
 thin alias (split D-006): scaffold/intake verbs route to
-`/spec-intent`, authoring to `/spec-shape`, execute verbs to
+`/spec-intent`, authoring to `/spec-gen`, execute verbs to
 `/spec-execute` — no pipeline body of its own.
 
 A typical pass: `scaffold` → author spec.md with the user → resolve the
@@ -444,7 +444,7 @@ walking `skills/*/`, never by a hardcoded name:
 3. `skills/<name>/commands/<name>.md` — optional: a router command
    (`/<name> <verb> …`) if the skill benefits from one — lives inside
    the skill dir so it stays a self-contained plugin root.
-   Short-lifecycle command wrappers (`/spec`, `/spec-plan`, …) are an
+   Short-lifecycle command wrappers (`/spec-idea`, `/spec-plan`, …) are an
    explicit per-skill opt-in — a `commands/extra.txt` file in the
    skill (one line of space-separated bare names; ADR-013) — because
    generic names land flat in shared global command roots; the

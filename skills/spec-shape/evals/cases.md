@@ -25,7 +25,7 @@ part of the evidence — the frontier is the only scheduler being judged.
 - **Setup**: scratch repo with a real test runner and a validated
   `specs/<name>/intent.md` (a /spec-intent run or a planted green
   artifact); ask: "shape <small feature, 2–3 FRs>" via
-  `/spec-shape <feature>`.
+  `/spec-gen <feature>`.
 - **Pass criteria**: the intake gate passes (intent node DONE on
   entry); the frontier is correct at every step (`--state-json`
   snapshots before/after each action): survey as a solo analysis wave

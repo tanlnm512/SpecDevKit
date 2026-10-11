@@ -103,7 +103,7 @@ sums computed by hand and checked by eye.
   raise TypeError.
 
 ## Handoff
-Next: `/spec-shape demo` — the docset (spec.md onward) is authored
+Next: `/spec-gen demo` — the docset (spec.md onward) is authored
 there, never here. The Baseline above is what shape's survey
 re-baselines against.
 """
@@ -136,7 +136,7 @@ only operation today.
 - **FR-001**: The system shall multiply two integers.
 
 ## Handoff
-Next: `/spec-shape demo` once the frontier is empty.
+Next: `/spec-gen demo` once the frontier is empty.
 """
 
 

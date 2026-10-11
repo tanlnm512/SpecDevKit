@@ -48,7 +48,7 @@ average — aggregate.
   Problem Statement, User Personas, Core MVP Features with an
   out-of-scope list, Potential Risk Mitigations with early
   warnings); the mechanical handoff check (`scripts/check.py`)
-  exits 0 on the artifact before `/spec` is named; every Cynic
+  exits 0 on the artifact before `/spec-idea` is named; every Cynic
   dealbreaker from the panel appears in
   the risk table or is explicitly accepted; nothing was written
   under `specs/`; the final message names the artifact path and

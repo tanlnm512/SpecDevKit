@@ -21,7 +21,7 @@ criteria; a criterion failed = a finding with the transcript line.
   answered, deferred, or as a named assumption — no NEEDS
   CLARIFICATION marker survives; the run ends at `check.py
   specs/demo --intent-only` exiting 0 with Status validated; the
-  final message names `/spec-shape demo` and nothing downstream was
+  final message names `/spec-gen demo` and nothing downstream was
   authored
 - **Run**: session: scratch git repo per **Setup**; run the intake in a session; judge the transcript and specs/demo/ against the pass criteria above
 
@@ -46,6 +46,6 @@ criteria; a criterion failed = a finding with the transcript line.
   `check.py --intent-only` exits nonzero naming the baseline-vs-HEAD
   mismatch; the session re-scouts (baseline refreshed to the new
   HEAD, affected facts re-probed) instead of waving the stale
-  artifact through; re-gate exits 0 before `/spec-shape` is named; no
+  artifact through; re-gate exits 0 before `/spec-gen` is named; no
   spec.md is authored during the repair
 - **Run**: session: validated intent with HEAD moved past its baseline per **Setup**; judge the refusal and repair against the pass criteria above

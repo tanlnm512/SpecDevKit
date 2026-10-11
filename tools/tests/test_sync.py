@@ -56,10 +56,10 @@ EXECUTE_SKILL = "skills/spec-execute"
 # shipped before the split.
 ROUTER_COMMANDS = (
     "spec-brainstorming", "spec-code-review", "spec-execute",
-    "spec-intent", "spec-shape",
+    "spec-intent",
 )
 BARE_COMMANDS = (
-    "spec", "spec-to-prod", "spec-plan", "spec-build",
+    "spec-idea", "spec-gen", "spec-plan", "spec-build",
     "spec-test", "spec-review", "spec-ship",
 )
 ALL_COMMANDS = ROUTER_COMMANDS + BARE_COMMANDS
@@ -84,14 +84,13 @@ SYNC_CORPUS = (
     f"{INTENT_SKILL}/SKILL.md",
     f"{INTENT_SKILL}/VERSION",
     f"{INTENT_SKILL}/commands/spec-intent.md",
-    f"{INTENT_SKILL}/commands/spec.md",
+    f"{INTENT_SKILL}/commands/spec-idea.md",
     f"{INTENT_SKILL}/commands/extra.txt",
     f"{INTENT_SKILL}/agents/_shared-protocol.md",
     f"{INTENT_SKILL}/agents/builder.md",
     f"{SHAPE_SKILL}/SKILL.md",
     f"{SHAPE_SKILL}/VERSION",
-    f"{SHAPE_SKILL}/commands/spec-shape.md",
-    f"{SHAPE_SKILL}/commands/spec-to-prod.md",
+    f"{SHAPE_SKILL}/commands/spec-gen.md",
     f"{SHAPE_SKILL}/commands/extra.txt",
     f"{SHAPE_SKILL}/agents/_shared-protocol.md",
     f"{SHAPE_SKILL}/agents/reviewer.md",
@@ -178,7 +177,7 @@ class SyncShTests(SyncShBase):
             (self.home / ".claude" / "skills" / "spec-execute"
              / "SKILL.md").is_file())
         self.assertTrue(
-            (self.home / ".agents" / "commands" / "spec.md").is_file())
+            (self.home / ".agents" / "commands" / "spec-idea.md").is_file())
         # skills-tree provenance ledger exists and is excluded from verify
         self.assertTrue(self.skill_root(LEDGER).is_file())
         # atomic replacement preserves the shipped executable bits
@@ -190,12 +189,10 @@ class SyncShTests(SyncShBase):
         self.assertEqual(list(self.home.rglob(f"{LEDGER}.tmp*")), [])
 
     def test_bare_name_redistribution_installs_the_same_total_set(self):
-        # FR-006/T019: the split moved the bare names — spec to
-        # spec-intent, the spec-to-prod alias to spec-shape, the five
-        # lifecycle verbs to spec-execute — and the exact installed set
-        # in a shared command root must stay the pre-split total: the
-        # five routers plus those seven bare names, nothing more,
-        # nothing less.
+        # FR-006/T019 + the 2026-10-11 renames: spec-idea to
+        # spec-intent, spec-gen replacing spec-shape's self-titled
+        # router, the five lifecycle verbs to spec-execute — eleven
+        # commands, nothing more, nothing less.
         self.assertEqual(self.run_sync().returncode, 0)
         for root in (".agents", ".claude", ".zcode"):
             installed = {p.name for p in

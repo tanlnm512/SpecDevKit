@@ -3,7 +3,7 @@ name: spec-execute
 description: >-
   Approved-spec execution — the suite's back half. Runs implementer
   waves over the per-task frontier of an approved task.md (any docset
-  with spec.md Status: approved — shaped by /spec-shape or
+  with spec.md Status: approved — shaped by /spec-gen or
   hand-authored), fix rounds capped at 5 per task, the ONE delivery
   pass (TC proofs, regression gate, review instruments), the
   tick-commit gate, and archive — driven by graph.py --span execute.
@@ -34,7 +34,7 @@ any node's ready/done conditions and why it sits where it sits.
 ## When to use
 
 - **An approved docset** — spec.md `Status: approved` (or later):
-  shaped by `/spec-shape` or hand-authored, FR-008 reads both the
+  shaped by `/spec-gen` or hand-authored, FR-008 reads both the
   same. Implement, prove, and deliver it here.
 - **Execution asks** — "execute/build <spec>", a T### task named,
   "run the proofs", "scope diff", "ship it": the run below.
@@ -43,7 +43,7 @@ any node's ready/done conditions and why it sits where it sits.
   and `(fix n/5)` counts surviving in the docs.
 
 Not here: anything before approval — authoring waves, doc repair,
-re-approval (`/spec-shape`), intake (`/spec-intent`). This skill
+re-approval (`/spec-gen`), intake (`/spec-intent`). This skill
 never authors a doc, never edits an unapproved plan, and never
 grants approval; the gate below refuses a red docset too.
 
@@ -59,7 +59,7 @@ Anything less, the span entry **exits 4** printing the blocking
 gate and its reason (`--run|--emit-spawns --span execute` alike),
 writes zero implementation files, and records an `intake_refusal`
 telemetry event under this skill's own name. Route the failure,
-never wave it through: not approved → `/spec-shape` (the approve
+never wave it through: not approved → `/spec-gen` (the approve
 gate is the user's; the freeze rides with it); verify red → the
 named node's repair (shape's too).
 
@@ -111,7 +111,7 @@ the entry (the count lives in task.md, so it survives resume; the
 graph surfaces a task at cap for adjudication, never auto-retry).
 Rounds 1–3 re-brief the SAME builder with the failure evidence
 verbatim; round 3 failing suspects the plan — re-brief the area's
-tech/tasks lens via `/spec-shape`'s repair before spending rounds
+tech/tasks lens via `/spec-gen`'s repair before spending rounds
 4–5 on a fresh builder one capability tier up. At the cap,
 adjudicate: wrong (park with a D-###), isolated (defer), or
 load-bearing (shape re-plans). From round 2 on the implementer may
@@ -221,8 +221,8 @@ it (C-01).
 - `/spec-execute <verb> <name>` — this skill's router
   (`commands/spec-execute.md`): execute, build/test/review/ship
   steps, resume/continue asks land here.
-- `/spec-shape` — everything before approval: authoring waves, doc
+- `/spec-gen` — everything before approval: authoring waves, doc
   repair, the approve gate and its freeze; `/spec-intent` — intake.
-- `/spec-to-prod` — the one-release thin alias routing the retired
+- `/spec-idea` (intake) or `/spec-gen` — the one-release thin alias routing the retired
   monolith's verbs (intake → intent, authoring → shape, execute
   verbs → here).

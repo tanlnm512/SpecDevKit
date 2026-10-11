@@ -8,8 +8,8 @@ description: >-
   requirements in frontier rounds until the question frontier is
   empty, gates the result through scripts/check.py --intent-only, and
   hard stops — never authors spec.md or the docset (that is
-  /spec-shape), never executes. Use when the user says "intent",
-  "intake", "clarify this idea", "/spec <name>", or arrives with a raw
+  /spec-gen), never executes. Use when the user says "intent",
+  "intake", "clarify this idea", "/spec-idea <name>", or arrives with a raw
   idea and no spec dir yet.
 metadata:
   owner: platform-core
@@ -34,7 +34,7 @@ first: its problem statement, personas, and MVP features seed
 Problem/Audience/FR seeds verbatim — the grilling then pressures those
 seeds against the actual repo, not the brainstorm's assumptions of it.
 
-Not here: authoring spec.md or any docset file (`/spec-shape`'s
+Not here: authoring spec.md or any docset file (`/spec-gen`'s
 move — intent never writes them), executing approved work
 (`/spec-execute`), and re-validating an existing docset whose spec.md
 already exists (also shape's). Repairing a stale or red intent.md
@@ -102,7 +102,7 @@ failure in the artifact and rerun. Green, flip `**Status**:` to
 ### 5 — Handoff
 
 The run's final message names the artifact path and the next step:
-`/spec-shape <name>`. The commit is the user's, always. Stopping here
+`/spec-gen <name>`. The commit is the user's, always. Stopping here
 is the contract — shape's span gate refuses on a red intent, and an
 adopted-but-unasked answer here is an ambiguity every downstream
 agent inherits.
@@ -112,7 +112,7 @@ agent inherits.
 1. **Never author the docset.** intent.md is the only file this skill
    writes under `specs/`. spec.md, survey.md, plan.md, tech-spec.md,
    task.md, test.md — all spec-shape's. Asked to "continue into the
-   spec"? Hand off to `/spec-shape`.
+   spec"? Hand off to `/spec-gen`.
 2. **Never adopt an unanswered round.** The non-answer rule above.
 3. **Never execute.** No implementation, no fixes — that is
    `/spec-execute`, phases later.

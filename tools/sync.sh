@@ -623,7 +623,7 @@ for name in "${SKILLS[@]}"; do
     for base in $name $(extra_commands "$name"); do
       if [ -f "$skill_dir/commands/$base.md" ]; then
         cmd_bases+=("$base")
-      else
+      elif [ "$base" != "$name" ]; then
         echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"
         PREFLIGHT_FAIL=1
       fi
@@ -796,6 +796,9 @@ if [ "$CHECK" = 0 ]; then
         f="$skill_dir/commands/$base.md"
         rel="skills/$name/commands/$base.md"
         if [ ! -f "$f" ]; then
+          # a skill may name no self-titled command (renamed router:
+          # spec-shape ships spec-gen.md) — extra.txt claims are the truth
+          [ "$base" = "$name" ] && continue
           echo "MISSING $rel (allowlisted, absent)"; fail=1; continue
         fi
         for root in "${COMMANDS_ROOTS[@]}"; do
@@ -815,6 +818,9 @@ if [ "$CHECK" = 0 ]; then
       for base in $name $(extra_commands "$name"); do
         f="$skill_dir/commands/$base.md"
         if [ ! -f "$f" ]; then
+          # a skill may name no self-titled command (renamed router:
+          # spec-shape ships spec-gen.md) — extra.txt claims are the truth
+          [ "$base" = "$name" ] && continue
           echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"; fail=1; continue
         fi
         install_command "$f" "$base" "$DROID_COMMANDS_ROOT" || fail=1
@@ -831,6 +837,9 @@ if [ "$CHECK" = 0 ]; then
       for base in $name $(extra_commands "$name"); do
         f="$skill_dir/commands/$base.md"
         if [ ! -f "$f" ]; then
+          # a skill may name no self-titled command (renamed router:
+          # spec-shape ships spec-gen.md) — extra.txt claims are the truth
+          [ "$base" = "$name" ] && continue
           echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"; fail=1; continue
         fi
         install_command "$f" "$base" "$KILO_COMMANDS_ROOT" || fail=1
@@ -982,7 +991,10 @@ for name in "${SKILLS[@]}"; do
           || [ -n "$(extra_commands "$name")" ]; }; then
     for base in $name $(extra_commands "$name"); do
       f="$skill_dir/commands/$base.md"
-      [ -f "$f" ] || { echo "MISSING $f (allowlisted)"; fail=1; continue; }
+      if [ ! -f "$f" ]; then
+        [ "$base" = "$name" ] && continue
+        echo "MISSING $f (allowlisted)"; fail=1; continue
+      fi
       for root in "${COMMANDS_ROOTS[@]}"; do
         verify_command "$f" "$base" "$root"
       done

@@ -12,7 +12,7 @@ run):
 - *(no verb / a spec name)* → the execute run: invocation-gated by
   `graph.py --span execute` (approve DONE + verify green; anything
   less refuses with exit 4 naming the blocking gate — route
-  authoring to /spec-shape), then implementer waves over the
+  authoring to /spec-gen), then implementer waves over the
   per-task frontier, fix rounds ≤5, the ONE delivery pass, and the
   tick-commit gate.
 - `build <spec> [T###]` → the execute node: implementer waves, no
@@ -29,5 +29,5 @@ run):
   state (the frontier recomputes from task.md alone; `(fix n/5)`
   counts survive the resume).
 - authoring asks (plan/tech/qa/tasks waves, re-survey, doc repair,
-  approve) → not here; route to `/spec-shape` (intake →
+  approve) → not here; route to `/spec-gen` (intake →
   `/spec-intent`) — this skill never authors or approves anything.

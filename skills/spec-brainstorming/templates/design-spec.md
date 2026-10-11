@@ -2,7 +2,7 @@
 
 > Handoff artifact of a spec-brainstorming run. Pre-spec by
 > design: it records the chosen direction and the reasoning, not
-> requirements. The next step is `/spec <name>` with this doc as
+> requirements. The next step is `/spec-idea <name>` with this doc as
 > intent input; requirements shaping happens there, with the user.
 
 **Status**: handoff-ready · **Date**: <date> ·
@@ -69,5 +69,5 @@ observed, that should stop this project.>
 
 ---
 
-*Next step: `/spec <name>` — treat this doc as intent input. The
+*Next step: `/spec-idea <name>` — treat this doc as intent input. The
 commit is the user's.*

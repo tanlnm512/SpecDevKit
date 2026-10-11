@@ -111,7 +111,7 @@ class ArtifactContractTests(unittest.TestCase):
         self.assertTrue(all(p >= 0 for p in positions),
                         f"template lost section(s): {[TEMPLATE_SECTIONS[i] for i, p in enumerate(positions) if p < 0]}")
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("/spec <name>", text, "the template names the next step")
+        self.assertIn("/spec-idea <name>", text, "the template names the next step")
 
     def test_run_contract_arbitrates_digest_grammar_and_payload(self):
         body = read("contracts/run.md")
@@ -121,7 +121,7 @@ class ArtifactContractTests(unittest.TestCase):
 
     def test_handoff_gate_is_observer_checkable(self):
         body = read("gates/handoff.md")
-        self.assertIn("ALL must hold before `/spec` is named", body)
+        self.assertIn("ALL must hold before `/spec-idea` is named", body)
         self.assertIn("never a silent clobber", body)
         self.assertIn("Kill criteria are observable", body)
 

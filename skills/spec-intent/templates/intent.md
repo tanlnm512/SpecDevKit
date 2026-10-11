@@ -52,6 +52,6 @@ nothing in `specs/<name>/` beyond this file is intent's to write.
 - **FR-002**: WHEN <trigger>, the system shall <response>.
 
 ## Handoff
-Next: `/spec-shape <name>` — the docset (spec.md onward) is authored
+Next: `/spec-gen <name>` — the docset (spec.md onward) is authored
 there, never here. The Baseline above is what shape's survey
 re-baselines against.

@@ -196,13 +196,13 @@ it (C-01).
 
 ## Commands and neighbors
 
-- `/spec-shape <verb> <name>` — this skill's router
-  (`commands/spec-shape.md`): authoring, plan/tech/qa/tasks, re-survey,
+- `/spec-gen <verb> <name>` — this skill's router
+  (`commands/spec-gen.md`): authoring, plan/tech/qa/tasks, re-survey,
   continue-spec asks land here.
-- `/spec-to-prod` — the one-release thin alias (`commands/
-  spec-to-prod.md` in this package) routing the retired monolith's
-  verbs: intake → `/spec-intent`, authoring → here, execute verbs →
-  `/spec-execute`.
+- (retired) the `/spec-to-prod` thin alias was removed ahead of its
+  one-release window (user decision 2026-10-11; D-006 amended): intake
+  is `/spec-idea` (spec-intent), authoring is `/spec-gen` (here),
+  execution is `/spec-execute`.
 - The five execution-phase lifecycle commands (`/spec-plan`,
   `/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship`) live with
   spec-execute — the post-approve half this skill hands off to.

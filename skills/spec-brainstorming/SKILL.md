@@ -48,7 +48,7 @@ build here", "help me decide the approach", "before we spec this".
 Also the compile-only continuation: "write up the design spec for
 what we just discussed" (`handoff`, see Continuity). Once a spec
 dir exists the idea has graduated — requirements shaping belongs
-to spec-to-prod's `/spec` intake, not here.
+to spec-to-prod's `/spec-idea` intake, not here.
 
 ## Principles
 
@@ -83,7 +83,7 @@ the change is wrong — not the rule.
    ends with the design spec on disk, pinned to the template's
    shape — never a summary left scrolling away in the transcript.
 7. **Nothing is written under `specs/`.** This skill writes only
-   `brainstorms/<name>.md`. Scaffolding a spec dir is `/spec`'s
+   `brainstorms/<name>.md`. Scaffolding a spec dir is `/spec-idea`'s
    move — writing here first would block it and skew spec-to-prod's
    constitution gate (D-003).
 
@@ -194,9 +194,9 @@ repository root; a user-named path wins. If the file already
 exists, read it — if it is a prior round of the same idea, ask
 (one question) whether to overwrite or version the name
 (`<name>-v2`); never clobber silently. Every criterion in
-`gates/handoff.md` must hold before `/spec` is named.
+`gates/handoff.md` must hold before `/spec-idea` is named.
 
-Before naming `/spec`, run the mechanical gate on the exact
+Before naming `/spec-idea`, run the mechanical gate on the exact
 artifact path:
 
 ```sh
