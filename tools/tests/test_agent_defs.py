@@ -4,7 +4,8 @@ Run via tools/tests/run.sh (needs Python >= 3.10).
 Same philosophy as test_omp_defs.py: the generator derives everything
 by parsing each source role's own Claude-style frontmatter — no
 per-role table to test in isolation — so these exercise it against
-spec-to-prod's real shipped agents/*.md, plus a synthetic scratch skill
+spec-execute's real shipped agents/*.md (the five archetype briefs,
+byte-shared across the spec trio), plus a synthetic scratch skill
 for staging and no-deletion behavior sync.sh can't safely practice on
 the live shared roots.
 """
@@ -16,7 +17,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL = REPO_ROOT / "skills" / "spec-to-prod"
+SKILL = REPO_ROOT / "skills" / "spec-execute"
 
 _spec = importlib.util.spec_from_file_location(
     "agent_defs", REPO_ROOT / "tools" / "agent-defs.py")

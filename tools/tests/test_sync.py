@@ -8,7 +8,9 @@ guarantees against the copy — fresh install, idempotence, foreign-file
 refusal (skills trees and command roots), stale-own cleanup via the
 ledger, absent-harness skips, version-drift detection, zero-write
 on a late collision (the all-root preflight, FR-002), and the no-write
---dry-run/--check modes (FR-009).
+--dry-run/--check modes (FR-009), and the retired-skills sweep (D-007):
+a listed skill whose master is gone is removed from every install root
+on ledger proof alone, foreign files in its paths refused.
 """
 import hashlib
 import io
@@ -27,36 +29,93 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ".spec-dev-kit-deployed"
 
 # Bounded corpus: exactly what sync.sh consumes, so a run costs spawns
-# not bytes. The invoked tools; the skill's consumable surfaces (tree
-# files the tests reference, the allowlisted command set, one role plus
-# its shared prose); the committed agy persona
-# the verify pass byte-compares; and the kit-rules surfaces sync
-# refreshes and drift-checks (rules source, the injector, both carrier
-# files). Behavior fidelity is per-file; corpus size is not load-bearing.
-SKILL = "skills/spec-to-prod"
+# not bytes. The invoked tools; the fixture skills' consumable surfaces
+# (tree files the tests reference, their command routers and bare-name
+# claims, one uniquely-named role brief per shipping skill — the def
+# roots refuse a second claimant of a name, so the fixture pins one);
+# the kit-rules surfaces sync refreshes and drift-checks (rules source,
+# the injector, all four carrier files — the trio's protocols and the
+# code-review fixer); the shared-core master whose closure sync's
+# parity refresh regenerates the replica views from; and the committed
+# root personas the verify pass byte-compares. Behavior fidelity is
+# per-file; corpus size is not load-bearing. The monolith is gone from
+# the repo (T023) and so from this corpus: retired-skills.txt still
+# names it, so every fixture run also exercises the retired sweep as a
+# no-op wherever nothing was ever deployed. The split successors (T019)
+# carry the skill-tree and command-install coverage beside
+# spec-code-review and spec-brainstorming, with the redistributed bare
+# names installing the same total set from their new homes.
+CMD_SKILL = "skills/spec-code-review"
+INTENT_SKILL = "skills/spec-intent"
+SHAPE_SKILL = "skills/spec-shape"
+EXECUTE_SKILL = "skills/spec-execute"
+# The exact flat-command set a fresh install must land in every command
+# root: the five routers plus the bare names the split redistributed
+# (spec from spec-intent, spec-to-prod alias from spec-shape, the five
+# lifecycle verbs from spec-execute) — the same total set the monolith
+# shipped before the split.
+ROUTER_COMMANDS = (
+    "spec-brainstorming", "spec-code-review", "spec-execute",
+    "spec-intent", "spec-shape",
+)
+BARE_COMMANDS = (
+    "spec", "spec-to-prod", "spec-plan", "spec-build",
+    "spec-test", "spec-review", "spec-ship",
+)
+ALL_COMMANDS = ROUTER_COMMANDS + BARE_COMMANDS
 SYNC_CORPUS = (
     "tools/sync.sh",
     "tools/ownership.py",
     "tools/omp-defs.py",
     "tools/agent-defs.py",
     "tools/kit-rules.py",
+    "tools/parity.py",
+    "tools/retired-skills.txt",
     "rules/engineering-rules.md",
-    f"{SKILL}/SKILL.md",
-    f"{SKILL}/VERSION",
-    f"{SKILL}/scripts/tick.py",
-    f"{SKILL}/scripts/graph.py",
-    f"{SKILL}/commands/extra.txt",
-    f"{SKILL}/commands/spec-to-prod.md",
-    f"{SKILL}/commands/spec.md",
-    f"{SKILL}/commands/spec-plan.md",
-    f"{SKILL}/commands/spec-build.md",
-    f"{SKILL}/commands/spec-test.md",
-    f"{SKILL}/commands/spec-review.md",
-    f"{SKILL}/commands/spec-ship.md",
-    f"{SKILL}/agents/scout.md",
-    f"{SKILL}/agents/_shared-protocol.md",
+    "skills/spec-brainstorming/SKILL.md",
+    "skills/spec-brainstorming/VERSION",
+    "skills/spec-brainstorming/commands/spec-brainstorming.md",
+    f"{CMD_SKILL}/SKILL.md",
+    f"{CMD_SKILL}/VERSION",
+    f"{CMD_SKILL}/commands/spec-code-review.md",
+    f"{CMD_SKILL}/scripts/gate.sh",
+    f"{CMD_SKILL}/scripts/review_orchestrator.py",
     "skills/spec-code-review/agents/code-review-fixer.md",
-    "agents/scout.md",
+    f"{INTENT_SKILL}/SKILL.md",
+    f"{INTENT_SKILL}/VERSION",
+    f"{INTENT_SKILL}/commands/spec-intent.md",
+    f"{INTENT_SKILL}/commands/spec.md",
+    f"{INTENT_SKILL}/commands/extra.txt",
+    f"{INTENT_SKILL}/agents/_shared-protocol.md",
+    f"{INTENT_SKILL}/agents/builder.md",
+    f"{SHAPE_SKILL}/SKILL.md",
+    f"{SHAPE_SKILL}/VERSION",
+    f"{SHAPE_SKILL}/commands/spec-shape.md",
+    f"{SHAPE_SKILL}/commands/spec-to-prod.md",
+    f"{SHAPE_SKILL}/commands/extra.txt",
+    f"{SHAPE_SKILL}/agents/_shared-protocol.md",
+    f"{SHAPE_SKILL}/agents/reviewer.md",
+    f"{EXECUTE_SKILL}/SKILL.md",
+    f"{EXECUTE_SKILL}/VERSION",
+    f"{EXECUTE_SKILL}/commands/spec-execute.md",
+    f"{EXECUTE_SKILL}/commands/spec-plan.md",
+    f"{EXECUTE_SKILL}/commands/spec-build.md",
+    f"{EXECUTE_SKILL}/commands/spec-test.md",
+    f"{EXECUTE_SKILL}/commands/spec-review.md",
+    f"{EXECUTE_SKILL}/commands/spec-ship.md",
+    f"{EXECUTE_SKILL}/commands/extra.txt",
+    f"{EXECUTE_SKILL}/agents/_shared-protocol.md",
+    f"{EXECUTE_SKILL}/agents/qa.md",
+    "agents/builder.md",
+    "agents/reviewer.md",
+    "agents/qa.md",
+    "agents/code-review-fixer.md",
+    "skills/spec-shape/scripts/check.py",
+    "skills/spec-shape/scripts/contract.py",
+    "skills/spec-shape/scripts/freeze.py",
+    "skills/spec-shape/scripts/graph.py",
+    "skills/spec-shape/scripts/specstate.py",
+    "skills/spec-shape/scripts/telemetry.py",
 )
 
 
@@ -80,7 +139,8 @@ class SyncShBase(unittest.TestCase):
             capture_output=True, text=True, timeout=300)
 
     def skill_root(self, *parts):
-        return self.home.joinpath(".claude", "skills", "spec-to-prod", *parts)
+        return self.home.joinpath(
+            ".claude", "skills", "spec-code-review", *parts)
 
     def home_snapshot(self):
         """relpath -> sha256 for every file under the temp HOME."""
@@ -101,18 +161,48 @@ class SyncShTests(SyncShBase):
         r1 = self.run_sync()
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
         self.assertTrue((self.skill_root("SKILL.md")).is_file())
-        # extra.txt wrapper name landed in a command root
+        # a skill's own-name router landed in a command root
         self.assertTrue(
-            (self.home / ".agents" / "commands" / "spec-build.md").is_file())
+            (self.home / ".agents" / "commands"
+             / "spec-code-review.md").is_file())
+        # the split successors install through the same loop (T019):
+        # their trees land and their redistributed bare names install
+        # from their new homes
+        self.assertTrue(
+            (self.home / ".claude" / "skills" / "spec-intent"
+             / "SKILL.md").is_file())
+        self.assertTrue(
+            (self.home / ".claude" / "skills" / "spec-shape"
+             / "SKILL.md").is_file())
+        self.assertTrue(
+            (self.home / ".claude" / "skills" / "spec-execute"
+             / "SKILL.md").is_file())
+        self.assertTrue(
+            (self.home / ".agents" / "commands" / "spec.md").is_file())
         # skills-tree provenance ledger exists and is excluded from verify
         self.assertTrue(self.skill_root(LEDGER).is_file())
         # atomic replacement preserves the shipped executable bits
         self.assertTrue(
-            os.access(self.skill_root("scripts", "tick.py"), os.X_OK))
+            os.access(self.skill_root("scripts", "gate.sh"), os.X_OK))
         r2 = self.run_sync()
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
         # FR-007: no installer scratch survives a completed apply
         self.assertEqual(list(self.home.rglob(f"{LEDGER}.tmp*")), [])
+
+    def test_bare_name_redistribution_installs_the_same_total_set(self):
+        # FR-006/T019: the split moved the bare names — spec to
+        # spec-intent, the spec-to-prod alias to spec-shape, the five
+        # lifecycle verbs to spec-execute — and the exact installed set
+        # in a shared command root must stay the pre-split total: the
+        # five routers plus those seven bare names, nothing more,
+        # nothing less.
+        self.assertEqual(self.run_sync().returncode, 0)
+        for root in (".agents", ".claude", ".zcode"):
+            installed = {p.name for p in
+                         (self.home / root / "commands").glob("*.md")}
+            self.assertEqual(
+                installed, {f"{base}.md" for base in ALL_COMMANDS},
+                f"~/{root}/commands vs the redistributed total set")
 
     def test_installer_scratch_leftover_is_not_a_foreign_file(self):
         # Atomic replacement (FR-007) stages through LEDGER_NAME-prefixed
@@ -132,19 +222,20 @@ class SyncShTests(SyncShBase):
     def test_command_update_replaces_content_and_ledger_atomically(self):
         self.assertEqual(self.run_sync().returncode, 0)
         root = self.home / ".agents" / "commands"
-        dest = root / "spec-build.md"
-        master = (self.repo / "skills" / "spec-to-prod"
-                  / "commands" / "spec-build.md")
+        dest = root / "spec-code-review.md"
+        master = (self.repo / CMD_SKILL
+                  / "commands" / "spec-code-review.md")
         master.write_text(
             master.read_text() + "\n<!-- touched by master -->\n")
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("touched by master", dest.read_text())
         entries = [line for line in (root / LEDGER).read_text().splitlines()
-                   if line.endswith(" spec-build")]
+                   if line.endswith(" spec-code-review")]
         self.assertEqual(
             entries,
-            [f"{hashlib.sha256(dest.read_bytes()).hexdigest()} spec-build"])
+            [f"{hashlib.sha256(dest.read_bytes()).hexdigest()}"
+             " spec-code-review"])
 
     def test_foreign_file_in_skills_tree_is_refused_and_kept(self):
         self.assertEqual(self.run_sync().returncode, 0)
@@ -157,7 +248,7 @@ class SyncShTests(SyncShBase):
 
     def test_same_path_foreign_file_in_skills_tree_is_refused_and_kept(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        dest = self.skill_root("scripts", "graph.py")
+        dest = self.skill_root("scripts", "review_orchestrator.py")
         dest.write_text(dest.read_text() + "# hand-edited\n")
         ledger_before = self.skill_root(LEDGER).read_text()
         r = self.run_sync()
@@ -169,23 +260,22 @@ class SyncShTests(SyncShBase):
 
     def test_same_path_owned_update_is_applied(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        master = (self.repo / "skills" / "spec-to-prod"
-                  / "scripts" / "tick.py")
+        master = (self.repo / CMD_SKILL
+                  / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        dest = (self.home / ".zcode" / "skills" / "spec-to-prod"
-                / "scripts" / "tick.py")
+        dest = (self.home / ".zcode" / "skills" / "spec-code-review"
+                / "scripts" / "gate.sh")
         self.assertIn("# touched by master", dest.read_text())
 
     def test_stale_delete_refused_when_current_hash_drifted(self):
         # deletion authority is the CURRENT hash matching the ledgered
         # deployed hash — a post-deploy hand-edit makes it foreign
         self.assertEqual(self.run_sync().returncode, 0)
-        (self.repo / "skills" / "spec-to-prod"
-         / "scripts" / "tick.py").unlink()
-        dest = (self.home / ".zcode" / "skills" / "spec-to-prod"
-                / "scripts" / "tick.py")
+        (self.repo / CMD_SKILL / "scripts" / "gate.sh").unlink()
+        dest = (self.home / ".zcode" / "skills" / "spec-code-review"
+                / "scripts" / "gate.sh")
         dest.write_text(dest.read_text() + "# hand-edited after deploy\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
@@ -195,27 +285,26 @@ class SyncShTests(SyncShBase):
     def test_foreign_file_blocks_stale_removal_in_same_tree(self):
         # a foreign file anywhere in the tree defers every removal too
         self.assertEqual(self.run_sync().returncode, 0)
-        (self.repo / "skills" / "spec-to-prod"
-         / "scripts" / "tick.py").unlink()
-        zcode_skill = (self.home / ".zcode" / "skills" / "spec-to-prod")
-        foreign = zcode_skill / "scripts" / "graph.py"
+        (self.repo / CMD_SKILL / "scripts" / "gate.sh").unlink()
+        zcode_skill = (self.home / ".zcode" / "skills" / "spec-code-review")
+        foreign = zcode_skill / "scripts" / "review_orchestrator.py"
         foreign.write_text(foreign.read_text() + "# hand-edited\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("REFUSE", r.stdout)
-        # stale-own tick.py survives: nothing is removed from a tree
+        # stale-own gate.sh survives: nothing is removed from a tree
         # that holds a foreign file
-        self.assertTrue((zcode_skill / "scripts" / "tick.py").is_file())
+        self.assertTrue((zcode_skill / "scripts" / "gate.sh").is_file())
         self.assertIn("hand-edited", foreign.read_text())
 
     def test_stale_own_file_is_cleaned_via_ledger(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        dest = (self.home / ".zcode" / "skills" / "spec-to-prod"
-                / "scripts" / "tick.py")
+        dest = (self.home / ".zcode" / "skills" / "spec-code-review"
+                / "scripts" / "gate.sh")
         self.assertTrue(dest.is_file())
         # master (the repo copy) drops the file: ledger proves we shipped
         # it, so the next sync removes it instead of refusing
-        (self.repo / "skills" / "spec-to-prod" / "scripts" / "tick.py").unlink()
+        (self.repo / CMD_SKILL / "scripts" / "gate.sh").unlink()
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("clean", r.stdout)
@@ -236,8 +325,8 @@ class SyncShTests(SyncShBase):
 
     def test_foreign_def_in_claude_agents_root_is_refused(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        dest = self.home / ".claude" / "agents" / "scout.md"
-        dest.write_text("---\nname: spec-scout\n---\nhand-edited\n")
+        dest = self.home / ".claude" / "agents" / "code-review-fixer.md"
+        dest.write_text("---\nname: code-review-fixer\n---\nhand-edited\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("REFUSE", r.stdout)
@@ -251,7 +340,7 @@ class SyncShTests(SyncShBase):
         self.assertFalse((self.home / ".factory").exists())
 
     def test_version_drift_fails_the_sync(self):
-        (self.repo / "skills" / "spec-to-prod" / "VERSION").write_text("9.9.9\n")
+        (self.repo / CMD_SKILL / "VERSION").write_text("9.9.9\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("DRIFT", r.stdout)
@@ -259,7 +348,7 @@ class SyncShTests(SyncShBase):
     def test_oversized_description_fails_the_sync(self):
         # zcode/claude loaders reject descriptions over 1024 chars — the
         # skill silently fails to register; sync must catch it first
-        sk = self.repo / "skills" / "spec-to-prod" / "SKILL.md"
+        sk = self.repo / CMD_SKILL / "SKILL.md"
         sk.write_text(sk.read_text().replace(
             "\nmetadata:", "\n  " + "x" * 1100 + "\nmetadata:", 1))
         r = self.run_sync()
@@ -272,11 +361,10 @@ class SyncShTests(SyncShBase):
         # preflight plans all roots first, so the whole HOME — content
         # and ledgers — stays byte-identical and the run exits nonzero.
         self.assertEqual(self.run_sync().returncode, 0)
-        master = (self.repo / "skills" / "spec-to-prod"
-                  / "scripts" / "tick.py")
+        master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
-        late = (self.home / ".omp" / "agent" / "skills" / "spec-to-prod"
-                / "scripts" / "tick.py")
+        late = (self.home / ".omp" / "agent" / "skills" / "spec-code-review"
+                / "scripts" / "gate.sh")
         late.write_text(late.read_text() + "# hand-edited\n")
         before = self.home_snapshot()
         r = self.run_sync()
@@ -284,8 +372,8 @@ class SyncShTests(SyncShBase):
         self.assertIn("REFUSE", r.stdout)
         self.assertIn("PREFLIGHT FAILED", r.stdout)
         self.assertIn("hand-edited", late.read_text())
-        first = (self.home / ".agents" / "skills" / "spec-to-prod"
-                 / "scripts" / "tick.py")
+        first = (self.home / ".agents" / "skills" / "spec-code-review"
+                 / "scripts" / "gate.sh")
         self.assertNotIn("touched by master", first.read_text())
         self.assertEqual(self.home_snapshot(), before)
 
@@ -294,10 +382,10 @@ class SyncShTests(SyncShBase):
         # per-skill manifest is that plan's ledger: a hand-edited def
         # there refuses before any other destination is touched.
         self.assertEqual(self.run_sync().returncode, 0)
-        master = (self.repo / "skills" / "spec-to-prod"
-                  / "scripts" / "tick.py")
+        master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
-        late = self.home / ".omp" / "agent" / "agents" / "scout.md"
+        late = (self.home / ".omp" / "agent" / "agents"
+                / "code-review-fixer.md")
         late.write_text(late.read_text() + "\nhand-edited\n")
         before = self.home_snapshot()
         r = self.run_sync()
@@ -312,7 +400,8 @@ class SyncShTests(SyncShBase):
         # on ~/.factory existing) must cost zero writes on a fresh
         # install: not even the first skill root gets created.
         (self.home / ".factory" / "commands").mkdir(parents=True)
-        foreign = self.home / ".factory" / "commands" / "spec-build.md"
+        foreign = (self.home / ".factory" / "commands"
+                   / "spec-code-review.md")
         foreign.write_text("# a hand-written note, not the wrapper\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
@@ -328,11 +417,12 @@ class SyncShTests(SyncShBase):
         # preflight before the first write — not mid-apply with the
         # skill roots already updated.
         for foreign_rel in (
-                ".factory/droids/scout.md",
-                ".config/opencode/agents/scout.md"):
+                ".factory/droids/code-review-fixer.md",
+                ".config/opencode/agents/code-review-fixer.md"):
             foreign = self.home / foreign_rel
             foreign.parent.mkdir(parents=True, exist_ok=True)
-            foreign.write_text("---\nname: spec-scout\nstale: old deploy\n")
+            foreign.write_text(
+                "---\nname: code-review-fixer\nstale: old deploy\n")
             before = self.home_snapshot()
             r = self.run_sync()
             self.assertNotEqual(r.returncode, 0, foreign_rel)
@@ -363,11 +453,10 @@ class SyncShTests(SyncShBase):
 
     def test_dry_run_reports_update_delete_refuse_and_writes_nothing(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        master = (self.repo / "skills" / "spec-to-prod"
-                  / "scripts" / "tick.py")
+        master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
-        (self.repo / "skills" / "spec-to-prod"
-         / "scripts" / "graph.py").unlink()
+        (self.repo / CMD_SKILL / "scripts"
+         / "review_orchestrator.py").unlink()
         foreign = self.skill_root("scripts", "zzz-foreign.py")
         foreign.write_text("# not ours\n")
         before = self.home_snapshot()
@@ -380,8 +469,9 @@ class SyncShTests(SyncShBase):
         self.assertIn("PREFLIGHT FAILED", r.stdout)
         # nothing the plan describes was applied
         self.assertNotIn("touched by master",
-                         self.skill_root("scripts", "tick.py").read_text())
-        self.assertTrue(self.skill_root("scripts", "graph.py").is_file())
+                         self.skill_root("scripts", "gate.sh").read_text())
+        self.assertTrue(
+            self.skill_root("scripts", "review_orchestrator.py").is_file())
         self.assertTrue(foreign.is_file())
         self.assertEqual(self.home_snapshot(), before)
 
@@ -401,17 +491,16 @@ class SyncShTests(SyncShBase):
             self.assertIn("OK", ok.stdout)
             self.assertEqual(self.home_snapshot(), before)
         # a master that moved on is DRIFT — reported, never applied
-        master = (self.repo / "skills" / "spec-to-prod"
-                  / "scripts" / "tick.py")
+        master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
         r2 = self.run_sync("--check")
         self.assertNotEqual(r2.returncode, 0)
         self.assertIn("DRIFT", r2.stdout)
         self.assertNotIn("touched by master",
-                         self.skill_root("scripts", "tick.py").read_text())
+                         self.skill_root("scripts", "gate.sh").read_text())
         self.assertEqual(self.home_snapshot(), before)
         # a hand-edited owned file is refused by the preflight and kept
-        dest = self.skill_root("scripts", "tick.py")
+        dest = self.skill_root("scripts", "gate.sh")
         edited = dest.read_text() + "# hand-edited\n"
         dest.write_text(edited)
         after_edit = self.home_snapshot()
@@ -444,8 +533,7 @@ class DroidCommandsTests(SyncShBase):
         (self.home / ".factory").mkdir()
         r1 = self.run_sync()
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
-        for base in ("spec", "spec-plan", "spec-build", "spec-test",
-                     "spec-review", "spec-ship", "spec-to-prod"):
+        for base in ALL_COMMANDS:
             self.assertTrue(
                 (self.home / ".factory" / "commands" / f"{base}.md").is_file(),
                 base)
@@ -457,7 +545,7 @@ class DroidCommandsTests(SyncShBase):
     def test_foreign_file_in_droid_commands_is_refused(self):
         (self.home / ".factory").mkdir()
         self.assertEqual(self.run_sync().returncode, 0)
-        dest = self.home / ".factory" / "commands" / "spec-build.md"
+        dest = self.home / ".factory" / "commands" / "spec-code-review.md"
         dest.write_text("# a hand-written note, not the wrapper\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
@@ -476,22 +564,30 @@ class KiloCommandsTests(SyncShBase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("skip  kilo commands", r.stdout)
         self.assertIn("skip  kilo defs", r.stdout)
+        self.assertIn("skip  kilo skills", r.stdout)
         self.assertFalse((self.home / ".config" / "kilo").exists())
 
-    def test_commands_and_defs_install_when_kilo_home_exists(self):
+    def test_commands_defs_and_skills_install_when_kilo_home_exists(self):
         (self.home / ".config" / "kilo").mkdir(parents=True)
         r1 = self.run_sync()
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
-        for base in ("spec", "spec-plan", "spec-build", "spec-test",
-                     "spec-review", "spec-ship", "spec-to-prod"):
+        # the full redistributed command set lands in Kilo's command root
+        for base in ALL_COMMANDS:
             self.assertTrue(
                 (self.home / ".config" / "kilo" / "command"
                  / f"{base}.md").is_file(), base)
         self.assertTrue(
             (self.home / ".config" / "kilo" / "command" / LEDGER).is_file())
+        # and the three new skills' trees land in Kilo's native skills
+        # root beside the older ones (D-040, FR-006)
+        for skill in ("spec-brainstorming", "spec-code-review",
+                      "spec-intent", "spec-shape", "spec-execute"):
+            self.assertTrue(
+                (self.home / ".config" / "kilo" / "skills" / skill
+                 / "SKILL.md").is_file(), skill)
         # agent dialect: subagent mode + derived permission map
         surveyor = (self.home / ".config" / "kilo" / "agent"
-                    / "scout.md").read_text()
+                    / "code-review-fixer.md").read_text()
         self.assertIn("mode: subagent", surveyor)
         self.assertIn("  task: deny", surveyor)
         self.assertIn("  edit: allow", surveyor)
@@ -502,7 +598,7 @@ class KiloCommandsTests(SyncShBase):
         (self.home / ".config" / "kilo").mkdir(parents=True)
         self.assertEqual(self.run_sync().returncode, 0)
         dest = (self.home / ".config" / "kilo" / "command"
-                / "spec-build.md")
+                / "spec-code-review.md")
         dest.write_text("# a hand-written note, not the wrapper\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
@@ -516,19 +612,17 @@ class StaleCommandPruneTests(SyncShBase):
     name is shared turf and stays untouched."""
 
     def test_renamed_extra_name_is_pruned_and_foreign_survives(self):
-        commands = self.repo / SKILL / "commands"
+        commands = self.repo / CMD_SKILL / "commands"
         (commands / "legacy.md").write_text("# legacy wrapper\n",
                                             encoding="utf-8")
         extra = commands / "extra.txt"
-        extra.write_text(extra.read_text().strip() + " legacy\n",
-                         encoding="utf-8")
+        extra.write_text("legacy\n", encoding="utf-8")
         r1 = self.run_sync()
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
         legacy = self.home / ".claude" / "commands" / "legacy.md"
         self.assertTrue(legacy.is_file())
 
-        extra.write_text(extra.read_text().replace(" legacy", ""),
-                         encoding="utf-8")
+        extra.unlink()
         (commands / "legacy.md").unlink()
         foreign = self.home / ".claude" / "commands" / "plan.md"
         foreign.write_text("# someone else's plan\n", encoding="utf-8")
@@ -539,27 +633,27 @@ class StaleCommandPruneTests(SyncShBase):
 
 
 class KitRulesSyncTests(SyncShBase):
-    """tools/kit-rules.py wiring (D-028): sync refreshes the two
+    """tools/kit-rules.py wiring (D-028): sync refreshes the four
     § Engineering rules carrier sections from the canonical
     rules/engineering-rules.md before installing, and --check reports a
     hand-edited carrier as DRIFT without writing anything."""
 
     def test_sync_refreshes_a_stale_carrier_and_installs_fresh(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        carrier = self.repo / SKILL / "agents" / "_shared-protocol.md"
+        carrier = self.repo / SHAPE_SKILL / "agents" / "_shared-protocol.md"
         carrier.write_text(carrier.read_text() + "stale hand-edit\n")
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         # the committed carrier was regenerated back to the source
         self.assertNotIn("stale hand-edit", carrier.read_text())
         # and the installed copies carry the fresh section too
-        installed = (self.home / ".zcode" / "skills" / "spec-to-prod"
-                     / "agents" / "_shared-protocol.md").read_text()
+        installed = (self.home / ".zcode" / "skills" / "spec-code-review"
+                     / "agents" / "code-review-fixer.md").read_text()
         self.assertNotIn("stale hand-edit", installed)
 
     def test_check_reports_stale_carrier_as_drift_and_writes_nothing(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        carrier = self.repo / SKILL / "agents" / "_shared-protocol.md"
+        carrier = self.repo / SHAPE_SKILL / "agents" / "_shared-protocol.md"
         carrier.write_text(carrier.read_text() + "stale hand-edit\n")
         before = self.home_snapshot()
         r = self.run_sync("--check")
@@ -571,13 +665,73 @@ class KitRulesSyncTests(SyncShBase):
     def test_stale_carrier_cannot_wedge_a_fresh_install(self):
         # the refresh runs before the first install write, so even a
         # never-installed HOME ends up with the source-fresh section
-        carrier = self.repo / SKILL / "agents" / "_shared-protocol.md"
+        carrier = self.repo / SHAPE_SKILL / "agents" / "_shared-protocol.md"
         carrier.write_text(carrier.read_text() + "stale hand-edit\n")
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn(
             "stale hand-edit",
-            self.skill_root("agents", "_shared-protocol.md").read_text())
+            self.skill_root("agents", "code-review-fixer.md").read_text())
+
+
+class RetiredSkillSweepTests(SyncShBase):
+    """tools/retired-skills.txt + sync's retired sweep (D-007, FR-009):
+    a listed skill whose master is gone is swept from the install roots,
+    deletion authority being the provenance ledgers alone — a foreign
+    file in the retired tree is refused, never deleted; while the master
+    still ships the sweep is a guarded no-op."""
+
+    def test_master_still_shipping_is_a_guarded_no_op(self):
+        # the committed list names spec-to-prod; the repo retired it
+        # (T023), so the guarded no-op is staged by planting a minimal
+        # master in the fixture repo — the sweep must skip the name and
+        # leave a staged installed tree completely untouched
+        monolith = self.repo / "skills" / "spec-to-prod"
+        monolith.mkdir(parents=True)
+        (monolith / "SKILL.md").write_text("# monolith deploy\n")
+        tree = self.home / ".claude" / "skills" / "spec-to-prod"
+        tree.mkdir(parents=True)
+        (tree / "SKILL.md").write_text("# monolith deploy\n")
+        (tree / LEDGER).write_text(
+            f"{hashlib.sha256(b'# monolith deploy\n').hexdigest()}"
+            " SKILL.md\n")
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(
+            "skip retired sweep for spec-to-prod — master still ships;"
+            " activate at its retirement", r.stdout)
+        self.assertEqual((tree / "SKILL.md").read_text(), "# monolith deploy\n")
+
+    def test_sweep_removes_proven_files_and_refuses_foreign(self):
+        # skills/retired-skill is absent from the fixture repo (the
+        # retirement); its installed tree at a root holds two
+        # ledger-proven deploys plus one planted foreign file
+        (self.repo / "tools" / "retired-skills.txt").write_text(
+            "retired-skill\n", encoding="utf-8")
+        tree = self.home / ".claude" / "skills" / "retired-skill"
+        deploy = {
+            "SKILL.md": "# old deploy\n",
+            "scripts/engine.py": "print('old')\n",
+        }
+        lines = []
+        for rel, text in deploy.items():
+            p = tree / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text)
+            lines.append(f"{hashlib.sha256(text.encode()).hexdigest()} {rel}")
+        (tree / LEDGER).write_text("\n".join(lines) + "\n")
+        foreign = tree / "notes.md"
+        foreign.write_text("# someone else's file\n")
+        r = self.run_sync()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("REFUSE", r.stdout)
+        # exactly the provenance-backed files went, nothing else
+        for rel in deploy:
+            self.assertFalse((tree / rel).exists(), rel)
+        self.assertEqual(foreign.read_text(), "# someone else's file\n")
+        self.assertTrue(
+            (self.home / ".claude" / "skills" / "spec-code-review"
+             / "SKILL.md").is_file())
 
 
 def _run_one(task):

@@ -73,7 +73,7 @@ HARDCODED_MODEL = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# The kit's real brief grammar: spec-to-prod roles carry Method/Done
+# The kit's real brief grammar: the spec suite's roles carry Method/Done
 # when, panel agents carry How to work/Output. Both are complete.
 AGENT_SECTIONS = [
     ("frontmatter name", re.compile(r"^name:\s+\S", re.M), 3),
@@ -191,9 +191,12 @@ def skill_dogfood_targets(skill):
             (str(p.relative_to(ROOT)), [sys.executable, str(checker), str(p)])
             for p in sorted(ROOT.glob("brainstorms/*.md"))
         ]
-    if skill == "spec-to-prod":
+    if skill == "spec-shape":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
-        dirs = [SKILLS_DIR / skill / "examples" / "mini-spec" / "specs" / "mini-spec"]
+        # the shared core's master home (the split, D-004): the
+        # checker is contract-shaped, so it gates every live docset
+        # plus the mini-spec fixture shipped beside it
+        dirs = [SKILLS_DIR / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [
             p.parent
             for p in sorted((ROOT / "specs").glob("*/spec.md"))
@@ -216,7 +219,7 @@ def skill_dogfood(skill):
     if not targets:
         # Distinguish "nothing of its type exists" from a mapping blind
         # spot: an unmapped skill must be named, not silently zeroed.
-        known = skill in ("spec-brainstorming", "spec-to-prod", "spec-code-review")
+        known = skill in ("spec-brainstorming", "spec-shape", "spec-code-review")
         return {"earned": 0, "max": 7, "detail": (
             f"NO DOGFOOD MAPPING for skill '{skill}' — add one to "
             "skill_dogfood_targets or document why none applies"

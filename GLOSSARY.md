@@ -21,17 +21,21 @@ on any conflict the canonical file wins.
 | digest | the only return value a spawned lens or panel agent produces; its grammar is fixed per skill | same |
 | evidence pack | the external context gathered before a brainstorm panel spawns | `skills/spec-brainstorming/SKILL.md` (stage 2) |
 
-### Scheduling and state (spec-to-prod)
+### Scheduling and state (the spec suite: spec-intent · spec-shape · spec-execute)
 
 | Term | Means | Canonical home |
 |------|-------|----------------|
-| doc-set | the seven files under `specs/<name>/` — the canonical statement of what a spec dir IS | `skills/spec-to-prod/contracts/docset.md` |
-| contract file / evidence file | the two doc-set classes: spec / plan / tech-spec / task / test are Contract; survey / research are Evidence | same (files table) |
-| status holder | task.md — the only file that carries status (C-01) | `specs/CONSTITUTION.md` |
-| frontier | every graph node that is ready and not done; the only scheduler — nothing schedules by stage number | `skills/spec-to-prod/SKILL.md` (workflow graph) |
+| doc-set | the seven files under `specs/<name>/` at `Tier: full` — the canonical statement of what a spec dir IS; at `Tier: tiny` the doc-set is ONE file (spec.md with § Tasks) | `skills/spec-shape/scripts/check.py` (the docset discipline) |
+| contract file / evidence file | the two doc-set classes: spec / plan / tech-spec / task / test are Contract; survey / research are Evidence | same (check discipline) |
+| contract tier | `**Tier**: tiny \| full` on spec.md — one-file contract vs the seven-file docset (D-037); absent reads full | `skills/spec-shape/decisions/037` |
+| archetype | one of the five agent briefs — scout · designer · qa · builder · reviewer (panelist in brainstorming); harness def and brief are the same file (D-036) | `skills/spec-*/agents/` (byte-shared across the trio) |
+| lens | a specialization riding a spawn payload from `agents/_lenses.md` (survey/research on scout; plan/tech/tasks on designer; the three panel angles) — data, not a brief file (D-036) | `skills/*/agents/_lenses.md` |
+| primitive | a model-invoked discipline reference an orchestrator composes — grilling, diagnosing, domain-language (D-039) | `skills/spec-intent/references/` (grilling; the monolith's tree is retired) |
+| status holder | the one file that carries status: task.md at full tier, spec.md § Tasks at tiny (C-01, amended by D-037) | `specs/CONSTITUTION.md` |
+| frontier | every graph node that is ready and not done; the only scheduler — nothing schedules by stage number | `skills/spec-shape/SKILL.md` (the generated node table) |
 | wave | one concurrent run of the whole frontier; recompute after each wave | same |
-| tick | the mechanical, atomic `- [ ] T###` → `- [x]` promotion with its `done <date> — <proof>` sub-line | `skills/spec-to-prod/scripts/tick.py` |
-| freeze | the approval freeze applied to the doc-set before execution | `skills/spec-to-prod/scripts/freeze.py` |
+| tick | the mechanical, atomic `- [ ] T###` → `- [x]` promotion with its `done <date> — <proof>` sub-line | `skills/spec-execute/scripts/tick.py` |
+| freeze | the approval freeze applied to the doc-set before execution | `skills/spec-shape/scripts/freeze.py` (the parity master) |
 | gate | a check the flow must pass — say mechanical gate (scripts decide: `check.py`, review stage 1) or name the approval gate (verify → approve; the researcher gate); bare "gate" is ambiguous | each skill's SKILL.md |
 
 ### Review (spec-code-review)
@@ -42,18 +46,19 @@ on any conflict the canonical file wins.
 | finding | a kept review observation with an ID, independently confirmed before it survives triage | `skills/spec-code-review/contracts/panel.md` |
 | verdict | a fix-loop verification outcome for one finding | same |
 | shared review oracle | `review_orchestrator.py` — the single home of review state, systems, asks, finding IDs, and report assembly | D-014 |
-| probe | one thin per-phase agent call by which a workflow dialect fetches JSON from the oracle | D-014 |
-| dialect twin | one of a skill's two workflow scripts — `*.dwf.ts` (zcode) and `*.js` (Claude Code); behavior-identical, so every edit lands in both or in the oracle they share | `skills/*/workflows/` |
+| probe | one thin per-phase call by which any caller fetches JSON from the oracle (scope, gate, shard, ask, report) | D-014 |
+| dialect twin | (retired, D-035) the per-harness workflow scripts deleted with the one-engine move — history only; the shared oracle is the one executable form | `skills/spec-code-review/decisions/016` |
 
 ### Kit plumbing
 
 | Term | Means | Canonical home |
 |------|-------|----------------|
 | skill dir | `skills/<name>/`, self-contained by packaging (marketplace `source: ./skills/<name>`) | `AGENTS.md` |
-| generated surface | any regenerate-only artifact: root `agents/`, `workflows/spec-run.*`, the plugin/marketplace manifests, the `§ Engineering rules` sections | `AGENTS.md` house rules |
+| generated surface | any regenerate-only artifact: root `agents/`, the SKILL.md node table (`scripts/contract.py`), the plugin/marketplace manifests, the `§ Engineering rules` sections | `AGENTS.md` house rules |
 | ADR (D-###) | an append-only decision record; every divergence from a doc contract gets its own entry (C-05) | `skills/<name>/decisions/` |
 | eval case | an entry in a skill's `evals/cases.md`; every increment names its served case (C-10) | `specs/CONSTITUTION.md` |
 | sync | `tools/sync.sh` — the one harness-neutral install pipeline to every machine harness root | `tools/` |
+| telemetry | the local append-only run record (`scripts/telemetry.py` → `~/.spec-dev-kit/telemetry/*.jsonl`) — evidence for self-improvement, never status, never contents | `skills/*/scripts/telemetry.py` |
 | lifecycle commands | the `/spec-*` verb wrappers — `/spec`, `/spec-plan`, `/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship` | D-029 |
 
 ## Terms to avoid
@@ -64,7 +69,11 @@ on any conflict the canonical file wins.
   D-029; they collide with harness modes and built-ins. Use the
   `/spec-*` forms, and say `spec-code-review` for standalone review —
   "review" alone is ambiguous with `/spec-review`.
-- **"Stage" for spec-to-prod scheduling** — the pipeline schedules by
+- **"Workflow dialect" / "twin"** for current surfaces — retired with
+  D-035; the term now names history only. Say "the oracle"
+  (spec-code-review) or "`graph.py --run`" (the spec suite's engine,
+  shipped by the trio).
+- **"Stage" for the spec suite's scheduling** — the pipeline schedules by
   frontier and waves, never by a stage ladder ("Waves, not stages").
   The brainstorming and code-review skills do have real stages; the
   word is theirs.
@@ -74,15 +83,16 @@ on any conflict the canonical file wins.
 ## Flagged ambiguities (resolved)
 
 - **"review"** splits three ways (D-029): `/spec-review` is
-  spec-to-prod's implementation-diff review node; `spec-code-review`
+  spec-execute's implementation-diff review step; `spec-code-review`
   is the standalone skill; harness built-ins keep their own names.
 - **"agent"** covers four things — say role agent (spawned), brief
   (the markdown), generated view (root `agents/` file), or AGENTS.md
   (the convention file).
-- **"workflow"** covers three things — the workflow graph (scheduling
-  semantics, spec-to-prod SKILL.md), the workflow twins (scripts
-  under `skills/*/workflows/`), and a workflow run (a harness
-  executing one). Name which.
-- **Byte-identical pairs** (workflow twins, dialect copies) are edited
-  in every copy at once or regenerated from source — the recurring
-  mistake is editing one copy and shipping drift.
+- **"workflow"** covers two things — the workflow graph (scheduling
+  semantics, `scripts/contract.py` + the spec-shape SKILL.md node
+  table) and a workflow run (`graph.py --run` executing one). Name
+  which.
+- **Byte-identical pairs** (telemetry module copies, lens sections in
+  payloads) are edited in every copy at once or regenerated from
+  source — the recurring mistake is editing one copy and shipping
+  drift.

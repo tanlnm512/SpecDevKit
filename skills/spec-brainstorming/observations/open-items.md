@@ -26,5 +26,5 @@ a decision, or strike it when resolved outright.
    kill-criterion observability stay judgment — `/spec` still
    treats the doc as intent input with no parser; the panel wave's brief-
    degrade path (a brief that fails to load) is pinned
-   structurally by `tests/test_workflow_copies.py` but has never
+   structurally (until the parity suite retired with D-006) and has never
    fired live.

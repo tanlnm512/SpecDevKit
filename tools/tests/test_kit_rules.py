@@ -1,12 +1,13 @@
-"""Kit-wide engineering rules parity — D-028 (spec-to-prod) / D-012
+"""Kit-wide engineering rules parity — D-028 (the spec trio) / D-012
 (spec-code-review) / D-005 (spec-brainstorming).
 
 The three engineering rules (test discipline, backgrounded-job
 discipline, strict code commenting) have ONE canonical source,
-rules/engineering-rules.md, injected by tools/kit-rules.py into two
-carrier views: spec-to-prod's agents/_shared-protocol.md § Engineering
-rules (embedded into every spawn payload by graph.py build_payload) and
-spec-code-review's agents/code-review-fixer.md § Engineering rules
+rules/engineering-rules.md, injected by tools/kit-rules.py into four
+carrier views: the spec trio's agents/_shared-protocol.md § Engineering
+rules sections (embedded into every spawn payload by graph.py
+build_payload — the monolith's carrier retired with the skill, T023)
+and spec-code-review's agents/code-review-fixer.md § Engineering rules
 (runtime-loaded into the fix loop). These tests pin the source→carrier
 injection, the load-bearing anchors, the SKILL.md pointers, and the
 constitution articles — so the wording cannot fork and the scoping
@@ -21,7 +22,9 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-S2P = REPO_ROOT / "skills" / "spec-to-prod"
+SINT = REPO_ROOT / "skills" / "spec-intent"
+SSHAPE = REPO_ROOT / "skills" / "spec-shape"
+SEXEC = REPO_ROOT / "skills" / "spec-execute"
 SCR = REPO_ROOT / "skills" / "spec-code-review"
 SBR = REPO_ROOT / "skills" / "spec-brainstorming"
 SOURCE = REPO_ROOT / "rules" / "engineering-rules.md"
@@ -70,7 +73,9 @@ def flat(text: str) -> str:
 
 
 class KitRulesParityTests(unittest.TestCase):
-    CARRIERS = (S2P / "agents" / "_shared-protocol.md",
+    CARRIERS = (SINT / "agents" / "_shared-protocol.md",
+                SSHAPE / "agents" / "_shared-protocol.md",
+                SEXEC / "agents" / "_shared-protocol.md",
                 SCR / "agents" / "code-review-fixer.md")
 
     def test_source_file_exists(self):
@@ -95,9 +100,9 @@ class KitRulesParityTests(unittest.TestCase):
         self.assertEqual(kit_rules.main(["--check"]), 0)
 
     def test_sections_are_byte_identical(self):
-        a = section(S2P / "agents" / "_shared-protocol.md")
-        b = section(SCR / "agents" / "code-review-fixer.md")
-        self.assertEqual(a, b)
+        sections = [section(c) for c in self.CARRIERS]
+        for other in sections[1:]:
+            self.assertEqual(sections[0], other)
 
     def test_section_carries_every_anchor(self):
         body = flat(SOURCE.read_text(encoding="utf-8"))
@@ -117,12 +122,15 @@ class KitRulesWiringTests(unittest.TestCase):
     protocol embed, the fixer via its brief (pinned in the skill's own
     test_workflow_copies.py), and orchestrators via each SKILL.md."""
 
-    def test_s2p_skill_md_points_at_the_canonical_section(self):
-        text = flat((S2P / "SKILL.md").read_text(encoding="utf-8"))
-        for anchor in ("§ Engineering rules",
-                       "NEVER poll a",
-                       "ride into every spawn payload"):
-            self.assertIn(anchor, text, anchor)
+    def test_phase_skill_mds_point_at_the_canonical_section(self):
+        # the two phase skills whose SKILL.md documents the payload
+        # embed name the canonical section and its injector
+        for skill in (SSHAPE, SEXEC):
+            text = flat((skill / "SKILL.md").read_text(encoding="utf-8"))
+            for anchor in ("§ Engineering rules",
+                           "_shared-protocol.md",
+                           "tools/kit-rules.py"):
+                self.assertIn(anchor, text, f"{skill.name}: {anchor}")
 
     def test_scr_skill_md_points_at_the_fixer_carrier(self):
         text = flat((SCR / "SKILL.md").read_text(encoding="utf-8"))
@@ -138,7 +146,7 @@ class KitRulesWiringTests(unittest.TestCase):
         self.assertIn("_shared-protocol.md", text)
 
     def test_builder_brief_defers_to_the_canonical_section(self):
-        text = flat((S2P / "agents" / "builder.md").read_text(
+        text = flat((SEXEC / "agents" / "builder.md").read_text(
             encoding="utf-8"))
         self.assertIn("§ Engineering rules", text)
         self.assertIn("they win", text)

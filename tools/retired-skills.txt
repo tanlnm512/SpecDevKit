@@ -1,0 +1,5 @@
+# Skills this kit has retired (D-007, FR-009): one name per line, #
+# starts a comment. spec-to-prod — retired by the split, FR-009; the
+# sweep activates at T023's deletion of the master and must be a no-op
+# while the master still exists.
+spec-to-prod

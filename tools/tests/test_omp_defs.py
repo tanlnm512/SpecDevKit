@@ -4,7 +4,8 @@ generator. Run via tools/tests/run.sh (needs Python >= 3.10).
 omp-defs.py derives everything (tools/model/thinking-level) by parsing
 each source role's own Claude-style frontmatter directly — there is no
 per-role table in the tool to test in isolation, so these tests exercise
-it against spec-to-prod's real shipped agents/*.md, the same files
+it against spec-execute's real shipped agents/*.md (the five
+archetype briefs, byte-shared across the spec trio), the same files
 tools/sync.sh feeds it. A second skill added to this repo is covered by
 the same code path with no new test needed here — see
 test_second_skill_needs_no_new_code, which proves that on a synthetic
@@ -18,7 +19,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SPEC_TO_CODE = REPO_ROOT / "skills" / "spec-to-prod"
+SKILL = REPO_ROOT / "skills" / "spec-execute"
 
 _spec = importlib.util.spec_from_file_location(
     "omp_defs", REPO_ROOT / "tools" / "omp-defs.py")
@@ -31,7 +32,7 @@ FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 # real frontmatter for the tiering assertions below — the source of
 # truth is the shipped file, never a hand-duplicated table.
 _ROLE_FIELDS = {}
-for _f in sorted((SPEC_TO_CODE / "agents").glob("*.md")):
+for _f in sorted((SKILL / "agents").glob("*.md")):
     if _f.name.startswith("_"):
         continue
     _name, _desc, _fields, _body = omp_defs.parse(_f)
@@ -41,7 +42,7 @@ for _f in sorted((SPEC_TO_CODE / "agents").glob("*.md")):
 def fm_lines(name: str) -> list:
     """A role's rendered frontmatter lines, via the real parse()+render()
     on its actual shipped source file — never hand-built."""
-    source = SPEC_TO_CODE / "agents" / f"{name}.md"
+    source = SKILL / "agents" / f"{name}.md"
     n, d, fields, body = omp_defs.parse(source)
     text = omp_defs.render(n, d, fields, body)
     return FRONTMATTER.match(text).group(1).splitlines()
@@ -305,9 +306,9 @@ class GenerationEndToEndTests(unittest.TestCase):
     def test_generates_one_file_per_source_role(self):
         with tempfile.TemporaryDirectory() as td:
             out = Path(td)
-            omp_defs.main(["--skill-dir", str(SPEC_TO_CODE), "--out", str(out)])
+            omp_defs.main(["--skill-dir", str(SKILL), "--out", str(out)])
             produced = sorted(p.name for p in out.glob("*.md"))
-            source = sorted(p.name for p in (SPEC_TO_CODE / "agents").glob("*.md")
+            source = sorted(p.name for p in (SKILL / "agents").glob("*.md")
                              if not p.name.startswith("_"))
             self.assertEqual(produced, source)
 
@@ -318,25 +319,25 @@ class GenerationEndToEndTests(unittest.TestCase):
             out = Path(td)
             stale = out / "spec-nonexistent-role.md"
             stale.write_text("---\nname: spec-nonexistent-role\n---\nbody\n")
-            output = run_gen(SPEC_TO_CODE, out)
+            output = run_gen(SKILL, out)
             self.assertTrue(stale.exists())
             self.assertIn("stale-check skipped", output)
 
     def test_stale_removal_never_touches_another_skills_files(self):
         """A shared --out dir may already hold a second skill's own
-        generated roles — regenerating spec-to-prod's must not delete
-        them, since their name shares no prefix with spec-to-prod's."""
+        generated roles — regenerating the skill's defs must not delete
+        them, since their name shares no prefix with its roles."""
         with tempfile.TemporaryDirectory() as td:
             out = Path(td)
             other = out / "foo-flow-planner.md"
             other.write_text("---\nname: foo-flow-planner\n---\nbody\n")
-            omp_defs.main(["--skill-dir", str(SPEC_TO_CODE), "--out", str(out)])
+            omp_defs.main(["--skill-dir", str(SKILL), "--out", str(out)])
             self.assertTrue(other.exists())
 
     def test_second_skill_needs_no_new_code(self):
         """A skill whose agents/ dir shares no naming convention with
-        spec-to-prod still generates correctly through the same parse()
-        / render() path — the tool has no spec-to-prod-specific branch."""
+        the real skill still generates correctly through the same parse()
+        / render() path — the tool has no skill-specific branch."""
         with tempfile.TemporaryDirectory() as td:
             skill = Path(td) / "other-skill"
             (skill / "agents").mkdir(parents=True)

@@ -16,7 +16,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DRIFT_CHECK = REPO_ROOT / "tools" / "drift-check.py"
-MODEL = REPO_ROOT / "skills" / "spec-to-prod" / "diagrams" / "spec-to-prod-workflow.mmd"
+MODEL = REPO_ROOT / "skills" / "spec-shape" / "diagrams" / "spec-to-prod-workflow.mmd"
 
 _spec = importlib.util.spec_from_file_location("drift_check", DRIFT_CHECK)
 drift_check = importlib.util.module_from_spec(_spec)
@@ -87,7 +87,7 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("drift check: OK", r.stdout)
         for section in ("== contract", "== manifests", "== kit-rules",
-                        "== diagrams", "== examples"):
+                        "== parity", "== diagrams", "== examples"):
             self.assertIn(section, r.stdout)
 
     def test_manifest_drift_fails_and_regeneration_repairs(self):
@@ -105,7 +105,7 @@ class DriftTests(unittest.TestCase):
 
     def test_model_drift_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
-        victim = repo / "skills" / "spec-to-prod" / "diagrams" / "spec-to-prod-workflow.mmd"
+        victim = repo / "skills" / "spec-shape" / "diagrams" / "spec-to-prod-workflow.mmd"
         original = victim.read_text()
         victim.write_text(original.replace("tick-commit<br/>", "commit-tick<br/>"))
         r = self.run_drift_check(repo)
@@ -117,7 +117,7 @@ class DriftTests(unittest.TestCase):
 
     def test_stale_render_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
-        victim = repo / "skills" / "spec-to-prod" / "diagrams" / "spec-to-prod-workflow-overview.html"
+        victim = repo / "skills" / "spec-shape" / "diagrams" / "spec-to-prod-workflow-overview.html"
         original = victim.read_text()
         victim.unlink()
         r = self.run_drift_check(repo)
@@ -128,7 +128,7 @@ class DriftTests(unittest.TestCase):
 
     def test_example_drift_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
-        victim = repo / "skills" / "spec-to-prod" / "examples" / "mini-spec" / "specs" / "mini-spec" / "plan.md"
+        victim = repo / "skills" / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec" / "plan.md"
         original = victim.read_text()
         victim.write_text("")
         r = self.run_drift_check(repo)
@@ -149,14 +149,14 @@ class ContractTableTests(unittest.TestCase):
 
     def test_mutation_fails_and_regeneration_repairs(self):
         repo = DriftMutationBase.clean_copy()
-        victim = repo / "skills" / "spec-to-prod" / "SKILL.md"
+        victim = repo / "skills" / "spec-shape" / "SKILL.md"
         victim.write_text(
             victim.read_text().replace("| `spec` | entry |",
                                        "| `spec` | HAND-EDIT |", 1))
         r = run_py(repo / "tools" / "drift-check.py")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("contract", r.stdout)
-        mod = repo / "skills" / "spec-to-prod" / "scripts" / "contract.py"
+        mod = repo / "skills" / "spec-shape" / "scripts" / "contract.py"
         gen = run_py(mod, "--render", "skill-table")
         self.assertEqual(gen.returncode, 0)
         text = victim.read_text()

@@ -92,7 +92,8 @@ class RepoSmokeTests(unittest.TestCase):
 
     def test_grader_exits_clean_and_reports_every_unit(self):
         self.assertEqual(self.rc, 0)
-        for unit in ("skill:spec-to-prod", "skill:spec-code-review",
+        for unit in ("skill:spec-intent", "skill:spec-shape",
+                     "skill:spec-execute", "skill:spec-code-review",
                      "skill:spec-brainstorming",
                      "agent:scout", "agent:code-review-correctness",
                      "agent:panelist"):

@@ -32,15 +32,37 @@
       "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-code-review"
     },
     {
-      "name": "spec-to-prod",
-      "description": "Language-agnostic multi-agent pipeline for spec-driven development: orchestrates role sub-agents in parallel waves to produce grounded contract files under specs/<name>/ \u2014 spec.md, plan.md, task.md (the status holder), tech-spec.md, test.md \u2014 plus survey.md and research.md as evidence, all verified by scripts/check.py.",
+      "name": "spec-execute",
+      "description": "Approved-spec execution \u2014 the suite's back half.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
       },
-      "source": "./skills/spec-to-prod",
+      "source": "./skills/spec-execute",
       "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-to-prod"
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-execute"
+    },
+    {
+      "name": "spec-intent",
+      "description": "Intake front door of the spec-driven suite \u2014 turns a raw idea (or a spec-brainstorming handoff) into one validated artifact, specs/<name>/intent.md.",
+      "author": {
+        "name": "Stanley",
+        "email": "minhtan512@gmail.com"
+      },
+      "source": "./skills/spec-intent",
+      "license": "MIT",
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-intent"
+    },
+    {
+      "name": "spec-shape",
+      "description": "Gated-intake spec authoring \u2014 the suite's middle phase.",
+      "author": {
+        "name": "Stanley",
+        "email": "minhtan512@gmail.com"
+      },
+      "source": "./skills/spec-shape",
+      "license": "MIT",
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-shape"
     }
   ]
 }

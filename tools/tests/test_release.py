@@ -24,7 +24,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL = REPO_ROOT / "skills" / "spec-to-prod"
+SKILL = REPO_ROOT / "skills" / "spec-shape"
 SCAFFOLD = SKILL / "scripts" / "scaffold.sh"
 CHECK = SKILL / "scripts" / "check.py"
 FREEZE = SKILL / "scripts" / "freeze.py"
@@ -213,8 +213,8 @@ lists the test module as its only consumer.
 
 ## References
 - [survey.md](survey.md) — module baseline and evidence.
-- The lifecycle contract: this repo consumes the spec-to-prod skill's
-  templates verbatim via scaffold.sh.
+- The lifecycle contract: this repo consumes the spec suite's
+  templates verbatim via scaffold.sh (mastered at spec-shape).
 
 ## Decisions
 ### D-001: One pure function, no parser

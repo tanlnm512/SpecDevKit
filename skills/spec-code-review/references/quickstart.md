@@ -16,12 +16,12 @@ This is navigation, not a second contract. `SKILL.md`,
 
 ## Pick the harness
 
-- **zcode / Claude Code**: ask for the workflow by name — "run the
-  spec-code-review workflow, target pr, pr 12" — or the `/spec-code-review`
-  router command. The workflow is the background, artifact-producing
-  form; inline stages are identical in behavior.
-- **Any other agent**: the skill inline; `scripts/gate.sh` is the only
-  executable it needs (bash + python3).
+One shape everywhere (D-016/017): the `/spec-code-review` router
+command or a natural ask — "review PR 12", "fix what the report
+found" — and the session runs the stages against the shared oracle
+(`scripts/review_orchestrator.py`), spawning the panel briefs where
+the harness can. `scripts/gate.sh` is the only executable it needs
+(bash + python3).
 
 ## The review-then-ask flow (fixing is a decision, not a default)
 

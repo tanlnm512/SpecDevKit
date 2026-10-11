@@ -61,13 +61,27 @@ class RealCorpusTests(unittest.TestCase):
         self.cases = evals.load_cases()
 
     def test_discovers_every_conversational_case(self):
-        # 16 since E5 (real-repo inline review) joined the corpus
-        self.assertEqual(len(self.cases), 17)
+        # 20 across the corpus since the split moved the authoring
+        # classes (E1–E3, E7) to spec-shape and the execution classes
+        # (E4–E6) to spec-execute — count unchanged by the moves
+        # (17 pre-intent + I1–I3 = 20)
+        self.assertEqual(len(self.cases), 20)
         self.assertTrue(all(c.conversational for c in self.cases))
         selectors = {c.selector for c in self.cases}
         self.assertIn("spec-code-review/e2", selectors)
         self.assertIn("spec-brainstorming/b5", selectors)
-        self.assertIn("spec-to-prod/e6", selectors)
+        self.assertIn("spec-intent/i1", selectors)
+        # the authoring and execution classes moved with the split:
+        # skill-prefixed selectors name their new homes, and the old
+        # spec-to-prod selectors are gone with the retired tree (T023)
+        self.assertIn("spec-shape/e1", selectors)
+        self.assertIn("spec-shape/e7", selectors)
+        self.assertIn("spec-execute/e4", selectors)
+        self.assertIn("spec-execute/e6", selectors)
+        self.assertNotIn("spec-to-prod/e1", selectors)
+        self.assertNotIn("spec-to-prod/e4", selectors)
+        self.assertNotIn("spec-to-prod/e6", selectors)
+        self.assertNotIn("spec-to-prod/e7", selectors)
 
     def test_criteria_enumerate_from_pass_bullets(self):
         by_sel = {c.selector: c for c in self.cases}

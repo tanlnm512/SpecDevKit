@@ -13,6 +13,10 @@ exit 0 releases; exit 1 names what drifted and what owns it:
               agents/code-review-fixer.md            rules/engineering-rules.md
               § Engineering rules sections           (tools/kit-rules.py
                                                      --check)
+  parity      skills/*/scripts/ replica views of     vs the master closure
+              the shared core                        at skills/spec-shape/
+                                                     scripts/ (tools/parity.py
+                                                     --check)
   diagrams    diagrams/spec-to-prod-workflow.mmd     vs the workflow graph
                                                      contract in
                                                      scripts/graph.py
@@ -20,8 +24,9 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                      tables), and the HTML
                                                      renders' coverage of
                                                      every model node
-  examples    examples/mini-spec — the tests'        must still pass
-              green fixture                          scripts/check.py
+  examples    skills/spec-shape/examples/mini-spec —   must still pass
+               the green fixture                      skills/spec-shape/
+                                                      scripts/check.py
 
 Exit: 0 every surface matches its canonical source · 1 drift · 2 usage
 error.
@@ -36,10 +41,11 @@ import sys
 from pathlib import Path
 
 PKG_ROOT = Path(__file__).resolve().parent.parent
-SKILL = PKG_ROOT / "skills" / "spec-to-prod"
+SKILL = PKG_ROOT / "skills" / "spec-shape"
+SHAPE = SKILL
 MODEL = SKILL / "diagrams" / "spec-to-prod-workflow.mmd"
 DIAGRAMS_DIR = SKILL / "diagrams"
-FIXTURE = SKILL / "examples" / "mini-spec" / "specs" / "mini-spec"
+FIXTURE = SHAPE / "examples" / "mini-spec" / "specs" / "mini-spec"
 
 NODE_DEF = re.compile(
     r'^\s*([A-Za-z0-9_]+)\s*(?:\[\[|\[|\{\{)"(.*)"(?:\]\]|\]|\}\})\s*$')
@@ -149,11 +155,11 @@ def diagram_problems(g) -> list[str]:
 
 
 def check_contract() -> int:
-    """The spec-to-prod node table: SKILL.md's generated block must
-    match a fresh render of scripts/contract.py (D-038)."""
-    print("== contract — canonical source: skills/spec-to-prod/"
+    """The workflow node table: spec-shape SKILL.md's generated block
+    must match a fresh render of its scripts/contract.py (D-038)."""
+    print("== contract — canonical source: skills/spec-shape/"
           "scripts/contract.py")
-    skill = PKG_ROOT / "skills" / "spec-to-prod"
+    skill = PKG_ROOT / "skills" / "spec-shape"
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "s2p_contract", skill / "scripts" / "contract.py")
@@ -167,10 +173,10 @@ def check_contract() -> int:
     committed = text[start:end + len(mod.END)]
     if committed != mod.render_skill_table():
         print("  DRIFT: SKILL.md node table differs from contract.py")
-        print("  regenerate: python3 skills/spec-to-prod/scripts/"
+        print("  regenerate: python3 skills/spec-shape/scripts/"
               "contract.py --render skill-table (replace the block)")
         return 1
-    print("  OK  skills/spec-to-prod/SKILL.md node table")
+    print("  OK  skills/spec-shape/SKILL.md node table")
     return 0
 
 
@@ -184,6 +190,12 @@ def check_kit_rules() -> int:
     print("== kit-rules — canonical source: rules/engineering-rules.md via "
           "tools/kit-rules.py")
     return run_tool(PKG_ROOT / "tools" / "kit-rules.py", "--check")
+
+
+def check_parity() -> int:
+    print("== parity — canonical source: skills/spec-shape/scripts/ via "
+          "tools/parity.py")
+    return run_tool(PKG_ROOT / "tools" / "parity.py", "--check")
 
 
 def check_diagrams() -> int:
@@ -202,8 +214,8 @@ def check_diagrams() -> int:
 
 def check_examples() -> int:
     print("== examples — canonical contract: the mini-spec green fixture "
-          "passes scripts/check.py")
-    return run_tool(SKILL / "scripts" / "check.py", FIXTURE)
+          "passes skills/spec-shape/scripts/check.py")
+    return run_tool(SHAPE / "scripts" / "check.py", FIXTURE)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -211,13 +223,14 @@ def main(argv: list[str] | None = None) -> int:
         prog="drift-check.py",
         description="Release-validate every generated surface against its "
                     "canonical source: contract, manifests, kit-rules, "
-                    "diagrams, examples.")
+                    "parity, diagrams, examples.")
     p.parse_args(argv)
 
     failed = []
     for name, check in (("contract", check_contract),
                         ("manifests", check_manifests),
                         ("kit-rules", check_kit_rules),
+                        ("parity", check_parity),
                         ("diagrams", check_diagrams),
                         ("examples", check_examples)):
         if check():
@@ -226,8 +239,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"drift check: FAILED — {', '.join(failed)} differ from their "
               f"canonical sources")
         return 1
-    print("drift check: OK — contract, manifests, kit-rules, diagrams, "
-          "examples match their canonical sources")
+    print("drift check: OK — contract, manifests, kit-rules, parity, "
+          "diagrams, examples match their canonical sources")
     return 0
 
 

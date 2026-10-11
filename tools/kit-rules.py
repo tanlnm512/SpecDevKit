@@ -4,22 +4,30 @@ views.
 
 The rules text lives ONCE in rules/engineering-rules.md (the browsable,
 editable file). This tool injects it verbatim as the
-"## Engineering rules (kit-wide)" section into the two carrier files the
+"## Engineering rules (kit-wide)" section into the carrier files the
 kit's spawn channels already load:
 
-  skills/spec-to-prod/agents/_shared-protocol.md   (embedded into every
-                                                    spawn payload by
-                                                    graph.py build_payload)
+  skills/spec-intent/agents/_shared-protocol.md    (embedded into every
+                                                     spawn payload by
+                                                     graph.py build_payload
+                                                     — the intent
+                                                     phase's own carrier)
+  skills/spec-shape/agents/_shared-protocol.md     (same embed — the
+                                                     shape phase's own
+                                                     carrier)
+  skills/spec-execute/agents/_shared-protocol.md   (same embed — the
+                                                     execute phase's
+                                                     own carrier)
   skills/spec-code-review/agents/code-review-fixer.md
-                                                   (runtime-loaded into
-                                                    the fix loop by both
-                                                    workflow dialects)
+                                                     (runtime-loaded into
+                                                      the fix loop by both
+                                                      workflow dialects)
 
 Edit the rules in the source file, run this tool, re-run drift-check.
 --check verifies the committed carriers match a fresh injection (this is
 the drift-check.py "kit-rules" category); no argument rewrites them.
 
-See skills/spec-to-prod/decisions/028-kit-wide-engineering-rules.md and
+See skills/spec-shape/decisions/028-kit-wide-engineering-rules.md and
 rules/engineering-rules.md's role as the single source of truth.
 """
 from __future__ import annotations
@@ -32,7 +40,12 @@ PKG_ROOT = Path(__file__).resolve().parent.parent
 SOURCE = PKG_ROOT / "rules" / "engineering-rules.md"
 HEADING = "## Engineering rules (kit-wide)"
 CARRIERS = (
-    PKG_ROOT / "skills" / "spec-to-prod" / "agents" / "_shared-protocol.md",
+    PKG_ROOT / "skills" / "spec-intent" / "agents"
+    / "_shared-protocol.md",
+    PKG_ROOT / "skills" / "spec-shape" / "agents"
+    / "_shared-protocol.md",
+    PKG_ROOT / "skills" / "spec-execute" / "agents"
+    / "_shared-protocol.md",
     PKG_ROOT / "skills" / "spec-code-review" / "agents"
     / "code-review-fixer.md",
 )
@@ -64,7 +77,7 @@ def inject(text: str, body: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="kit-rules.py",
-        description="Inject rules/engineering-rules.md into the two "
+        description="Inject rules/engineering-rules.md into the "
                     "carrier sections, or --check them against a fresh "
                     "injection.")
     p.add_argument("--check", action="store_true",

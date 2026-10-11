@@ -1,0 +1,564 @@
+"""Shared doc-state parsers for a spec folder under specs/<name>/.
+
+Every scheduling-relevant signal the tooling layer reads out of the docset
+lives here as a pure function: spec Status, task entries (checkboxes,
+phases, parallel markers, dependency chains, fix rounds, implemented
+markers), the Delivered header line and the approval-freeze anchor, the
+survey baseline header and item list, the researcher-skip marker,
+next-free-ID allocation, ID definitions, and the git availability probes.
+check.py, audit.py, and graph.py import from this module instead
+of inlining their own copies — one canonical regex per doc shape, so the
+validators and the workflow engine can never drift apart on what the docs
+say (the same drift-killer D-007 applied to agent defs/briefs).
+
+Pure functions, stdlib only, no CLI: importing this module has no side
+effects — no output, no file writes (the file-reading exceptions are
+research_state/git helpers, which take an explicit path). Text arguments
+are the already-read file contents; check.py strips invisible/control
+characters at read time before any parser sees the text, so the patterns
+below can stay simple.
+
+Exit-code/CLI contracts live in the tooling scripts, not here.
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+from typing import NamedTuple
+
+# An ID is "defined" when it introduces its entity on one of these line shapes.
+# Single source of truth for FR/AC/US/TC/D — check.py's traceability graph,
+# its checklist builder, and graph.py's ID bookkeeping all read this table.
+DEFINITIONS = {
+    "FR": re.compile(r"^-\s+\*\*(FR-\d{3})\*\*"),
+    "NFR": re.compile(r"^-\s+\*\*(NFR-\d{3})\*\*"),
+    "AC": re.compile(r"^-\s+(AC\d+):"),
+    "US": re.compile(r"^###\s+(US\d{1,2})\b"),
+    "TC": re.compile(r"^#{2,3}\s+(TC-\d{3})"),
+    "D": re.compile(r"^###\s+(D-\d{3})"),
+}
+
+# Template placeholders: <name>, <verb phrase>, <initial state> ... (letters,
+# spaces, hyphens only — real markdown like <br> or <a href> won't match).
+PLACEHOLDER = re.compile(r"<[a-z][a-z -]{2,}>")
+CODE_SPAN = re.compile(r"`[^`]*`")
+QUOTE_SPAN = re.compile(r'"[^"\n]*"')
+HTML_COMMENT = re.compile(r"<!--.*?-->")
+
+# spec.md lifecycle: `**Status**: <word>` (backticked words tolerated).
+STATUS_LINE = re.compile(r"^\*\*Status\*\*:\s*`?([A-Za-z]+)", re.M)
+
+# spec.md effort tier: `**Effort**: <word>` — the mechanical handle for the
+# effort-scaling tiers (D-024). Absent or unknown reads "large" so every
+# pre-field docset keeps the full-wave graph unchanged.
+EFFORT_LINE = re.compile(r"^\*\*Effort\*\*:\s*`?([A-Za-z]+)", re.M)
+EFFORT_TIERS = ("tiny", "standard", "large")
+# D-037 thin floor: `**Tier**: tiny` on spec.md — the contract is ONE
+# file (tasks live in spec.md § Tasks); absent/unknown reads "full",
+# so every docset predating the field keeps today's graph.
+TIER_LINE = re.compile(r"^\*\*Tier\*\*:\s*`?([A-Za-z]+)", re.M)
+TASKS_HEADING = "## Tasks"
+
+# task.md entry shapes (the Conventions block in templates/task.md is the
+# normative wording): `- [x]` done, `(in-progress)` claimed, `~~T###~~`
+# struck/dropped, `[P]` parallelizable, `(after T###)` dependency chain,
+# `(fix <n>/5)` fix-round counter. `(implemented)` records landed work on
+# an unticked entry — durable before the delivery step's ticks, and read
+# independently of claimed/done/struck.
+TASK_ID = re.compile(r"- \[[ x]\]\s*(T\d{3})")
+TASK_DONE = re.compile(r"- \[x\]")
+AFTER_REF = re.compile(r"\(after\s+(T\d{3})")
+FIX_ROUND = re.compile(r"\(fix\s+(\d+)/\d+\)")
+STRIKETHROUGH = re.compile(r"~~[^~]*~~")
+
+# task.md tick proof: the `done <date> — <proof>` sub-line a ticked entry
+# carries (em dash U+2014; tick.py writes it bulleted, the conventions show
+# it indented — both shapes read). A tick without it is bookkeeping, not
+# durable evidence.
+DONE_NOTE = re.compile(r"^\s*(?:-\s*)?done \d{4}-\d{2}-\d{2} \u2014", re.M)
+
+# task.md header: the delivery record — `commit @ <sha>` once the plan's
+# end-of-spec commit exists, `commit @ -` the explicit non-git skip. The
+# record must name `commit` directly after the colon, so the scaffold's
+# `pending` placeholder — and its backticked example text — cannot read
+# as delivered.
+DELIVERED_COMMIT = re.compile(
+    r"Delivered\*{0,2}\s*:\s*commit\s+@\s*`?([0-9a-f]{7,40}|-)"
+)
+
+# approvals/approval.md: the `**Approved-at**: <sha>` anchor freeze.py
+# records at approval — the commit the approved docset was signed against,
+# and the default diff base for the post-execute review instruments.
+APPROVED_AT = re.compile(
+    r"\*\*Approved-at\*\*\s*:\s*`?([0-9a-f]{7,40})`?", re.I)
+
+# Exact lifecycle evidence values. The older state helpers intentionally
+# answer only "was this marker recorded?"; these parsers expose the SHA (or
+# explicit non-git dash) so integrity checks can prove it exists and belongs
+# to the repository instead of trusting any hex-looking text.
+LIFECYCLE_VALUES = {
+    "delivered": DELIVERED_COMMIT,
+}
+
+# spec.md coverage-floor header: `**Coverage**: 80` (percent sign
+# tolerated, value clamped by the reader) — the minimum line coverage
+# audit.py's coverage mode enforces over the tasks' intended files when
+# the repo ships coverage tooling. Absent → the 80 default.
+COVERAGE_FLOOR = re.compile(
+    r"^\*\*Coverage\*\*\s*:\s*(\d{1,3})\s*%?", re.M)
+
+# survey.md baseline header: `**Baseline**: <version> @ <sha>`, backticks on
+# the sha tolerated; the second shape matches a bare angle-bracketed baseline
+# header carrying a real hash (e.g. `<v2 @ abc1234>`). The unfilled
+# template's `<version @ commit>` placeholder has no hex chars and cannot
+# match either shape — it reads None (see survey_baseline).
+BASELINE_HEADER = re.compile(r"Baseline\*\*([^@\n]*)@\s*`?([0-9a-f]{7,40})`?")
+BASELINE_PLACEHOLDER = re.compile(r"<\s*([^<>@\n]{1,40})\s*@\s*([0-9a-f]{7,40})\s*>")
+
+# survey.md item list shape (the surveyor's template): `item <id>: "<desc>"`
+# with a following `status:` line. Malformed/missing status reads "unknown"
+# rather than raising — converge diffs two possibly-messy snapshots.
+SURVEY_ITEM = re.compile(r'^item\s+(\S+):\s*"([^"]*)"', re.M)
+SURVEY_ITEM_STATUS = re.compile(r"^\s*status:\s*(DONE|PARTIAL|TODO)", re.M)
+
+# The researcher-gate skip record (byte-exact, em dash U+2014). Canonical
+# home: contracts/docset.md; every occurrence anywhere must match this
+# sequence exactly. research_state matches it as a whole stripped line.
+RESEARCH_SKIP_MARKER = "not applicable — no open questions at Stage 0"
+
+# Substrings that survive only while research.md is still the unfilled
+# scaffold template (scaffold.sh copies templates verbatim) — a file
+# carrying any of these has not been filled, and the research gate must
+# stay undetermined rather than misread the template as done research.
+RESEARCH_TEMPLATE_GLUE = (
+    "### <research question",
+    "### <open choice>",
+    "- **source**: <URL or DOI>",
+)
+
+
+# NamedTuple, not dataclass: the suite loads scripts by file path via
+# importlib without sys.modules registration, which breaks dataclass
+# annotation processing — a plain record keeps the module loadable either way.
+class TaskEntry(NamedTuple):
+    """One `- [ ]`-anchored task entry from task.md's `## Phase N` sections.
+
+    `block` is the entry's raw text (trimmed at the first blank line, so
+    trailing prose after the section's last entry is not swallowed); the
+    flag fields are parsed views onto it. `id` is None for entries whose
+    first line doesn't open with a T-ID (e.g. the struck form
+    `- [ ] ~~T005~~ …`) and `phase` is None under an unnumbered phase
+    header — both stay in the list so consumers count them where the
+    source file counts them."""
+
+    id: str | None
+    phase: int | None
+    block: str
+    first_line: str
+    done: bool
+    claimed: bool
+    struck: bool
+    parallel: bool
+    after: list[str]
+    fix_round: int | None
+    implemented: bool = False
+
+
+class SurveyItem(NamedTuple):
+    """One `item <id>: "…"` block from survey.md's item list."""
+
+    id: str
+    description: str
+    status: str  # DONE | PARTIAL | TODO | unknown
+
+
+class TickEvidence(NamedTuple):
+    """task.md's durable tick record: entry counts plus the ids whose
+    evidence is missing. `unticked` holds open (not ticked, not struck)
+    task ids in file order; `noteless` holds ticked ids whose entry block
+    carries no done-proof sub-line."""
+
+    total: int
+    ticked: int
+    struck: int
+    unticked: list[str]
+    noteless: list[str]
+
+
+def spec_status(spec_md: str) -> str | None:
+    """The spec.md lifecycle word (draft/approved/active/done), lowercased;
+    None when no line-leading `**Status**:` header exists."""
+    m = STATUS_LINE.search(spec_md)
+    return m.group(1).lower() if m else None
+
+
+def spec_effort(spec_md: str) -> str:
+    """The spec.md effort tier (tiny/standard/large), lowercased; "large"
+    when no `**Effort**:` header exists or the word is not a known tier —
+    the legacy full-wave behavior, so docsets predating the field keep
+    today's graph (D-024)."""
+    m = EFFORT_LINE.search(spec_md) if spec_md else None
+    word = m.group(1).lower() if m else ""
+    return word if word in EFFORT_TIERS else "large"
+
+
+def spec_tier(spec_md: str) -> str:
+    """The spec.md contract tier — `tiny` (one file: the task list lives
+    in spec.md § Tasks) or `full` (the seven-file docset). Absent or
+    unknown reads `full`: docsets predating the field keep today's
+    graph (D-037)."""
+    m = TIER_LINE.search(spec_md) if spec_md else None
+    word = m.group(1).lower() if m else ""
+    return word if word in ("tiny", "full") else "full"
+
+
+def tasks_section(spec_md: str) -> str | None:
+    """The text of spec.md's `## Tasks` section (the tiny tier's task
+    list), or None when the spec carries no such section. Section ends
+    at the next `## ` heading."""
+    if not spec_md:
+        return None
+    start = spec_md.find(TASKS_HEADING)
+    if start < 0:
+        return None
+    body = spec_md[start + len(TASKS_HEADING):]
+    end = body.find("\n## ")
+    return body[:end] if end >= 0 else body
+
+
+def tiny_task_text(spec_md: str) -> str | None:
+    """The tiny tier's task-source text: the § Tasks section wrapped in
+    a `## Phase 1` header so task_entries/tick_evidence — the same
+    parsers task.md uses — read it unchanged (D-037: one grammar, two
+    homes)."""
+    section = tasks_section(spec_md)
+    if section is None:
+        return None
+    return "## Phase 1\n" + section.lstrip("\n")
+
+
+def coverage_floor(spec_md: str, default: int = 80) -> int:
+    """The spec.md coverage floor (`**Coverage**: <int>` percent), clamped
+    to 0–100; `default` (80) when the header is absent — the minimum line
+    coverage audit.py's coverage mode demands over the tasks' intended
+    files."""
+    m = COVERAGE_FLOOR.search(spec_md) if spec_md else None
+    if not m:
+        return default
+    return max(0, min(100, int(m.group(1))))
+
+
+def task_entries(task_md: str) -> list[TaskEntry]:
+    """Parse task.md's phase sections into TaskEntry records, in file order.
+
+    Only `- [ ]`-anchored blocks inside `## Phase …` sections count — the
+    burndown table and the Conventions examples must not become entries.
+    An entry's continuation is the indented lines directly under it; the
+    block ends at the first blank line (never a blank-line-separated
+    paragraph after the entry)."""
+    entries: list[TaskEntry] = []
+    for sec in re.split(r"^## ", task_md, flags=re.M):
+        header = sec.split("\n", 1)[0].strip()
+        # `## Tasks` is the tiny tier's phase-1 section inside spec.md
+        # (D-037) — task.md parsers read either home unchanged. An
+        # unnumbered `## Phase …` header keeps its legacy phase=None.
+        if header == "Tasks":
+            phase = 1
+        elif header.lower().startswith("phase"):
+            hm = re.match(r"phase\s+(\d+)", header, re.I)
+            phase = int(hm.group(1)) if hm else None
+        else:
+            continue
+        for block in re.split(r"^(?=- \[)", sec, flags=re.M):
+            if not re.match(r"- \[", block):
+                continue
+            block = block.split("\n\n", 1)[0]
+            first_line = block.split("\n", 1)[0]
+            own = TASK_ID.match(block)
+            fix = FIX_ROUND.search(block)
+            entries.append(TaskEntry(
+                id=own.group(1) if own else None,
+                phase=phase,
+                block=block,
+                first_line=first_line,
+                done=bool(TASK_DONE.match(block)),
+                claimed="(in-progress)" in block,
+                struck=bool(STRIKETHROUGH.search(first_line)),
+                parallel="[P]" in first_line,
+                after=AFTER_REF.findall(block),
+                fix_round=int(fix.group(1)) if fix else None,
+                implemented="(implemented)" in block,
+            ))
+    return entries
+
+
+def delivery_state(task_md: str) -> tuple[str, str | None]:
+    """(state, evidence) for task.md's Delivered header line.
+
+    delivered = a commit record exists — evidence is the recorded sha, or
+    `-` for the explicit non-git skip; pending = a Delivered line exists
+    but records no commit (the scaffold's placeholder reads pending, never
+    delivered); missing = no Delivered line at all. evidence is None
+    unless delivered."""
+    if "Delivered" not in task_md:
+        return "missing", None
+    m = DELIVERED_COMMIT.search(task_md)
+    if not m:
+        return "pending", None
+    return "delivered", m.group(1)
+
+
+def lifecycle_shas(task_md: str) -> dict[str, str | None]:
+    """Exact recorded values for delivered evidence.
+
+    A value is a commit SHA or the explicit non-git dash. None means the
+    marker has not been recorded yet. These values are inputs to integrity
+    checks, not themselves proof: a hex string must still resolve to a commit.
+    """
+    out: dict[str, str | None] = {}
+    for name, pattern in LIFECYCLE_VALUES.items():
+        m = pattern.search(task_md)
+        out[name] = m.group(1) if m else None
+    return out
+
+
+def approval_sha(spec_dir: Path) -> str | None:
+    """The `**Approved-at**` commit freeze.py recorded at approval —
+    approvals/approval.md's anchor for the approved docset. None when no
+    freeze exists yet (pre-approval) or the file is unreadable; never the
+    dash form (a non-git freeze records `-`, which names no diff base)."""
+    try:
+        text = (Path(spec_dir) / "approvals" / "approval.md").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not text:
+        return None
+    m = APPROVED_AT.search(text)
+    return m.group(1) if m else None
+
+
+def tick_evidence(task_md: str) -> TickEvidence:
+    """The durable task-tick evidence for the tick-commit transition: the
+    transition is fully evidenced only when `unticked` and `noteless` are
+    both empty — every task ticked or struck, every tick carrying its
+    `done <date> — <proof>` sub-line."""
+    entries = task_entries(task_md)
+    return TickEvidence(
+        total=len(entries),
+        ticked=sum(1 for e in entries if e.done),
+        struck=sum(1 for e in entries if e.struck),
+        unticked=[e.id for e in entries
+                  if e.id and not e.done and not e.struck],
+        noteless=[e.id for e in entries
+                  if e.id and e.done and not DONE_NOTE.search(e.block)],
+    )
+
+
+def survey_baseline(survey_md: str) -> tuple[str, str] | None:
+    """(version, sha) from survey.md's baseline header, or None.
+
+    Handles the filled `**Baseline**: <version> @ <sha>` form (backticked
+    sha tolerated) and the template's `<version @ commit>` placeholder
+    shape — the placeholder carries no real hash, so it reads None and the
+    caller decides how to report an unfilled header."""
+    m = BASELINE_HEADER.search(survey_md) or BASELINE_PLACEHOLDER.search(survey_md)
+    if not m:
+        return None
+    ver = m.group(1).strip().lstrip(":").strip()
+    return ver, m.group(2)
+
+
+def survey_items(survey_md: str) -> list[SurveyItem]:
+    """survey.md's item list: id, quoted description, and status (unknown
+    when the status line is absent or malformed). Blocks that don't open
+    with the `item <id>: "…"` shape are skipped, not raised."""
+    items: list[SurveyItem] = []
+    for block in re.split(r'(?=^item\s+\S+:)', survey_md, flags=re.M):
+        m = SURVEY_ITEM.match(block)
+        if not m:
+            continue
+        sm = SURVEY_ITEM_STATUS.search(block)
+        items.append(
+            SurveyItem(m.group(1), m.group(2), sm.group(1) if sm else "unknown"))
+    return items
+
+
+def research_state(research_path: Path | str | None) -> str:
+    """'done' | 'skip' | 'pending' | 'missing' for specs/<name>/research.md.
+
+    skip = the file carries the canonical skip-marker line (byte-exact, em
+    dash — RESEARCH_SKIP_MARKER; the marker wins over template residue
+    since writing it is the orchestrator's explicit record). pending = the
+    file exists but is empty or still the unfilled scaffold template — the
+    gate stays undetermined, never misreading the template as ran research.
+    missing = no file (or an unreadable path)."""
+    if research_path is None:
+        return "missing"
+    try:
+        text = Path(research_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "missing"
+    if any(line.strip() == RESEARCH_SKIP_MARKER for line in text.splitlines()):
+        return "skip"
+    if not text.strip():
+        return "pending"
+    if any(glue in text for glue in RESEARCH_TEMPLATE_GLUE):
+        return "pending"
+    return "done"
+
+
+def defined_ids(text: str) -> dict[str, set[str]]:
+    """IDs defined in one file's text, per family: {"FR": {"FR-001", …}, …}.
+
+    A definition is the family's line shape in DEFINITIONS; a mere mention
+    in prose never defines."""
+    out: dict[str, set[str]] = {kind: set() for kind in DEFINITIONS}
+    for line in text.splitlines():
+        stripped = line.strip()
+        for kind, pat in DEFINITIONS.items():
+            m = pat.match(stripped)
+            if m:
+                out[kind].add(m.group(1))
+    return out
+
+
+def next_ids(texts: dict[str, str]) -> dict[str, str]:
+    """Next free ID per family — the append-scope helper behind check.py
+    --next-ids. IDs are never renumbered, so a collision is the only
+    failure mode to prevent. Missing/empty sources allocate the first ID."""
+    def nxt(pat: str, text: str, fmt: str) -> str:
+        nums = [int(m) for m in re.findall(pat, text)]
+        return fmt.format((max(nums) + 1) if nums else 1)
+
+    return {
+        "FR": nxt(r"FR-(\d{3})", texts.get("spec.md", ""), "FR-{:03d}"),
+        "NFR": nxt(r"NFR-(\d{3})", texts.get("spec.md", ""), "NFR-{:03d}"),
+        "AC": nxt(r"\bAC(\d+)\b", texts.get("spec.md", ""), "AC{}"),
+        "US": nxt(r"\bUS(\d+)\b", texts.get("spec.md", ""), "US{}"),
+        "T": nxt(r"\bT(\d{3})\b", texts.get("task.md", ""), "T{:03d}"),
+        "TC": nxt(r"TC-(\d{3})", texts.get("test.md", ""), "TC-{:03d}"),
+        "D": nxt(r"D-(\d{3})", texts.get("tech-spec.md", ""), "D-{:03d}"),
+    }
+
+
+PATH_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,12}$")
+
+
+def _pathish(span: str) -> bool:
+    span = span.strip().strip("'\"")
+    return bool(span) and " " not in span and "://" not in span and (
+        "/" in span or span.endswith("/") or PATH_EXTENSION.search(span)
+    )
+
+
+def _normalize_path(span: str) -> str:
+    span = span.strip().strip("'\"")
+    if span.startswith("./"):
+        span = span[2:]
+    return span.rstrip("/")
+
+
+def task_touches(entry: TaskEntry) -> list[str]:
+    """Intended file/directory/glob touches for one task.
+
+    Reads the complete entry, not only its first line. Explicit `Touches:`
+    bullets are authoritative; legacy path-shaped backticks remain supported
+    so existing docsets do not silently lose overlap detection.
+    """
+    touches: set[str] = set()
+    in_touches = False
+    for line in entry.block.splitlines():
+        if re.match(r"^\s*-\s*Touches:\s*$", line):
+            in_touches = True
+            continue
+        if in_touches:
+            if not line.strip():
+                break
+            m = re.match(r"^\s*-\s+(.*)$", line)
+            if not m:
+                break
+            for span in re.findall(r"`([^`]+)`", m.group(1)):
+                if _pathish(span):
+                    touches.add(_normalize_path(span))
+            continue
+        for span in re.findall(r"`([^`]+)`", line):
+            if _pathish(span):
+                touches.add(_normalize_path(span))
+    return sorted(touches)
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    """Conservative overlap for exact paths, directories, and glob prefixes."""
+    a, b = _normalize_path(left), _normalize_path(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a.startswith(b + "/") or b.startswith(a + "/"):
+        return True
+
+    def prefix(path: str) -> str | None:
+        m = re.search(r"[*?\[]", path)
+        return path[:m.start()] if m else None
+
+    ap, bp = prefix(a), prefix(b)
+    if ap and bp:
+        return ap.startswith(bp) or bp.startswith(ap)
+    if ap and b.startswith(ap):
+        return True
+    if bp and a.startswith(bp):
+        return True
+    return False
+
+
+def git_available(repo: Path | str) -> bool:
+    """True iff `repo` sits inside a working git repository — the
+    availability probe every git-derived verdict consults first. A missing
+    or broken git degrades to False (callers print an explicit SKIPPED
+    notice; a failing probe is never read as a clean result)."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--git-dir"],
+            capture_output=True, text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def head_sha(repo: Path | str) -> str | None:
+    """The repo's short HEAD sha (lowercased), or None when there is no
+    repository, no history, or git is unavailable."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip().lower() or None
+
+
+def diff_paths(repo: Path | str, base: str, head: str) -> list[str] | None:
+    """Paths changed between two commits (`base..head`), sorted — the
+    delta scope for a stale-baseline re-survey (graph.py's DELTA
+    RE-SURVEY payload). None when git cannot answer (no repository,
+    unknown sha, git unavailable): callers degrade to a full re-survey,
+    never to an empty-delta verdict. Committed range only, matching the
+    converge staleness comparison (baseline sha vs HEAD); uncommitted
+    work is the audits' business (audit.py changed_paths), not the
+    survey's."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--name-only", base, head],
+            capture_output=True, text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return sorted({l.strip() for l in r.stdout.splitlines() if l.strip()})

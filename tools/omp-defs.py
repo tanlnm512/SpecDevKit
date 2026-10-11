@@ -60,7 +60,7 @@ exit and nothing written: never clobbered, never silently adopted.
 
 Run by tools/sync.sh; standalone:
 
-    tools/omp-defs.py --skill-dir skills/spec-to-prod --out ~/.omp/agent/agents
+    tools/omp-defs.py --skill-dir skills/spec-shape --out ~/.omp/agent/agents
 """
 import hashlib
 import os
@@ -157,18 +157,23 @@ def write_manifest(path: Path, out: Path, names: set) -> None:
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    skill_dir = out = None
+    skill_dir = out = only = None
     for i, a in enumerate(argv):
         if a == "--skill-dir" and i + 1 < len(argv):
             skill_dir = Path(argv[i + 1])
         elif a == "--out" and i + 1 < len(argv):
             out = Path(argv[i + 1])
+        elif a == "--only" and i + 1 < len(argv):
+            only = {s for s in argv[i + 1].split(",") if s}
     if skill_dir is None or out is None:
-        sys.exit("usage: omp-defs.py --skill-dir <skill dir> --out <dir>")
+        sys.exit("usage: omp-defs.py --skill-dir <skill dir> --out <dir> "
+                 "[--only a.md,b.md]")
     agents = skill_dir / "agents"
     if not agents.is_dir():
         sys.exit(f"{agents}: no agents/ dir")
-    sources = sorted(p for p in agents.glob("*.md") if not p.name.startswith("_"))
+    sources = sorted(p for p in agents.glob("*.md")
+                     if not p.name.startswith("_")
+                     and (only is None or p.name in only))
     mpath = manifest_path_for(out, skill_dir)
 
     stage = Path(tempfile.mkdtemp(prefix="omp-defs-stage-"))

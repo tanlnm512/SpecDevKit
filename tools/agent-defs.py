@@ -71,13 +71,13 @@ destination ledger.
 
 Run by tools/sync.sh; standalone:
 
-    tools/agent-defs.py --target opencode --skill-dir skills/spec-to-prod \
+    tools/agent-defs.py --target opencode --skill-dir skills/spec-shape \
         --out ~/.config/opencode/agents
-    tools/agent-defs.py --target droid    --skill-dir skills/spec-to-prod \
+    tools/agent-defs.py --target droid    --skill-dir skills/spec-shape \
         --out ~/.factory/droids
-    tools/agent-defs.py --target kilo     --skill-dir skills/spec-to-prod \
+    tools/agent-defs.py --target kilo     --skill-dir skills/spec-shape \
         --out ~/.config/kilo/agent
-    tools/agent-defs.py --target agy      --skill-dir skills/spec-to-prod \
+    tools/agent-defs.py --target agy      --skill-dir skills/spec-shape \
         --out agents
 """
 import re
@@ -210,7 +210,7 @@ def record_ledger(outd: Path, written):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    target = out = None
+    target = out = only = None
     skill = None
     it = iter(argv)
     for a in it:
@@ -221,16 +221,20 @@ def main(argv=None):
             skill = val
         elif a == "--out":
             out = val
+        elif a == "--only":
+            only = {s for s in (val or "").split(",") if s}
         else:
             sys.exit(f"unknown arg: {a}")
     if target not in TARGETS or not skill or not out:
         sys.exit("usage: agent-defs.py --target {opencode|droid|kilo|agy} "
-                 "--skill-dir <dir> --out <dir>")
+                 "--skill-dir <dir> --out <dir> [--only a.md,b.md]")
 
     src = Path(skill) / "agents"
-    roles = sorted(p for p in src.glob("*.md") if not p.name.startswith("_"))
+    roles = sorted(p for p in src.glob("*.md")
+                   if not p.name.startswith("_")
+                   and (only is None or p.name in only))
     if not roles:
-        sys.exit(f"{src}: no role files")
+        sys.exit(f"{src}: no role files (after --only filter, if any)")
 
     outd = Path(out)
     stage = Path(tempfile.mkdtemp(prefix="agent-defs-stage-"))

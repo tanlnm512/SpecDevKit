@@ -37,8 +37,10 @@ class BrainstormDogfoodTests(unittest.TestCase):
 
 class SpecDogfoodTests(unittest.TestCase):
     def test_every_live_specset_passes_check_py(self):
-        checker = SKILLS / "spec-to-prod" / "scripts" / "check.py"
-        dirs = [SKILLS / "spec-to-prod" / "examples" / "mini-spec" / "specs" / "mini-spec"]
+        # the docset checker's master home is spec-shape (the split's
+        # parity master, D-004); the fixture ships beside it
+        checker = SKILLS / "spec-shape" / "scripts" / "check.py"
+        dirs = [SKILLS / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [
             p.parent
             for p in sorted((ROOT / "specs").glob("*/spec.md"))
@@ -50,7 +52,7 @@ class SpecDogfoodTests(unittest.TestCase):
                 r = run([sys.executable, str(checker), str(d)])
                 self.assertEqual(
                     r.returncode, 0,
-                    f"{d} fails spec-to-prod's own docset checker:\n"
+                    f"{d} fails spec-shape's own docset checker:\n"
                     f"{r.stdout}\n{r.stderr}",
                 )
 
