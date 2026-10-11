@@ -257,3 +257,5 @@ Status reflects code state per [survey.md](survey.md), not intent.
 - Every code task carries a `Touches:` block (repo-relative files,
   directories, or globs); `[P]` tasks whose touches overlap are chained, not
   spawned together
+
+Delivered: commit @ 1949401

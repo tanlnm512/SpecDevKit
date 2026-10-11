@@ -1,6 +1,6 @@
 # Spec: spec-to-prod-split
 
-**Status**: approved
+**Status**: done
 **Tier**: full
 **Effort**: large
 **Created**: 2026-10-10
