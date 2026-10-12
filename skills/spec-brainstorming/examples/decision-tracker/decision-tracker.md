@@ -2,7 +2,7 @@
 
 > Handoff artifact of a spec-brainstorming run. Pre-spec by
 > design: it records the chosen direction and the reasoning, not
-> requirements. The next step is `/spec decision-tracker` with
+> requirements. The next step is `/spec-idea decision-tracker` with
 > this doc as intent input; requirements shaping happens there,
 > with the user.
 
@@ -105,7 +105,7 @@ today; backfill is archaeology).
 | The seeker never searches (the archive is written but never read) | `decide why` runs < 1×/week by month two | Mitigated: Persona 2 is served only if search is habit; new-joiner onboarding ("first week: live in `decide why`") is the wedge. Reassess at month two |
 | Chat remains the real decision venue — the CLI captures summaries after the fact, and drifts from what was actually said | records routinely contradicting what teammates remember | Accepted: a record written minutes later by someone present is better than no record; the owner field makes disputes resolvable (ask the owner, not the room) |
 | Scope creep: "just one more field" until `decide add` is a form | any schema change proposed in the first month | Mitigated: the schema is frozen for v1; changes go through the kill-criteria conversation, not a PR |
-| Hidden cost: maintaining a tool nobody owns | nobody can name the owner after the first quarter | Accepted (explicitly): the owner field exists per record; the tool itself needs an owner named at `/spec` time |
+| Hidden cost: maintaining a tool nobody owns | nobody can name the owner after the first quarter | Accepted (explicitly): the owner field exists per record; the tool itself needs an owner named at `/spec-idea` time |
 
 **Kill criteria**: fewer than ~5 records/week by week three
 (adoption dead — stop), or `decide why` effectively unused by
@@ -115,5 +115,5 @@ which is the one thing local-first buys.
 
 ---
 
-*Next step: `/spec decision-tracker` — treat this doc as intent
+*Next step: `/spec-idea decision-tracker` — treat this doc as intent
 input. The commit is the user's.*

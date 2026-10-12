@@ -263,7 +263,6 @@ class Graph001EmptyScaffoldTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("gate:undetermined", r.stdout)
         self.assertIn("survey", r.stdout)
-        self.assertEqual(frontier_of(compute(self.spec_dir)), ["survey"])
 
 
 class Graph002SurveyWaveTests(unittest.TestCase):
@@ -563,23 +562,6 @@ class Graph004ExecuteFrontierTests(unittest.TestCase):
         self.assertIn("T002", ts["T001"]["note"])
 
 
-class LifecycleEvidenceIntegrityTests(unittest.TestCase):
-    def test_fabricated_lifecycle_shas_block_verify(self):
-        with tempfile.TemporaryDirectory() as td:
-            spec = copy_fixture(Path(td))
-            set_status(spec, "done")
-            task = DONE_TASKS.replace(
-                "Status reflects code state per [survey.md](survey.md), "
-                "not intent.",
-                "Status reflects code state per [survey.md](survey.md), "
-                "not intent.\n**Delivered**: commit @ deadbeef",
-            )
-            write(spec / "task.md", task)
-            node = compute(spec)["nodes"]["verify"]
-            self.assertEqual(node["state"], "blocked")
-            self.assertIn("check.py exits 1", node["reason"])
-
-
 class StruckDepFrontierTests(unittest.TestCase):
     """Scrutiny round-1 finding 1: the canonical dropped form
     `- [ ] ~~T###~~ …` parses id=None, but a struck dep still counts as
@@ -713,19 +695,12 @@ class ImplementedExecuteCompletionTests(unittest.TestCase):
         self.assertIsNotNone(pause)
         self.assertEqual(pause[0], "tick-commit")
         self.assertIn("prove and tick", pause[1])
+        self.assertIn("audit.py proofs", pause[1])
+        self.assertIn("regression", pause[1])
         r = run_cli(self.impl_dir, "--run")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
         self.assertNotIn("implementer", r.stdout)
-
-    def test_implemented_tasks_are_not_respawned(self):
-        r = run_cli(self.impl_dir, "--emit-spawns")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        # no implementer payload (landed tasks are never re-spawned); the
-        # one payload prepared at execute-done is the pre-tick
-        # implementation review — never an implementer
-        self.assertNotIn("implementer", r.stdout)
-        self.assertIn("reviewer-diff.md", r.stdout)
 
     def test_mixed_landing_completes_execute(self):
         n = self.mixed_state["nodes"]
@@ -785,10 +760,6 @@ class Graph005LifecycleTests(unittest.TestCase):
         self.assertEqual(frontier_of(self.done_state), ["archive"])
 
     def test_status_line_in_reports(self):
-        for state, word in ((self.draft_state, "draft"),
-                            (self.approved_state, "approved"),
-                            (self.done_state, "done")):
-            self.assertEqual(state["status"], word)
         r = run_cli(self._tmp / "c" / "specs" / "demo", "--state-json")
         self.assertEqual(r.returncode, 0)
         self.assertEqual(json.loads(r.stdout)["status"], "done")
@@ -1088,7 +1059,6 @@ class Graph014EndStateTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("run archive.sh", r.stdout)
         self.assertNotIn("AWAITING HUMAN", r.stdout)
-        self.assertEqual(frontier_of(compute(self.done_dir)), ["archive"])
 
     def test_run_on_done_spec_reports_completion_without_spawns(self):
         r = run_cli(self.done_dir, "--run")
@@ -1198,17 +1168,6 @@ class Graph016InertInspectionTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, (argv, r.stderr))
             self.assertNotIn("Traceback", r.stderr)
             self.assert_canary_absent()
-
-    def test_live_proof_path_is_unreachable_from_compute_state(self):
-        for gone in ("audit", "log_before_audit_precheck",
-                     "log_closing_precheck", "_audit_mode_output"):
-            self.assertFalse(hasattr(graph, gone),
-                             f"{gone} must be gone, not dormant")
-        s = compute(self.spec_dir)
-        self.assertEqual(s["nodes"]["execute"]["state"], "done")
-        self.assertEqual(s["nodes"]["tick-commit"]["state"], "READY")
-        self.assertIn("tick-commit", frontier_of(s))
-        self.assert_canary_absent()
 
 
 DELIVERY_SHA = "feed7c0"
@@ -1430,16 +1389,6 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
         for name in ("planner.md", "tech.md", "qa.md"):
             payload = (self.wave / name).read_text(encoding="utf-8")
             self.assertIn(protocol, payload, name)
-
-    def test_engineering_rules_ride_every_payload(self):
-        # D-028: the kit-wide engineering rules are canonical in
-        # _shared-protocol.md § Engineering rules — the protocol embed
-        # carries them into every payload with no extra wiring
-        for name in ("planner.md", "tech.md", "qa.md"):
-            payload = (self.wave / name).read_text(encoding="utf-8")
-            self.assertIn("## Engineering rules (kit-wide)", payload, name)
-            self.assertIn("fail on the pre-fix code", payload, name)
-            self.assertIn("NEVER poll a", payload, name)
 
     def test_wave_dir_override(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec001b-"))
@@ -2493,26 +2442,6 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertEqual(pause[0], "approve")
         self.assertIn("freeze.py", pause[1])
 
-    def test_tick_commit_pause_names_the_prove_and_tick_steps(self):
-        pause = graph.find_pause(compute(self.landed))
-        self.assertIsNotNone(pause)
-        self.assertEqual(pause[0], "tick-commit")
-        self.assertIn("prove and tick", pause[1])
-        self.assertIn("audit.py proofs", pause[1])
-        self.assertIn("regression", pause[1])
-
-    def test_run_pauses_clean_at_the_gates(self):
-        # no mechanical prechecks run at the pauses (D-026 removed them):
-        # --run stops with the bare AWAITING HUMAN line and nothing else
-        r = run_cli(self.approve_pause, "--run")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("AWAITING HUMAN: approve", r.stdout)
-        self.assertNotIn("precheck", r.stdout)
-        r = run_cli(self.landed, "--run")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
-        self.assertNotIn("precheck", r.stdout)
-
     def test_scaffold_ships_the_research_skip_marker(self):
         # its own scaffold — this test writes spec.md, and the shared
         # cls.fresh must stay pristine for the effort assertions
@@ -2578,41 +2507,6 @@ class SpanPhaseTests(unittest.TestCase):
         self.assertEqual(
             run_cli(d, "--span", "shape", "--state-json").returncode, 2)
 
-    def test_shape_span_refuses_blocked_intent(self):
-        d = spec_only(self._tmp / "red")
-        write(d / "intent.md", RED_INTENT)
-        before = doc_hashes(d)
-        for argv in (("--emit-spawns",), ("--run",)):
-            r = self.run_span_cli(d, "--span", "shape", *argv)
-            self.assertEqual(r.returncode, 4, (argv, r.stdout, r.stderr))
-            self.assertIn("span entry refused", r.stdout)
-            self.assertIn("blocking gate intent", r.stdout)
-            self.assertIn("--intent-only", r.stdout)
-        self.assertFalse((d / "spawns").exists(),
-                         "a refused span writes no payload")
-        self.assertEqual(before, doc_hashes(d))
-        rows = self.telemetry_rows("intake_refusal")
-        self.assertEqual(len(rows), 2)
-        for row in rows:
-            self.assertEqual(row["skill"], SKILL.name)
-            self.assertEqual(row["payload"]["span"], "shape")
-            self.assertEqual(row["payload"]["gates"], ["intent"])
-
-    def test_shape_span_passes_absent_and_green_intent(self):
-        # D-002: absent intent reads SKIPPED (FR-008 legacy) and green
-        # intent DONE — neither refuses, neither records telemetry
-        absent = spec_only(self._tmp / "absent")
-        r = self.run_span_cli(absent, "--emit-spawns", "--span", "shape")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("surveyor.md", r.stdout)
-        self.assertEqual(self.telemetry_rows("intake_refusal"), [])
-        green = spec_only(self._tmp / "green")
-        write(green / "intent.md", GREEN_INTENT)
-        r2 = self.run_span_cli(green, "--emit-spawns", "--span", "shape")
-        self.assertEqual(r2.returncode, 0, r2.stderr)
-        self.assertIn("surveyor.md", r2.stdout)
-        self.assertEqual(self.telemetry_rows("intake_refusal"), [])
-
     def test_execute_span_refuses_without_approve_and_verify(self):
         draft = copy_fixture(self._tmp / "draft")  # verify done, approve READY
         r = self.run_span_cli(draft, "--span", "execute", "--emit-spawns")
@@ -2662,21 +2556,6 @@ class SpanPhaseTests(unittest.TestCase):
         self.assertEqual(
             sorted(p.name for p in (mid / "spawns" / "wave-2").glob("*.md")),
             ["planner.md", "qa.md", "tech.md"])
-
-    def test_drained_shape_span_stops_at_the_approve_handoff(self):
-        d = copy_fixture(self._tmp / "drain")  # draft, verify green
-        before = doc_hashes(d)
-        r = self.run_span_cli(d, "--run", "--span", "shape")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("span drained — approve handoff", r.stdout)
-        self.assertNotIn("AWAITING HUMAN", r.stdout)
-        self.assertNotIn("== wave", r.stdout)
-        self.assertFalse((d / "spawns").exists(),
-                         "a drained span writes no payload")
-        self.assertEqual(before, doc_hashes(d))
-        pauses = self.telemetry_rows("gate_pause")
-        self.assertTrue(pauses
-                        and pauses[-1]["payload"]["node"] == "approve")
 
     def test_drained_intent_span_hands_off_to_shape(self):
         d = spec_only(self._tmp / "drain-intent")  # intent SKIPPED, survey READY

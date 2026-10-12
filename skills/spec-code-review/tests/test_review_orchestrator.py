@@ -7,7 +7,6 @@ JSON out — error paths must fail loudly (exit 1 + status error), never
 silently proceed (TC-006)."""
 
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -279,60 +278,11 @@ class ReportTests(unittest.TestCase):
 
 
 
-# --- ask rendering: behavior preservation vs the JS masters (D-014) ---------
-# The oracle is the single source going forward; until the dialects are
-# rewritten (T004/T005), the ORIGINAL JS builders remain the behavioral
-# contract. This harness executes them in Node and requires byte-equal
-# output from the oracle for identical inputs — drift here means the
-# port changed what agents are asked, which the spec forbids.
-
-JS_MASTER = Path(__file__).resolve().parent.parent / "workflows" / "spec-code-review.dwf.ts"
-
-# Embedded, not /tmp-resident: the harness must exist for every runner.
-ASK_HARNESS_JS = r"""
-"use strict";
-const fs = require("fs");
-const src = fs.readFileSync(process.argv[2], "utf8");
-const start = src.indexOf("function outTail");
-const end = src.indexOf("// The report's findings section");
-const body = src.slice(start, end);
-const env = JSON.parse(process.argv[3] || "{}");
-const prefix = `const PROJECT=${JSON.stringify(!!env.project)};const BASE=${JSON.stringify(env.base||"HEAD")};const intentText=${JSON.stringify(env.intent||"")};const scoutMap=${JSON.stringify(env.scout_map||null)};const REPO_ABS=${JSON.stringify(env.repo_abs||null)};const TARGET="diff";const PATHS_ARG="";const PR_ARG="";const FAST_MAX_LINES=400;const FAST_MAX_FILES=5;const SUGGEST_SPLIT_LINES=1000;const SUGGEST_SPLIT_FILES=20;\n`;
-const fn = new Function(prefix + body + "\nreturn {scoutAsk,reviewAsk,reviewAskProject,triageAsk,triageAskProject,crossLensAsk,confirmAsk,confirmAskProject,finalAsk,finalAskProject,fixerAsk,verifyAsk,fixReviewAsk,loopFinalAsk};");
-const fns = fn();
-const req = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
-const c = req.ctx;
-let out;
-switch (req.kind) {
-  case "scout": out = fns.scoutAsk(c.files); break;
-  case "review": out = fns.reviewAsk(c.lens, c.files_n, c.lines, !!c.over_cap, c.gate_line); break;
-  case "review-project": out = fns.reviewAskProject(c.lens, c.files, c.candidates, c.part, c.parts, c.gate_line); break;
-  case "triage": out = fns.triageAsk(c.lens_label, c.findings); break;
-  case "triage-project": out = fns.triageAskProject(c.lens_label, c.findings); break;
-  case "cross-lens": out = fns.crossLensAsk(c.kept); break;
-  case "confirm": out = fns.confirmAsk(c.finding); break;
-  case "confirm-project": out = fns.confirmAskProject(c.finding); break;
-  case "final": out = fns.finalAsk(c.summary, c.gate_line); break;
-  case "final-project": out = fns.finalAskProject(c.summary, c.gate_line, c.files); break;
-  case "fixer": out = fns.fixerAsk(c.round, c.unresolved, c.gate_feedback || null); break;
-  case "verify": out = fns.verifyAsk(c.tracked, c.notes || "(none)"); break;
-  case "fix-review": out = fns.fixReviewAsk(c.paths, !!c.gate_green); break;
-  case "loop-final": out = fns.loopFinalAsk(c.tracked, c.rounds_used, !!c.gate_green, c.changed_paths); break;
-  default: throw new Error("kind? " + req.kind);
-}
-process.stdout.write(JSON.stringify({ask: out}));
-"""
-
-SYSTEMS_HARNESS_JS = r"""
-"use strict";
-const fs = require("fs");
-const src = fs.readFileSync(process.argv[2], "utf8");
-const start = src.indexOf("const HONESTY =");
-const end = src.indexOf("// --- schemas");
-const body = src.slice(start, end);
-const fn = new Function(body + "\nreturn {HONESTY, LENSES, GENERAL, TRIAGE_SYSTEM, FIXER_SYSTEM, FIX_REVIEW_SYSTEM, SCOUT_SYSTEM};");
-process.stdout.write(JSON.stringify(fn()));
-"""
+# --- ask rendering and the pinned panel contract (D-014) ---------------------
+# The oracle is the single source; the retired JS dialect's byte-parity
+# harness went with the dialects. What must hold: deterministic
+# rendering, the anchors the panel contract pins, and loud failure on
+# an unknown ask kind.
 
 ASK_CASES = [
     ("scout", {"base": "HEAD", "project": False, "files": ["src/a.py", "src/b.py"]}),
@@ -384,21 +334,7 @@ TRACKED_FIX = {"finding": {"id": "F-1", "where": "a.py:1", "what": "x", "evidenc
                "fix": "pending", "fixNote": "carried"}
 
 
-@unittest.skipUnless(shutil.which("node"), "node is not on PATH")
-class AskParityTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        import os
-        fd, hp = tempfile.mkstemp(suffix=".js")
-        os.close(fd)
-        cls.harness = Path(hp)
-        cls.harness.write_text(ASK_HARNESS_JS, encoding="utf-8")
-
-    @classmethod
-    def tearDownClass(cls):
-        if getattr(cls, "harness", None) and cls.harness.exists():
-            cls.harness.unlink()
-
+class AskRenderingTests(unittest.TestCase):
     def _oracle(self, kind, ctx):
         return ok(["ask", "--kind", kind, "--ctx", json.dumps(ctx)])["ask"]
 

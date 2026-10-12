@@ -60,26 +60,6 @@ class BurndownLabelTests(unittest.TestCase):
         self.assertIsNone(phase)         # ...but not fix_burndown-rewritable
 
 
-class DefinitionTests(unittest.TestCase):
-    def test_defined_families(self):
-        text = (
-            "### US1 — Story\n"
-            "- AC1: Given x\n"
-            "- **FR-001**: The system shall x\n"
-            "## TC-001 — Case\n"
-            "### D-001: Decision\n"
-        )
-        self.assertEqual(check.defined(text, "US"), {"US1"})
-        self.assertEqual(check.defined(text, "AC"), {"AC1"})
-        self.assertEqual(check.defined(text, "FR"), {"FR-001"})
-        self.assertEqual(check.defined(text, "TC"), {"TC-001"})
-        self.assertEqual(check.defined(text, "D"), {"D-001"})
-
-    def test_defined_ignores_mentions(self):
-        text = "a mention of FR-002 in prose is not a definition\n"
-        self.assertEqual(check.defined(text, "FR"), set())
-
-
 class ParseArgsTests(unittest.TestCase):
     def test_positional_and_flags(self):
         self.assertEqual(

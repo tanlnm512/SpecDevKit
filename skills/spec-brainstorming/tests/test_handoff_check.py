@@ -98,6 +98,14 @@ class HandoffCheckTests(unittest.TestCase):
         self.assertTrue(failures, result.stdout)
         self.assertTrue(result.stdout.splitlines()[-1].startswith("JUDGMENT:"))
 
+    def test_out_of_order_sections_fail(self):
+        text = BASE_ARTIFACT.replace(
+            DIRECTION_BLOCK + PROBLEM_STATEMENT_BLOCK,
+            PROBLEM_STATEMENT_BLOCK + DIRECTION_BLOCK)
+        result, _ = run_text(text)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("section-order", result.stdout)
+
     def test_placeholder_failure_names_stem_and_line(self):
         selected = "- Selected: <angle or blend>"
         text = BASE_ARTIFACT.replace("- Selected: Minimalist core", selected)

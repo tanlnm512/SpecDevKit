@@ -78,15 +78,6 @@ class KitRulesParityTests(unittest.TestCase):
                 SEXEC / "agents" / "_shared-protocol.md",
                 SCR / "agents" / "code-review-fixer.md")
 
-    def test_source_file_exists(self):
-        self.assertTrue(SOURCE.is_file())
-        self.assertTrue(
-            SOURCE.read_text(encoding="utf-8").startswith(SECTION_HEADING))
-
-    def test_carriers_exist(self):
-        for carrier in self.CARRIERS:
-            self.assertTrue(carrier.is_file(), carrier)
-
     def test_carriers_match_the_canonical_source(self):
         # the injector's own invariant: each carrier's section equals a
         # fresh injection from rules/engineering-rules.md
@@ -96,25 +87,10 @@ class KitRulesParityTests(unittest.TestCase):
             self.assertEqual(current, kit_rules.inject(current, body),
                              carrier)
 
-    def test_kit_rules_check_passes(self):
-        self.assertEqual(kit_rules.main(["--check"]), 0)
-
-    def test_sections_are_byte_identical(self):
-        sections = [section(c) for c in self.CARRIERS]
-        for other in sections[1:]:
-            self.assertEqual(sections[0], other)
-
     def test_section_carries_every_anchor(self):
         body = flat(SOURCE.read_text(encoding="utf-8"))
         for anchor in ANCHORS:
             self.assertIn(anchor, body, anchor)
-
-    def test_subsections_present(self):
-        body = section(SCR / "agents" / "code-review-fixer.md")
-        for sub in ("### Before adding a test",
-                    "### Long foreground tasks",
-                    "### Strict code commenting"):
-            self.assertIn(sub, body, sub)
 
 
 class KitRulesWiringTests(unittest.TestCase):

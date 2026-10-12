@@ -13,7 +13,6 @@ The version triple (VERSION · SKILL.md frontmatter · plugin.json)
 is owned by tools/tests/test_manifests.py.
 """
 import os
-import re
 import subprocess
 import tempfile
 import unittest
@@ -79,11 +78,13 @@ class StageContractTests(unittest.TestCase):
 
 class PanelContractTests(unittest.TestCase):
     def test_every_lens_section_carries_the_digest_contract(self):
-        lenses = read("agents/_lenses.md")
-        for _, name in LENSES:
+        text = read("agents/_lenses.md")
+        for key, name in LENSES:
+            section = text.split(f"## Lens: {key}", 1)[1] \
+                          .split("## Lens:", 1)[0]
             with self.subTest(lens=name):
-                for field in ("`angle:", "`pitch:`", "`points:`", "`watch:`"):
-                    self.assertIn(field, lenses,
+                for field in ("`angle:", "`pitch:", "`points:", "`watch:`"):
+                    self.assertIn(field, section,
                                   f"{name}: digest field {field} not pinned")
 
     def test_panelist_brief_is_def_generator_compatible(self):
@@ -127,37 +128,14 @@ class ArtifactContractTests(unittest.TestCase):
 
 
 class GreenFixtureTests(unittest.TestCase):
-    """examples/decision-tracker is the green artifact: it must
-    satisfy the same pinned shape — and the handoff gate's honesty
-    criteria — that a real run's output must."""
+    """examples/decision-tracker is the green artifact: the handoff
+    checker (test_handoff_check.py) owns its shape; pinned here is only
+    what the checker does not judge."""
 
     FIXTURE = "examples/decision-tracker/decision-tracker.md"
 
-    def test_fixture_carries_every_pinned_section(self):
-        text = read(self.FIXTURE)
-        positions = [text.find(s) for s in TEMPLATE_SECTIONS]
-        self.assertTrue(all(p >= 0 for p in positions),
-                        f"fixture lost section(s): {[TEMPLATE_SECTIONS[i] for i, p in enumerate(positions) if p < 0]}")
-        self.assertEqual(positions, sorted(positions))
-
-    def test_fixture_records_selection_and_rejection(self):
-        text = read(self.FIXTURE)
-        self.assertRegex(text, r"- Selected: .+")
-        self.assertRegex(text, r"- Rationale: .+")
-        self.assertRegex(text, r"- Rejected: .+ — .+")
-
-    def test_fixture_risks_carry_early_warnings(self):
-        text = read(self.FIXTURE)
-        self.assertIn("| Risk (from the panel) | Early warning | Mitigation or acceptance |", text)
-        self.assertIn("**Kill criteria**", text)
-
-    def test_fixture_has_no_leftover_placeholders(self):
-        text = read(self.FIXTURE)
-        for stem in PLACEHOLDER_STEMS:
-            self.assertNotIn(stem, text, f"template placeholder survived: {stem}")
-
     def test_fixture_names_the_next_step(self):
-        self.assertIn("/spec decision-tracker", read(self.FIXTURE))
+        self.assertIn("/spec-idea decision-tracker", read(self.FIXTURE))
 
 
 class SkillDirScriptTests(unittest.TestCase):

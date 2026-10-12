@@ -162,29 +162,21 @@ class DriftTests(unittest.TestCase):
         victim.unlink()
         self.assertEqual(self.run_drift_check(repo).returncode, 0)
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
-class ContractTableTests(unittest.TestCase):
-    """D-038: scripts/contract.py is the node table's single source;
-    graph.py imports it and SKILL.md's block is generated from it."""
-
-    def test_mutation_fails_and_regeneration_repairs(self):
-        repo = DriftMutationBase.clean_copy()
+    def test_contract_drift_fails_and_regeneration_repairs(self):
+        # D-038: scripts/contract.py is the node table's single source;
+        # graph.py imports it and SKILL.md's block is generated from it
+        repo = self.clean_copy()
         victim = repo / "skills" / "spec-shape" / "SKILL.md"
         victim.write_text(
             victim.read_text().replace("| `spec` | entry |",
                                        "| `spec` | HAND-EDIT |", 1))
-        r = run_py(repo / "tools" / "drift-check.py")
+        r = self.run_drift_check(repo)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("contract", r.stdout)
         mod = repo / "skills" / "spec-shape" / "scripts" / "contract.py"
         gen = run_py(mod, "--render", "skill-table")
-        self.assertEqual(gen.returncode, 0)
+        self.assertEqual(gen.returncode, 0, gen.stdout + gen.stderr)
         text = victim.read_text()
-        import importlib.util
         spec = importlib.util.spec_from_file_location("c", mod)
         m = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(m)
@@ -192,5 +184,8 @@ class ContractTableTests(unittest.TestCase):
         victim.write_text(
             text[:start] + gen.stdout.strip("\n")
             + text[end + len(m.END):])
-        self.assertEqual(
-            run_py(repo / "tools" / "drift-check.py").returncode, 0)
+        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

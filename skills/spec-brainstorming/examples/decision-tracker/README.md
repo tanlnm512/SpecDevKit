@@ -10,5 +10,5 @@ it does.
 
 Use it to calibrate: this is the shape, density and honesty a
 handoff-ready design spec carries — not a requirements doc (that
-is `/spec`'s to shape with the user), and not a transcript (the
+is `/spec-idea`'s to shape with the user), and not a transcript (the
 conversation stays in the conversation).

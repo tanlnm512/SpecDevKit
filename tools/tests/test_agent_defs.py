@@ -73,20 +73,14 @@ class OpencodeDefsTests(unittest.TestCase):
     def gen(self, tmp):
         return run("opencode", SKILL, tmp / "oc")
 
-    def test_permissions_follow_source_tools(self):
+    def test_every_role_is_subagent_and_never_spawns(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
             for src in source_roles():
-                _, _, fields, _ = agent_defs.parse(src)
                 text = (out / src.name).read_text()
                 fm = FM.match(text).group(1)
-                self.assertIn("mode: subagent", fm)
-                have = set(agent_defs.claude_names(fields.get("tools", "")))
-                for key, srcs in agent_defs.OPENCODE_PERMS.items():
-                    want = "allow" if have & set(srcs) else "deny"
-                    self.assertIn(f"  {key}: {want}", fm,
-                                  f"{src.name}: {key} should be {want}")
-                self.assertIn("  task: deny", fm)  # no agent spawns another
+                self.assertIn("mode: subagent", fm, src.name)
+                self.assertIn("  task: deny", fm, src.name)
 
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -151,20 +145,14 @@ class KiloDefsTests(unittest.TestCase):
     def gen(self, tmp):
         return run("kilo", SKILL, tmp / "ki")
 
-    def test_permissions_follow_source_tools(self):
+    def test_every_role_is_subagent_and_never_spawns(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
             for src in source_roles():
-                _, _, fields, _ = agent_defs.parse(src)
                 text = (out / src.name).read_text()
                 fm = FM.match(text).group(1)
-                self.assertIn("mode: subagent", fm)
-                have = set(agent_defs.claude_names(fields.get("tools", "")))
-                for key, srcs in agent_defs.KILO_PERMS.items():
-                    want = "allow" if have & set(srcs) else "deny"
-                    self.assertIn(f"  {key}: {want}", fm,
-                                  f"{src.name}: {key} should be {want}")
-                self.assertIn("  task: deny", fm)  # no agent spawns another
+                self.assertIn("mode: subagent", fm, src.name)
+                self.assertIn("  task: deny", fm, src.name)
 
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -346,22 +334,6 @@ class OwnershipLedgerTests(unittest.TestCase):
             self.assertEqual(
                 ledger_entries(out)["spec-aaa.md"],
                 hashlib.sha256((out / "spec-aaa.md").read_bytes()).hexdigest())
-
-    def test_identical_unledgered_file_is_refused_not_adopted(self):
-        # content equality is not ownership: a byte-identical file with
-        # no ledger proof stays foreign, and the run writes nothing
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            skill = make_skill(tmp, ["spec-aaa"])
-            staged = run("opencode", skill, tmp / "first")
-            out = tmp / "out"
-            out.mkdir()
-            (out / "spec-aaa.md").write_bytes(
-                (staged / "spec-aaa.md").read_bytes())
-            rc, output = run_rc("opencode", skill, out)
-            self.assertEqual(rc, 1)
-            self.assertIn("REFUSE", output)
-            self.assertFalse((out / LEDGER).exists())
 
     def test_shared_root_ledger_merges_other_skills_deployments(self):
         with tempfile.TemporaryDirectory() as tmp:

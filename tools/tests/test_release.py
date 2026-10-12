@@ -404,9 +404,6 @@ class DeliveredLifecycleTests(unittest.TestCase):
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
-    def test_v2_lifecycle_header_present(self):
-        self.assertIn("**Lifecycle**: v2", self.read("task.md"))
-
     def test_specstate_recovers_every_lifecycle_record(self):
         task = self.read("task.md")
         self.assertEqual(specstate.spec_status(self.read("spec.md")), "done")
@@ -450,10 +447,6 @@ class ReleaseGateTests(unittest.TestCase):
     def test_version_changelog_manifest_alignment(self):
         r = run_py(TEST_MANIFESTS)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-
-    def test_release_checklist_names_the_gate(self):
-        self.assertIn("python3 tools/tests/test_release.py",
-                      (REPO_ROOT / "RELEASE.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

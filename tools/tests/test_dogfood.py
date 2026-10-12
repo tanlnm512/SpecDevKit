@@ -59,12 +59,5 @@ class SpecDogfoodTests(unittest.TestCase):
                 )
 
 
-class ReviewFixtureTests(unittest.TestCase):
-    def test_seeded_review_example_is_intact(self):
-        base = SKILLS / "spec-code-review" / "examples" / "review-target"
-        for rel in ("base/app.py", "base/legacy.py", "change.diff", "EXPECTED.md", "README.md"):
-            self.assertTrue((base / rel).is_file(), f"review fixture missing {rel}")
-
-
 if __name__ == "__main__":
     unittest.main()

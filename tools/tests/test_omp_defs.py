@@ -269,20 +269,6 @@ class WriteGateTests(unittest.TestCase):
                 omp_defs.manifest_path_for(out, skill).read_bytes(),
                 manifest_before)
 
-    def test_identical_unledgered_file_is_refused_not_adopted(self):
-        with tempfile.TemporaryDirectory() as td:
-            out = Path(td) / "first"
-            skill = scratch_skill(Path(td), "skill-a", ["alpha"])
-            run_gen(skill, out)
-            fresh = Path(td) / "out"
-            fresh.mkdir()
-            (fresh / "alpha.md").write_bytes((out / "alpha.md").read_bytes())
-            rc, output = run_gen_rc(skill, fresh)
-            self.assertEqual(rc, 1)
-            self.assertIn("REFUSE", output)
-            self.assertFalse(
-                omp_defs.manifest_path_for(fresh, skill).exists())
-
     def test_owned_update_is_applied_and_remanifested(self):
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "out"

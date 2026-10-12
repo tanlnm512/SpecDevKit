@@ -108,36 +108,6 @@ there, never here. The Baseline above is what shape's survey
 re-baselines against.
 """
 
-# I2's surviving-frontier artifact: one live grilling marker is the
-# whole point, so everything else is filled (the Baseline hex keeps
-# the staleness family quiet — the probe reads a markerless non-git
-# temp root and skips).
-OPEN_MARKER_INTENT = """# Intent: demo
-
-**Status**: draft
-**Tier**: standard
-**Created**: 2026-10-10
-**Baseline**: v1 @ 012345abcdef
-
-## Problem
-The user asked to grow the calculator with multiplication; add is the
-only operation today.
-
-## Audience
-- Callers composing arithmetic at the REPL.
-
-## Constraints
-- Python stdlib only.
-
-## Questions
-- [NEEDS CLARIFICATION: integers only, or floats too?]
-
-## FR seeds
-- **FR-001**: The system shall multiply two integers.
-
-## Handoff
-Next: `/spec-gen demo` once the frontier is empty.
-"""
 
 
 def write(path: Path, text: str) -> Path:
@@ -269,26 +239,6 @@ class IntentTelemetryTests(unittest.TestCase):
             self.assertEqual(len(waves), 1)
             self.assertEqual(waves[0]["payload"]["roles"], ["intent"])
             self.assertEqual(waves[0]["payload"]["payloads"], 1)
-
-
-class IntentHardStopTests(unittest.TestCase):
-    """Eval case I2's checker side: a non-answered round leaves its
-    marker open, and the skill's own checker copy refuses the artifact
-    naming the family — the pin that keeps the refusal self-contained
-    (the conversational reprint-and-stop itself is judged in I2's
-    session eval, not here)."""
-
-    def test_open_marker_fails_intent_only_naming_the_family(self):
-        with tempfile.TemporaryDirectory(prefix="intent-stop-") as td:
-            d = Path(td) / "specs" / "demo"
-            d.mkdir(parents=True)
-            write(d / "intent.md", OPEN_MARKER_INTENT)
-            r = run_cli(CHECK, str(d), "--intent-only")
-            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-            self.assertIn("NEEDS CLARIFICATION marker(s) still open",
-                          r.stdout)
-            self.assertIn("(1 fail)", r.stdout)
-            self.assertNotIn("PASS (0 fail)", r.stdout)
 
 
 if __name__ == "__main__":

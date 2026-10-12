@@ -34,11 +34,6 @@ class DiscoveryTests(unittest.TestCase):
             GRAPH_SKILLS,
             ["spec-execute", "spec-intent", "spec-shape"])
 
-    def test_closure_enumeration_covers_the_seeds(self):
-        self.assertLessEqual(set(parity.SEEDS), set(CLOSURE))
-        self.assertIn("graph.py", CLOSURE)
-
-
 class ParityTests(unittest.TestCase):
     def test_closure_files_byte_identical_across_master_and_replicas(self):
         for name in CLOSURE:

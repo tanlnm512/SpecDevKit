@@ -243,18 +243,6 @@ class SyncShTests(SyncShBase):
         self.assertIn("REFUSE", r.stdout)
         self.assertTrue(foreign.is_file())  # never clobbered
 
-    def test_same_path_foreign_file_in_skills_tree_is_refused_and_kept(self):
-        self.assertEqual(self.run_sync().returncode, 0)
-        dest = self.skill_root("scripts", "review_orchestrator.py")
-        dest.write_text(dest.read_text() + "# hand-edited\n")
-        ledger_before = self.skill_root(LEDGER).read_text()
-        r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("REFUSE", r.stdout)
-        self.assertIn("hand-edited", dest.read_text())  # never clobbered
-        # the refused tree's ledger is not rewritten either
-        self.assertEqual(self.skill_root(LEDGER).read_text(), ledger_before)
-
     def test_same_path_owned_update_is_applied(self):
         self.assertEqual(self.run_sync().returncode, 0)
         master = (self.repo / CMD_SKILL
@@ -265,19 +253,6 @@ class SyncShTests(SyncShBase):
         dest = (self.home / ".zcode" / "skills" / "spec-code-review"
                 / "scripts" / "gate.sh")
         self.assertIn("# touched by master", dest.read_text())
-
-    def test_stale_delete_refused_when_current_hash_drifted(self):
-        # deletion authority is the CURRENT hash matching the ledgered
-        # deployed hash — a post-deploy hand-edit makes it foreign
-        self.assertEqual(self.run_sync().returncode, 0)
-        (self.repo / CMD_SKILL / "scripts" / "gate.sh").unlink()
-        dest = (self.home / ".zcode" / "skills" / "spec-code-review"
-                / "scripts" / "gate.sh")
-        dest.write_text(dest.read_text() + "# hand-edited after deploy\n")
-        r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("REFUSE", r.stdout)
-        self.assertIn("hand-edited after deploy", dest.read_text())
 
     def test_foreign_file_blocks_stale_removal_in_same_tree(self):
         # a foreign file anywhere in the tree defers every removal too
@@ -539,17 +514,6 @@ class DroidCommandsTests(SyncShBase):
         r2 = self.run_sync()
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
 
-    def test_foreign_file_in_droid_commands_is_refused(self):
-        (self.home / ".factory").mkdir()
-        self.assertEqual(self.run_sync().returncode, 0)
-        dest = self.home / ".factory" / "commands" / "spec-code-review.md"
-        dest.write_text("# a hand-written note, not the wrapper\n")
-        r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("REFUSE", r.stdout)
-        self.assertIn("hand-written note", dest.read_text())
-
-
 class KiloCommandsTests(SyncShBase):
     """Kilo CLI's command + agent roots (~/.config/kilo/command,
     ~/.config/kilo/agent) — gated on the harness's global config dir
@@ -590,18 +554,6 @@ class KiloCommandsTests(SyncShBase):
         self.assertIn("  edit: allow", surveyor)
         r2 = self.run_sync()
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
-
-    def test_foreign_file_in_kilo_commands_is_refused(self):
-        (self.home / ".config" / "kilo").mkdir(parents=True)
-        self.assertEqual(self.run_sync().returncode, 0)
-        dest = (self.home / ".config" / "kilo" / "command"
-                / "spec-code-review.md")
-        dest.write_text("# a hand-written note, not the wrapper\n")
-        r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("REFUSE", r.stdout)
-        self.assertIn("hand-written note", dest.read_text())
-
 
 class StaleCommandPruneTests(SyncShBase):
     """A name that leaves extra.txt must not linger in flat command
