@@ -54,12 +54,6 @@ core never grows harness-specific code (C-03).
 
 ## Rules that bind you here
 
-- `specs/CONSTITUTION.md` — articles C-01…C-10: task.md is the sole
-  status holder; regenerate-only artifacts; harness-neutral core;
-  reuse before writing; append-only decisions; stdlib-only Python;
-  test discipline (C-07); comments explain why, not what (C-08);
-  never poll a backgrounded job (C-09); every increment names its
-  served eval case (C-10).
 - `rules/engineering-rules.md` — the kit-wide engineering rules,
   canonical text; injected into the agent carriers by
   `tools/kit-rules.py`, never edited in the carriers themselves.

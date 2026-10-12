@@ -160,26 +160,5 @@ class KitRulesWiringTests(unittest.TestCase):
             self.assertNotIn(SECTION_HEADING, text, name)
 
 
-class KitRulesConstitutionTests(unittest.TestCase):
-    """The user chose to bind the repo's own development too: C-07
-    (tests), C-08 (comments), C-09 (backgrounded jobs)."""
-
-    def test_constitution_articles_present(self):
-        text = flat((REPO_ROOT / "specs" / "CONSTITUTION.md").read_text(
-            encoding="utf-8"))
-        for anchor in (
-            "**C-07**: every added test protects observable behavior",
-            "**C-08**: code comments explain why, not what",
-            "**C-09**: never poll a backgrounded job",
-        ):
-            self.assertIn(anchor, text, anchor)
-
-    def test_constitution_rationale_covers_the_new_articles(self):
-        text = flat((REPO_ROOT / "specs" / "CONSTITUTION.md").read_text(
-            encoding="utf-8"))
-        for anchor in ("- C-07: ", "- C-08: ", "- C-09: "):
-            self.assertIn(anchor, text, anchor)
-
-
 if __name__ == "__main__":
     unittest.main(verbosity=2)

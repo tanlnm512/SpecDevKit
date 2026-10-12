@@ -187,9 +187,12 @@ def skill_dogfood_targets(skill):
     whose outputs drift past its own checkers."""
     if skill == "spec-brainstorming":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
+        artifacts = [SKILLS_DIR / skill / "examples" / "decision-tracker"
+                     / "decision-tracker.md"]
+        artifacts += sorted(ROOT.glob("brainstorms/*.md"))
         return [
             (str(p.relative_to(ROOT)), [sys.executable, str(checker), str(p)])
-            for p in sorted(ROOT.glob("brainstorms/*.md"))
+            for p in artifacts
         ]
     if skill == "spec-shape":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"

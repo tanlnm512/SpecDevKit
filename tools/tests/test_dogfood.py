@@ -22,7 +22,9 @@ def run(cmd, cwd=None):
 
 class BrainstormDogfoodTests(unittest.TestCase):
     def test_every_brainstorm_artifact_passes_the_handoff_checker(self):
-        artifacts = sorted(ROOT.glob("brainstorms/*.md"))
+        artifacts = [SKILLS / "spec-brainstorming" / "examples"
+                     / "decision-tracker" / "decision-tracker.md"]
+        artifacts += sorted(ROOT.glob("brainstorms/*.md"))
         self.assertTrue(artifacts, "no brainstorm artifacts found to gate")
         checker = SKILLS / "spec-brainstorming" / "scripts" / "check.py"
         for art in artifacts:
