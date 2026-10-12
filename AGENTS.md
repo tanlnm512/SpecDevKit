@@ -17,8 +17,8 @@ core never grows harness-specific code (C-03).
 
 - Skill suites: `skills/<name>/tests/run.sh` for all five skills
 - Tooling suite: `tools/tests/run.sh`
-- Generated-surface drift: `python3 tools/drift-check.py` (manifests,
-  kit-rules, diagrams, examples)
+- Generated-surface drift: `python3 tools/drift-check.py` (contract,
+  manifests, kit-rules, parity, diagrams, examples, personas)
 - Docset contract: `python3 skills/spec-shape/scripts/check.py
   skills/spec-shape/examples/mini-spec/specs/mini-spec`
 - Install to machine harness roots + verify: `bash tools/sync.sh`, then

@@ -87,7 +87,8 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("drift check: OK", r.stdout)
         for section in ("== contract", "== manifests", "== kit-rules",
-                        "== parity", "== diagrams", "== examples"):
+                        "== parity", "== diagrams", "== examples",
+                        "== personas"):
             self.assertIn(section, r.stdout)
 
     def test_manifest_drift_fails_and_regeneration_repairs(self):
@@ -136,6 +137,29 @@ class DriftTests(unittest.TestCase):
         self.assertIn("examples", r.stdout)
         self.assertIn("scripts/check.py", r.stdout)
         victim.write_text(original)
+        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+
+    def test_persona_drift_fails_and_restoration_repairs(self):
+        repo = self.clean_copy()
+        victim = repo / "agents" / "builder.md"
+        original = victim.read_text()
+        victim.write_text(original.replace("builder", "HAND-EDIT", 1))
+        r = self.run_drift_check(repo)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("personas", r.stdout)
+        self.assertIn("tools/sync.sh", r.stdout)
+        victim.write_text(original)
+        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+
+    def test_stale_persona_fails_and_deletion_repairs(self):
+        repo = self.clean_copy()
+        victim = repo / "agents" / "retired-persona.md"
+        victim.write_text("---\ndescription: gone\n---\n")
+        r = self.run_drift_check(repo)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("personas", r.stdout)
+        self.assertIn("retired-persona.md", r.stdout)
+        victim.unlink()
         self.assertEqual(self.run_drift_check(repo).returncode, 0)
 
 

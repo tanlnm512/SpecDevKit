@@ -4,9 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -22,8 +27,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Skill suite
-        run: skills/spec-to-prod/tests/run.sh
+      - name: Intent skill suite
+        run: skills/spec-intent/tests/run.sh
+      - name: Shape skill suite
+        run: skills/spec-shape/tests/run.sh
+      - name: Execute skill suite
+        run: skills/spec-execute/tests/run.sh
       - name: Review skill suite
         run: skills/spec-code-review/tests/run.sh
       - name: Brainstorm skill suite
@@ -38,5 +47,3 @@ jobs:
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n 1 bash -n
       - name: Generated-artifact drift
         run: python3 tools/drift-check.py
-      - name: Representative docset
-        run: python3 skills/spec-to-prod/scripts/check.py skills/spec-to-prod/examples/mini-spec/specs/mini-spec

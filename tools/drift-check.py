@@ -26,7 +26,12 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                      every model node
   examples    skills/spec-shape/examples/mini-spec —   must still pass
                the green fixture                      skills/spec-shape/
-                                                      scripts/check.py
+                                                       scripts/check.py
+  personas    agents/*.md (agy personas)              vs a fresh
+                                                      regeneration from
+                                                      skills/*/agents/
+                                                      (tools/agent-defs.py
+                                                      --target agy)
 
 Exit: 0 every surface matches its canonical source · 1 drift · 2 usage
 error.
@@ -38,6 +43,7 @@ import importlib.util
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 PKG_ROOT = Path(__file__).resolve().parent.parent
@@ -218,12 +224,48 @@ def check_examples() -> int:
     return run_tool(SHAPE / "scripts" / "check.py", FIXTURE)
 
 
+def check_personas() -> int:
+    print("== personas — canonical source: skills/*/agents/*.md via "
+          "tools/agent-defs.py --target agy")
+    committed = PKG_ROOT / "agents"
+    problems: list[str] = []
+    expected: set[str] = set()
+    with tempfile.TemporaryDirectory(prefix="personas-") as tmp:
+        out = Path(tmp)
+        for agents_dir in sorted(PKG_ROOT.glob("skills/*/agents")):
+            r = subprocess.run(
+                [sys.executable, str(PKG_ROOT / "tools" / "agent-defs.py"),
+                 "--target", "agy", "--skill-dir", str(agents_dir.parent),
+                 "--out", str(out)],
+                cwd=PKG_ROOT, capture_output=True, text=True)
+            if r.returncode != 0:
+                problems.append(f"agents/ — agent-defs.py failed for "
+                                f"{agents_dir.parent.name}: {r.stderr.strip()}")
+                continue
+            for f in sorted(out.glob("*.md")):
+                expected.add(f.name)
+                dest = committed / f.name
+                if not dest.is_file():
+                    problems.append(f"agents/{f.name} — missing a fresh agy "
+                                    f"regeneration (regenerate: bash tools/sync.sh)")
+                elif dest.read_bytes() != f.read_bytes():
+                    problems.append(f"agents/{f.name} — differs from a fresh "
+                                    f"agy regeneration (regenerate: bash tools/sync.sh)")
+    for stale in sorted(p.name for p in committed.glob("*.md")
+                        if p.name not in expected):
+        problems.append(f"agents/{stale} — no brief ships this persona "
+                        f"anymore (delete it)")
+    for problem in problems:
+        print(f"DRIFT {problem}")
+    return 1 if problems else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="drift-check.py",
         description="Release-validate every generated surface against its "
                     "canonical source: contract, manifests, kit-rules, "
-                    "parity, diagrams, examples.")
+                    "parity, diagrams, examples, personas.")
     p.parse_args(argv)
 
     failed = []
@@ -232,7 +274,8 @@ def main(argv: list[str] | None = None) -> int:
                         ("kit-rules", check_kit_rules),
                         ("parity", check_parity),
                         ("diagrams", check_diagrams),
-                        ("examples", check_examples)):
+                        ("examples", check_examples),
+                        ("personas", check_personas)):
         if check():
             failed.append(name)
     if failed:
@@ -240,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
               f"canonical sources")
         return 1
     print("drift check: OK — contract, manifests, kit-rules, parity, "
-          "diagrams, examples match their canonical sources")
+          "diagrams, examples, personas match their canonical sources")
     return 0
 
 
