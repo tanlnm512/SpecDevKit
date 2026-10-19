@@ -11,7 +11,7 @@ with the transcript and the artifact can verify each one.
 |---|---|
 | Idea still fuzzy after one follow-up | NOT a stop: proceed on what is known, naming every assumption in the artifact |
 | User redirects the idea mid-run | Restart stage 1 with the redirect as the new ask |
-| Existing `brainstorms/<name>.md` | ONE question — overwrite, or version the name; never a silent clobber |
+| Existing `brainstorms/<name>.md` | ONE question — overwrite, or version the name; never a silent clobber; an unanswered ask stops the run (D-008) |
 | A path under `specs/` requested for the artifact | Refusal — the artifact lives at `brainstorms/` (D-003); scaffolding is `/spec-idea`'s move |
 | A lens brief fails to load (workflow form) | Degrade to the inline mission line, logged — never an error, never a skipped lens |
 

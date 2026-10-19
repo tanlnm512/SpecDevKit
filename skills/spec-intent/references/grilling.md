@@ -32,6 +32,13 @@ where useful, and carries a recommended answer:
 
 - Word each question so **"yes" accepts the recommended answer** —
   the user can confirm the ➡️ with one word.
+- **Put the round through the harness's structured question tool
+  where one exists** — each question one ask, its 2–3 viable
+  options the choices, the ➡️ recommended answer first and marked.
+  Where the tool caps questions per call, split the round across
+  consecutive calls — never truncate a frontier to fit. With no
+  such tool, print the round as formatted above: the ❓ block is
+  the one form every path — ask, fallback, transcript — shares.
 - **Finding facts is never the user's job** — "does X already exist /
   is Y already handled" is a fact, not a decision: grep/read the repo
   yourself (or spawn a scoped scout probe for anything substantial)
@@ -42,8 +49,10 @@ where useful, and carries a recommended answer:
 ## The non-answer rule (hard stop)
 
 A round put to the user is a HUMAN gate — an unanswered round is not
-an answer. Some harness modes resolve the ask without ever waiting,
-and an empty or skipped reply is the same thing. On any non-answer:
+an answer. Some harness modes resolve the ask without ever waiting —
+a structured-tool call auto-answered by the harness is D-018's
+observed case — and an empty or skipped reply is the same thing.
+On any non-answer:
 print the round exactly as formatted and **end the turn there** — do
 not adopt the ➡️ recommendations, do not resolve markers yourself, do
 not spawn anything. Stopping is safe by construction while open

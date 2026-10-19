@@ -193,7 +193,10 @@ Location rules: the default is `brainstorms/<name>.md` at the
 repository root; a user-named path wins. If the file already
 exists, read it — if it is a prior round of the same idea, ask
 (one question) whether to overwrite or version the name
-(`<name>-v2`); never clobber silently. Every criterion in
+(`<name>-v2`), through the harness's structured question tool
+where one exists — the two outcomes are its choices. An
+unanswered ask stops the run: never clobber silently, never
+default to either outcome. Every criterion in
 `gates/handoff.md` must hold before `/spec-idea` is named.
 
 Before naming `/spec-idea`, run the mechanical gate on the exact

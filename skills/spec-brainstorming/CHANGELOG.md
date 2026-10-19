@@ -20,6 +20,10 @@ specification that feeds spec-to-prod's `/spec` intake.
 - Local run telemetry (`scripts/telemetry.py`): handoff-check
   outcomes record to `~/.spec-dev-kit/telemetry/
   spec-brainstorming.jsonl`; `KIT_TELEMETRY=off` disables.
+- **D-008 — collision ask channel**: stage 5's overwrite-or-version
+  question goes through the harness's structured question tool
+  where one exists; an unanswered ask stops the run — never a
+  silent clobber, never a silent default.
 
 Migration: delete installed workflow copies
 (`~/.zcode/workflows/spec-brainstorming.*`, `~/.claude/workflows/`)

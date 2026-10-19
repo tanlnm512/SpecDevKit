@@ -73,8 +73,11 @@ sections: Problem, Audience, Constraints, FR seeds) as a design tree;
 work it in rounds; the frontier is every question whose prerequisites
 are settled. Ask the whole frontier per round — numbered, titled,
 each with why it matters and a recommended answer worded so "yes"
-accepts it. Open questions live in intent.md's Questions section as
-NEEDS CLARIFICATION markers; each closes exactly one way — answered
+accepts it — through the harness's structured question tool where
+one exists, the printed ❓ round otherwise (grilling.md pins the
+channel rules). Open questions live in intent.md's Questions
+section as NEEDS CLARIFICATION markers; each closes exactly one
+way — answered
 (folded into the sections it resolves), deferred (Scope out, named),
 or a named assumption — and stays listed as its closure line. The
 pass ends when the frontier is EMPTY, never at a question count.

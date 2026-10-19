@@ -7,6 +7,11 @@ stop — the docset is spec-shape's, execution spec-execute's.
 
 ## Unreleased
 
+- D-019: grilling rounds ride the harness's structured question
+  tool where one exists — options as the choices, ➡️ first,
+  split-never-truncate across the tool's per-call cap; the printed
+  ❓ round stays the universal form and D-018's non-answer hard
+  stop is unchanged.
 - `/spec` → `/spec-idea` (D-003): the intake command renames; the
   skill name, scripts, and flow are unchanged. Migration: re-run
   `bash tools/sync.sh` — the stale prune removes the old `spec.md`
