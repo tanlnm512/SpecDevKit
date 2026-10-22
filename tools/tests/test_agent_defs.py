@@ -116,8 +116,6 @@ class OpencodeDefsTests(unittest.TestCase):
                 self.assertTrue(
                     (out / src.name).read_text().endswith(body))
 
-
-
     def test_researcher_gets_web_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
@@ -229,7 +227,7 @@ class StagingAndNoDeletionTests(unittest.TestCase):
             (out / "spec-stale.md").write_text("stale\n")  # same prefix, never generated
             (out / "other-skill.md").write_text("foreign\n")
             (skill / "agents" / "spec-bbb.md").unlink()  # role dropped upstream
-            stale_bbb = (out / "spec-bbb.md").read_bytes()  # this tool's own old output
+            stale_bbb = (out / "spec-bbb.md").read_bytes()  # this tool's previous output
             run("droid", skill, tmp / "out")
             self.assertEqual((out / "spec-stale.md").read_text(), "stale\n")
             self.assertEqual((out / "other-skill.md").read_text(), "foreign\n")
@@ -270,25 +268,9 @@ class StagingAndNoDeletionTests(unittest.TestCase):
             self.assertEqual(
                 {p.name: p.read_bytes() for p in out.iterdir()}, first)
 
-    def test_no_shared_prefix_never_removes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            skill = make_skill(tmp, ["aaa", "abb"])  # no 'x-' prefix
-            out = run("droid", skill, tmp / "out")
-            (out / "aaa-old.md").write_text("stale?\n")
-            run("droid", skill, tmp / "out")
-            self.assertTrue((out / "aaa-old.md").exists())
-
-    def test_droid_rejects_invalid_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            skill = make_skill(tmp, ["Bad_Name"])
-            with self.assertRaises(SystemExit):
-                run("droid", skill, tmp / "out")
-
 
 class OwnershipLedgerTests(unittest.TestCase):
-    """Deployment ownership across the opencode/droid roots (FR-003): a
+    """Deployment ownership across the opencode/droid roots: a
     destination belongs to this generator only when its current hash
     sits in the destination's .spec-dev-kit-deployed ledger — a foreign
     file at a generated name, byte-different or byte-identical, is

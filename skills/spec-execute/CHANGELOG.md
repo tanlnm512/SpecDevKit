@@ -7,6 +7,9 @@ authoring is spec-shape's, intake spec-intent's.
 
 ## Unreleased
 
+- Replica engine suites removed; spec-shape owns them (spec-shape
+  D-045). The implementer payload's acceptance commands are pinned in
+  `test_execute_gates.py`.
 - `agents/` ships builder and reviewer only; scout, designer, qa,
   and `_lenses.md` stay with spec-shape (D-031).
 - `/spec-plan` retired; the reviewer is implementation-diff only; the

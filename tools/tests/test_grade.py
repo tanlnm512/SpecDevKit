@@ -2,14 +2,12 @@
 """Contract tests for the kit grading rubric (rubrics/kit-grading-rubric.md)
 and its mechanical half (tools/grade.py).
 
-Serves eval case: none yet mechanical — this suite IS the gate for the
-grading tooling itself (C-07); the rubric's own session protocol is the
-conversational half.
+Gates the grading tooling itself; the rubric's session protocol is the
+judgment half.
 """
 
 import re
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 

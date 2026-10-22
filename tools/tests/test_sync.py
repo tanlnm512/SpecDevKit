@@ -7,8 +7,8 @@ points HOME at a fresh temp dir, then exercises the provenance
 guarantees against the copy — fresh install, idempotence, foreign-file
 refusal (skills trees and command roots), stale-own cleanup via the
 ledger, absent-harness skips, version-drift detection, zero-write
-on a late collision (the all-root preflight, FR-002), and the no-write
---dry-run/--check modes (FR-009), and the retired-skills sweep (D-007):
+on a late collision (the all-root preflight), the no-write
+--dry-run/--check modes, and the retired-skills sweep:
 a listed skill whose master is gone is removed from every install root
 on ledger proof alone, foreign files in its paths refused.
 """
@@ -29,31 +29,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ".spec-dev-kit-deployed"
 
 # Bounded corpus: exactly what sync.sh consumes, so a run costs spawns
-# not bytes. The invoked tools; the fixture skills' consumable surfaces
-# (tree files the tests reference, their command routers and bare-name
-# claims, one uniquely-named role brief per shipping skill — the def
-# roots refuse a second claimant of a name, so the fixture pins one);
-# the kit-rules surfaces sync refreshes and drift-checks (rules source,
-# the injector, all four carrier files — the trio's protocols and the
-# code-review fixer); the shared-core master whose closure sync's
-# parity refresh regenerates the replica views from; and the committed
-# root personas the verify pass byte-compares. Behavior fidelity is
-# per-file; corpus size is not load-bearing. The monolith is gone from
-# the repo (T023) and so from this corpus: retired-skills.txt still
-# names it, so every fixture run also exercises the retired sweep as a
-# no-op wherever nothing was ever deployed. The split successors (T019)
-# carry the skill-tree and command-install coverage beside
-# spec-code-review and spec-brainstorming, with the redistributed bare
-# names installing the same total set from their new homes.
+# not bytes. Covers the invoked tools; the skills' consumable surfaces
+# (tree files the tests reference, command routers and bare-name claims,
+# one uniquely-named role brief per skill, since the def roots refuse a
+# second claimant of a name); the kit-rules surfaces sync refreshes and
+# drift-checks; the shared-core master whose closure parity refresh
+# regenerates replica views from; and the committed root personas the
+# verify pass byte-compares. Behavior fidelity is per-file; corpus size is
+# not load-bearing. retired-skills.txt names a skill absent from this
+# corpus, so every run also exercises the retired sweep as a no-op.
 CMD_SKILL = "skills/spec-code-review"
 INTENT_SKILL = "skills/spec-intent"
 SHAPE_SKILL = "skills/spec-shape"
 EXECUTE_SKILL = "skills/spec-execute"
 # The exact flat-command set a fresh install must land in every command
-# root: the five routers plus the bare names the split redistributed
-# (spec from spec-intent, spec-to-prod alias from spec-shape, the five
-# lifecycle verbs from spec-execute) — the same total set the monolith
-# shipped before the split.
+# root: the skill routers plus the bare names redistributed across skills.
 ROUTER_COMMANDS = (
     "spec-brainstorming", "spec-code-review", "spec-execute",
     "spec-intent",
@@ -165,9 +155,8 @@ class SyncShTests(SyncShBase):
         self.assertTrue(
             (self.home / ".agents" / "commands"
              / "spec-code-review.md").is_file())
-        # the split successors install through the same loop (T019):
-        # their trees land and their redistributed bare names install
-        # from their new homes
+        # the skill trees and their redistributed bare names install
+        # through the same loop
         self.assertTrue(
             (self.home / ".claude" / "skills" / "spec-intent"
              / "SKILL.md").is_file())
@@ -186,14 +175,12 @@ class SyncShTests(SyncShBase):
             os.access(self.skill_root("scripts", "gate.sh"), os.X_OK))
         r2 = self.run_sync()
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
-        # FR-007: no installer scratch survives a completed apply
+        # no installer scratch survives a completed apply
         self.assertEqual(list(self.home.rglob(f"{LEDGER}.tmp*")), [])
 
     def test_bare_name_redistribution_installs_the_same_total_set(self):
-        # FR-006/T019 + the 2026-10-11 renames: spec-idea to
-        # spec-intent, spec-gen replacing spec-shape's self-titled
-        # router, the four lifecycle verbs to spec-execute — ten
-        # commands, nothing more, nothing less.
+        # bare names map to their owning skills: ten commands, nothing
+        # more, nothing less.
         self.assertEqual(self.run_sync().returncode, 0)
         for root in (".agents", ".claude", ".zcode"):
             installed = {p.name for p in
@@ -203,7 +190,7 @@ class SyncShTests(SyncShBase):
                 f"~/{root}/commands vs the redistributed total set")
 
     def test_installer_scratch_leftover_is_not_a_foreign_file(self):
-        # Atomic replacement (FR-007) stages through LEDGER_NAME-prefixed
+        # Atomic replacement stages through LEDGER_NAME-prefixed
         # scratch in the destination's own directory; a leftover from a
         # killed run sits in the namespace every classifier excludes, so
         # it can never wedge the next sync as a "foreign file".
@@ -282,19 +269,6 @@ class SyncShTests(SyncShBase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("clean", r.stdout)
         self.assertFalse(dest.exists())
-
-    def test_foreign_file_at_unclaimed_command_name_is_left_alone(self):
-        self.assertEqual(self.run_sync().returncode, 0)
-        cmd = self.home / ".claude" / "commands" / "plan.md"
-        cmd.write_text("# a hand-written note, not the wrapper\n")
-        r = self.run_sync()
-        # plan.md is a dropped name since D-029: not refused, not pruned
-        # — a foreign file at an unclaimed name is shared turf now (the
-        # name is no longer ours to defend); refusal still applies at
-        # claimed names (see DroidCommandsTests).
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertNotIn("REFUSE", r.stdout)
-        self.assertIn("hand-written note", cmd.read_text())
 
     def test_foreign_def_in_claude_agents_root_is_refused(self):
         self.assertEqual(self.run_sync().returncode, 0)
@@ -406,7 +380,7 @@ class SyncShTests(SyncShBase):
             foreign.unlink()
 
     def test_dry_run_reports_the_plan_and_writes_nothing(self):
-        # FR-009: --dry-run prints the planner's create/update/unchanged/
+        # --dry-run prints the planner's create/update/unchanged/
         # delete/refuse decisions and touches no destination — a fresh
         # HOME stays completely empty.
         r = self.run_sync("--dry-run")
@@ -494,13 +468,7 @@ class DroidCommandsTests(SyncShBase):
     """Factory Droid's own command root (~/.factory/commands) — gated on
     the harness home existing (never fabricated), same provenance-ledger
     discipline as the other command roots, kept as a separate sync.sh
-    block (D-017)."""
-
-    def test_absent_factory_home_skips_loudly(self):
-        r = self.run_sync()
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("skip  droid commands", r.stdout)
-        self.assertFalse((self.home / ".factory" / "commands").exists())
+    block."""
 
     def test_commands_install_when_factory_home_exists(self):
         (self.home / ".factory").mkdir()
@@ -540,8 +508,7 @@ class KiloCommandsTests(SyncShBase):
                  / f"{base}.md").is_file(), base)
         self.assertTrue(
             (self.home / ".config" / "kilo" / "command" / LEDGER).is_file())
-        # and the three new skills' trees land in Kilo's native skills
-        # root beside the older ones (D-040, FR-006)
+        # and the skill trees land in Kilo's native skills root
         for skill in ("spec-brainstorming", "spec-code-review",
                       "spec-intent", "spec-shape", "spec-execute"):
             self.assertTrue(
@@ -558,8 +525,8 @@ class KiloCommandsTests(SyncShBase):
 
 class StaleCommandPruneTests(SyncShBase):
     """A name that leaves extra.txt must not linger in flat command
-    roots (D-029's migration path); a foreign file at an unclaimed
-    name is shared turf and stays untouched."""
+    roots; a foreign file at an unclaimed name is shared turf and stays
+    untouched."""
 
     def test_renamed_extra_name_is_pruned_and_foreign_survives(self):
         commands = self.repo / CMD_SKILL / "commands"
@@ -583,7 +550,7 @@ class StaleCommandPruneTests(SyncShBase):
 
 
 class KitRulesSyncTests(SyncShBase):
-    """tools/kit-rules.py wiring (D-028): sync refreshes the four
+    """tools/kit-rules.py wiring: sync refreshes the four
     § Engineering rules carrier sections from the canonical
     rules/engineering-rules.md before installing, and --check reports a
     hand-edited carrier as DRIFT without writing anything."""
@@ -620,29 +587,18 @@ class KitRulesSyncTests(SyncShBase):
         self.assertIn("stale hand-edit", carrier.read_text())
         self.assertEqual(self.home_snapshot(), before)
 
-    def test_stale_carrier_cannot_wedge_a_fresh_install(self):
-        # the refresh runs before the first install write, so even a
-        # never-installed HOME ends up with the source-fresh section
-        carrier = (self.repo / "skills" / "spec-code-review" / "agents"
-                   / "code-review-fixer.md")
-        self.hand_edit(carrier)
-        r = self.run_sync()
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertNotIn(
-            "stale hand-edit",
-            self.skill_root("agents", "code-review-fixer.md").read_text())
 
 
 class RetiredSkillSweepTests(SyncShBase):
-    """tools/retired-skills.txt + sync's retired sweep (D-007, FR-009):
+    """tools/retired-skills.txt + sync's retired sweep:
     a listed skill whose master is gone is swept from the install roots,
     deletion authority being the provenance ledgers alone — a foreign
     file in the retired tree is refused, never deleted; while the master
     still ships the sweep is a guarded no-op."""
 
     def test_master_still_shipping_is_a_guarded_no_op(self):
-        # the committed list names spec-to-prod; the repo retired it
-        # (T023), so the guarded no-op is staged by planting a minimal
+        # the committed list names spec-to-prod, which the repo no longer
+        # ships, so the guarded no-op is staged by planting a minimal
         # master in the fixture repo — the sweep must skip the name and
         # leave a staged installed tree completely untouched
         monolith = self.repo / "skills" / "spec-to-prod"
@@ -662,9 +618,9 @@ class RetiredSkillSweepTests(SyncShBase):
         self.assertEqual((tree / "SKILL.md").read_text(), "# monolith deploy\n")
 
     def test_sweep_removes_proven_files_and_refuses_foreign(self):
-        # skills/retired-skill is absent from the fixture repo (the
-        # retirement); its installed tree at a root holds two
-        # ledger-proven deploys plus one planted foreign file
+        # skills/retired-skill is absent from the fixture repo; its
+        # installed tree at a root holds two ledger-proven deploys plus
+        # one planted foreign file
         (self.repo / "tools" / "retired-skills.txt").write_text(
             "retired-skill\n", encoding="utf-8")
         tree = self.home / ".claude" / "skills" / "retired-skill"

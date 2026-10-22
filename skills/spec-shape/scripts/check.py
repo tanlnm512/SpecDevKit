@@ -97,13 +97,12 @@ CONTRACT_FILES = ["spec.md", "plan.md", "tech-spec.md", "task.md", "test.md"]
 INPUT_FILES = ["survey.md", "research.md"]
 ALL_FILES = CONTRACT_FILES + INPUT_FILES
 
-# Zero-width/invisible/bidi-control characters. A live adversarial test
-# showed a zero-width space inserted between an ID's digits and its closing
+# Zero-width/invisible/bidi-control characters. A zero-width space inserted between an ID's digits and its closing
 # `**` (e.g. "FR-001" + ZWSP + "**") silently breaks the DEFINITIONS regex,
 # making a real ID invisible to the ID graph — it fails safe (spurious FAIL,
-# not a bypass) but is real corruption from a stray copy-paste. Stripped
-# once, at file-read time, so every regex downstream (definitions,
-# references, traceability) sees clean text uniformly. Escapes only —
+# not a bypass) but is still corruption. Stripped once, at file-read time,
+# so every regex downstream (definitions, references, traceability) sees
+# clean text uniformly. Escapes only —
 # these codepoints render as nothing, so spelling them out as \u escapes
 # keeps this auditable instead of pasting invisible bytes into the source.
 INVISIBLE = re.compile(
@@ -175,20 +174,17 @@ NON_PATH = set("*?$<>()[]{}|\"'!;,")
 # survey.md evidence citation shape: `<path with extension>:<symbol>:<line>`,
 # e.g. `agent_runtime/app/adk/runner.py:_run_workflow_async:214`. Matches the
 # surveyor's own template ("file:symbol with line — copied verbatim from
-# grep/read output"). A live incident showed the surveyor writing plausible
-# but nonexistent symbol names and off-by-hundreds line numbers for 9 of 13
-# citations in one survey — nothing mechanically caught it before this.
+# grep/read output"). Surveyors have written plausible but nonexistent symbol
+# names and far-off line numbers; this check catches both mechanically.
 EVIDENCE_CITATION = re.compile(r"([\w./-]+\.\w+):([A-Za-z_]\w*):(\d+)\b")
 
 # A def/class introducing SYMBOL, any indentation, optional async/decorators
 # handled by just matching the def/class line itself (multi-line signatures
 # still start on this line).
 def _symbol_def_lines(text: str, symbol: str) -> list[int]:
-    # [ \t]* not \s* for the indent: \s matches newlines too, so a blank
-    # line (or two) directly above the def/class let it eat backwards past
-    # ^ and skew every match's line count by however many blank lines
-    # preceded it — caught by a live off-by-2 on every citation in a real
-    # survey.md, all landing on defs with exactly one blank line above them.
+    # [ \t]* not \s* for the indent: \s matches newlines too, so blank
+    # lines directly above a def/class would eat backwards past ^ and skew
+    # the line count.
     pat = re.compile(rf"^[ \t]*(?:async[ \t]+def|def|class)[ \t]+{re.escape(symbol)}\b", re.M)
     return [text.count("\n", 0, m.start()) + 1 for m in pat.finditer(text)]
 
@@ -217,9 +213,8 @@ def _baseline_head_probe(
 
     The baseline commit may live in repo_root itself (single-repo
     layout) or in one of its immediate subdirectories (a multi-repo
-    workspace like this one, where specs/ sits beside agent_runtime/
-    etc. and repo_root — two levels up from specs/<name>/ — has no
-    .git of its own). `cat-file -e <sha>^{commit}` — not just ".git
+    workspace where specs/ sits beside component repos; repo_root, two
+    levels up from specs/<name>/, has no .git of its own). `cat-file -e <sha>^{commit}` — not just ".git
     exists" — confirms the candidate actually contains this commit
     before trusting its HEAD, so a same-named-but-wrong repo can't
     produce a false staleness warning (or a false all-clear)."""
@@ -267,15 +262,12 @@ def _baseline_head_probe(
 
 
 # verify:/Pass-condition commands that shell out to pytest with a path or
-# glob argument — the other half of the same incident: a wrong path
-# (tests/unit/test_contribution_suggest_graph.py for the real
-# tests/test_contribution_suggest_graph.py) matches zero files and pytest
-# silently reports nothing to run, instead of failing loudly.
+# glob argument. A wrong path matches zero files and pytest silently reports
+# nothing to run, instead of failing loudly.
 PYTEST_CMD = re.compile(r"`([^`\n]*\bpytest\b[^`\n]*)`")
 # survey.md's own `verify:` lines sit inside the item list's ``` fence, not
-# wrapped in single backticks like tech-spec.md/plan.md/test.md — a plain
-# PYTEST_CMD scan silently skips them entirely, which is exactly the file a
-# wrong test path originates in. Matched separately, backticks optional.
+# wrapped in single backticks like tech-spec.md/plan.md/test.md, so a plain
+# PYTEST_CMD scan would skip them. Matched separately, backticks optional.
 SURVEY_VERIFY_LINE = re.compile(r"^\s*verify:\s*(.+)$", re.M)
 
 
@@ -283,7 +275,7 @@ def _pytest_target_exists(repo_root: Path, tok: str) -> bool:
     """True if tok (a literal path or glob) resolves under repo_root OR
     under one of its immediate subdirectories. The fallback matters for a
     multi-repo workspace (specs/<name>/ documenting one component repo
-    among several siblings, per this workspace's own CLAUDE.md) where
+    among several siblings) where
     verify commands are written relative to the component repo's own root
     (cd agent_runtime && uv run pytest tests/...), not the workspace root
     two levels up from specs/<name>/ that repo_root defaults to."""
@@ -312,8 +304,7 @@ def bd_label(cell: str) -> tuple[str, int | None]:
     """Classify a burndown row label: ('sum'|'data'|'skip', phase or None).
 
     Shared by burndown_sums and burndown_rewrite so validation and repair
-    can never drift apart on what counts as a data row (that drift was the
-    actual root cause of "Phase 1" rows escaping both).
+    can never drift apart on what counts as a data row.
     """
     lab = cell.strip().strip("*").strip("`").strip()
     if not lab or not lab.strip("-:= "):
@@ -368,9 +359,7 @@ def survey_only_check(spec_dir: Path, repo_root: Path) -> int:
     right after writing survey.md, before returning its digest. Deliberately
     skips everything that needs the other four contract files (they don't
     exist yet at Stage 1) so this catches a bad survey BEFORE tech/plan/qa
-    build on it, rather than only at Stage 4's full check.py — the gap that
-    let a fabricated survey.md flow into four downstream docs undetected in
-    a real incident.
+    build on it, rather than only at the full check.py.
     """
     p = spec_dir / "survey.md"
     if not p.exists():
@@ -432,7 +421,7 @@ def intent_failures(intent: str, repo_root: Path) -> tuple[list[str], list[str]]
     CLARIFICATION markers (the grilling vocabulary — the same marker scan
     spec.md uses), and baseline-vs-HEAD staleness. intent.md carries
     survey.md's `**Baseline**:` header shape, so the same staleness
-    diagnosis reads it unchanged (D-001). Shared by --intent-only and the
+    diagnosis reads it unchanged. Shared by --intent-only and the
     full check's optional-input path — one discipline, never a second
     checker."""
     if not intent.strip():
@@ -467,8 +456,7 @@ def intent_failures(intent: str, repo_root: Path) -> tuple[list[str], list[str]]
         sha = bl[1]
         repo_hit, head, saw_git_dir = _baseline_head_probe(repo_root, sha)
         if repo_hit is None and not saw_git_dir:
-            # Same GITDEG honesty as survey staleness: a baseline that
-            # cannot be compared is visible as skipped, never fatal.
+            # A baseline that cannot be compared is visible as skipped, never fatal.
             notes.append("intent staleness: SKIPPED (not a git repo)")
         elif repo_hit is None:
             notes.append(
@@ -529,8 +517,8 @@ def constitution_status(repo_root: Path) -> tuple[bool, str]:
 def other_specs_exist(repo_root: Path, spec_dir: Path) -> bool:
     """True if specs/ holds another spec dir besides this one (excluding the
     non-spec `context/` and `archive/` folders) — i.e. this is not the
-    repo's first spec, so scaffold.sh's auto-create on first scaffold no
-    longer explains a missing constitution."""
+    repo's first spec, so a missing constitution cannot be blamed on
+    scaffold.sh's first-scaffold auto-create."""
     specs_root = repo_root / "specs"
     if not specs_root.is_dir():
         return False
@@ -560,8 +548,7 @@ def build_checklist(name: str, spec: str, entries: list[TaskEntry]) -> str:
     """Plain, human-tickable FR/AC summary derived from spec.md + task.md —
     for stakeholders who won't parse task.md's burndown table. Regenerated
     on every --checklist run, never hand-edited: a second, independently
-    maintained status representation is exactly the drift class D-007
-    (agents/_shared-protocol.md) already killed once for agent defs/briefs.
+    maintained status representation is exactly the drift class to avoid.
     Requirement checkboxes derive from task.md ticks (task.md stays the only status
     holder — this mirrors it, never adds a new one); ACs are listed plain
     since no independent AC-level status exists to mirror."""
@@ -761,7 +748,7 @@ def lifecycle_integrity_problems(task: str, repo: Path) -> list[str]:
 
 
 def tiny_check(spec_dir: Path) -> int:
-    """The ONE-FILE contract gate (D-037): spec.md carries the task list
+    """The ONE-FILE contract gate: spec.md carries the task list
     in § Tasks; no other docset file exists or is required. Checks the
     in-file contract only — placeholders, open clarify markers, task
     grammar (IDs, FR citations, unique, Accept lines on code tasks),
@@ -829,13 +816,10 @@ def tiny_check(spec_dir: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # argv is optional so a persistent process (e.g. an orchestrator's
-    # eval kernel, importing this module once and calling main() across
-    # many recomputes) can pass args directly instead of paying a fresh
-    # interpreter + import per invocation; the CLI path (argv=None) is
-    # unchanged. graph.py's own internal probe still shells out via
-    # subprocess (process isolation from this module's prints/argv), so
-    # this is additive, not a replacement for that call site.
+    # argv is optional so a persistent process can call main() with args
+    # instead of paying a fresh interpreter + import per invocation; the CLI
+    # path (argv=None) is unchanged. graph.py's own probe still shells out
+    # via subprocess for process isolation.
     if argv is None:
         argv = sys.argv[1:]
     if any(a in ("-h", "--help") for a in argv):
@@ -850,9 +834,7 @@ def main(argv: list[str] | None = None) -> int:
     if not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory")
         return 1
-    # specs/<name>/ is two levels below the repo root. (Historically
-    # docs/specs/<name>/ was three levels; the parenthetical
-    # "spec_dir.parent.parent" is now literally correct.)
+    # specs/<name>/ is two levels below the repo root.
     repo_root = Path(repo_arg) if repo_arg else spec_dir.parent.parent
 
     if survey_only:
@@ -904,9 +886,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # 1a. intent.md — optional input beside survey.md/research.md, but
-    # with FAIL teeth: absent → not checked, no warn (pre-split docsets
-    # and specs shaped without a scout pass must stay green); present →
-    # the --intent-only refusal families run here too (D-001).
+    # with FAIL teeth: absent → not checked, no warn (specs shaped without
+    # a scout pass must stay green); present → the --intent-only refusal
+    # families run here too.
     intent_path = spec_dir / "intent.md"
     if intent_path.exists():
         intent_text = INVISIBLE.sub(
@@ -996,11 +978,7 @@ def main(argv: list[str] | None = None) -> int:
     # "## TC-### ..." section's own body. Existence checks below search
     # WITHIN these blocks (and within task entries, above), never raw
     # whole-file substrings: a decoy comment or a stale coverage-matrix row
-    # citing an ID must not be able to stand in for a real reference. A live
-    # adversarial test proved the whole-file version gameable — 3 real
-    # "FR has no task" FAILs vanished by adding one HTML comment with no
-    # actual task behind it, and a stale matrix row masked a TC whose Story
-    # line had been changed to cite a different FR entirely.
+    # citing an ID must not be able to stand in for a real reference.
     # Split on H2 OR H3 headings: some real specs nest "### TC-###" cases
     # under a "## US#" grouping header rather than the flat template's
     # top-level "## TC-###" — either shape isolates each TC's own content
@@ -1043,12 +1021,11 @@ def main(argv: list[str] | None = None) -> int:
         entry = next((e.block for e in entries if re.search(rf"\b{t}\b", e.block)), "")
         if not re.search(r"\b(?:FR|NFR)-\d{3}\b", entry):
             fails.append(f"traceability: {t} cites no FR/NFR (scope creep?)")
-    # Task-dependency dangling check: a "(after T###)" chain marker (the
-    # Conventions-documented shape) pointing at a T-ID that doesn't exist —
-    # same pattern as the FR/AC/D dangling checks below, just for the one ID
-    # family those don't cover. WARN: this never had a check before, and a
-    # dangling dependency, while a real doc defect, doesn't itself corrupt
-    # status the way an ungrounded FR/task does.
+    # Task-dependency dangling check: a "(after T###)" chain marker pointing
+    # at a T-ID that doesn't exist — same pattern as the FR/AC/D dangling
+    # checks below, for the one ID family those don't cover. WARN: a dangling
+    # dependency is a real doc defect but does not corrupt status the way an
+    # ungrounded FR/task does.
     for ref in sorted(set(re.findall(r"\(after\s+(T\d{3})\)", task)) - tsks):
         warns.append(f"dangling: (after {ref}) references a task that doesn't exist")
     # Cross-phase chains: a task depending on a task in a LATER phase can
@@ -1088,10 +1065,8 @@ def main(argv: list[str] | None = None) -> int:
     # D-### structural completeness: a heading alone isn't a decision — the
     # template's shape is Context/Decision/Consequences, bulleted or (as
     # real specs also do it) written as bold-labelled prose paragraphs.
-    # Match the label itself, not a specific bullet syntax — a live check
-    # against real docs found "**Context**:" as a paragraph opener, not a
-    # "- **Context**" list item, and a syntax-strict pattern false-flagged
-    # it as missing. WARN, not FAIL: a stub is a real defect but not an
+    # Match the label itself, not a specific bullet syntax: "**Context**:"
+    # is often a paragraph opener, not a "- **Context**" list item. WARN, not FAIL: a stub is a real defect but not an
     # ID-graph corruption.
     for d in sorted(ds):
         blk = d_blocks.get(d, "")
@@ -1106,8 +1081,8 @@ def main(argv: list[str] | None = None) -> int:
             fails.append(f"traceability: {tc} traces to no FR/NFR")
     # Coverage-matrix ↔ TC consistency: a matrix row's own claim (this FR is
     # covered by this TC) must be backed by that TC's own content — a stale
-    # row citing a TC that no longer exists, or one whose Traces-to line was
-    # since changed to a different FR, silently passed before this check.
+    # row citing a TC that no longer exists, or one whose Traces-to line names
+    # a different FR, is caught here.
     for fr_m, tc_col in re.findall(
             r"^\|\s*((?:FR|NFR)-\d{3})\s*\|([^|]*)\|[^|]*\|\s*$", test, re.M):
         for tc_ref in re.findall(r"TC-\d{3}", tc_col):
@@ -1118,9 +1093,8 @@ def main(argv: list[str] | None = None) -> int:
                     f"coverage matrix: {fr_m} → {tc_ref}, but {tc_ref}'s own "
                     f"content doesn't mention {fr_m}"
                 )
-    # US traceability is WARN-only: never enforced before this check existed,
-    # so promoting it to FAIL would break specs in the wild that have
-    # untraced stories today.
+    # US traceability is WARN-only: promoting it to FAIL would break specs
+    # that have untraced stories.
     for ref in sorted(set(re.findall(r"\bUS\d{1,2}\b", test + task)) - uss):
         warns.append(f"dangling: {ref} referenced but not defined in spec.md")
     for us in sorted(uss):
@@ -1314,11 +1288,11 @@ def main(argv: list[str] | None = None) -> int:
         sha = bl[1]
         repo_hit, head, saw_git_dir = _baseline_head_probe(repo_root, sha)
         if repo_hit is None and not saw_git_dir:
-            # GITDEG honesty: a baseline that cannot be compared is not a
-            # fresh baseline — the skip must be visible, not silent.
+            # A baseline that cannot be compared is not a fresh baseline — the
+            # skip must be visible, not silent.
             notes.append("staleness: SKIPPED (not a git repo)")
         elif repo_hit is None:
-            # Same honesty for the subtler skip: .git dirs exist, but none
+            # A subtler skip: .git dirs exist, but none
             # of the candidates actually contains the baseline commit, so
             # the comparison still cannot run — say so instead of passing
             # silently. Informational note, never a warn or fail.
@@ -1368,8 +1342,7 @@ def main(argv: list[str] | None = None) -> int:
     # tech-spec.md/plan.md/test.md/task.md all copy verify commands forward)
     # must match at least one real file. WARN: a glob matching zero files
     # today could legitimately be a not-yet-written test, but silently
-    # matching nothing is exactly how the wrong suggest-graph path went
-    # unnoticed through four downstream docs in the live incident.
+    # matching nothing hides a wrong path.
     seen_tokens: set[tuple[str, str]] = set()
 
     def _check_pytest_cmd(f: str, cmd: str) -> None:

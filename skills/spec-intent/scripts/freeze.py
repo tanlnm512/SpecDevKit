@@ -10,7 +10,7 @@ execution and delivery:
   plan.md     exact hash
   survey.md   exact hash
   test.md     exact hash
-  tech-spec.md prefix hash/length (only appended D-### decisions may drift)
+  tech-spec.md prefix hash/length (only appended decisions may drift)
 
 task.md is deliberately not frozen: it is the lifecycle's status holder.
 Its contract-shape protections are traceability checks and the task-body

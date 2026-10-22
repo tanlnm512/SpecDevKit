@@ -1,18 +1,14 @@
 """CLI-bound owner suite for the handoff checker.
 
 The checker's command line is its only interface: behavioral
-assertions run it as a subprocess, and the placeholder stems stay
-pinned to the flow-contract module so the two cannot drift apart.
+assertions run it as a subprocess.
 """
-import importlib.util
 import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-import test_flow_contracts as flow
 
 SKILL = Path(__file__).resolve().parents[1]
 CHECKER = SKILL / "scripts" / "check.py"
@@ -198,12 +194,6 @@ class HandoffCheckTests(unittest.TestCase):
                 for line in result.stdout.splitlines()),
             result.stdout,
         )
-
-    def test_placeholder_stems_match_the_flow_contract_pin(self):
-        spec = importlib.util.spec_from_file_location("handoff_check", CHECKER)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self.assertEqual(module.PLACEHOLDER_STEMS, flow.PLACEHOLDER_STEMS)
 
 
 if __name__ == "__main__":

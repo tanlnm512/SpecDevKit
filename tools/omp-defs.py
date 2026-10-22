@@ -31,11 +31,9 @@ Frontmatter derivation (from each source file's own Claude-style block):
   cost-downgrade from the flagship default — ported to omp's built-in
   `@smol` role alias (models.md "Role aliases and settings"), the one
   documented cheap/fast tier every install gets with zero config.
-  D-012 made this data-driven and D-016 extended the tiered set: the
-  source briefs whose `model:` isn't `inherit` are spec-scout and
-  spec-builder — a new
-  skill's own tiering choices carry over the same way, with no edit to
-  this file. `@`-prefixed values must be quoted in YAML.
+  Tiering is data-driven: any brief whose `model:` isn't `inherit` gets
+  the mapping, so a new skill's tiering carries over with no edit to this
+  file. `@`-prefixed values must be quoted in YAML.
 - effort: `effort: low` -> `thinking-level: low`; absent -> omitted.
 
 Stale-output scoping: regenerating one skill's defs must never delete

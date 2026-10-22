@@ -82,7 +82,7 @@
 #                              regenerate-only carrier views, refreshed
 #                              in-place by tools/kit-rules.py before
 #                              install and drift-checked in verify
-#                              (D-028). Repo-local: nothing here is
+#  Repo-local: nothing here is
 #                              installed to a harness root.
 #
 # omp also reads ~/.agents/skills (its `agents` provider, priority 70),
@@ -95,7 +95,7 @@
 # Run from anywhere: tools/sync.sh — edits always land in skills/<name>/
 # first; this script is the only thing that copies out.
 #
-# Modes (FR-009): plain `tools/sync.sh` applies the plan (pruning
+# Modes: plain `tools/sync.sh` applies the plan (pruning
 # stale flat-root command deploys the ledger proves it owns, and
 # sweeping the roots of skills named in tools/retired-skills.txt whose
 # masters no longer ship — ledger-proven deploys deleted, foreign files
@@ -154,7 +154,7 @@ KILO_AGENTS_ROOT="$KILO_HOME/agent"
 # Bare-named commands a skill ships beyond its collision-proof
 # <name>.md router: an explicit `commands/extra.txt` in the skill (one
 # line, space-separated bare names — a reviewed file inside the skill
-# dir, never a glob; ADR-013). Generic names (spec.md, plan.md, ...)
+# dir, never a glob). Generic names (spec.md, plan.md, ...)
 # land flat in shared global command roots, so the opt-in lives with
 # the skill that pays for it, and a second skill wanting the same bare
 # name is a rename-or-namespace decision.
@@ -181,7 +181,7 @@ ledger_record() {  # <ledger-file> <command-name> <master-file>
   local h
   h="$(shasum -a 256 < "$3" | cut -d' ' -f1)"
   # Rewrite via destination-local scratch renamed over the ledger, so
-  # the ledger file itself never holds partial content (FR-007).
+  # the ledger file itself never holds partial content.
   if [ -f "$1" ]; then
     grep -v " $2\$" "$1" > "$1.tmp" || true
   else
@@ -203,7 +203,7 @@ sha() {  # <file> -> sha256 on stdout
 
 LEDGER_NAME=".spec-dev-kit-deployed"
 
-# Destination-local staging + atomic replacement (FR-007): content lands
+# Destination-local staging + atomic replacement: content lands
 # via rename from a scratch file in the destination's own directory, so
 # a destination is never seen half-written. Scratch carries the
 # LEDGER_NAME prefix — the installer-scratch namespace the sweep, the
@@ -276,7 +276,7 @@ check_stale_commands() {  # <root>
   done < <(stale_commands_in "$root")
 }
 
-# --- retired-skills sweep (D-007, FR-009) ----------------------------------
+# --- retired-skills sweep ----------------------------------
 # tools/retired-skills.txt names skills this kit retired. Once the master
 # skills/<name>/ is gone, the install roots still hold its deploys; the
 # sweep removes exactly what the provenance ledgers prove this kit
@@ -335,7 +335,7 @@ sweep_retired_tree() {  # <dest-tree> — per file: ledger-proven deleted,
 sweep_retired_command() {  # <root> <retired-name>
   local root="$1" name="$2" dest="$root/$name.md"
   [ -f "$dest" ] || return 0
-  # A shipping skill claiming the bare name owns it now (the split's
+  # A shipping skill claiming the bare name owns it now (a
   # thin alias does exactly that); an unclaimed foreign file at a flat
   # root is shared turf — neither is this sweep's to touch.
   if printf '%s\n' "$(claimed_command_names | sort -u)" \
@@ -485,7 +485,7 @@ install_skill_tree() {  # <skill-dir> <dest-root> — refuses on foreign files
   sweep_tree "$master" "$dest" "$dest/$LEDGER_NAME" || return 1
   mkdir -p "$dest"
   # Per-file atomic replacement, not a tree copy: each destination file
-  # lands whole or not at all (FR-007); identical files stay untouched.
+  # lands whole or not at all; identical files stay untouched.
   while IFS= read -r rel; do
     rel="${rel#./}"; [ -n "$rel" ] || continue
     mkdir -p "$dest/$(dirname "$rel")"
@@ -499,8 +499,8 @@ install_skill_tree() {  # <skill-dir> <dest-root> — refuses on foreign files
 DEF_OWNERS="$(mktemp)"  # basename|owner|master-path lines (bash-3.2 safe)
 trap 'rm -rf "$preflight_stage" "$DEF_OWNERS"' EXIT
 
-# Flat agent roots are ONE namespace and the split shares archetypes
-# (builder/reviewer in shape+execute+monolith, scout in intent+monolith).
+# Flat agent roots are ONE namespace, so shared archetypes must be
+# byte-identical across the skills that ship them.
 # rc 0 = install (unowned); rc 3 = skip (owned, byte-identical);
 # rc 4 = REFUSE (owned, bytes differ — names both owners; never a silent
 # last-writer-wins).
@@ -553,17 +553,17 @@ install_command() {  # <master-file> <base> <root> — ledger-guarded copy
 
 # --- preflight -------------------------------------------------------------
 # Plan every destination this run may touch BEFORE the first write
-# (FR-001, FR-002): tools/ownership.py classifies each candidate as
+# tools/ownership.py classifies each candidate as
 # create / update / unchanged / delete / refuse from the destination's
 # provenance ledger, and generated content is rendered to scratch first
-# so a generator or source failure also costs zero writes (D-002 — a
+# so a generator or source failure also costs zero writes (a
 # collision in the last root must not leave the first root
 # half-updated). Refuse means the ledger cannot prove the occupant is a
 # prior deploy: however identical it looks, it is never adopted.
 # Unplanned here: agy personas (committed regenerate-only repo
 # artifacts, no destination ledger) and the opencode/droid agent roots
-# (no provenance record exists yet; their deployment alignment is
-# T006's) — but their renders are still validated before any write.
+# (no provenance record exists yet) — but their renders are still
+# validated before any write.
 PREFLIGHT_FAIL=0
 preflight_stage="$(mktemp -d)"
 
@@ -581,7 +581,7 @@ plan_tree_root() {  # <src-dir> <dest-dir> — fail the run on any refusal
         echo "REFUSE $dest/${line#refuse } — foreign file (differs from master, not a prior deploy); resolve manually" ;;
       *)
         # --dry-run reports every decision in the planner's own
-        # create/update/unchanged/delete vocabulary (FR-009)
+        # create/update/unchanged/delete vocabulary
         [ "$DRY_RUN" = 1 ] && echo "plan  ${line%% *} $dest/${line#* }" ;;
     esac
   done <<< "$out"
@@ -644,7 +644,7 @@ for name in "${SKILLS[@]}"; do
   fi
 
   if [ -d "$skill_dir/agents" ]; then
-    # Shared-archetype ownership (D-036 split): flat def roots are ONE
+    # Shared-archetype ownership: flat def roots are ONE
     # namespace; briefs are byte-identical across skills, so the FIRST
     # skill in SKILLS order owns each basename and renders it; later
     # skills skip it. The owned set is computed once here and reused by
@@ -753,7 +753,7 @@ if [ -d "$KILO_HOME" ]; then
   plan_stale_commands "$KILO_COMMANDS_ROOT"
 fi
 
-# Retired skills (D-007): swept before the apply loop, so successor
+# Retired skills: swept before the apply loop, so successor
 # skills redeploy anything byte-shared later in the same run.
 sweep_retired_skills
 
@@ -763,10 +763,10 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 # --- apply -----------------------------------------------------------------
-# --check stops here (FR-009): the preflight above reported refusals and
+# --check stops here: the preflight above reported refusals and
 # the verify pass below reports drift — read-only either way.
 if [ "$CHECK" = 0 ]; then
-  # Kit-wide engineering rules (D-028): refresh the § Engineering rules
+  # Kit-wide engineering rules: refresh the § Engineering rules
   # carrier sections from the canonical rules/engineering-rules.md
   # BEFORE any install copies them out — same committed regenerate-only
   # discipline as the agy personas below. Never runs in --dry-run or
@@ -793,7 +793,7 @@ if [ "$CHECK" = 0 ]; then
       echo "skip  kilo skills — ~/.config/kilo absent (harness not installed)"
     fi
     # Kilo's own skills root: ~/.config/kilo/skills/<name>/ — its native
-    # scan surface (D-040), the same tree the compatibility root gets.
+    # scan surface, the same tree the compatibility root gets.
 
     if [ -d "$skill_dir/commands" ] \
        && { [ -f "$skill_dir/commands/$name.md" ] \
@@ -802,8 +802,8 @@ if [ "$CHECK" = 0 ]; then
         f="$skill_dir/commands/$base.md"
         rel="skills/$name/commands/$base.md"
         if [ ! -f "$f" ]; then
-          # a skill may name no self-titled command (renamed router:
-          # spec-shape ships spec-gen.md) — extra.txt claims are the truth
+          # a skill may name no self-titled command (a renamed
+          # router) — extra.txt claims are the truth
           [ "$base" = "$name" ] && continue
           echo "MISSING $rel (allowlisted, absent)"; fail=1; continue
         fi
@@ -817,15 +817,15 @@ if [ "$CHECK" = 0 ]; then
     # home existing, like the opencode/droid agent defs above: sync never
     # fabricates a harness directory; installing the harness just needs
     # one more sync run. Same provenance-ledger discipline, kept as a
-    # separate block so the shared roots' path is untouched (D-017).
+    # separate block so the shared roots' path is untouched.
     if [ -d "$HOME/.factory" ] \
        && { [ -f "$skill_dir/commands/$name.md" ] \
             || [ -n "$(extra_commands "$name")" ]; }; then
       for base in $name $(extra_commands "$name"); do
         f="$skill_dir/commands/$base.md"
         if [ ! -f "$f" ]; then
-          # a skill may name no self-titled command (renamed router:
-          # spec-shape ships spec-gen.md) — extra.txt claims are the truth
+          # a skill may name no self-titled command (a renamed
+          # router) — extra.txt claims are the truth
           [ "$base" = "$name" ] && continue
           echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"; fail=1; continue
         fi
@@ -843,8 +843,8 @@ if [ "$CHECK" = 0 ]; then
       for base in $name $(extra_commands "$name"); do
         f="$skill_dir/commands/$base.md"
         if [ ! -f "$f" ]; then
-          # a skill may name no self-titled command (renamed router:
-          # spec-shape ships spec-gen.md) — extra.txt claims are the truth
+          # a skill may name no self-titled command (a renamed
+          # router) — extra.txt claims are the truth
           [ "$base" = "$name" ] && continue
           echo "MISSING skills/$name/commands/$base.md (allowlisted, absent)"; fail=1; continue
         fi
@@ -937,7 +937,7 @@ fi
 verify_tree() {  # <master> <copy> <label>
   local master="$1" copy="$2" label="$3" m c
   if [ ! -d "$copy" ]; then
-    # --check on a destination nothing ever installed (FR-009)
+    # --check on a destination nothing ever installed
     echo "MISSING $label — not installed"; fail=1
     return 0
   fi
@@ -966,7 +966,7 @@ for name in "${SKILLS[@]}"; do
   skill_dir="$PKG_ROOT/skills/$name"
 
   # SKILL.md frontmatter version must equal the VERSION file — nothing
-  # else enforces the pair, and they have drifted twice already.
+  # else enforces the pair, and they can drift apart.
   v_file="$(cat "$skill_dir/VERSION" 2>/dev/null || true)"
   v_fm="$(sed -n 's/^  version: "\(.*\)"$/\1/p' "$skill_dir/SKILL.md" | head -1)"
   if [ -n "$v_file" ] && [ "$v_file" != "$v_fm" ]; then
@@ -975,8 +975,8 @@ for name in "${SKILLS[@]}"; do
   fi
 
   # zcode/claude skill loaders reject a SKILL.md description over 1024
-  # chars — the skill silently fails to register (seen twice on
-  # spec-to-prod). Same shape as the version pairing above: mechanical
+  # chars — the skill silently fails to register.
+  # Same shape as the version pairing above: mechanical
   # guard on every sync run.
   d_len="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"description: >-\n((?:  .*\n|\n)*?)metadata:", t); print(len("".join(l[2:] if l.startswith("  ") else l for l in m.group(1).splitlines(keepends=True)).strip()) if m else 0)' "$skill_dir/SKILL.md")"
   if [ "${d_len:-0}" -gt 1024 ]; then
@@ -1086,7 +1086,7 @@ for name in "${SKILLS[@]}"; do
   fi
 done
 
-# Kit-wide engineering rules (D-028): the committed carrier sections
+# Kit-wide engineering rules: the committed carrier sections
 # must match a fresh injection from rules/engineering-rules.md — the
 # same regenerate-only guarantee the agy personas get above.
 for root in "${COMMANDS_ROOTS[@]}"; do

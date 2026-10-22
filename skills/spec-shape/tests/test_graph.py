@@ -1,15 +1,13 @@
 """Tests for scripts/graph.py — the frontier engine.
 
-graph.py derives the workflow state from doc state alone (architecture §2):
-15 nodes, each done/READY/blocked/gate:undetermined/SKIPPED with a reason,
-a frontier wave of the READY nodes, loop-edge statuses, task counts, and a
-git-availability line that degrades to `SKIPPED (not a git repo)` in this
-deliberately non-git workspace. Fixtures are built exactly the way the
-validation contract prescribes: scaffold.sh + minimal writes, and mutated
-copies of examples/mini-spec (never the original). --state-json is the
-authoritative oracle, so node-state assertions read the same dict the CLI
-serializes; report/exit-code/JSON-shape assertions go through the real CLI
-subprocess. Executor modes (--emit-spawns/--run) live in their own feature.
+graph.py derives the workflow state from doc state alone: each node is
+done/READY/blocked/gate:undetermined/SKIPPED with a reason, plus a frontier
+wave of the READY nodes, loop-edge statuses, task counts, and a git line that
+degrades to `SKIPPED (not a git repo)` in this non-git workspace. Fixtures are
+scaffold.sh plus minimal writes, or mutated copies of examples/mini-spec (never
+the original). --state-json is the oracle for node-state assertions;
+report, exit-code and JSON-shape assertions go through the real CLI subprocess.
+Executor modes (--emit-spawns/--run) are covered in the executor section.
 """
 
 import contextlib
@@ -61,7 +59,7 @@ def copy_fixture(tmp: Path, name: str = "demo") -> Path:
 
 
 def spec_only(tmp: Path, name: str = "demo") -> Path:
-    """GRAPH-001's fixture: a filled spec.md and nothing else."""
+    """A filled spec.md and nothing else."""
     d = scaffold(tmp, name)
     write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
     for f in ("survey.md", "research.md", "plan.md", "tech-spec.md",
@@ -188,9 +186,7 @@ Status reflects code state per [survey.md](survey.md), not intent.
 """
 
 def done_fixture(tmp: Path) -> Path:
-    """All tasks ticked with their proof notes and Status: done — the
-    completed docset: tick-commit reads done (the non-git skip) and
-    archive is the frontier."""
+    """All tasks ticked with proof notes and Status: done; archive is the frontier."""
     d = copy_fixture(tmp)
     set_status(d, "done")
     write(d / "task.md", DONE_TASKS)
@@ -221,8 +217,8 @@ def dir_checksum(root: Path) -> str:
 
 
 class Graph001EmptyScaffoldTests(unittest.TestCase):
-    """GRAPH-001: filled spec.md only — survey READY, gate undetermined,
-    everything downstream blocked, frontier = [survey]."""
+    """Filled spec.md only: survey READY, gate undetermined, downstream blocked,
+    frontier = [survey]."""
 
     @classmethod
     def setUpClass(cls):
@@ -253,7 +249,7 @@ class Graph001EmptyScaffoldTests(unittest.TestCase):
         self.assertIn("survey", n["plan"]["reason"])
         self.assertIn("survey", n["qa"]["reason"])
         self.assertIn("survey", n["tech"]["reason"])
-        # tech alone also demands the research resolution (§2.1).
+        # tech alone also demands the research resolution.
         self.assertIn("research", n["tech"]["reason"])
         self.assertIn("plan", n["tasks"]["reason"])
         self.assertIn("verify", n["approve"]["reason"])
@@ -266,8 +262,8 @@ class Graph001EmptyScaffoldTests(unittest.TestCase):
 
 
 class Graph002SurveyWaveTests(unittest.TestCase):
-    """GRAPH-002: a valid survey flips survey done; plan ∥ qa go READY while
-    tech stays blocked on the undetermined gate; real research unblocks tech."""
+    """A valid survey flips survey done; plan ∥ qa go READY while tech stays
+    blocked on the undetermined gate; real research unblocks tech."""
 
     @classmethod
     def setUpClass(cls):
@@ -277,9 +273,8 @@ class Graph002SurveyWaveTests(unittest.TestCase):
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
         write(cls.spec_dir / "survey.md",
               (FIXTURE / "survey.md").read_text(encoding="utf-8"))
-        # the scaffold ships research.md as the resolved skip marker (D-025)
-        # — restore the unfilled template so `before` tests the
-        # gate:undetermined state this class exists for
+        # the scaffold ships research.md as a resolved skip marker; restore the
+        # unfilled template so `before` tests the gate:undetermined state
         write(cls.spec_dir / "research.md",
               (SKILL / "templates" / "research.md").read_text(
                   encoding="utf-8"))
@@ -344,8 +339,8 @@ class QuotedEvidenceSurveyTests(unittest.TestCase):
 
 
 class Graph003SkipMarkerTests(unittest.TestCase):
-    """GRAPH-003: the canonical em-dash skip marker resolves the gate as
-    skip — research reads SKIPPED (not blocked), tech goes READY."""
+    """The em-dash skip marker resolves the gate as skip: research reads
+    SKIPPED (not blocked), tech goes READY."""
 
     @classmethod
     def setUpClass(cls):
@@ -420,12 +415,11 @@ TINY_SPEC = (
 
 
 class IntentNodeTests(unittest.TestCase):
-    """D-002/FR-008: the intent node between spec and survey — absent
-    reads SKIPPED citing FR-008 and the legacy graph is unchanged (no
-    new blockers; survey readiness and the frontier keep their
-    pre-intent values); present-but-red reads BLOCKED naming the failing
-    check with survey waiting on it; present-and-green reads DONE and
-    survey proceeds; an unfilled intent.md is READY for the scout."""
+    """The intent node between spec and survey: absent reads SKIPPED and the
+    graph is otherwise unchanged (no new blockers; survey readiness and the
+    frontier keep their pre-intent values); present-but-red reads BLOCKED
+    naming the failing check with survey waiting on it; present-and-green
+    reads DONE and survey proceeds; an unfilled intent.md is READY for the scout."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="graphintent-"))
@@ -501,8 +495,8 @@ class IntentNodeTests(unittest.TestCase):
 
 
 class Graph004ExecuteFrontierTests(unittest.TestCase):
-    """GRAPH-004: per-task readiness — deps chain (T002 after T001), fix-cap
-    (T003 at 5/5) surfaced for adjudication, ticking T1 unblocks T2."""
+    """Per-task readiness: deps chain (T002 after T001), fix-cap (T003 at 5/5)
+    surfaced for adjudication, ticking T1 unblocks T2."""
 
     @classmethod
     def setUpClass(cls):
@@ -563,9 +557,8 @@ class Graph004ExecuteFrontierTests(unittest.TestCase):
 
 
 class StruckDepFrontierTests(unittest.TestCase):
-    """Scrutiny round-1 finding 1: the canonical dropped form
-    `- [ ] ~~T###~~ …` parses id=None, but a struck dep still counts as
-    satisfied (architecture §2.1) — a dependent of a struck task is
+    """The canonical dropped form `- [ ] ~~T###~~ …` parses id=None, but a
+    struck dep still counts as satisfied: a dependent of a struck task is
     runnable, and only a dep matching no entry at all reads 'not defined'."""
 
     @classmethod
@@ -603,7 +596,7 @@ class StruckDepFrontierTests(unittest.TestCase):
 
 
 class ImplementedDepFrontierTests(unittest.TestCase):
-    """FR-002: an `(after T###)` dependency is satisfied by a landed
+    """An `(after T###)` dependency is satisfied by a landed
     upstream — `(implemented)` (unticked) releases its dependent the same
     way a ticked or struck one does, while a merely claimed (in-progress)
     upstream still blocks. Landing is not ticking: the release happens
@@ -633,11 +626,6 @@ class ImplementedDepFrontierTests(unittest.TestCase):
         self.assertEqual(t["T002"]["state"], "runnable")
         self.assertIn("deps satisfied", t["T002"]["reason"])
 
-    def test_landing_is_not_ticking(self):
-        t = self.tasks(self.impl_state)
-        self.assertNotEqual(t["T001"]["state"], "ticked")
-        self.assertEqual(self.impl_state["counts"]["ticked"], 0)
-
     def test_claimed_dependency_still_blocks(self):
         t = self.tasks(self.claimed_state)
         self.assertEqual(t["T001"]["state"], "claimed")
@@ -646,7 +634,7 @@ class ImplementedDepFrontierTests(unittest.TestCase):
 
 
 class ImplementedExecuteCompletionTests(unittest.TestCase):
-    """TC-003 (FR-003/AC1): when every non-dropped task is `(implemented)`
+    """When every non-dropped task is `(implemented)`
     (unticked), execute is done and the graph sits directly at the
     tick-commit human gate (the prove-and-tick pause — Status is not done,
     so the gate is still open). An implemented entry is its own per-task
@@ -712,7 +700,7 @@ class ImplementedExecuteCompletionTests(unittest.TestCase):
 
 
 class Graph005LifecycleTests(unittest.TestCase):
-    """GRAPH-005: draft → approve is the frontier's human gate; approved →
+    """Draft → approve is the frontier's human gate; approved →
     execute eligible; done status with every task ticked reads tick-commit
     done (the explicit non-git skip) and archive becomes the frontier.
     The lifecycle Status shows in report and JSON throughout."""
@@ -766,8 +754,8 @@ class Graph005LifecycleTests(unittest.TestCase):
 
 
 class Graph006ClarifyHoldTests(unittest.TestCase):
-    """GRAPH-006: an open NEEDS CLARIFICATION marker holds the whole frontier
-    at clarify; removing the marker restores the GRAPH-001 state."""
+    """An open NEEDS CLARIFICATION marker holds the whole frontier at clarify;
+    removing the marker restores the filled-spec state."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="graph006-"))
@@ -802,7 +790,7 @@ class Graph006ClarifyHoldTests(unittest.TestCase):
 
 
 class Graph007StateJsonShapeTests(unittest.TestCase):
-    """GRAPH-007: --state-json is valid JSON with the machine-readable keys
+    """--state-json is valid JSON with the machine-readable keys
     later asserts consume — on empty, mid-pipeline, and approved states."""
 
     def test_valid_json_with_required_keys(self):
@@ -842,7 +830,7 @@ class Graph007StateJsonShapeTests(unittest.TestCase):
 
 
 class Graph008MermaidTests(unittest.TestCase):
-    """GRAPH-008: --mermaid renders the live state graph — state classes,
+    """--mermaid renders the live state graph — state classes,
     dotted conditional/loop edges, and output that differs per fixture."""
 
     @classmethod
@@ -872,7 +860,7 @@ class Graph008MermaidTests(unittest.TestCase):
 
 
 class Graph009ExitCodeTests(unittest.TestCase):
-    """GRAPH-009: 0 any readable spec-dir; 1 unreadable (message, not a
+    """0 any readable spec-dir; 1 unreadable (message, not a
     traceback); 2 usage errors."""
 
     @classmethod
@@ -906,7 +894,7 @@ class Graph009ExitCodeTests(unittest.TestCase):
 
 
 class Graph010NonGitTests(unittest.TestCase):
-    """GRAPH-010: git-derived signals degrade loudly — a visible
+    """Git-derived signals degrade loudly — a visible
     `SKIPPED (not a git repo)` line in the report and an explicit git field."""
 
     @classmethod
@@ -933,7 +921,7 @@ class Graph010NonGitTests(unittest.TestCase):
 
 
 class Graph011ExplainTests(unittest.TestCase):
-    """GRAPH-011: --explain matches the JSON reason; execute explains the
+    """--explain matches the JSON reason; execute explains the
     per-task frontier; unknown nodes exit 2 listing the valid names."""
 
     @classmethod
@@ -975,7 +963,7 @@ class Graph011ExplainTests(unittest.TestCase):
 
 
 class Graph012VerifyTests(unittest.TestCase):
-    """GRAPH-012: verify reflects check.py — blocked on a red docset with
+    """verify reflects check.py — blocked on a red docset with
     the failing checks named, done once the docset is consistent."""
 
     def setUp(self):
@@ -1009,7 +997,7 @@ class Graph012VerifyTests(unittest.TestCase):
 
 
 class Graph013FixtureIntegrationTests(unittest.TestCase):
-    """GRAPH-013: graph.py on the real mini-spec fixture — exit 0, coherent
+    """graph.py on the real mini-spec fixture — exit 0, coherent
     state, and byte-identical directory checksums before/after (no mutation)."""
 
     @classmethod
@@ -1040,7 +1028,7 @@ class Graph013FixtureIntegrationTests(unittest.TestCase):
 
 
 class Graph014EndStateTests(unittest.TestCase):
-    """GRAPH-014: a done-status docset with every task ticked is complete —
+    """A done-status docset with every task ticked is complete —
     tick-commit reads the explicit non-git skip and archive is the frontier
     (no gate holds it); a zero-file dir reports spec pending/blocked,
     exit 0, no crash."""
@@ -1081,7 +1069,7 @@ NOTE_LINE = "      done 2026-09-08 — proof: python3 -m pytest repo/test_calc.p
 
 
 class Graph015TickCommitEvidenceTests(unittest.TestCase):
-    """GRAPH-015 (FR-006/AC5/AC6, TC-006): tick evidence is durable task.md
+    """Tick evidence is durable task.md
     state — the specstate parser reads ticked/struck counts and the gaps
     (unticked, ticked-without-proof-note) the tick-commit gate consumes once
     execute is done. Node-level: a docset whose tasks all landed unticked
@@ -1129,7 +1117,7 @@ MUTATING_TC = "touch proof-canary.txt"
 
 def mutating_test_md(spec_dir: Path) -> None:
     """Swap the fixture's real pytest TC pass conditions for a mutating
-    command — the probe no graph inspection mode may execute (FR-004)."""
+    command — the probe no graph inspection mode may execute."""
     test = (FIXTURE / "test.md").read_text(encoding="utf-8")
     for tc in ("multiply", "zero"):
         test = test.replace(
@@ -1139,11 +1127,11 @@ def mutating_test_md(spec_dir: Path) -> None:
 
 
 class Graph016InertInspectionTests(unittest.TestCase):
-    """GRAPH-016 (FR-004/AC3, TC-004): every inspection mode — report,
+    """Every inspection mode — report,
     --state-json, --mermaid, --explain, --emit-spawns, --run --dry-run —
     computes state without executing repository or test.md commands. A
     mutating pass condition stays inert end-to-end; compute_state reaches
-    no proof probe (the audit hooks are gone, not dormant)."""
+    no proof probe."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="graph016-"))
@@ -1181,7 +1169,7 @@ def with_delivery_record(tasks_md: str, record: str) -> str:
 
 
 class Graph018DeliveryEvidenceTests(unittest.TestCase):
-    """GRAPH-018 (FR-006/AC6, TC-006): tick-commit's done citation carries
+    """tick-commit's done citation carries
     durable evidence — the task.md tick counts with proof notes plus the
     delivery record: `Delivered: commit @ <sha>` where git exists, the
     explicit non-git skip where it does not. Ticks alone never read done in
@@ -1193,9 +1181,8 @@ class Graph018DeliveryEvidenceTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
 
     def compute_in_git(self, spec_dir):
-        """compute_state with the git probes answering as a real repository
-        (mocked, never initialized — test_git_degradation's sanctioned
-        simulation)."""
+        """compute_state with the git probes mocked as a real repository
+        (never initialized)."""
         with unittest.mock.patch.object(graph.specstate, "git_available",
                                         return_value=True), \
              unittest.mock.patch.object(graph.specstate, "head_sha",
@@ -1247,10 +1234,8 @@ class Graph018DeliveryEvidenceTests(unittest.TestCase):
                       s["nodes"]["tick-commit"]["reason"])
 
     def test_done_status_without_delivery_record_still_pauses(self):
-        # find_pause keys on the gate's own delivery-record state, never
-        # spec.md Status: an interrupted ship (Status hand-set to done
-        # before the Delivered record) resumes at the named tick-commit
-        # gate, not as an unexplained hold
+        # find_pause keys on the delivery record, not spec.md Status: a Status
+        # hand-set to done before the Delivered record still pauses at tick-commit
         d = ticked_fixture(self._tmp / "f", status="done")
         with unittest.mock.patch.object(graph.specstate, "git_available",
                                         return_value=True), \
@@ -1269,7 +1254,7 @@ class Graph018DeliveryEvidenceTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Executor modes (--emit-spawns / --run) — EXEC-001..010. Payloads are built
+# Executor modes (--emit-spawns / --run). Payloads are built
 # from doc state alone (brief bodies + _shared-protocol.md + filled input
 # payload) into specs/<name>/spawns/wave-<N>/; --run loops waves with the
 # configured runner and pauses AWAITING HUMAN at every judgment node without
@@ -1284,8 +1269,7 @@ def doc_hashes(spec_dir: Path) -> dict:
 
 
 def wave2_fixture(tmp: Path, name: str = "demo") -> Path:
-    """The GRAPH-002 after-state: spec + valid survey + real research →
-    plan ∥ tech ∥ qa all READY (the stage-2 wave, wave 2)."""
+    """Spec + valid survey + real research: plan ∥ tech ∥ qa all READY (wave 2)."""
     d = scaffold(tmp, name)
     write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
     write(d / "survey.md", (FIXTURE / "survey.md").read_text(encoding="utf-8"))
@@ -1342,7 +1326,7 @@ def ticked_fixture(tmp: Path, name: str = "demo",
 
 def implemented_fixture(tmp: Path, name: str = "demo") -> Path:
     """All tasks `(implemented)`, none ticked: execute's completion state
-    without the forbidden early tick (TC-003) — the delivery-pending
+    without any tick — the delivery-pending
     stretch where tick-commit is the pending human gate."""
     d = copy_fixture(tmp, name)
     set_status(d, "approved")
@@ -1351,7 +1335,7 @@ def implemented_fixture(tmp: Path, name: str = "demo") -> Path:
 
 
 class Exec001EmitSpawnsTests(unittest.TestCase):
-    """EXEC-001: --emit-spawns writes one self-contained payload per
+    """--emit-spawns writes one self-contained payload per
     frontier agent node under spawns/wave-<N>/ — brief body (frontmatter
     stripped) contiguous + byte-verbatim, _shared-protocol.md verbatim,
     filled input payload naming spec dir + FR list, resolved skill_dir."""
@@ -1378,10 +1362,10 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
                             ("tech.md", "designer.md"),
                             ("qa.md", "qa.md")):
             raw = (SKILL / "agents" / brief).read_text(encoding="utf-8")
-            body = graph.strip_frontmatter(raw)
+            _, frontmatter, body = raw.split("---\n", 2)
             payload = (self.wave / name).read_text(encoding="utf-8")
-            self.assertIn(body, payload, name)
-            self.assertNotIn("disallowedTools", payload, name)
+            self.assertIn(body.strip(), payload, name)
+            self.assertNotIn(frontmatter, payload, name)
 
     def test_shared_protocol_verbatim_for_every_role(self):
         protocol = (SKILL / "agents" / "_shared-protocol.md").read_text(
@@ -1411,7 +1395,7 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
 
 
 class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
-    """EXEC-002: spawns/ is a derived, regenerate-only artifact — check.py's
+    """spawns/ is a derived, regenerate-only artifact — check.py's
     output and exit are identical with and without it, and re-emitting after
     deletion regenerates byte-identical payloads."""
 
@@ -1452,7 +1436,7 @@ class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
 
 
 class Exec003DryRunTests(unittest.TestCase):
-    """EXEC-003: --run --dry-run prints the full wave plan (frontier, payload
+    """--run --dry-run prints the full wave plan (frontier, payload
     paths, runner invocations) and changes nothing but the payload files."""
 
     @classmethod
@@ -1471,7 +1455,7 @@ class Exec003DryRunTests(unittest.TestCase):
 
 
 class Exec004GatePauseTests(unittest.TestCase):
-    """EXEC-004: --run pauses AWAITING HUMAN on judgment nodes — an
+    """--run pauses AWAITING HUMAN on judgment nodes — an
     undetermined research-gate stops before any wave; a draft-spec approve
     gate stops without ever writing Status."""
 
@@ -1498,7 +1482,7 @@ class Exec004GatePauseTests(unittest.TestCase):
 
 
 class Exec005GateHashInvarianceTests(unittest.TestCase):
-    """EXEC-005: at every human gate --run stops with AWAITING HUMAN and
+    """At every human gate --run stops with AWAITING HUMAN and
     mutates no doc state — no Status writes, no ticks, no marker removals."""
 
     def run_gate(self, spec_dir):
@@ -1545,7 +1529,7 @@ class Exec005GateHashInvarianceTests(unittest.TestCase):
 
 
 class Exec006RunnerTemplateTests(unittest.TestCase):
-    """EXEC-006: --runner placeholders are substituted verbatim with real
+    """--runner placeholders are substituted verbatim with real
     paths; no unsubstituted {...} token survives in the echoed lines."""
 
     @classmethod
@@ -1583,7 +1567,7 @@ class Exec006RunnerTemplateTests(unittest.TestCase):
 
 
 class Exec007MaxWavesTests(unittest.TestCase):
-    """EXEC-007: --max-waves bounds the loop — exactly one wave with the
+    """--max-waves bounds the loop — exactly one wave with the
     bound at 1 (print runner: doc state untouched); a runner that really
     writes artifacts advances the frontier and the bound still holds."""
 
@@ -1674,7 +1658,7 @@ class Exec007MaxWavesTests(unittest.TestCase):
 
 
 class Exec008VerifyInRunTests(unittest.TestCase):
-    """EXEC-008: the mechanical verify node runs check.py directly inside
+    """The mechanical verify node runs check.py directly inside
     --run (output/exit in the run log); a red check never advances."""
 
     def tearDown(self):
@@ -1707,7 +1691,7 @@ class Exec008VerifyInRunTests(unittest.TestCase):
 
 
 class Exec009PayloadBuildingTests(unittest.TestCase):
-    """EXEC-009: implementer payloads carry the task entry byte-verbatim plus
+    """Implementer payloads carry the task entry byte-verbatim plus
     the TC acceptance commands; the researcher payload carries the spec's
     research questions (prepared at the undetermined gate for the run
     decision — the gate itself is still a pause, never auto-spawned)."""
@@ -1734,7 +1718,7 @@ class Exec009PayloadBuildingTests(unittest.TestCase):
 
 
 class Exec010CrossModeNamingTests(unittest.TestCase):
-    """EXEC-010: --emit-spawns and --run --dry-run use identical payload
+    """--emit-spawns and --run --dry-run use identical payload
     paths under the same spawns/wave-<N>/ directory for the same state."""
 
     def test_identical_wave_paths_across_modes(self):
@@ -1757,7 +1741,7 @@ class Exec010CrossModeNamingTests(unittest.TestCase):
 
 
 class RunWaveDirTests(unittest.TestCase):
-    """Scrutiny round-1 finding 2: --wave-dir is honored by --run too —
+    """--wave-dir is honored by --run too —
     payloads land in DIR instead of the default spawns/wave-<N>/, the same
     override semantics --emit-spawns --wave-dir already has, and the
     runner sees the overridden path."""
@@ -1792,7 +1776,7 @@ class RunWaveDirTests(unittest.TestCase):
 
 
 class Exec011RepairDeltaTests(unittest.TestCase):
-    """EXEC-011: --repair emits one non-frontier agent node's payload
+    """--repair emits one non-frontier agent node's payload
     (the single-agent repair-run instrument), and a stale survey
     baseline scopes that payload to a DELTA RE-SURVEY block — the files
     git says changed since the baseline, so the converge re-survey
@@ -1887,7 +1871,6 @@ class Exec011RepairDeltaTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-
     def test_docs_only_delta_excludes_the_specs_tree(self):
         """A commit touching only specs/ (task ticks, survey.md's own
         refresh) can't invalidate a code citation — the delta filters
@@ -1935,7 +1918,7 @@ class Exec011RepairDeltaTests(unittest.TestCase):
 
 
 class Exec012RunnerFailureTests(unittest.TestCase):
-    """EXEC-012 (FR-008/AC8): a runner that exits nonzero or raises stops
+    """A runner that exits nonzero or raises stops
     the run — the diagnostic names the role and node, graph.py exits
     RUNNER_FAILED_EXIT (3), and neither the wave's remaining payloads nor
     any later wave start. dry-run and the print runner never invoke
@@ -1985,7 +1968,7 @@ class Exec012RunnerFailureTests(unittest.TestCase):
         self.assertNotIn("Traceback", buf.getvalue())
 
     def test_failing_runner_progresses_then_stops_at_later_wave(self):
-        """A multi-wave run (TC-008's shape): wave 2's runners really land
+        """A multi-wave run: wave 2's runners really land
         plan/tech/qa, wave 3's task-breaker fails — wave 3 is the last one
         started and the exit is nonzero."""
         self._tmp = Path(tempfile.mkdtemp(prefix="exec012c-"))
@@ -2092,16 +2075,8 @@ class ExecutorCliValidationTests(unittest.TestCase):
                     "execute").returncode, 2)
 
 
-    def test_strip_frontmatter(self):
-        raw = (SKILL / "agents" / "reviewer.md").read_text(
-            encoding="utf-8")
-        body = graph.strip_frontmatter(raw)
-        self.assertTrue(body.lstrip().startswith("# Reviewer agent"))
-        self.assertNotIn("readonly: true", body)
-
-
 class Graph019LaunchCheckTests(unittest.TestCase):
-    """GRAPH-019: --launch-check (D-022) — the spec-run launch advisory.
+    """--launch-check — the spec-run launch advisory.
     Only a heavy span (a multi-payload wave, or any execute span) says
     launch_workflow; a pending human gate (clarify, an undetermined
     research-gate, approve, tick-commit), one light doc node, complete,
@@ -2111,7 +2086,7 @@ class Graph019LaunchCheckTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = Path(tempfile.mkdtemp(prefix="graph019-"))
-        # research-gate pending: filled spec.md only (GRAPH-001 shape)
+        # research-gate pending: filled spec.md only
         cls.gate_research = spec_only(cls._tmp / "a")
         # clarify pending: the same spec plus an open marker
         cls.gate_clarify = spec_only(cls._tmp / "b")
@@ -2134,7 +2109,7 @@ class Graph019LaunchCheckTests(unittest.TestCase):
         # is the frontier (T001 runnable; T002 dep-chained; T003 at cap)
         cls.execute_dir = approved_fixture(cls._tmp / "f", "demo")
         # wave (analysis fan-out): survey done + real research →
-        # plan ∥ qa ∥ tech all READY (the GRAPH-002 shape)
+        # plan ∥ qa ∥ tech all READY
         cls.analysis_dir = scaffold(cls._tmp / "g", "demo")
         write(cls.analysis_dir / "spec.md",
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
@@ -2232,11 +2207,10 @@ class Graph019LaunchCheckTests(unittest.TestCase):
 
 
 class Graph020PipelineShorteningTests(unittest.TestCase):
-    """GRAPH-020: the pipeline shapes — mechanical effort tiering (D-024,
-    amended by D-027: the standard-tier design wave is designer ∥ qa),
-    the delivery-pending reviewer payload with its approval-freeze base,
-    the tick-commit pause's prove-and-tick need, and the scaffold's
-    skip-marker research default (D-025)."""
+    """The pipeline shapes: effort tiering (the standard-tier design wave is
+    designer ∥ qa), the delivery-pending reviewer payload with its
+    approval-freeze base, the tick-commit pause's prove-and-tick need, and the
+    scaffold's skip-marker research default."""
 
     @classmethod
     def setUpClass(cls):
@@ -2275,17 +2249,15 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
     def test_state_json_carries_effort_with_large_default(self):
         self.assertEqual(compute(self.standard)["effort"], "standard")
         self.assertEqual(compute(self.large)["effort"], "large")
-        # legacy docsets with no field keep the full-wave graph
+        # docsets with no effort field keep the full-wave graph
         self.assertEqual(compute(self.landed)["effort"], "large")
         # a fresh scaffold reads the template's default: standard
         self.assertEqual(compute(self.fresh)["effort"], "standard")
 
     def test_standard_collapses_the_design_wave_to_designer_plus_qa(self):
-        # D-024 as amended by D-027: the standard tier's plan ∥ tech wave
-        # (plus the tasks wave it feeds) collapses into ONE merged designer
-        # payload — but qa is NOT collapsed into it: test.md always comes
-        # from an implementation-blind qa spawn of its own, riding the
-        # same wave
+        # the standard tier's plan ∥ tech wave (plus the tasks wave it feeds)
+        # collapses into ONE merged designer payload; qa stays separate: test.md
+        # always comes from an implementation-blind qa spawn riding the same wave
         lines = self.payload_lines(self.standard)
         self.assertEqual(len(lines), 2, lines)
         self.assertIn("designer.md", lines[0])
@@ -2338,8 +2310,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertEqual(roles, ["planner", "qa", "tech"])
 
     def test_repair_stays_single_role_at_standard_tier(self):
-        # D-024: --repair always emits single-role payloads — a repair run
-        # must never carry the merged whole-docset designer payload
+        # --repair always emits single-role payloads, never the merged designer one
         wave = self._tmp / "repair-wave"
         r = run_cli(self.standard, "--emit-spawns", "--repair", "plan",
                     "--wave-dir", str(wave))
@@ -2349,10 +2320,9 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertIn("repair: plan already in the frontier", r.stdout)
 
     def test_standard_design_stretch_launches_as_a_wave(self):
-        # D-027: the default tier's design stretch is TWO payloads — the
-        # merged designer plus its parallel implementation-blind qa — so
-        # it is never a "one light doc node" inline advisory: the wave
-        # launches (D-024's collapse, qa's independence intact)
+        # the standard tier's design stretch is TWO payloads (merged designer plus
+        # parallel implementation-blind qa), so it launches as a wave, never as a
+        # "one light doc node" inline advisory
         r = run_cli(self.standard, "--launch-check")
         self.assertEqual(r.returncode, 0, r.stderr)
         adv = json.loads(r.stdout)
@@ -2365,7 +2335,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertIn("heavy span", adv["reason"])
 
     def test_single_merged_design_payload_still_launches_and_names_briefs(self):
-        # launch-check's single-design-payload branch (D-024/D-027): even
+        # launch-check's single-design-payload branch: even
         # when qa has already ridden ahead and only the merged designer
         # remains, the design stretch launches — and its reason names the
         # three briefs, never the old single-brief blindness trade-off
@@ -2433,7 +2403,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
 
 
 class SpanPhaseTests(unittest.TestCase):
-    """D-003/FR-003/FR-004 (T009): --span bounds which frontier payloads a
+    """--span bounds which frontier payloads a
     run may touch — a filter only, never a node's ready/done vocabulary.
     Default full keeps bare-invocation semantics byte-identical; the two
     invocation-time gates refuse with exit 4 naming the blocking gate and

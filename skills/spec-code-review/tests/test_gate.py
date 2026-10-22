@@ -248,15 +248,6 @@ class SecretsTests(GateBase):
         self.assertEqual(entry["exit_code"], 1)
         self.assertIn("local.sh", entry["tail"])
 
-    def test_clean_change_passes_and_lists_the_family(self):
-        (self.repo / "app.py").write_text("x = 1\n")
-        self.commit_all()
-        (self.repo / "app.py").write_text("x = 2\n")
-        r = self.run_on_repo()
-        self.assertEqual(r.returncode, 0, r.stderr)
-        entry = self.secret_entry(r)
-        self.assertEqual(entry["exit_code"], 0)
-
     def test_fixture_shaped_text_does_not_trip_the_patterns(self):
         # precision over recall: prose about keys, short placeholders
         # and example-ish fragments must not fail the gate

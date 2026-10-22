@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Eval-case runner for the kit's standing eval scenarios.
 
-Discovers cases from skills/*/evals/cases.md (D-004), tells mechanical
-from conversational by each case's Run: line (D-001), and records
-per-criterion verdicts under the case's skill's evals/results/ (D-002).
-The runner records; the observer judges (D-005).
+Discovers cases from skills/*/evals/cases.md, tells mechanical from
+conversational by each case's Run: line, and records per-criterion
+verdicts under the case's skill's evals/results/. The runner records;
+the observer judges.
 
 Usage:
   evals.py list
@@ -41,7 +41,7 @@ VERDICTS_HEADING = re.compile(r"^#+\s*Verdicts\s*$", re.IGNORECASE | re.MULTILIN
 
 def bullet_value(block, field):
     """A `- **<field>**:` bullet's value, continuations joined — a bullet's
-    text wraps across lines, and the value is all of it (D-002)."""
+    text wraps across lines, and the value is all of it."""
     lines = block.splitlines()
     start = None
     for i, line in enumerate(lines):

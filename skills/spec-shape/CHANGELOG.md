@@ -7,6 +7,8 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- Engine test suites (`test_graph`, `test_check`, `test_specstate`)
+  live here only (D-045).
 - Each spec skill ships only its span's archetypes; this skill drops
   `builder.md`, and § Engineering rules have one builder carrier
   (D-044).

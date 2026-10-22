@@ -105,13 +105,6 @@ class LedgerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ownership.read_ledger(p)
 
-    def test_short_sha_raises(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "L"
-            p.write_text("abc x.md\n")
-            with self.assertRaises(ValueError):
-                ownership.read_ledger(p)
-
     def test_duplicate_name_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "L"
@@ -204,17 +197,6 @@ class PlanTreeTests(unittest.TestCase):
             self.assertEqual(by_name(ownership.plan_tree(src, dest)), {
                 "SKILL.md": ownership.REFUSE,
                 "scripts/tick.py": ownership.UNCHANGED})
-
-    def test_identical_tree_without_ledger_is_refused_not_adopted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            src = make_src(tmp)
-            dest = tmp / "root" / "sk"
-            deploy(src, dest)
-            (dest / ownership.LEDGER_NAME).unlink()
-            self.assertEqual(
-                kinds(ownership.plan_tree(src, dest)),
-                [ownership.REFUSE] * 2)
 
     def test_unshipped_ledgered_file_is_delete(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -2,8 +2,8 @@
 # Print the active spec-code-review skill directory — the first existing
 # root in SKILL.md's launch-discipline priority order (project before
 # home; omp-native roots first, mirroring omp's provider precedence).
-# Callers run this once instead of eyeballing eight paths; its output is
-# the skill_dir the workflow bake would otherwise carry.
+# Callers run this once instead of checking each candidate path by hand;
+# its output is the skill_dir a launch payload would otherwise carry.
 set -euo pipefail
 
 for root in .omp .claude .zcode .agents .kilo; do

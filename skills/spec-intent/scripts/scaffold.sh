@@ -2,8 +2,8 @@
 # Scaffold a spec folder from the skill's templates.
 # Usage: scaffold.sh [--tier tiny|full] <kebab-case-spec-name> [target-root]
 # Default tier: tiny — the ONE-FILE contract (spec.md carries the task
-# list in § Tasks; D-037). --tier full scaffolds the 7-file docset (the
-# pre-D-037 shape). Both register in <target-root>/specs/INDEX.md.
+# list in § Tasks). --tier full scaffolds the 7-file docset. Both
+# register in <target-root>/specs/INDEX.md.
 set -euo pipefail
 
 tier=tiny
@@ -37,8 +37,8 @@ else
 fi
 # research.md ships as the resolved skip marker, not the template: the
 # research-gate's common case (no real open questions — most bugfixes) is
-# the default, so no run ever pauses "undetermined" on a fresh scaffold
-# (D-025). The orchestrator flips it to run by replacing this file with
+# the default, so no run ever pauses "undetermined" on a fresh scaffold.
+# The orchestrator flips it to run by replacing this file with
 # the filled template when the spec has real open questions.
 printf 'not applicable — no open questions at Stage 0\n' \
   > "$target/research.md"

@@ -61,8 +61,8 @@ converge — diffs specs/<name>/survey.md against its last committed
          the drift going unnoticed. Items unchanged or newly improved are
          not listed.
 
-mutate  — mutation testing over the changed implementation files
-         (D-027): flips operators and constants one at a time in every
+mutate  — mutation testing over the changed implementation files:
+         flips operators and constants one at a time in every
          changed non-test .py file vs base (default: the approval
          freeze's Approved-at SHA) and re-runs the auto TC commands from
          test.md after each mutant. A mutant that turns the suite red is
@@ -76,7 +76,7 @@ mutate  — mutation testing over the changed implementation files
          be verified aborts the file loudly); timeouts count as killed
          (the mutant hung the suite). Report always; exit 0.
 
-coverage — line-coverage floor over the tasks' intended files (D-027):
+coverage — line-coverage floor over the tasks' intended files:
          runs the repo suite once under pytest-cov and checks every
          `Touches:` path from task.md against the floor — spec.md's
          `**Coverage**: <int>` header (default 80), or --threshold to
@@ -448,10 +448,10 @@ def mode_proofs(spec_dir: Path, repo: Path, run: bool) -> int:
     return 1 if d["failed"] else 0
 
 
-# --- mutation testing (D-027) ----------------------------------------------
+# --- mutation testing ----------------------------------------------
 # A stdlib-only AST engine: one operator/constant flip at a time, the auto
 # TC commands as the kill suite. Optional instrument in the target repo's
-# own terms — no new dependency anywhere (constitution C-06).
+# own terms — no new dependency anywhere.
 
 CMP_SWAP = {
     ast.Lt: ast.GtE, ast.LtE: ast.Gt, ast.Gt: ast.LtE, ast.GtE: ast.Lt,
@@ -686,7 +686,7 @@ def mode_mutate(spec_dir: Path, repo: Path, base: str | None,
     return 0
 
 
-# --- coverage floor (D-027) -------------------------------------------------
+# --- coverage floor -------------------------------------------------
 
 COV_LINE = re.compile(r"^(.*?)\s+(\d+)\s+(\d+)\s+(\d+)%\s*(.*)$")
 

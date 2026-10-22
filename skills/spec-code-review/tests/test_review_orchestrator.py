@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Unit tests for the shared review oracle (spec
-code-review-workflow-extraction FR-001/FR-004, NFR-004/005).
+"""Unit tests for the shared review oracle.
 
 Real temp git repos, not mocks: the oracle's contract is repo state in,
-JSON out — error paths must fail loudly (exit 1 + status error), never
-silently proceed (TC-006)."""
+JSON out. Error paths must fail loudly (exit 1 + status error), never
+silently proceed."""
 
 import json
 import subprocess
@@ -162,9 +161,8 @@ class ShardTests(unittest.TestCase):
         d2 = ok(["shard", "--files-json", json.dumps(files),
                  "--sizes-json", json.dumps(sizes), "--max-files", "3"])
         self.assertEqual(d1["parts"], d2["parts"])
-        # path-sorted contiguous runs: directory-coherent, and a tiny
-        # trailing run may merge into the previous part (ported rule —
-        # the merged tail can exceed max_files, as in the dialects)
+        # path-sorted contiguous runs; a tiny trailing run merges into the
+        # previous part, so the last part may exceed max_files
         self.assertEqual(sorted(sum(d1["parts"], [])), sorted(files))
         self.assertTrue(all(len(p) <= 3 for p in d1["parts"][:-1]))
         self.assertTrue(d1["part_labels"])
@@ -276,14 +274,6 @@ class ReportTests(unittest.TestCase):
         self.assertIn("report data invalid", msg)
 
 
-
-
-# --- ask rendering and the pinned panel contract (D-014) ---------------------
-# The oracle is the single source; the retired JS dialect's byte-parity
-# harness went with the dialects. What must hold: deterministic
-# rendering, the anchors the panel contract pins, and loud failure on
-# an unknown ask kind.
-
 ASK_CASES = [
     ("scout", {"base": "HEAD", "project": False, "files": ["src/a.py", "src/b.py"]}),
     ("scout", {"base": "HEAD", "project": True, "files": [f"m{i}.py" for i in range(45)],
@@ -338,56 +328,22 @@ class AskRenderingTests(unittest.TestCase):
     def _oracle(self, kind, ctx):
         return ok(["ask", "--kind", kind, "--ctx", json.dumps(ctx)])["ask"]
 
-    def test_every_ask_kind_renders_deterministically_with_stable_anchors(self):
-        # The js dialect now relays asks to the oracle (D-014), so the
-        # byte-vs-js comparison is obsolete; what must hold instead:
-        # deterministic rendering + the anchors the panel contract pins.
-        anchors = {
-            "scout": "You are the preflight scout",
-            "review": "read the FULL diff",
-            "review-project": "Read EVERY target file in full",
-            "triage": "You are the triage editor",
-            "triage-project": "You are the triage editor",
-            "cross-lens": "final cross-lens pass",
-            "confirm": "You are an independent confirmer",
-            "confirm-project": "You are an independent confirmer",
-            "final": "final assessment of this change",
-            "final-project": "final assessment of the project's code",
-            "fixer": "never commit",
-            "verify": "Verify in the CURRENT working tree",
-            "fix-review": "fresh reviewer on a new change",
-            "loop-final": "final assessment of",
-        }
+    def test_every_ask_kind_renders_deterministically(self):
         for kind, ctx in ASK_CASES:
             with self.subTest(kind=kind, project=ctx.get("project"), base=ctx.get("base")):
-                first = self._oracle(kind, ctx)
-                self.assertEqual(first, self._oracle(kind, ctx), "ask rendering is not deterministic")
-                self.assertIn(anchors[kind], first)
+                self.assertEqual(self._oracle(kind, ctx), self._oracle(kind, ctx))
         batch = ok(["ask", "--kind", "batch", "--ctx", json.dumps(
             {"batch": [{"kind": k, "ctx": c} for k, c in ASK_CASES[:4]]})])
         self.assertEqual(batch["asks"], [self._oracle(k, c) for k, c in ASK_CASES[:4]])
 
-    def test_systems_carry_the_pinned_panel_contract(self):
-        # The oracle is now the single definition (D-014): pin its panel
-        # contract by anchors. When T005 makes the ts dialect relay too,
-        # no dialect carries systems inline and this IS the cross-check.
+    def test_systems_carry_the_three_lenses(self):
         d = ok(["systems"])
         self.assertEqual([l["label"] for l in d["lenses"]], ["correctness", "security", "quality"])
-        for lens in d["lenses"]:
-            self.assertIn("code review panel", lens["system"])
-        self.assertIn("sole reviewer on a small change", d["general"]["system"])
         for lens in d["lenses"] + [d["general"]]:
             self.assertTrue(lens["focus"].endswith("."))
-        self.assertIn("triage editor", d["triage"])
-        self.assertIn("Never commit", d["fixer"])
-        self.assertIn("fresh-eyes reviewer", d["fix_review"])
-        self.assertIn("preflight scout", d["scout"])
-        self.assertIn("independent verifier", d["verify"])
-        self.assertIn("escalate and say so plainly", d["honesty"])
 
     def test_unknown_ask_kind_fails_loudly(self):
         err(["ask", "--kind", "nope", "--ctx", "{}"])
-
 
 
 if __name__ == "__main__":

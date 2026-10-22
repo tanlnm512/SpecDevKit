@@ -9,7 +9,7 @@ next-free-ID allocation, ID definitions, and the git availability probes.
 check.py, audit.py, and graph.py import from this module instead
 of inlining their own copies — one canonical regex per doc shape, so the
 validators and the workflow engine can never drift apart on what the docs
-say (the same drift-killer D-007 applied to agent defs/briefs).
+say.
 
 Pure functions, stdlib only, no CLI: importing this module has no side
 effects — no output, no file writes (the file-reading exceptions are
@@ -50,13 +50,13 @@ HTML_COMMENT = re.compile(r"<!--.*?-->")
 STATUS_LINE = re.compile(r"^\*\*Status\*\*:\s*`?([A-Za-z]+)", re.M)
 
 # spec.md effort tier: `**Effort**: <word>` — the mechanical handle for the
-# effort-scaling tiers (D-024). Absent or unknown reads "large" so every
-# pre-field docset keeps the full-wave graph unchanged.
+# effort-scaling tiers. Absent or unknown reads "large" so docsets without
+# the field keep the full-wave graph unchanged.
 EFFORT_LINE = re.compile(r"^\*\*Effort\*\*:\s*`?([A-Za-z]+)", re.M)
 EFFORT_TIERS = ("tiny", "standard", "large")
-# D-037 thin floor: `**Tier**: tiny` on spec.md — the contract is ONE
+# Thin floor: `**Tier**: tiny` on spec.md — the contract is ONE
 # file (tasks live in spec.md § Tasks); absent/unknown reads "full",
-# so every docset predating the field keeps today's graph.
+# so docsets without the field keep the full-contract graph.
 TIER_LINE = re.compile(r"^\*\*Tier\*\*:\s*`?([A-Za-z]+)", re.M)
 TASKS_HEADING = "## Tasks"
 
@@ -93,10 +93,10 @@ DELIVERED_COMMIT = re.compile(
 APPROVED_AT = re.compile(
     r"\*\*Approved-at\*\*\s*:\s*`?([0-9a-f]{7,40})`?", re.I)
 
-# Exact lifecycle evidence values. The older state helpers intentionally
-# answer only "was this marker recorded?"; these parsers expose the SHA (or
-# explicit non-git dash) so integrity checks can prove it exists and belongs
-# to the repository instead of trusting any hex-looking text.
+# Exact lifecycle evidence values. State helpers answer only whether a marker
+# was recorded; these parsers expose the SHA (or explicit non-git dash) so
+# integrity checks can prove it exists and belongs to the repository instead
+# of trusting any hex-looking text.
 LIFECYCLE_VALUES = {
     "delivered": DELIVERED_COMMIT,
 }
@@ -196,8 +196,8 @@ def spec_status(spec_md: str) -> str | None:
 def spec_effort(spec_md: str) -> str:
     """The spec.md effort tier (tiny/standard/large), lowercased; "large"
     when no `**Effort**:` header exists or the word is not a known tier —
-    the legacy full-wave behavior, so docsets predating the field keep
-    today's graph (D-024)."""
+    the full-wave behavior, so docsets without the field keep the
+    existing graph."""
     m = EFFORT_LINE.search(spec_md) if spec_md else None
     word = m.group(1).lower() if m else ""
     return word if word in EFFORT_TIERS else "large"
@@ -206,8 +206,7 @@ def spec_effort(spec_md: str) -> str:
 def spec_tier(spec_md: str) -> str:
     """The spec.md contract tier — `tiny` (one file: the task list lives
     in spec.md § Tasks) or `full` (the seven-file docset). Absent or
-    unknown reads `full`: docsets predating the field keep today's
-    graph (D-037)."""
+    unknown reads `full`: docsets without the field keep the full graph."""
     m = TIER_LINE.search(spec_md) if spec_md else None
     word = m.group(1).lower() if m else ""
     return word if word in ("tiny", "full") else "full"
@@ -230,8 +229,7 @@ def tasks_section(spec_md: str) -> str | None:
 def tiny_task_text(spec_md: str) -> str | None:
     """The tiny tier's task-source text: the § Tasks section wrapped in
     a `## Phase 1` header so task_entries/tick_evidence — the same
-    parsers task.md uses — read it unchanged (D-037: one grammar, two
-    homes)."""
+    parsers task.md uses — read it unchanged (one grammar, two homes)."""
     section = tasks_section(spec_md)
     if section is None:
         return None
@@ -261,8 +259,8 @@ def task_entries(task_md: str) -> list[TaskEntry]:
     for sec in re.split(r"^## ", task_md, flags=re.M):
         header = sec.split("\n", 1)[0].strip()
         # `## Tasks` is the tiny tier's phase-1 section inside spec.md
-        # (D-037) — task.md parsers read either home unchanged. An
-        # unnumbered `## Phase …` header keeps its legacy phase=None.
+        # task.md parsers read either home unchanged. An unnumbered
+        # `## Phase …` header keeps phase=None.
         if header == "Tasks":
             phase = 1
         elif header.lower().startswith("phase"):
@@ -464,7 +462,7 @@ def task_touches(entry: TaskEntry) -> list[str]:
     """Intended file/directory/glob touches for one task.
 
     Reads the complete entry, not only its first line. Explicit `Touches:`
-    bullets are authoritative; legacy path-shaped backticks remain supported
+    bullets are authoritative; path-shaped backticks remain supported
     so existing docsets do not silently lose overlap detection.
     """
     touches: set[str] = set()

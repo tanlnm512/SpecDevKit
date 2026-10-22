@@ -2,8 +2,8 @@
 # Print the active spec-brainstorming skill directory — the first existing
 # root in SKILL.md's spawn-payload priority order (project before home;
 # omp-native roots first, mirroring omp's provider precedence).
-# Callers run this once instead of eyeballing eight paths; its output is
-# the skill_dir the stage-2 spawn payload would otherwise carry.
+# Callers run this once instead of checking each candidate path by hand;
+# its output is the skill_dir a spawn payload would otherwise carry.
 set -euo pipefail
 
 for root in .omp .claude .zcode .agents .kilo; do

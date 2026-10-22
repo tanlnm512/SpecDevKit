@@ -3,7 +3,7 @@
 Three contracts:
 1. Parity — the module is byte-identical across every skill that
    ships it (the kit's self-contained-packaging duplication, pinned
-   like the workflow copies used to be).
+   so the copies cannot diverge).
 2. Behavior — record/summary/off-switch, via KIT_TELEMETRY_DIR into a
    temp store.
 3. Constitution — recording is fire-and-forget: a read-only store dir
@@ -32,7 +32,6 @@ def load(skill):
 
 class ParityTests(unittest.TestCase):
     def test_all_five_skills_ship_the_module(self):
-        # the retired monolith's copy went with its tree (T023)
         self.assertEqual(SKILLS, ["spec-brainstorming", "spec-code-review",
                                   "spec-execute", "spec-intent",
                                   "spec-shape"])

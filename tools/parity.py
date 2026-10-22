@@ -6,7 +6,7 @@ skills/spec-shape/scripts/ and is enumerated by import scan, never a
 hand list: the seeds are graph.py, check.py, contract.py,
 specstate.py, telemetry.py and freeze.py, and any local sibling
 module those files import — transitively, to fixpoint — joins the
-closure mechanically (D-004, specs/spec-to-prod-split/tech-spec.md).
+closure mechanically.
 
 This tool replicates the closure into the scripts/ of every other
 skill that ships graph.py (discovery keyed on graph.py alone, so a

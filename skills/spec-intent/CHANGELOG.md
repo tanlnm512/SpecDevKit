@@ -7,6 +7,8 @@ stop — the docset is spec-shape's, execution spec-execute's.
 
 ## Unreleased
 
+- Replica engine suites removed; spec-shape owns them (spec-shape
+  D-045).
 - `agents/` ships the scout alone — the only archetype the intent
   span spawns (D-020).
 - D-019: grilling rounds ride the harness's structured question

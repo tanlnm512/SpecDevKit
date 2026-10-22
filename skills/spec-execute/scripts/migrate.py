@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""migrate.py — bring a version 1 active docset's task.md to the current
+"""migrate.py — bring an older active docset's task.md to the template's
 contract header shape: dry-run, idempotent, evidence-neutral.
 
 The task template IS the target shape: every `**Field**:` line in the
@@ -116,8 +116,8 @@ def verify_text(original: str, candidate: str, additions: list[str]) -> list[str
 
 # ------------------------------------------------------------- grow ----
 def grow(spec_dir: Path) -> int:
-    """tiny -> full (D-037): move the § Tasks blocks into task.md
-    verbatim (Phase 1 — IDs never renumbered), scaffold the four
+    """tiny -> full: move the § Tasks blocks into task.md
+    verbatim (IDs never renumbered), scaffold the four
     authoring docs from templates, flip the Tier header to full, and
     drop § Tasks. Structure moves; CONTENT re-enters authoring: the
     fresh templates fail check.py by design, and the graph's authoring

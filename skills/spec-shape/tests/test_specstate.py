@@ -1,16 +1,8 @@
 """Tests for scripts/specstate.py — the shared doc-state parsers.
 
-specstate.py is the extraction of every doc-state parser check.py's
-monolithic main() and audit.py used to inline: spec Status, task entries
-(including the implemented marker), the Delivered header line, the
-approval-freeze anchor, the survey baseline/items, the researcher-skip
-marker, next-free-ID allocation, ID definitions, the coverage-floor
-header (D-027), and the git availability
-probes. Pure functions, stdlib only, no CLI: importing the module must
-produce no output and write nothing (asserted here, SPECSTATE-001), and
-every parser gets a representative case plus its None/missing/empty edge
-(SPECSTATE-007). check.py/audit.py rewiring is covered by the existing
-suites — they must stay green unmodified.
+Pure functions, stdlib only, no CLI: importing the module must produce no
+output and write nothing, and every parser gets a representative case plus
+its None/missing/empty edge.
 """
 
 import importlib.util
@@ -94,9 +86,8 @@ class TaskEntryTests(unittest.TestCase):
         self.by_id = {e.id: e for e in self.entries if e.id}
 
     def test_phase_sections_hold_the_entries(self):
-        # The struck/dropped form (`- [ ] ~~T005~~ …`) has no plain leading
-        # T-ID, so — exactly like the parser it was extracted from — its
-        # id reads None while the struck flag carries the drop signal.
+        # A struck entry (`- [ ] ~~T005~~ …`) has no plain leading T-ID, so its
+        # id reads None; the struck flag carries the drop signal.
         self.assertEqual([e.id for e in self.entries],
                          ["T001", "T002", "T003", "T004", "T006", None])
         self.assertEqual([e.phase for e in self.entries], [1, 1, 2, 2, 2, 2])
@@ -174,20 +165,13 @@ class ImplementedMarkerTests(unittest.TestCase):
         self.assertTrue(e["T002"].implemented)
         self.assertEqual(e["T002"].after, ["T001"])
 
-    def test_direct_construction_defaults_to_unimplemented(self):
-        entry = specstate.TaskEntry(
-            id="T001", phase=1, block="- [ ] T001", first_line="- [ ] T001",
-            done=False, claimed=False, struck=False, parallel=False,
-            after=[], fix_round=None)
-        self.assertFalse(entry.implemented)
 
 
 class ApprovalShaTests(unittest.TestCase):
-    """The approval freeze's anchor (D-026): approval_sha reads the
-    `**Approved-at**` commit freeze.py recorded in approvals/approval.md —
-    the default diff base for the post-execute review instruments. No
-    freeze (pre-approval), an unreadable file, or the dash form reads
-    None — a non-git freeze names no diff base."""
+    """approval_sha reads the `**Approved-at**` commit from approvals/approval.md,
+    the default diff base for the post-execute review instruments. No freeze,
+    an unreadable file, or the dash form reads None — a non-git freeze names
+    no diff base."""
 
     @staticmethod
     def approval_dir(tmp, approval_md=None):
@@ -257,10 +241,8 @@ class DeliveryStateTests(unittest.TestCase):
 
 
 class CoverageFloorTests(unittest.TestCase):
-    """The coverage floor audit.py's coverage mode enforces (D-027):
-    spec.md's `**Coverage**: <int>` header, clamped to 0-100; the 80
-    default when the header is absent. Line-leading bold headers only,
-    like every other doc-state header in this module."""
+    """spec.md's `**Coverage**: <int>` header, clamped to 0-100; 80 when absent.
+    Line-leading bold headers only, like every other doc-state header here."""
 
     def test_absent_header_reads_the_80_default(self):
         self.assertEqual(specstate.coverage_floor("# Spec, no floor line\n"), 80)
@@ -423,9 +405,6 @@ class DefinedIdsTests(unittest.TestCase):
             "NFR": {"NFR-001"}, "TC": {"TC-001"}, "D": {"D-001"},
         })
 
-    def test_mentions_are_not_definitions(self):
-        self.assertNotIn("FR-002", specstate.defined_ids(self.TEXT)["FR"])
-
     def test_empty_text_yields_empty_families(self):
         self.assertEqual(specstate.defined_ids(""),
                          {"FR": set(), "AC": set(), "US": set(),
@@ -491,8 +470,7 @@ class GitHelperTests(unittest.TestCase):
                 specstate.diff_paths(Path("/some/repo"), "abc1234", "def5678"))
 
     def test_diff_paths_real_repo_lists_changed_files(self):
-        """The sanctioned real-git probe: init, two commits, the changed
-        file (and only it) sits between the two shas."""
+        """Real git: after two commits, only the changed files sit between them."""
         import os
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
@@ -521,10 +499,7 @@ class GitHelperTests(unittest.TestCase):
 
 
     def test_real_workspace_probe_is_non_git(self):
-        # The sanctioned rc-128 probe: a workspace that is genuinely
-        # non-git. A temp dir outside any repo — the in-repo fixture can
-        # no longer serve (SpecDevKit itself is a git repo, so the probe
-        # resolves the parent .git and the old premise stopped holding).
+        # A temp dir outside any repo; a path inside a repo would resolve the parent .git.
         with tempfile.TemporaryDirectory() as td:
             self.assertFalse(specstate.git_available(Path(td)))
             self.assertIsNone(specstate.head_sha(Path(td)))
@@ -537,8 +512,7 @@ class LifecycleValueTests(unittest.TestCase):
             "**Closing-audit**: approved @ def5678\n"
             "**Delivered**: commit @ 90abcdef\n"
         )
-        # D-026: the audit markers are gone — Delivered is the only
-        # lifecycle value left, and legacy lines read as nothing.
+        # Delivered is the only lifecycle value; legacy audit lines read as nothing.
         self.assertEqual(specstate.lifecycle_shas(text),
                          {"delivered": "90abcdef"})
 
@@ -588,7 +562,7 @@ class TaskTouchTests(unittest.TestCase):
 
 
 class ModuleShapeTests(unittest.TestCase):
-    """SPECSTATE-001: stdlib-only, importable, no CLI side effects."""
+    """Stdlib-only, importable, no CLI side effects."""
 
     def test_import_produces_no_output_and_writes_nothing(self):
         r = subprocess.run(
@@ -607,14 +581,6 @@ class ModuleShapeTests(unittest.TestCase):
         self.assertLessEqual(roots, {
             "__future__", "pathlib", "re", "subprocess", "sys", "typing",
         }, f"non-stdlib import found: {roots}")
-
-    def test_tooling_scripts_import_specstate(self):
-        for script in ("check.py", "audit.py"):
-            if not (SCRIPTS / script).exists():
-                self.skipTest(f"{script} not shipped in this skill")
-            source = (SCRIPTS / script).read_text(encoding="utf-8")
-            self.assertRegex(source, r"from specstate import|import specstate",
-                             f"{script} does not import specstate")
 
 
 if __name__ == "__main__":

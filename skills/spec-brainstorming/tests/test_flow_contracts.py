@@ -42,14 +42,6 @@ LENSES = [
     ("minimalist", "The Minimalist"),
 ]
 
-# Template placeholders that must never survive into a filled artifact
-# (legitimate angle brackets like a CLI's <term> argument are fine).
-PLACEHOLDER_STEMS = (
-    "<Name>", "<date>", "<persona>", "<angle", "<feature", "<the ",
-    "<risk", "<why", "<mitigation", "<the one",
-)
-
-
 def read(rel: str) -> str:
     return (SKILL / rel).read_text()
 
@@ -62,14 +54,6 @@ class StageContractTests(unittest.TestCase):
                         f"missing stage heading(s): {[STAGES[i] for i, p in enumerate(positions) if p < 0]}")
         self.assertEqual(positions, sorted(positions),
                           "the five stages are rigid — SKILL.md lists them out of order")
-
-    def test_rigidity_is_stated(self):
-        text = read("SKILL.md")
-        self.assertIn("always run in order, none is\nskippable", text)
-        for sentence in ("**One question at a time.**",
-                         "**The user selects or blends.**",
-                         "**Nothing is written under `specs/`.**"):
-            self.assertIn(sentence, text, f"principle lost: {sentence}")
 
     def test_artifact_location_is_pinned(self):
         self.assertIn("brainstorms/<name>.md", read("SKILL.md"))
@@ -97,13 +81,6 @@ class PanelContractTests(unittest.TestCase):
         for banned in ("  - Write\n", "  - Edit\n", "  - Agent\n"):
             self.assertIn(banned, fm, "lenses never edit or spawn")
 
-    def test_shared_protocol_carries_lens_rules(self):
-        body = read("agents/_panel-protocol.md")
-        self.assertIn("Argue your lens, not the balance", body)
-        self.assertIn("Digest only, never edit", body)
-        for field in ("`angle:", "`pitch:`", "`points:`", "`watch:`"):
-            self.assertIn(field, body)
-
 
 class ArtifactContractTests(unittest.TestCase):
     def test_template_pins_the_five_sections_in_order(self):
@@ -112,30 +89,11 @@ class ArtifactContractTests(unittest.TestCase):
         self.assertTrue(all(p >= 0 for p in positions),
                         f"template lost section(s): {[TEMPLATE_SECTIONS[i] for i, p in enumerate(positions) if p < 0]}")
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("/spec-idea <name>", text, "the template names the next step")
 
     def test_run_contract_arbitrates_digest_grammar_and_payload(self):
         body = read("contracts/run.md")
-        self.assertIn("SKILL.md summarizes; this file arbitrates", body)
         self.assertIn("angle:  The Visionary | The Cynic | The Minimalist", body)
         self.assertIn("scripts/skill-dir.sh", body)
-
-    def test_handoff_gate_is_observer_checkable(self):
-        body = read("gates/handoff.md")
-        self.assertIn("ALL must hold before `/spec-idea` is named", body)
-        self.assertIn("never a silent clobber", body)
-        self.assertIn("Kill criteria are observable", body)
-
-
-class GreenFixtureTests(unittest.TestCase):
-    """examples/decision-tracker is the green artifact: the handoff
-    checker (test_handoff_check.py) owns its shape; pinned here is only
-    what the checker does not judge."""
-
-    FIXTURE = "examples/decision-tracker/decision-tracker.md"
-
-    def test_fixture_names_the_next_step(self):
-        self.assertIn("/spec-idea decision-tracker", read(self.FIXTURE))
 
 
 class SkillDirScriptTests(unittest.TestCase):

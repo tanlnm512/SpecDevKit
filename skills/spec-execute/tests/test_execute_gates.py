@@ -1,35 +1,24 @@
-"""Tests for the spec-execute invocation gate — the T018 suite
-(FR-004, FR-008, NFR-003).
+"""Invocation gate for spec-execute.
 
-The execute span's entry gate (D-003) is the skill's whole intake
-discipline: `graph.py <dir> --span execute` refuses (exit 4, blocking
-gate printed, an intake_refusal telemetry event under the engine's own
-derived skill name) unless approve AND verify are DONE — so spec-execute
-accepts any directory that satisfies the docset contract, never only the
-ones this kit shaped (FR-008). These cases pin:
+`graph.py <dir> --span execute` refuses (exit 4, blocking gate printed,
+an intake_refusal telemetry event) unless approve and verify are DONE.
+Any directory that satisfies the docset contract is accepted, not only
+kit-shaped ones. The cases pin:
 
-  GATE-001  a draft docset (Status: draft, check green) refuses naming
-            the approve gate, writes zero payloads, records telemetry;
-  GATE-002  an approved-but-red docset (check.py fails, e.g. a broken
-            task entry) refuses naming verify the same way;
-  GATE-003  the approved-and-green fixture executes: --emit-spawns
-            writes implementer payload(s) for runnable tasks, --run
-            (print runner) drives the wave and stops — at the
-            tick-commit gate on the landed shape, on the state's
-            tick-commit-blocked-readonly at the runnable shape — and no
-            authoring payload (survey/plan/tech/qa/tasks/design) is ever
-            emitted under the execute span;
-  GATE-004  a hand-authored docset (same contract shapes, different
-            prose) hits the identical refusal and gate outcomes — the
-            gate reads Status + green check, not kit provenance;
-  GATE-005  the five lifecycle commands moved in T016 live here with
-            extra.txt claiming their bare names exactly once (the
-            install pin itself is T019's).
+  - a draft docset refuses naming approve, writes zero payloads, and
+    records telemetry;
+  - an approved-but-red docset refuses naming verify the same way;
+  - the approved-and-green fixture executes: implementer payloads for
+    runnable tasks, the print runner stops at the tick-commit gate on a
+    landed shape, and no authoring payload is ever emitted;
+  - a hand-authored docset with the same contract shapes gets identical
+    refusal and gate outcomes;
+  - the lifecycle command surface and its bare-name claims.
 
-Fixtures follow the validation contract: mutated copies of
-examples/mini-spec (never the original) plus the repo it cites, and a
-from-scratch hand-authored docset. Every CLI run gets its own
-KIT_TELEMETRY_DIR so telemetry assertions read only this run's events.
+Fixtures are mutated copies of examples/mini-spec (never the original)
+plus the repo it cites, and a from-scratch hand-authored docset. Every
+CLI run gets its own telemetry dir so assertions read only that run's
+events.
 """
 
 import hashlib
@@ -51,7 +40,7 @@ FIXTURE = SKILL / "examples" / "mini-spec" / "specs" / "mini-spec"
 FIXTURE_REPO = SKILL / "examples" / "mini-spec" / "repo"
 COMMANDS = SKILL / "commands"
 
-# The moved lifecycle commands (T016) plus the skill's own router verb.
+# The lifecycle commands plus the skill's own router verb.
 LIFECYCLE_COMMANDS = ("spec-build.md", "spec-test.md", "spec-review.md",
                       "spec-ship.md")
 CLAIMED_BARE_NAMES = ["spec-execute", "spec-build", "spec-test",
@@ -167,11 +156,9 @@ def dir_checksum(root: Path) -> str:
 
 
 class Gate001DraftRefusalTests(unittest.TestCase):
-    """GATE-001 (FR-004): a green docset at Status: draft refuses
-    execute-span entry naming the approve gate — exit 4, zero payloads
-    written, one intake_refusal telemetry event under the derived skill
-    name. The gate is mode-independent: --emit-spawns and --run are both
-    executions of the span, so both refuse identically."""
+    """A green docset at Status: draft refuses execute-span entry naming
+    the approve gate: exit 4, zero payloads, one intake_refusal event.
+    --emit-spawns and --run both execute the span, so both refuse."""
 
     @classmethod
     def setUpClass(cls):
@@ -214,11 +201,10 @@ class Gate001DraftRefusalTests(unittest.TestCase):
 
 
 class Gate002RedCheckRefusalTests(unittest.TestCase):
-    """GATE-002 (FR-004): Status approved is necessary, not sufficient —
-    a red check.py (here: a task entry whose burndown disagrees with the
-    actual entries) leaves verify not-DONE, and the span refuses naming
-    it (approve appears too, blocked on verify — the engine reports both
-    non-DONE gates)."""
+    """Status approved is necessary, not sufficient: a red check.py (a task
+    entry whose burndown disagrees with the entries) leaves verify not
+    DONE, and the span refuses naming it. The engine also lists approve,
+    blocked on verify."""
 
     @classmethod
     def setUpClass(cls):
@@ -256,13 +242,11 @@ class Gate002RedCheckRefusalTests(unittest.TestCase):
 
 
 class Gate003ApprovedGreenExecuteTests(unittest.TestCase):
-    """GATE-003 (FR-004, FR-008, NFR-003): the approved-and-green
-    docset executes. --emit-spawns writes implementer payload(s) for the
-    runnable tasks only; --run with the print runner drives the wave and
-    stops — at `AWAITING HUMAN: tick-commit` once every task has landed
-    (the print runner mutates nothing, so the runnable shape stops on
-    the unchanged state and tick-commit reads blocked-on-execute in
-    --state-json, the state half of the same gate) — and no authoring
+    """The approved-and-green docset executes. --emit-spawns writes
+    implementer payloads for runnable tasks only. --run with the print
+    runner stops at `AWAITING HUMAN: tick-commit` once every task has
+    landed; on the runnable shape the print runner mutates nothing, so
+    the state stays put and tick-commit reads blocked. No authoring
     payload ever appears under the execute span."""
 
     @classmethod
@@ -306,6 +290,8 @@ class Gate003ApprovedGreenExecuteTests(unittest.TestCase):
         text = next((self.runnable / "spawns").glob(
             "*/implementer-T001.md")).read_text(encoding="utf-8")
         self.assertIn("- [ ] T001 [P] Implement multiply", text)
+        self.assertIn("TC-001: `cd repo && python3 -m pytest test_calc.py "
+                      "-k multiply`", text)
 
     def test_run_drives_the_execute_wave_with_print_runner(self):
         tel = self._tmp / "tel-run"
@@ -330,7 +316,7 @@ class Gate003ApprovedGreenExecuteTests(unittest.TestCase):
         self.assertEqual(s["nodes"]["tick-commit"]["state"], "blocked")
         self.assertIn("waiting on: execute",
                       s["nodes"]["tick-commit"]["reason"])
-        # NFR-003: the run recorded its wave under the derived name
+        # the run recorded its wave under the skill's derived name
         waves = [e for e in telemetry_events(tel) if e["event"] == "wave"]
         self.assertEqual(waves[-1]["payload"]["roles"], ["execute"])
 
@@ -369,9 +355,8 @@ class Gate003ApprovedGreenExecuteTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# GATE-004: the hand-authored docset. Same contract shapes as mini-spec,
-# entirely different prose (no kit template was copied) — the gate reads
-# Status + green check.py, never kit provenance (FR-008).
+# Hand-authored docset: same contract shapes as mini-spec, entirely different
+# prose. The gate reads Status and check.py's exit, never kit provenance.
 # ---------------------------------------------------------------------------
 
 HAND_SPEC = """# Spec: handbuilt
@@ -549,11 +534,9 @@ def land_hand_tasks(spec_dir: Path) -> None:
 
 
 class Gate004HandAuthoredEquivalenceTests(unittest.TestCase):
-    """GATE-004 (FR-008): a hand-authored docset executes identically to
-    a shaped one. The gate's inputs are Status and check.py's exit — so
-    the draft refusal, the approved run, the emitted payload roles, and
-    the tick-commit stop must all match the mini-spec-shaped fixtures'
-    outcomes node for node."""
+    """A hand-authored docset executes identically to a shaped one: the
+    draft refusal, the approved run, the emitted payload roles, and the
+    tick-commit stop all match the mini-spec fixtures node for node."""
 
     @classmethod
     def setUpClass(cls):
@@ -595,9 +578,8 @@ class Gate004HandAuthoredEquivalenceTests(unittest.TestCase):
                              "--emit-spawns", tel=self._tmp / "tel-s")
         self.assertEqual(hand_r.returncode, shaped_r.returncode)
         self.assertEqual(hand_r.returncode, 0, hand_r.stdout + hand_r.stderr)
-        # one runnable task (T002 chains after T001) → one implementer
-        # payload, node execute — the same emission surface the shaped
-        # fixture produces for its own runnable set
+        # one runnable task (the second chains after the first) gives one
+        # implementer payload, the same emission surface as the shaped fixture
         self.assertEqual(payload_nodes(hand_r.stdout), ["execute"])
         self.assertEqual(spawn_files(self.hand), ["implementer.md"])
         self.assertNotIn("span entry refused", hand_r.stdout)
@@ -617,13 +599,9 @@ class Gate004HandAuthoredEquivalenceTests(unittest.TestCase):
 
 
 class Gate005LifecycleCommandSurfaceTests(unittest.TestCase):
-    """GATE-005 (FR-004, FR-010's surface half): the five lifecycle
-    commands moved in T016 live in spec-execute's commands dir, each
-    carrying the skill's own frontmatter binding, and extra.txt claims
-    every bare name exactly once — the retired monolith holds none of
-    them because its tree is gone (T023; the install-level pin —
-    INSTALL sets, sync behavior — is T019's, this is the presence +
-    claim coherence T018 names)."""
+    """The lifecycle commands live in spec-execute's commands dir, each
+    carrying the skill's frontmatter binding, and extra.txt claims every
+    bare name exactly once. Install-level behavior is tested elsewhere."""
 
     def test_the_five_lifecycle_commands_exist_with_content(self):
         for name in LIFECYCLE_COMMANDS:
@@ -647,9 +625,7 @@ class Gate005LifecycleCommandSurfaceTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
     def test_the_retired_monolith_is_gone_so_no_second_claimant_exists(self):
-        # exactly one claimant per bare name: T016 moved the files and
-        # dropped the claims together, and T023 deleted the monolith
-        # outright — the whole tree's absence is the coherence pin now
+        # exactly one claimant per bare name: the old monolith must not ship
         self.assertFalse((SKILL.parent / "spec-to-prod").exists(),
                          "the retired monolith must not ship")
 

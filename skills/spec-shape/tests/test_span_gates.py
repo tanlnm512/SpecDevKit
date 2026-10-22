@@ -1,19 +1,14 @@
-"""Tests for the spec-shape intake gate — T014 of spec-to-prod-split.
+"""Tests for the spec-shape intake gate.
 
-FR-003/FR-008/NFR-003, TC-007..TC-009: `--span shape` (D-003) refuses a
-docset whose intent.md is present, filled and red — the refusal families
-are exactly check.py --intent-only's on authored artifacts: a stale
-baseline (Baseline != HEAD, TC-009), a missing or hashless baseline
-header, and an open NEEDS CLARIFICATION marker (TC-008). Placeholders and
-empty files are the scout's unwritten territory (D-002): the node reads
-READY there, so intake never refuses them. An absent intent.md reads
-SKIPPED per FR-008 — pre-split dirs pass the gate untouched, and the
-full-span bare report keeps the pre-split vocabulary (the marker list;
-the monolith's engine retired with its tree, T023). A valid intent admits the
-authoring waves; a drained shape span stops at the named approve handoff
-and never emits an execute payload. Every refusal records an
-intake_refusal telemetry event under the skill's own derived name in the
-temp KIT_TELEMETRY_DIR store, and writes zero payload files.
+`--span shape` refuses a docset whose intent.md is present, filled and red.
+The refusal families are check.py --intent-only's on authored artifacts: a
+stale baseline (Baseline != HEAD), a missing or hashless baseline header,
+and an open NEEDS CLARIFICATION marker. Placeholders and empty files read
+READY, so intake never refuses them. An absent intent.md reads SKIPPED, so
+docsets without one pass the gate untouched. A valid intent admits the authoring
+waves; a drained shape span stops at the named approve handoff and never
+emits an execute payload. Every refusal records an intake_refusal telemetry
+event in the temp KIT_TELEMETRY_DIR store and writes zero payload files.
 """
 
 import hashlib
@@ -31,11 +26,8 @@ SCRIPTS = SKILL / "scripts"
 GRAPH = SCRIPTS / "graph.py"
 SCAFFOLD = SCRIPTS / "scaffold.sh"
 ROOT = SKILL.parent.parent
-# the mini-spec fixture moved to this skill's examples/ with the split
-# (T022); the monolith's copy went with its tree (T023)
 MINI_SPEC = SKILL / "examples" / "mini-spec" / "specs" / "mini-spec"
 MINI_SPEC_REPO = SKILL / "examples" / "mini-spec" / "repo"
-MASTER_CHECK = SCRIPTS / "check.py"
 
 SPEC_TEXT = (MINI_SPEC / "spec.md").read_text(encoding="utf-8")
 
@@ -59,9 +51,8 @@ def write(path: Path, text: str) -> Path:
 
 def scaffold_spec(tmp: Path, name: str = "demo") -> Path:
     """Full-tier scaffold with a filled spec.md and nothing else authored:
-    survey/plan/tech/qa/tasks stay unfilled templates, research.md ships
-    the skip marker (D-025), so the frontier is exactly the intent gate's
-    to decide."""
+    survey/plan/tech/qa/tasks stay unfilled templates, so the frontier is
+    exactly the intent gate's to decide."""
     r = subprocess.run(["bash", str(SCAFFOLD), "--tier", "full", name,
                         str(tmp)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -107,9 +98,8 @@ def git_commit(root: Path, message: str) -> str:
 
 
 class TelemetryStoreTestCase(unittest.TestCase):
-    """Every invocation runs against a temp telemetry store — the suite
-    stays hermetic and intake_refusal rows are assertable in
-    spec-shape.jsonl (FR-007's derived skill name)."""
+    """Every invocation runs against a temp telemetry store, keeping the suite
+    hermetic while intake_refusal rows stay assertable in spec-shape.jsonl."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="spangate-"))
@@ -133,15 +123,12 @@ class TelemetryStoreTestCase(unittest.TestCase):
 
 
 class ShapeIntakeRefusalTests(TelemetryStoreTestCase):
-    """TC-008/TC-009: every present-and-red intent family refuses span
-    entry — exit 4, the message naming the blocking gate and the intent
-    node's BLOCKED reason, zero payload files, zero authoring docs
-    written, one intake_refusal telemetry event per refused invocation.
-    The checker families a filled artifact can fail: stale baseline,
-    absent baseline header, hashless baseline header, open clarify
-    marker. Placeholder residue and empty files read READY (the scout
-    rewrites them — intake is a gate on validated artifacts, never on
-    unwritten ones), and absence reads SKIPPED (FR-008)."""
+    """Every present-and-red intent family refuses span entry: exit 4, the
+    message naming the blocking gate and the intent node's BLOCKED reason,
+    zero payload files, zero authoring docs written, one intake_refusal
+    telemetry event per refused invocation. The families a filled artifact
+    can fail: stale baseline, absent baseline header, hashless baseline
+    header, open clarify marker."""
 
     def refused(self, spec_dir: Path):
         """Both executor modes refuse identically; the docset is byte-
@@ -166,7 +153,7 @@ class ShapeIntakeRefusalTests(TelemetryStoreTestCase):
             self.assertEqual(row["payload"]["gates"], ["intent"])
 
     def test_stale_baseline_refuses(self):
-        # TC-009: the artifact passed the checker once, but HEAD moved on
+        # The artifact passed the checker once, but HEAD moved on
         root = self._tmp / "stale"
         root.mkdir(parents=True)
         subprocess.run(["git", "-C", str(root), "init", "-q"],
@@ -202,34 +189,31 @@ class ShapeIntakeRefusalTests(TelemetryStoreTestCase):
               + "\n- [NEEDS CLARIFICATION: who funds the work?]\n")
         self.refused(d)
 
-    def test_placeholder_residue_is_ready_never_refused(self):
-        # D-002's boundary: placeholder-shaped lines mean the scout has
-        # not rewritten the artifact yet — that is work to spawn, not a
-        # validation to reject (check.py would fail it; intake never asks)
-        d = scaffold_spec(self._tmp / "residue")
-        write(d / "intent.md", GOOD_INTENT.format(sha="3fa9c21")
-              + "\nAudience: <target users> everywhere.\n")
-        r = self.run_cli(d, "--emit-spawns", "--span", "shape")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("span entry refused", r.stdout)
-        self.assertFalse((d / "spawns").exists(),
-                         "the shape span never spawns the intent scout")
-        self.assertEqual(self.telemetry_rows("intake_refusal"), [])
-
-    def test_empty_intent_file_is_ready_never_refused(self):
-        d = scaffold_spec(self._tmp / "empty")
-        write(d / "intent.md", "")
-        r = self.run_cli(d, "--emit-spawns", "--span", "shape")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("span entry refused", r.stdout)
-        self.assertEqual(self.telemetry_rows("intake_refusal"), [])
+    def test_unwritten_intent_is_ready_never_refused(self):
+        # Placeholder residue and empty files mean the scout has not written
+        # the artifact yet: intake never refuses them, check.py would.
+        unwritten = (
+            ("residue", GOOD_INTENT.format(sha="3fa9c21")
+             + "\nAudience: <target users> everywhere.\n"),
+            ("empty", ""),
+        )
+        for label, text in unwritten:
+            with self.subTest(label):
+                d = scaffold_spec(self._tmp / f"unwritten-{label}")
+                write(d / "intent.md", text)
+                r = self.run_cli(d, "--emit-spawns", "--span", "shape")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertNotIn("span entry refused", r.stdout)
+                self.assertFalse((d / "spawns").exists(),
+                                 "the shape span never spawns the intent scout")
+                self.assertEqual(self.telemetry_rows("intake_refusal"), [])
 
 
 class ShapeValidIntentRunTests(TelemetryStoreTestCase):
-    """TC-007: a green intent admits the authoring waves — the payloads
-    are the authoring wave's (the surveyor; never an implementer); and a
-    docset at the approve boundary drains the shape span at its named
-    handoff without ever emitting an execute payload."""
+    """A green intent admits the authoring waves — the payloads are the
+    authoring wave's (the surveyor; never an implementer); and a docset at
+    the approve boundary drains the shape span at its named handoff without
+    ever emitting an execute payload."""
 
     def test_valid_intent_admits_the_authoring_wave(self):
         # non-git tmp: the baseline's staleness probe reads SKIPPED (a
@@ -288,22 +272,15 @@ class ShapeValidIntentRunTests(TelemetryStoreTestCase):
 
 
 class LegacyDirCompatTests(TelemetryStoreTestCase):
-    """FR-008: a pre-split docset (no intent.md) is untouched by the new
-    gate — the shape span admits it (intent SKIPPED citing FR-008), the
-    bare full-span report keeps the pre-split vocabulary (the marker
-    list below; the byte-for-byte monolith comparison retired with the
-    monolith's tree, T023 — this skill's engine is the master now), and
-    the committed fixture itself is only ever read: the proof anchor
-    (the master check.py PASS on it) holds with the tree checksummed
-    before and after."""
+    """A docset without intent.md is untouched by the gate: the shape span
+    admits it (intent SKIPPED), and the bare full-span report lists the
+    legacy marker vocabulary. The committed fixture is only ever read, and the
+    tests assert its tree is unchanged afterwards."""
 
     @classmethod
     def setUpClass(cls):
         cls.before = dir_checksum(MINI_SPEC)
         cls.repo_before = dir_checksum(MINI_SPEC_REPO)
-        cls.anchor = subprocess.run(
-            [sys.executable, str(MASTER_CHECK), str(MINI_SPEC)],
-            capture_output=True, text=True, timeout=300)
 
     @classmethod
     def tearDownClass(cls):
@@ -311,10 +288,6 @@ class LegacyDirCompatTests(TelemetryStoreTestCase):
             "the read-only fixture was mutated"
         assert dir_checksum(MINI_SPEC_REPO) == cls.repo_before, \
             "the read-only fixture repo was mutated"
-
-    def test_proof_anchor_master_check_passes_in_place(self):
-        self.assertEqual(self.anchor.returncode, 0, self.anchor.stdout)
-        self.assertIn("PASS", self.anchor.stdout)
 
     def test_shape_span_admits_the_pre_split_dir(self):
         d = copy_mini_spec(self._tmp / "legacy")

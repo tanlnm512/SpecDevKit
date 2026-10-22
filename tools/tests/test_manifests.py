@@ -1,11 +1,9 @@
 """Tests for the generated plugin manifests and the version triple.
 
 Every skill's VERSION file, SKILL.md frontmatter version, and generated
-.claude-plugin/plugin.json version must agree — v2.5.0 shipped with
-plugin.json still at 2.3.0 and SKILL.md at 2.4.0, and nothing tied all
-three together. tools/plugin-manifest.py is regenerate-only and runs
-manually, so the guard is a test: it fails until the manifests are
-regenerated.
+.claude-plugin/plugin.json version must agree. tools/plugin-manifest.py is
+regenerate-only and runs manually, so this test fails until the manifests
+are regenerated.
 """
 import json
 import re

@@ -196,8 +196,8 @@ def skill_dogfood_targets(skill):
         ]
     if skill == "spec-shape":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
-        # the shared core's master home (the split, D-004): the
-        # checker is contract-shaped, so it gates every live docset
+        # the shared core's master home: the checker is
+        # contract-shaped, so it gates every live docset
         # plus the mini-spec fixture shipped beside it
         dirs = [SKILLS_DIR / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [

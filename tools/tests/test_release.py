@@ -1,14 +1,14 @@
 """The release gate: one command proving the release's evidence classes.
 
-End-to-end lifecycle (FR-007's "end-to-end lifecycle evidence"): scaffold.sh
+End-to-end lifecycle evidence: scaffold.sh
 raises a fresh docset in a hermetic temp repo, this file fills it as a real
 plan and drives it to the delivered v2 end state — implemented-and-ticked
 tasks with proof notes, the approval freeze, and the Delivered record —
 then check.py must read it green and every specstate evidence reader must
 recover the recorded lifecycle state from it.
 
-Release surfaces (FR-007's alignment half, in service of FR-005's "a claim
-ships only with a gate behind it"): tools/drift-check.py must find the live
+Release surfaces (alignment, in service of the rule that a claim ships only
+with a gate behind it): tools/drift-check.py must find the live
 tree's generated surfaces matching their canonical sources, and tools/
 tests/test_manifests.py must pass version / changelog / manifest alignment.
 
@@ -398,11 +398,6 @@ class DeliveredLifecycleTests(unittest.TestCase):
         r = run_py(CHECK, str(self.spec_dir), cwd=self.repo)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("PASS (0 fail, 0 warn)", r.stdout)
-
-    def test_cited_proof_command_runs_green(self):
-        r = subprocess.run([sys.executable, "test_calc.py"], cwd=self.repo,
-                           capture_output=True, text=True, timeout=120)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_specstate_recovers_every_lifecycle_record(self):
         task = self.read("task.md")

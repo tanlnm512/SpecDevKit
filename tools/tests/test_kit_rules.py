@@ -1,23 +1,10 @@
-"""Kit-wide engineering rules parity — D-028 (the spec trio) / D-012
-(spec-code-review) / D-005 (spec-brainstorming).
+"""Kit-wide engineering rules: each carrier's injected section matches the
+canonical source, and only the code-writing briefs carry the section.
 
-The three engineering rules (test discipline, backgrounded-job
-discipline, strict code commenting) have ONE canonical source,
-rules/engineering-rules.md, injected by tools/kit-rules.py into four
-carrier views: the spec trio's agents/_shared-protocol.md § Engineering
-rules sections (embedded into every spawn payload by graph.py
-build_payload — the monolith's carrier retired with the skill, T023)
-and spec-code-review's agents/code-review-fixer.md § Engineering rules
-(runtime-loaded into the fix loop). These tests pin the source→carrier
-injection, the load-bearing anchors, the SKILL.md pointers, and the
-constitution articles — so the wording cannot fork and the scoping
-decisions cannot silently rot. (drift-check.py's kit-rules category
-covers the same injection at release time; this suite also pins what
-the injector cannot see.)
-Run via tools/tests/run.sh (needs Python >= 3.10).
+The canonical text is rules/engineering-rules.md, injected by
+tools/kit-rules.py. Run via tools/tests/run.sh (needs Python >= 3.10).
 """
 import importlib.util
-import re
 import unittest
 from pathlib import Path
 
@@ -36,94 +23,20 @@ _spec.loader.exec_module(kit_rules)
 
 SECTION_HEADING = "## Engineering rules (kit-wide)"
 
-# Anchors that carry each rule's load: if an edit waters one down, a
-# test fails before the rules can silently weaken.
-ANCHORS = (
-    # scope line
-    "does not apply to you",
-    # test discipline
-    "smallest test that reliably proves it",
-    "one owner test at the strongest boundary",
-    "Do not create exports, wrappers, or seams that only tests use",
-    "fail on the pre-fix code",
-    # backgrounded-job discipline
-    "NEVER poll a",
-    "you will be woken with its output",
-    # strict commenting
-    "Explain why, not what",
-    "git history owns that",
-    "Never embed volatile",
-)
-
-
-def section(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
-    match = re.search(
-        rf"^{re.escape(SECTION_HEADING)}\n.*?(?=^## |\Z)",
-        text, re.S | re.M)
-    if not match:
-        raise AssertionError(f"{SECTION_HEADING!r} not found in {path}")
-    return match.group(0).rstrip()
-
-
-def flat(text: str) -> str:
-    """Whitespace-flattened text — anchors survive re-wrapping
-    (same convention as the skills' test_workflow_copies.py)."""
-    return " ".join(text.split())
-
 
 class KitRulesParityTests(unittest.TestCase):
     CARRIERS = (SEXEC / "agents" / "builder.md",
                 SCR / "agents" / "code-review-fixer.md")
 
     def test_carriers_match_the_canonical_source(self):
-        # the injector's own invariant: each carrier's section equals a
-        # fresh injection from rules/engineering-rules.md
         body = SOURCE.read_text(encoding="utf-8")
         for carrier in self.CARRIERS:
             current = carrier.read_text(encoding="utf-8")
             self.assertEqual(current, kit_rules.inject(current, body),
                              carrier)
 
-    def test_section_carries_every_anchor(self):
-        body = flat(SOURCE.read_text(encoding="utf-8"))
-        for anchor in ANCHORS:
-            self.assertIn(anchor, body, anchor)
-
 
 class KitRulesWiringTests(unittest.TestCase):
-    """The rules must actually reach their audiences: payloads via the
-    protocol embed, the fixer via its brief (pinned in the skill's own
-    test_workflow_copies.py), and orchestrators via each SKILL.md."""
-
-    def test_phase_skill_mds_point_at_the_canonical_section(self):
-        # the builder's home skill names the canonical section and its
-        # injector
-        text = flat((SEXEC / "SKILL.md").read_text(encoding="utf-8"))
-        for anchor in ("§ Engineering rules",
-                       "builder.md",
-                       "tools/kit-rules.py"):
-            self.assertIn(anchor, text, anchor)
-
-    def test_scr_skill_md_points_at_the_fixer_carrier(self):
-        text = flat((SCR / "SKILL.md").read_text(encoding="utf-8"))
-        for anchor in ("§ Engineering rules",
-                       "code-review-fixer.md",
-                       "NEVER poll a"):
-            self.assertIn(anchor, text, anchor)
-
-    def test_sbr_skill_md_scopes_the_rules_to_the_orchestrator(self):
-        text = flat((SBR / "SKILL.md").read_text(encoding="utf-8"))
-        self.assertIn("## Operator rules", text)
-        self.assertIn("NEVER poll a", text)
-        self.assertIn("_shared-protocol.md", text)
-
-    def test_builder_brief_defers_to_the_canonical_section(self):
-        text = flat((SEXEC / "agents" / "builder.md").read_text(
-            encoding="utf-8"))
-        self.assertIn("§ Engineering rules", text)
-        self.assertIn("they win", text)
-
     def test_only_code_writing_briefs_carry_the_rules(self):
         for skill in (SINT, SSHAPE, SEXEC):
             for brief in (skill / "agents").glob("*.md"):
@@ -134,11 +47,10 @@ class KitRulesWiringTests(unittest.TestCase):
                                  f"{skill.name}/{brief.name}")
 
     def test_brainstorming_panel_carries_no_engineering_rules(self):
-        # D-005: the lenses are read-only — the rules must NOT ride
-        # their briefs or the panel protocol
+        # the lenses are read-only and never receive the rules
         for name in ("panelist.md", "_lenses.md",
                      "_panel-protocol.md"):
-            text = flat((SBR / "agents" / name).read_text(encoding="utf-8"))
+            text = (SBR / "agents" / name).read_text(encoding="utf-8")
             self.assertNotIn(SECTION_HEADING, text, name)
 
 

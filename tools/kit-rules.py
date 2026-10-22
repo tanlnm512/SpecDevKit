@@ -19,8 +19,6 @@ Edit the rules in the source file, run this tool, re-run drift-check.
 --check verifies the committed carriers match a fresh injection (this is
 the drift-check.py "kit-rules" category); no argument rewrites them.
 
-See skills/spec-shape/decisions/028-kit-wide-engineering-rules.md and
-rules/engineering-rules.md's role as the single source of truth.
 """
 from __future__ import annotations
 

@@ -18,21 +18,13 @@ Writes:
   the skill root), both at Claude Code's own default scan locations, so
   neither needs a manifest path override.
 
-Known limitation, NOT fixed here: a skill's agents/ dir may hold shared
-prose a role brief points at (the spec suite's _shared-protocol.md)
-that is not itself a role. Claude Code's default agents/ directory scan
-loads every file in it as an agent even when frontmatter is absent or
-doesn't parse (naming it after the file) — and per its own manifest
-reference, listing specific files in an `agents` manifest field ADDS to
-that default scan rather than replacing it ("merge behavior... no
-overwriting"), so there is no manifest-level way to exclude one file from
-an otherwise-wanted directory. Installing one of the spec-suite skills
-via Claude Code will therefore show one extra, inert
-"<skill>:_shared-protocol" entry in the subagent list. The real fix
-(moving that file out of agents/) touches every cross-reference to it
-across SKILL.md, the briefs, and the carriers — out of scope for a
-packaging pass; flagged here rather than silently worked around with a
-manifest field that would not actually do anything.
+Known limitation: a skill's agents/ dir may hold shared prose a role brief
+points at (_shared-protocol.md) that is not itself a role. Claude Code's
+default agents/ scan loads every file in it as an agent, and an `agents`
+manifest field merges with that scan rather than replacing it, so no
+manifest entry can exclude the file. Installing a spec-suite skill
+therefore shows one inert "<skill>:_shared-protocol" subagent entry.
+Moving the file out of agents/ would touch every cross-reference to it.
 
 Run manually after adding a skill, bumping a skill's VERSION, or changing
 a SKILL.md description — not part of tools/sync.sh, since regenerating

@@ -1,25 +1,13 @@
-"""Tests for the spec-intent flow — the skill's own proof (T012).
+"""Skill-level flow tests for spec-intent, run through this skill's scripts.
 
-The other three suites here (test_graph/test_check/test_specstate) are
-the engine suite as landed by the parity closure; this file is
-spec-intent's own and pins what the closure cannot — the skill-level
-flow through this skill's scripts (FR-001):
-
-- eval case I1's mechanical skeleton: a scratch repo + a spec dir
-  whose intent.md starts from templates/intent.md; `graph.py --span
-  intent --emit-spawns` emits the scout payload carrying the intent
-  lens; a filled intent.md (grounded facts, no open markers, current
-  Baseline) gates green through `check.py --intent-only` and the
-  intent node reads DONE. The scouting/grilling themselves are
-  conversational — only their start and end states are mechanical.
-- FR-007's derived telemetry name: a `--run --span intent` invocation
-  with KIT_TELEMETRY_DIR pointed at a temp store records its events
-  in spec-intent.jsonl (SKILL_DIR.name), never spec-to-prod's.
-- eval case I2's checker side: an intent.md with an open grilling
-  marker fails --intent-only naming the family — the non-answer hard
-  stop itself is conversational, so the surviving-marker refusal is
-  the part a suite can pin, here through spec-intent's own checker
-  copy so the skill stays self-contained (NFR-003).
+- The intent span from a scaffolded template: the intent node is READY
+  behind a done spec, and `graph.py --span intent --emit-spawns` emits
+  the scout payload carrying the intent lens.
+- A filled intent.md gates green through `check.py --intent-only` and
+  the intent node reads done. Scouting and grilling are conversational;
+  only their start and end states are mechanical.
+- Telemetry from a `--run --span intent` lands in this skill's own
+  store, named after the skill directory.
 """
 
 import json
@@ -38,8 +26,7 @@ CHECK = SCRIPTS / "check.py"
 SCAFFOLD = SCRIPTS / "scaffold.sh"
 INTENT_TEMPLATE = SKILL / "templates" / "intent.md"
 
-# The sanctioned real-git pattern (test_specstate's): identity via env
-# so a scratch repo commits without touching the machine's git config.
+# Identity via env so scratch commits never touch the machine's git config.
 GIT_ENV = dict(os.environ, GIT_AUTHOR_NAME="scout",
                GIT_AUTHOR_EMAIL="scout@example.com",
                GIT_COMMITTER_NAME="scout",
@@ -61,12 +48,8 @@ answers; one real operation removes the trap.
 - **FR-001**: The system shall multiply two integers.
 """
 
-# The validated end state of I1: every section grounded in the seeded
-# repo, the question frontier closed (each question answered or a
-# named assumption — no marker survives), and the Baseline at the
-# scouted HEAD. Angle-bracket placeholder shapes are absent by
-# construction; the template's HTML comments ride along stripped of
-# meaning, so they are simply not carried over.
+# A validated intake: sections grounded in the seeded repo, every question
+# answered or assumed (no open marker), and the Baseline at the scouted HEAD.
 FILLED_INTENT = """# Intent: demo
 
 **Status**: validated
@@ -116,8 +99,7 @@ def write(path: Path, text: str) -> Path:
 
 
 def seed_repo(root: Path) -> str:
-    """A one-commit git repo with a tiny src tree — I1's scratch repo;
-    returns the short HEAD sha the scout records as the Baseline."""
+    """A one-commit git repo with a tiny src tree; returns its short HEAD sha."""
     src = root / "src"
     src.mkdir(parents=True)
     write(src / "calc.py", "def add(a, b):\n    return a + b\n")
@@ -138,10 +120,8 @@ def seed_repo(root: Path) -> str:
 
 
 def scaffold_intent_dir(tmp: Path) -> tuple[Path, str]:
-    """The I1 skeleton: specs/demo scaffolded beside the seeded repo
-    (the layout the baseline probe's candidate scan is built for),
-    with spec.md crafted filled — the docset state the intent span
-    needs — and intent.md as the skill's own template, unfilled."""
+    """specs/demo beside the seeded repo: spec.md filled, intent.md the
+    skill's template unfilled."""
     sha = seed_repo(tmp / "repo")
     r = subprocess.run(["bash", str(SCAFFOLD), "--tier", "tiny", "demo",
                         str(tmp)], capture_output=True, text=True)
@@ -159,7 +139,7 @@ def run_cli(script: Path, *args: str, env: dict | None = None):
 
 
 class IntentFlowTests(unittest.TestCase):
-    """Eval case I1's mechanical skeleton, start to handoff gate."""
+    """The intent span, from template start to handoff gate."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="intent-flow-"))
@@ -188,9 +168,7 @@ class IntentFlowTests(unittest.TestCase):
         payloads = sorted((self.spec_dir / "spawns").glob("*/surveyor.md"))
         self.assertEqual(len(payloads), 1)
         text = payloads[0].read_text(encoding="utf-8")
-        # the lens section rides the payload verbatim (T011's carrier)
         self.assertIn("## Carried lens — intent ", text)
-        # EXEC-001's shape holds here too: the requirement list embeds
         self.assertIn("**FR-001**", text)
 
     def test_filled_intent_gates_green_and_reads_done(self):
@@ -211,9 +189,8 @@ class IntentFlowTests(unittest.TestCase):
 
 
 class IntentTelemetryTests(unittest.TestCase):
-    """FR-007: the engine reports under its own resolved skill root —
-    events from this skill's graph.py land in spec-intent.jsonl, the
-    derived SKILL_DIR.name, never the pre-split spec-to-prod store."""
+    """Events from this skill's graph.py land in a store named after the
+    skill directory."""
 
     def test_run_records_events_under_the_derived_skill_name(self):
         with tempfile.TemporaryDirectory(prefix="intent-tel-") as td:

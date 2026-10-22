@@ -39,8 +39,7 @@ class BrainstormDogfoodTests(unittest.TestCase):
 
 class SpecDogfoodTests(unittest.TestCase):
     def test_every_live_specset_passes_check_py(self):
-        # the docset checker's master home is spec-shape (the split's
-        # parity master, D-004); the fixture ships beside it
+        # the docset checker lives in spec-shape, with its fixture beside it
         checker = SKILLS / "spec-shape" / "scripts" / "check.py"
         dirs = [SKILLS / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [

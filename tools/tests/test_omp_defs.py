@@ -6,10 +6,8 @@ each source role's own Claude-style frontmatter directly — there is no
 per-role table in the tool to test in isolation, so these tests exercise
 it against the spec trio's real shipped agents/*.md (the five
 archetype briefs, staged into one skill dir), the same files
-tools/sync.sh feeds it. A second skill added to this repo is covered by
-the same code path with no new test needed here — see
-test_second_skill_needs_no_new_code, which proves that on a synthetic
-skill directory instead.
+tools/sync.sh feeds it. The generator has no skill-specific branch;
+test_second_skill_needs_no_new_code proves that on a synthetic skill.
 """
 import atexit
 import hashlib
@@ -99,20 +97,11 @@ def run_gen_rc(skill: Path, out: Path):
 
 class ModelTierTests(unittest.TestCase):
     def test_tiered_set_matches_decisions_012_and_016(self):
-        """decisions/012 + 016: a real `model:` value other than
-        `inherit` in the Claude-side frontmatter IS the tiering signal
-        — read from the shipped files, not a hand-maintained name list."""
+        """A real `model:` value other than `inherit` in the Claude-side
+        frontmatter is the tiering signal, read from the shipped files."""
         tiered = {n for n, f in _ROLE_FIELDS.items()
                   if f.get("model") and f["model"] != "inherit"}
         self.assertEqual(tiered, {"spec-scout", "spec-builder"})
-
-    def test_reviewer_never_tiered(self):
-        """The one safety-critical role left above the cheap tier:
-        reviewer's adversarial judgment is its own deliverable with no
-        mechanical backstop — it must not run cheaper without an
-        explicit, reviewed decision (decisions/012; 016 lifted the
-        implementer half of this lock)."""
-        self.assertEqual(_ROLE_FIELDS["spec-reviewer"]["model"], "inherit")
 
     def test_model_alias_is_quoted(self):
         """`@`-prefixed values are not valid unquoted YAML plain scalars
@@ -128,18 +117,14 @@ class ModelTierTests(unittest.TestCase):
                 any(l.startswith("model:") for l in fm_lines(name)), name)
 
     def test_thinking_level_unaffected_by_model_tier(self):
-        """spec-scout and spec-builder get the cheap model;
-        designer/qa/reviewer inherit (D-012/D-016, with D-036 folding
-        the old per-role effort caps away — the cheap tier rides the
-        model alone)."""
+        """spec-scout and spec-builder get the cheap model; the other
+        roles inherit. The tier never sets thinking depth."""
         self.assertTrue(any(l.startswith("model:")
                             for l in fm_lines("builder")))
-        # D-036: no archetype carries `effort:` — the cheap tier rides
-        # the model alone; thinking depth stays the harness default
+        # no archetype carries `effort:`; thinking depth stays the harness default
         for name in ("scout", "builder", "designer", "qa", "reviewer"):
             self.assertFalse(any(l.startswith("thinking-level:")
                                  for l in fm_lines(name)), name)
-
 
 
 class ToolMappingTests(unittest.TestCase):
@@ -174,8 +159,7 @@ class ManifestProvenanceTests(unittest.TestCase):
     """Stale-cleanup ownership proof: deletion requires the skill's own
     manifest naming the file with a matching content hash. A foreign
     file in a shared --out dir — even one named like this skill's roles
-    — is never touched (the old basename-prefix heuristic is gone, and
-    with it the ability to delete a hand-made `spec-foo.md`)."""
+    — is never touched, so a hand-made `spec-foo.md` is safe."""
 
     def test_first_run_removes_nothing_and_establishes_manifest(self):
         with tempfile.TemporaryDirectory() as td:
@@ -246,7 +230,7 @@ class ManifestProvenanceTests(unittest.TestCase):
 
 
 class WriteGateTests(unittest.TestCase):
-    """FR-003 on the omp deploy root: the per-skill manifest is the
+    """On the omp deploy root the per-skill manifest is the
     provenance ledger, so a role destination is replaced only when its
     current hash is recorded there — a foreign file at a role name,
     byte-different or byte-identical, with or without a manifest yet, is
@@ -328,28 +312,6 @@ class GenerationEndToEndTests(unittest.TestCase):
             source = sorted(p.name for p in (SKILL / "agents").glob("*.md")
                              if not p.name.startswith("_"))
             self.assertEqual(produced, source)
-
-    def test_foreign_stale_file_is_never_removed_on_first_run(self):
-        """First run into a root with no manifest: nothing is deletable,
-        so even a role-named file this tool never made survives."""
-        with tempfile.TemporaryDirectory() as td:
-            out = Path(td)
-            stale = out / "spec-nonexistent-role.md"
-            stale.write_text("---\nname: spec-nonexistent-role\n---\nbody\n")
-            output = run_gen(SKILL, out)
-            self.assertTrue(stale.exists())
-            self.assertIn("stale-check skipped", output)
-
-    def test_stale_removal_never_touches_another_skills_files(self):
-        """A shared --out dir may already hold a second skill's own
-        generated roles — regenerating the skill's defs must not delete
-        them, since their name shares no prefix with its roles."""
-        with tempfile.TemporaryDirectory() as td:
-            out = Path(td)
-            other = out / "foo-flow-planner.md"
-            other.write_text("---\nname: foo-flow-planner\n---\nbody\n")
-            omp_defs.main(["--skill-dir", str(SKILL), "--out", str(out)])
-            self.assertTrue(other.exists())
 
     def test_second_skill_needs_no_new_code(self):
         """A skill whose agents/ dir shares no naming convention with

@@ -1,8 +1,5 @@
-"""Kit parity pin — the FR-005 shared core stays one engine, byte-identical
-in every graph.py-shipping skill (master skills/spec-shape/scripts/ plus its
-replicas), backing NFR-001 (no dialect/engine fork) and NFR-003 (a kit-level
-suite behind each skill's own). Kill criterion: any released divergence — a
-mutated, missing, or extra closure copy — fails this suite.
+"""Kit parity: the shared graph.py closure stays byte-identical in every
+graph.py-shipping skill, and each skill ships only its span's archetypes.
 """
 import hashlib
 import importlib.util
@@ -28,11 +25,11 @@ CLOSURE = parity.closure()
 
 class DiscoveryTests(unittest.TestCase):
     def test_graph_shipping_skills_pinned_exactly(self):
-        # the trio alone since the monolith's retirement (T023) —
         # discovery is keyed on graph.py shipping, never a hand list
         self.assertEqual(
             GRAPH_SKILLS,
             ["spec-execute", "spec-intent", "spec-shape"])
+
 
 class ArchetypeParityTests(unittest.TestCase):
     """Each skill ships only the archetypes its span spawns; a brief

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Shared review-state oracle for the spec-code-review workflow dialects.
+"""Shared review-state oracle for spec-code-review.
 
-One stdlib home for the logic both workflow dialects need: target
+One stdlib home for: target
 resolution (diff/branch/pr/project), the mechanical gate, project-file
 sharding, finding-ID allocation, carried-findings parsing, and report
-markdown assembly (spec: code-review-workflow-extraction FR-001).
+markdown assembly.
 
-Contract (NFR-004/005): every subcommand prints ONE JSON object; success
+Contract: every subcommand prints ONE JSON object; success
 is {"status": "ok", ...} exit 0, failure is {"status": "error",
 "error": ...} exit 1 — a workflow never proceeds on missing state.
 
@@ -80,7 +80,7 @@ def git_out(args, repo):
     return r.stdout if r.returncode == 0 else None
 
 
-# --- source-file targeting (ported verbatim from the dialects) --------------
+# --- source-file targeting --------------
 
 def is_excluded_source(path):
     base = path.rsplit("/", 1)[-1]
@@ -574,11 +574,9 @@ def main(argv=None):
 
 
 
-# --- panel systems + ask rendering (single source, D-014) --------------------
-# Ported verbatim from the workflow dialects: one home for the panel's
-# system prompts and ask builders. The dialects fetch systems once per
-# run and render asks through `ask` — the strings can no longer drift
-# between twins (they exist exactly once, here).
+# --- panel systems + ask rendering --------------------
+# One home for the panel's system prompts and ask builders; callers fetch
+# systems once per run and render asks through `ask`.
 
 HONESTY = (" If your instructions are impossible to satisfy, escalate and "
            "say so plainly rather than working around it.")
@@ -656,8 +654,7 @@ def jdump(obj):
 
 
 def jd(obj):
-    # JS JSON.stringify's compact form — used by verifyAsk exactly as the
-    # master writes it (behavior preservation, not style choice)
+    # Matches JS JSON.stringify's compact output byte-for-byte.
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -945,8 +942,7 @@ def cmd_ask(a):
     except (json.JSONDecodeError, OSError) as e:
         return out(False, error=f"ask ctx invalid: {e}")
     if isinstance(ctx, dict) and isinstance(ctx.get("batch"), list):
-        # One probe renders a whole wave of asks (NFR-003: no extra
-        # round trips per agent spawned).
+        # One probe renders a whole wave of asks, with no extra round trips per agent.
         asks = []
         for item in ctx["batch"]:
             renderer = ASK_RENDERERS.get(item.get("kind"))

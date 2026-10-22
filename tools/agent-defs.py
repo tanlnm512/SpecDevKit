@@ -15,7 +15,7 @@ Targets:
   mode: subagent, permission map derived from the source `tools:` list
   (read/edit/bash/glob/grep/webfetch/websearch allow iff the source
   lists a matching Claude tool; task always deny — "no agent spawns
-  another" from _shared-protocol, made mechanical). model omitted
+  another" from _shared-protocol). model omitted
   (inherit): opencode wants provider-prefixed model IDs the source
   briefs don't carry. Skills reach opencode through the
   ~/.agents/skills compatibility root it already scans — only defs need
@@ -44,8 +44,8 @@ Targets:
   _shared-protocol, made mechanical). model omitted: Kilo wants
   provider-prefixed model IDs the source briefs don't carry, so the
   agent inherits the session default. Skills reach Kilo through the
-  ~/.agents/skills compatibility root it scans natively (verified on a
-  live Kilo session) — only defs need generating.
+  ~/.agents/skills compatibility root it scans natively — only defs need
+  generating.
 
 - agy       --out <repo-root>/agents — Antigravity plugin personas.
   agy reads Claude-style frontmatter natively, so the def is a

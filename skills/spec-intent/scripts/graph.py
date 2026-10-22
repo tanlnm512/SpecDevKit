@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """graph.py — the dynamic workflow engine for a spec folder under specs/<name>/.
 
-The doc state under specs/<name>/ is the only state (ADR-002, generalized):
+The doc state under specs/<name>/ is the only state:
 graph.py derives every node's mechanical signal from it via specstate.py and
 prints the workflow graph's live picture. Judgment (brief quality, gate
 decisions, rulings) stays with the orchestrator and the human; this script is
@@ -14,9 +14,8 @@ architecture.md §2.1/§2.2 and the READY_WHEN/DONE_WHEN tables below. In sum:
   plan ∥ tech ∥ qa → tasks → verify → approve(HUMAN) → execute
   (per-task frontier, fix-round loops ≤5) → tick-commit → archive,
   with loop edges: clarify, fix-round, re-brief, converge (survey staleness).
-  intent? is the optional evidence node (D-002): intent.md absent →
-  SKIPPED (FR-008 legacy path), present-but-red → BLOCKED, green → survey
-  proceeds.
+  intent? is the optional evidence node: intent.md absent → SKIPPED,
+  present-but-red → BLOCKED, green → survey proceeds.
 
 Modes:
   default        human-readable report: per-node state + reason, the frontier
@@ -64,7 +63,7 @@ Modes:
                  plan ∥ tech wave (plus the tasks wave it feeds) collapses
                  into ONE merged designer payload authoring
                  plan/tech-spec/task in a single spawn, with qa as its own
-                 implementation-blind spawn alongside (D-024, D-027);
+                 implementation-blind spawn alongside;
                  while delivery is pending (execute done,
                  delivery not yet recorded), the reviewer-diff.md payload
                  (implementation-diff mode) is prepared the same way the
@@ -82,8 +81,8 @@ Modes:
                   workflow completion, --max-waves, or a wave that changed
                   nothing.
   --span PHASE   with --run/--emit-spawns: bound the wave to one phase's
-                 frontier (D-003) — `intent` (the scout node; spec/clarify
-                 mechanics as today), `shape` (intent + the authoring wave
+                 frontier — `intent` (the scout node; spec/clarify
+                 mechanics unchanged), `shape` (intent + the authoring wave
                  survey/plan/tech/qa/tasks + verify + the approve display;
                  a drained shape span stops at the approve handoff),
                  `execute` (execute + tick-commit + archive mechanics),
@@ -100,7 +99,7 @@ Mechanical probes: the survey node runs `check.py <spec-dir> --survey-only`
 and the verify node runs `check.py <spec-dir>` — skill-owned contract
 checkers, each only once its inputs are in place; the intent node probes
 `check.py <spec-dir> --intent-only` only when intent.md is present (absent
-→ SKIPPED, the FR-008 legacy path). No inspection mode ever
+→ SKIPPED). No inspection mode ever
 executes repository or `test.md` commands, and proofs execute only on the
 explicit audit.py CLI. Human gates (clarify, approve, an undetermined
 research-gate, tick-commit) are never auto-satisfied by this script.
@@ -144,8 +143,8 @@ from check import (  # noqa: E402
 )
 import specstate  # noqa: E402
 
-# The workflow graph's nodes, in canonical (dependency) order. Names are
-# contractual: CROSS-001 compares them against SKILL.md's table.
+# The workflow graph's nodes, in canonical (dependency) order. Names must
+# match SKILL.md's table.
 NODES = [
     "spec", "clarify", "research-gate", "research", "intent", "survey",
     "plan", "tech", "qa", "tasks", "verify", "approve", "execute",
@@ -197,9 +196,9 @@ LOOP_EDGES = [
 ]
 
 # The node/ready/done contract (architecture §2.1), kept as data so --explain
-# states it exactly and CROSS-001 has one comparable surface.
+# states it exactly and tests compare against one surface.
 # Single source: scripts/contract.py owns every node's identity,
-# readiness, and done-signal (D-038) — SKILL.md's node table is
+# readiness, and done-signal — SKILL.md's node table is
 # generated from the same table (`contract.py --render skill-table`).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from contract import DONE_WHEN, READY_WHEN  # noqa: E402
@@ -211,9 +210,9 @@ DONE, READY, BLOCKED, UNDETERMINED, SKIPPED = (
 # Frontier agent nodes → (spawn role, brief file under agents/). Payloads are
 # named <role>.md (execute: one per runnable task). The reviewer is never a
 # frontier node — it rides the tick-commit orchestrator judgment — but the
-# payload builder still knows its protocol exemption (C1).
+# payload builder still knows its protocol exemption.
 AGENT_BRIEFS = {
-    # node -> (role, archetype brief, lens) — D-036: five archetypes,
+    # node -> (role, archetype brief, lens); five archetypes,
     # lens specializations ride the payload from agents/_lenses.md
     "intent": ("surveyor", "scout.md", "intent"),
     "survey": ("surveyor", "scout.md", "survey"),
@@ -241,11 +240,11 @@ PRINT_RUNNER = "print"
 RUNNER_FAILED_EXIT = 3
 
 # --span's refusal exit: the span-entry gate read an already-computed node
-# state and refused the invocation (D-003) — distinct from every runner or
+# state and refused the invocation — distinct from every runner or
 # usage failure so callers can route it to the right phase.
 SPAN_REFUSED_EXIT = 4
 
-# Phase spans (D-003): a span bounds which frontier/payload nodes a run may
+# Phase spans: a span bounds which frontier/payload nodes a run may
 # touch — a filter on the frontier, never a node's ready/done vocabulary
 # (states compute identically under every span). `design` is the collapsed
 # plan∥tech∥tasks wave, admitted wherever its tasks constituent is;
@@ -266,7 +265,7 @@ SPAN_HANDOFF = {"intent": "shape", "shape": "execute"}
 
 def span_allows(span: str, node: str) -> bool:
     """Whether a frontier/payload node may run under the span. `full`
-    admits everything (today's semantics); a phase admits its own nodes
+    admits everything (bare-invocation semantics); a phase admits its own nodes
     only, so no span ever changes a node's state."""
     if span == "full":
         return True
@@ -276,9 +275,9 @@ def span_allows(span: str, node: str) -> bool:
 
 
 def span_entry_refusals(state: dict, span: str) -> list[tuple[str, str]]:
-    """The invocation-time span gates (D-003): span entry reads the
+    """The invocation-time span gates: span entry reads the
     already-computed node states — shape refuses on a BLOCKED intent
-    (absent reads SKIPPED, the FR-008 legacy path, and passes); execute
+    (absent reads SKIPPED and passes); execute
     refuses unless approve is DONE (APPROVED_AND_LATER) AND verify is
     DONE. One (gate, reason) pair per blocking gate; empty = allowed."""
     n = state["nodes"]
@@ -462,7 +461,7 @@ def strip_frontmatter(text: str) -> str:
 def wave_number(state: dict) -> int:
     """The wave number for the current doc state — derived, so --emit-spawns
     and --run --dry-run always name the same spawns/wave-<N>/ directory for
-    the same state (EXEC-010). Waves advance as milestone groups complete:
+    the same state. Waves advance as milestone groups complete:
     analysis (survey + research), authoring (plan ∥ tech ∥ qa), the task
     list, then one per executed task batch (ticked/struck count)."""
     n = state["nodes"]
@@ -661,7 +660,7 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     """The filled input payload (SKILL.md § Spawn mechanics step 3): the
     doc-state facts each brief's `Input payload` section asks the
     orchestrator to embed — verbatim where the brief says verbatim. Every
-    payload names the spec dir and carries the requirement list (EXEC-001); the
+    payload names the spec dir and carries the requirement list; the
     role-specific facts come first."""
     spec_text = read_doc(spec_dir / "spec.md") or ""
     test_text = read_doc(spec_dir / "test.md") or ""
@@ -826,7 +825,7 @@ def frontier_payloads(state: dict, spec_dir: Path,
     (execute done, delivery not yet recorded) — the implementation-diff
     reviewer payload (the instruments of a `run` decision and of the
     pre-tick review; --run still pauses at the tick-commit gate and never
-    spawns them). D-024 (amended by D-027): at effort tier `standard` the
+    spawns them). At effort tier `standard` the
     plan ∥ tech wave (plus the tasks wave it feeds) collapses into ONE
     merged design payload — one spawn writes plan.md, tech-spec.md, and
     task.md; qa stays its own implementation-blind spawn in the same
@@ -834,7 +833,7 @@ def frontier_payloads(state: dict, spec_dir: Path,
     the gates are unchanged.
     `merge=False` (the --repair path) keeps every payload single-role —
     a repair run must never re-author the whole docset.
-    `span` (D-003) filters the emitted payloads to the phase's nodes —
+    `span` filters the emitted payloads to the phase's nodes —
     a filter on payloads only, never on node states."""
     items: list[dict] = []
     merge_design = (
@@ -896,8 +895,8 @@ def frontier_payloads(state: dict, spec_dir: Path,
 
 
 def lens_section(lens: str) -> str | None:
-    """The `## Lens: <name>` section from agents/_lenses.md, verbatim
-    (D-036) — the archetype's specialization riding the payload."""
+    """The `## Lens: <name>` section from agents/_lenses.md, verbatim:
+    the archetype's specialization riding the payload."""
     raw = read_raw(SKILL_DIR / "agents" / "_lenses.md")
     if raw is None:
         return None
@@ -915,7 +914,7 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
     byte-verbatim + the carried lens sections from `_lenses.md` +
     `_shared-protocol.md` verbatim — except the reviewer, the one exempt
     role (its brief states it needs no shared protocol). A merged-design
-    item (D-024) carries the designer archetype once with its three lens
+    item carries the designer archetype once with its three lens
     sections in authoring order and the protocol once."""
     if item.get("briefs") is not None:
         bodies = []
@@ -986,7 +985,7 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     instrument — e.g. a stale-survey converge re-survey, whose payload
     carries the DELTA RE-SURVEY block); already-frontier nodes are not
     duplicated. A repair run never emits the merged designer payload
-    (D-024: --repair always emits single-role payloads). `span` rides
+    `span` rides
     through to frontier_payloads; the repair item itself is the
     orchestrator's explicit instrument, so it bypasses the span filter."""
     wave = wave_number(state)
@@ -1123,7 +1122,7 @@ def print_complete_or_held(state: dict) -> None:
 
 def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     """--launch-check: should the spec-run dynamic workflow be launched for
-    this doc state, or is the span light enough to run inline? (D-022) The
+    this doc state, or is the span light enough to run inline? The
     workflow's value is the multi-wave loop with parallel fan-out; a launch
     on a light state reads state once and stops seconds later, deciding
     nothing (on Claude Code that single fetch is a whole probe agent). The
@@ -1131,7 +1130,7 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     human gate can never be worked past by launching), then the payload
     count from frontier_payloads (read-only: nothing is written). Only
     `wave` — a multi-payload wave, any execute span, or the merged design
-    payload (briefs authoring the docset, D-024/D-027) — says launch."""
+    payload (briefs authoring the docset) — says launch."""
     n = state["nodes"]
     advisory = {"spec_dir": str(spec_dir),
                 "launch_workflow": False, "gate": None,
@@ -1160,7 +1159,7 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     payloads = frontier_payloads(state, spec_dir, repo)
     advisory["payloads"] = len(payloads)
     if len(payloads) == 1 and payloads[0]["node"] == "design":
-        # the merged designer (D-024, D-027) is one payload but not a
+        # the merged designer is one payload but not a
         # light node: three briefs + protocol authoring plan, tech-spec,
         # and task — the design stretch stays a workflow wave, only
         # collapsed to one spawn (qa already done — its own payload rides
@@ -1196,8 +1195,8 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
     <spec-dir>/spawns/wave-<N>/ (the same override --emit-spawns takes).
     The loop itself mutates no doc state; only the runner's own effects move
     the workflow, so human gates can never be auto-satisfied.
-    `span` (D-003) bounds the wave to the phase's frontier nodes: gates
-    still pause as today (the intent span never decides research, so its
+    `span` bounds the wave to the phase's frontier nodes: gates
+    still pause (the intent span never decides research, so its
     gate is not the intent phase's to answer), a drained shape span stops
     at the approve handoff, and a span with nothing left to run stops as
     drained instead of held."""
@@ -1312,7 +1311,7 @@ def emit_spawns(spec_dir: Path, repo_override: str | None,
     """--emit-spawns: write this wave's payloads and list them. With
     --repair NODE, the named agent node's payload is emitted even when
     done/not in the frontier (single-agent repair run — always single-role
-    payloads, never the merged designer). `span` (D-003) bounds the
+    payloads, never the merged designer). `span` bounds the
     emitted payloads to the phase's frontier nodes."""
     state = compute_state(spec_dir, repo_override)
     items = frontier_payloads(state, spec_dir,
@@ -1363,7 +1362,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     effort = specstate.spec_effort(spec_text)
     tier = specstate.spec_tier(spec_text) if spec_text is not None else "full"
     markers = spec_text.count("NEEDS CLARIFICATION") if spec_text else 0
-    # D-037 thin floor: at tiny tier the task list lives in spec.md
+    # Thin floor: at tiny tier the task list lives in spec.md
     # § Tasks — same parsers, one grammar, two homes.
     task_text = docs["task.md"] if tier == "full" else (
         specstate.tiny_task_text(spec_text) if spec_text else None)
@@ -1440,11 +1439,11 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                              "content yet"}
     research_done = nodes["research"]["state"] == DONE
 
-    # -- intent (optional evidence node; D-002) ----------------------------
-    # FR-008 back-compat: intent.md absent reads SKIPPED — every
-    # pre-existing docset keeps today's graph (no new blockers, survey
-    # readiness unchanged); present-but-red is the ungated artifact the
-    # shape span gate refuses; present-and-green reads DONE.
+    # -- intent (optional evidence node) -----------------------------------
+    # Absent intent.md reads SKIPPED: docsets without it keep the existing
+    # graph (no new blockers, survey readiness unchanged); present-but-red
+    # is the ungated artifact the shape span gate refuses; present-and-green
+    # reads DONE.
     if docs["intent.md"] is None:
         nodes["intent"] = {"state": SKIPPED, "reason":
                            "no intent.md — legacy path (FR-008): the "

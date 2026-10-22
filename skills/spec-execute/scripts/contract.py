@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""contract.py — the spec workflow graph's single declarative source
-(D-038).
+"""contract.py — the spec workflow graph's single declarative source.
 
 One table owns every node's identity, readiness, done-signal, and
 spawn wiring. `graph.py` imports its READY_WHEN/DONE_WHEN from here
 (the behavior), and `--render skill-table` regenerates the node table
 in SKILL.md (the documentation) — never hand-edit the generated block;
 edit this file and regenerate (`tools/drift-check.py` pins the pair,
-the diagrams precedent generalized).
+the same way it pins diagrams).
 
-Tier rows note where `**Tier**: tiny` (D-037) SKIPPEDs a node.
+Tier rows note where `**Tier**: tiny` SKIPPEDs a node.
 """
 from __future__ import annotations
 
@@ -70,8 +69,8 @@ NODE_TABLE = [
      "dir moved to specs/archive/<date>-<name>/, INDEX repointed"),
 ]
 
-# Nodes `**Tier**: tiny` SKIPPEDs (D-037) — the one-file contract has
-# no authoring docs to wait on.
+# Nodes `**Tier**: tiny` SKIPPEDs — the one-file contract has no
+# authoring docs to wait on.
 TINY_SKIPPED = ("survey", "plan", "tech", "qa", "tasks")
 
 READY_WHEN = {n: r for n, _, r, _ in NODE_TABLE}

@@ -162,7 +162,7 @@ def diagram_problems(g) -> list[str]:
 
 def check_contract() -> int:
     """The workflow node table: spec-shape SKILL.md's generated block
-    must match a fresh render of its scripts/contract.py (D-038)."""
+    must match a fresh render of its scripts/contract.py."""
     print("== contract — canonical source: skills/spec-shape/"
           "scripts/contract.py")
     skill = PKG_ROOT / "skills" / "spec-shape"

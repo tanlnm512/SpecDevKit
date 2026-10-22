@@ -1,5 +1,4 @@
-"""Reference-rot guards: retired command names never return to runtime
-prose, and every skill-relative path a SKILL.md, command, brief, or
+"""Reference guards: removed command names stay out of runtime prose, and every skill-relative path a SKILL.md, command, brief, or
 template names exists in that skill."""
 import re
 import unittest

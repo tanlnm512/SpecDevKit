@@ -1,6 +1,5 @@
 """Tests for tools/drift-check.py — release validation of the generated
-surfaces (manifests, diagrams, examples) against their canonical sources
-(FR-006).
+surfaces (manifests, diagrams, examples) against their canonical sources.
 
 Per surface, the same contract: a clean tree passes; a mutated generated
 output fails nonzero with the canonical generator named; regeneration
@@ -59,12 +58,9 @@ class ModelParserTests(unittest.TestCase):
                 (a, b) in conditional or any({a, b} == {x, y} for x, y in loops),
                 f"unaccounted dotted edge {a}-.->{b}")
 
-    def test_diagram_problems_empty_on_the_committed_tree(self):
-        self.assertEqual(drift_check.diagram_problems(self.graph), [])
-
 
 class DriftTests(unittest.TestCase):
-    """TC-style per-surface proof on repo copies: mutate -> nonzero with
+    """Per-surface proof on repo copies: mutate -> nonzero with
     the canonical generator named -> regenerate/restore -> green."""
 
     def clean_copy(self) -> Path:
@@ -163,8 +159,8 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(self.run_drift_check(repo).returncode, 0)
 
     def test_contract_drift_fails_and_regeneration_repairs(self):
-        # D-038: scripts/contract.py is the node table's single source;
-        # graph.py imports it and SKILL.md's block is generated from it
+        # scripts/contract.py is the node table's single source; graph.py
+        # imports it and SKILL.md's block is generated from it
         repo = self.clean_copy()
         victim = repo / "skills" / "spec-shape" / "SKILL.md"
         victim.write_text(

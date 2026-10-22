@@ -10,10 +10,10 @@ rest on a standing evidence stream instead of hand-recalled runs.
 Contract (kit constitution):
 - LOCAL ONLY. No network, no contents: payloads carry counts, node
   names, exit codes and paths — never user prose, code, or secrets.
-- NOT STATUS (C-01): nothing under specs/<name>/ reads this file;
+- NOT STATUS: nothing under specs/<name>/ reads this file;
   check.py/graph.py never consume it. Humans and summary only.
-- stdlib-only (C-06), harness-neutral (C-03), fire-and-forget: a
-  telemetry failure must never break the host script.
+- stdlib-only, harness-neutral, fire-and-forget: a telemetry failure
+  must never break the host script.
 - KIT_TELEMETRY=off disables recording entirely;
   KIT_TELEMETRY_DIR relocates the store (tests).
 
