@@ -169,10 +169,9 @@ is scout + research lens, full span only):
 3. A gap in a digest → re-brief the owner; never edit another agent's
    file. You are the sole spawner, status writer, and re-briefer.
 
-`agents/_shared-protocol.md` rides every payload. § Engineering rules
-(tests, comments) live in `agents/builder.md` only — injected from the
-kit's single source by `tools/kit-rules.py`; the authoring briefs write
-docs, not code.
+`agents/_shared-protocol.md` rides every payload. The `execute` and
+`tick-commit` rows belong to spec-execute: this skill ships no builder
+(D-044) — its briefs write docs, not code.
 
 ## Repair runs (single agent, never the wave)
 

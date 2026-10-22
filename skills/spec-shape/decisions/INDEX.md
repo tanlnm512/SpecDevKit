@@ -14,4 +14,4 @@ ADRs are append-only. The split reused four numbers, so a bare
 | D-006 | `006-parallel-by-default.md` | monolith — parallel waves |
 | D-006 | `006-command-rename-spec-gen-alias-removal.md` | split — `/spec-gen` rename |
 
-New decisions continue from the highest number (D-043 is the latest).
+New decisions continue from the highest number (D-044 is the latest).

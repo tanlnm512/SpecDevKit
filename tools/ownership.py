@@ -145,15 +145,21 @@ def plan_file(src_file, dest_file, name=None, ledger_file=None):
     """One Decision for a file-to-file destination. name is the ledger
     key and defaults to the destination filename — command roots key on
     the extension-less base, so pass it there. The ledger defaults to
-    the destination's parent/LEDGER_NAME."""
+    the destination's parent/LEDGER_NAME; a list of ledgers proves
+    ownership when any one records the occupant's current hash."""
     src_file, dest_file = Path(src_file), Path(dest_file)
     if not src_file.is_file():
         raise ValueError(f"{src_file}: source file missing")
-    ledger = read_ledger(ledger_file or dest_file.parent / LEDGER_NAME)
+    key = name or dest_file.name
+    paths = ledger_file or dest_file.parent / LEDGER_NAME
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    ledgers = [read_ledger(p) for p in paths]
     blocked, dest_sha = _dest_sha(dest_file)
     if blocked:
-        return Decision(REFUSE, name or dest_file.name, sha256_file(src_file), None)
-    return classify(name or dest_file.name, sha256_file(src_file), dest_sha, ledger)
+        return Decision(REFUSE, key, sha256_file(src_file), None)
+    ledger = next((l for l in ledgers if l.get(key) == dest_sha), ledgers[0])
+    return classify(key, sha256_file(src_file), dest_sha, ledger)
 
 
 def main(argv=None) -> int:
@@ -173,8 +179,9 @@ def main(argv=None) -> int:
     one.add_argument("--dest", required=True, metavar="FILE")
     one.add_argument("--name", metavar="KEY",
                      help="ledger key; defaults to the destination filename")
-    one.add_argument("--ledger", metavar="FILE",
-                     help="defaults to the destination's parent/" + LEDGER_NAME)
+    one.add_argument("--ledger", metavar="FILE", action="append",
+                     help="repeatable — any one proves ownership; defaults "
+                          "to the destination's parent/" + LEDGER_NAME)
 
     args = ap.parse_args(argv)
     try:

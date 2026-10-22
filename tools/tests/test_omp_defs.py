@@ -4,22 +4,39 @@ generator. Run via tools/tests/run.sh (needs Python >= 3.10).
 omp-defs.py derives everything (tools/model/thinking-level) by parsing
 each source role's own Claude-style frontmatter directly — there is no
 per-role table in the tool to test in isolation, so these tests exercise
-it against spec-execute's real shipped agents/*.md (the five
-archetype briefs, byte-shared across the spec trio), the same files
+it against the spec trio's real shipped agents/*.md (the five
+archetype briefs, staged into one skill dir), the same files
 tools/sync.sh feeds it. A second skill added to this repo is covered by
 the same code path with no new test needed here — see
 test_second_skill_needs_no_new_code, which proves that on a synthetic
 skill directory instead.
 """
+import atexit
 import hashlib
 import importlib.util
 import re
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL = REPO_ROOT / "skills" / "spec-execute"
+
+
+def staged_archetypes() -> Path:
+    """The spec trio's five archetypes in one skill dir — each skill
+    ships only its span's subset, byte-shared where they overlap."""
+    root = Path(tempfile.mkdtemp(prefix="archetypes-"))
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    agents = root / "agents"
+    agents.mkdir()
+    for skill in ("spec-intent", "spec-shape", "spec-execute"):
+        for f in (REPO_ROOT / "skills" / skill / "agents").glob("*.md"):
+            shutil.copyfile(f, agents / f.name)
+    return root
+
+
+SKILL = staged_archetypes()
 
 _spec = importlib.util.spec_from_file_location(
     "omp_defs", REPO_ROOT / "tools" / "omp-defs.py")
@@ -284,6 +301,20 @@ class WriteGateTests(unittest.TestCase):
             manifest = omp_defs.manifest_path_for(out, skill).read_text()
             want = hashlib.sha256((out / "alpha.md").read_bytes()).hexdigest()
             self.assertEqual(manifest, f"{want} alpha.md\n")
+
+    def test_role_handed_to_a_sibling_skill_is_taken_over_and_kept(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out"
+            a = scratch_skill(Path(td), "skill-a", ["alpha", "beta"])
+            run_gen(a, out)
+            b = scratch_skill(Path(td), "skill-b", ["beta"])
+            rc, output = run_gen_rc(b, out)
+            self.assertEqual(rc, 0, output)
+            self.assertNotIn(
+                "beta.md", omp_defs.manifest_path_for(out, a).read_text())
+            scratch_skill(Path(td), "skill-a", ["alpha"])
+            run_gen(a, out)
+            self.assertTrue((out / "beta.md").exists())
 
 
 class GenerationEndToEndTests(unittest.TestCase):

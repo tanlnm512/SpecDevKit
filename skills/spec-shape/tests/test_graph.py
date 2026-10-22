@@ -1466,20 +1466,8 @@ class Exec003DryRunTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
-    def test_exit_zero_with_full_plan(self):
-        self.assertEqual(self.r.returncode, 0, self.r.stderr)
-        self.assertIn("wave 4", self.r.stdout)
-        self.assertIn("implementer.md", self.r.stdout)
-        self.assertIn("print", self.r.stdout)
-
     def test_doc_state_unchanged_modulo_spawns(self):
         self.assertEqual(self.before, doc_hashes(self.spec_dir))
-
-    def test_payloads_written_no_gate_no_agent_execution(self):
-        self.assertTrue((self.spec_dir / "spawns" / "wave-4"
-                         / "implementer.md").exists())
-        self.assertNotIn("AWAITING HUMAN", self.r.stdout)
-        self.assertIn("no doc-state change", self.r.stdout)
 
 
 class Exec004GatePauseTests(unittest.TestCase):
@@ -1726,22 +1714,6 @@ class Exec009PayloadBuildingTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def test_implementer_payload_entry_and_acceptance_commands(self):
-        self._tmp = Path(tempfile.mkdtemp(prefix="exec009a-"))
-        d = approved_fixture(self._tmp)
-        r = run_cli(d, "--emit-spawns")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        wave = d / "spawns" / "wave-4"
-        payload = (wave / "implementer.md").read_text(encoding="utf-8")
-        self.assertIn("- [ ] T001 [P] implement multiply in `repo/calc.py` "
-                      "(FR-001)", payload)
-        self.assertIn(
-            "cd repo && python3 -m pytest test_calc.py -k multiply", payload)
-        self.assertFalse((wave / "implementer-T002.md").exists(),
-                         "dep-chained task is not runnable")
-        self.assertFalse((wave / "implementer-T003.md").exists(),
-                         "at-fix-cap task is never auto-scheduled")
 
     def test_researcher_payload_carries_research_questions(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec009b-"))
@@ -2524,16 +2496,6 @@ class SpanPhaseTests(unittest.TestCase):
                          ["payload"]["gates"], ["approve", "verify"])
         self.assertEqual(self.telemetry_rows("intake_refusal")[-1]
                          ["payload"]["span"], "execute")
-
-    def test_execute_span_admits_approved_and_green(self):
-        d = approved_fixture(self._tmp / "exec")
-        r = self.run_span_cli(d, "--emit-spawns", "--span", "execute")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        waves = sorted((d / "spawns").glob("wave-*"))
-        payloads = sorted(p.name for w in waves for p in w.glob("*.md"))
-        self.assertTrue(payloads, "the execute span emits the wave")
-        self.assertTrue(all(n.startswith("implementer")
-                            for n in payloads), payloads)
 
     def test_intent_span_emits_only_the_scout_payload(self):
         d = spec_only(self._tmp / "scout")

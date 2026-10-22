@@ -7,6 +7,9 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- Each spec skill ships only its span's archetypes; this skill drops
+  `builder.md`, and § Engineering rules have one builder carrier
+  (D-044).
 - Contract review at the approve stop: `reviewer-contract.md` is
   prepared when approve is READY (D-043); SKILL.md gains a generated
   spawn table, drift-checked against `graph.py`.

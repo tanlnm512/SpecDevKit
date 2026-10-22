@@ -4,20 +4,37 @@ Run via tools/tests/run.sh (needs Python >= 3.10).
 Same philosophy as test_omp_defs.py: the generator derives everything
 by parsing each source role's own Claude-style frontmatter — no
 per-role table to test in isolation — so these exercise it against
-spec-execute's real shipped agents/*.md (the five archetype briefs,
-byte-shared across the spec trio), plus a synthetic scratch skill
+the spec trio's real shipped agents/*.md (the five archetype briefs,
+staged into one skill dir), plus a synthetic scratch skill
 for staging and no-deletion behavior sync.sh can't safely practice on
 the live shared roots.
 """
+import atexit
 import hashlib
 import importlib.util
 import re
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL = REPO_ROOT / "skills" / "spec-execute"
+
+
+def staged_archetypes() -> Path:
+    """The spec trio's five archetypes in one skill dir — each skill
+    ships only its span's subset, byte-shared where they overlap."""
+    root = Path(tempfile.mkdtemp(prefix="archetypes-"))
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    agents = root / "agents"
+    agents.mkdir()
+    for skill in ("spec-intent", "spec-shape", "spec-execute"):
+        for f in (REPO_ROOT / "skills" / skill / "agents").glob("*.md"):
+            shutil.copyfile(f, agents / f.name)
+    return root
+
+
+SKILL = staged_archetypes()
 
 _spec = importlib.util.spec_from_file_location(
     "agent_defs", REPO_ROOT / "tools" / "agent-defs.py")

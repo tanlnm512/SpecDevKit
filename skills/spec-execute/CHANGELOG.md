@@ -7,6 +7,8 @@ authoring is spec-shape's, intake spec-intent's.
 
 ## Unreleased
 
+- `agents/` ships builder and reviewer only; scout, designer, qa,
+  and `_lenses.md` stay with spec-shape (D-031).
 - `/spec-plan` retired; the reviewer is implementation-diff only; the
   delivery pass is numbered 1–6 (D-030).
 

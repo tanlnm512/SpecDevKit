@@ -76,8 +76,7 @@
 #                                 `agy plugin install` copies; agy owns
 #                                 ~/.gemini/config/plugins itself).
 #   rules/engineering-rules.md -> the § Engineering rules sections in
-#                              the spec trio's agents/builder.md
-#                              (spec-intent, spec-shape, spec-execute)
+#                              skills/spec-execute/agents/builder.md
 #                              and skills/spec-code-review/agents/
 #                              code-review-fixer.md — COMMITTED
 #                              regenerate-only carrier views, refreshed
@@ -721,11 +720,18 @@ for name in "${SKILLS[@]}"; do
     done
 
     # omp defs: the generator's per-skill manifest IS this skill's
-    # provenance in the shared root, so it is the plan's ledger.
+    # provenance in the shared root, so it is the plan's ledger; a
+    # sibling kit skill's manifest also proves a role it hands over.
+    omp_ledgers=(--ledger "$OMP_AGENTS_ROOT/.spec-dev-kit-omp-defs-$name")
+    for m in "$OMP_AGENTS_ROOT"/.spec-dev-kit-omp-defs-*; do
+      [ -f "$m" ] || continue
+      case "$m" in *.tmp|*"/.spec-dev-kit-omp-defs-$name") continue ;; esac
+      omp_ledgers+=(--ledger "$m")
+    done
     for f in "$preflight_stage/$name/omp"/*.md; do
       [ -e "$f" ] || continue
       plan_file_dest "$f" "$OMP_AGENTS_ROOT/$(basename "$f")" \
-        --ledger "$OMP_AGENTS_ROOT/.spec-dev-kit-omp-defs-$name"
+        "${omp_ledgers[@]}"
      done
   fi
 done

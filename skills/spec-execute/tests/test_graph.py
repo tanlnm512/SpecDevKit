@@ -1222,66 +1222,6 @@ def implemented_fixture(tmp: Path, name: str = "demo") -> Path:
     return d
 
 
-class Exec001EmitSpawnsTests(unittest.TestCase):
-    """EXEC-001: --emit-spawns writes one self-contained payload per
-    frontier agent node under spawns/wave-<N>/ — brief body (frontmatter
-    stripped) contiguous + byte-verbatim, _shared-protocol.md verbatim,
-    filled input payload naming spec dir + FR list, resolved skill_dir."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls._tmp = Path(tempfile.mkdtemp(prefix="exec001-"))
-        cls.spec_dir = wave2_fixture(cls._tmp)
-        cls.r = run_cli(cls.spec_dir, "--emit-spawns")
-        cls.wave = cls.spec_dir / "spawns" / "wave-2"
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls._tmp, ignore_errors=True)
-
-    def test_one_payload_per_frontier_agent_in_wave_2(self):
-        self.assertEqual(self.r.returncode, 0, self.r.stderr)
-        self.assertEqual(sorted(p.name for p in self.wave.glob("*.md")),
-                         ["planner.md", "qa.md", "tech.md"])
-        self.assertIn("wave-2", self.r.stdout)
-
-    def test_brief_body_is_contiguous_verbatim_frontmatter_stripped(self):
-        for name, brief in (("planner.md", "designer.md"),
-                            ("tech.md", "designer.md"),
-                            ("qa.md", "qa.md")):
-            raw = (SKILL / "agents" / brief).read_text(encoding="utf-8")
-            body = graph.strip_frontmatter(raw)
-            payload = (self.wave / name).read_text(encoding="utf-8")
-            self.assertIn(body, payload, name)
-            self.assertNotIn("disallowedTools", payload, name)
-
-    def test_shared_protocol_verbatim_for_every_role(self):
-        protocol = (SKILL / "agents" / "_shared-protocol.md").read_text(
-            encoding="utf-8")
-        for name in ("planner.md", "tech.md", "qa.md"):
-            payload = (self.wave / name).read_text(encoding="utf-8")
-            self.assertIn(protocol, payload, name)
-
-    def test_wave_dir_override(self):
-        tmp = Path(tempfile.mkdtemp(prefix="exec001b-"))
-        try:
-            d = wave2_fixture(tmp)
-            out = tmp / "custom-wave"
-            r = run_cli(d, "--emit-spawns", "--wave-dir", str(out))
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(sorted(p.name for p in out.glob("*.md")),
-                             ["planner.md", "qa.md", "tech.md"])
-            self.assertFalse((d / "spawns").exists())
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_input_payload_names_spec_dir_frs_and_skill_dir(self):
-        payload = (self.wave / "planner.md").read_text(encoding="utf-8")
-        self.assertIn(str(self.spec_dir), payload)
-        self.assertIn("**FR-001**", payload)
-        self.assertIn(str(SKILL), payload)
-
-
 class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
     """EXEC-002: spawns/ is a derived, regenerate-only artifact — check.py's
     output and exit are identical with and without it, and re-emitting after
@@ -1299,23 +1239,6 @@ class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(SCRIPTS / "check.py"), str(self.spec_dir)],
             capture_output=True, text=True, timeout=300)
-
-    def test_check_output_identical_with_and_without_spawns(self):
-        with_spawns = self.check_run()
-        shutil.rmtree(self.spec_dir / "spawns")
-        without = self.check_run()
-        self.assertEqual(with_spawns.returncode, without.returncode)
-        self.assertEqual(with_spawns.stdout, without.stdout)
-
-    def test_reemit_regenerates_identical_payloads(self):
-        before = {p.name: p.read_bytes()
-                  for p in (self.spec_dir / "spawns").rglob("*.md")}
-        shutil.rmtree(self.spec_dir / "spawns")
-        r = run_cli(self.spec_dir, "--emit-spawns")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        after = {p.name: p.read_bytes()
-                 for p in (self.spec_dir / "spawns").rglob("*.md")}
-        self.assertEqual(before, after)
 
     def test_task_md_never_mentions_spawns(self):
         self.assertNotIn(
@@ -1448,22 +1371,9 @@ class Exec006RunnerTemplateTests(unittest.TestCase):
     def runner_lines(self):
         return [ln for ln in self.r.stdout.splitlines() if "agentx" in ln]
 
-    def test_three_substituted_invocations(self):
-        self.assertEqual(self.r.returncode, 0, self.r.stderr)
-        self.assertEqual(len(self.runner_lines()), 3)
-
     def test_no_residual_placeholders(self):
         for ln in self.runner_lines():
             self.assertNotIn("{", ln, ln)
-
-    def test_each_placeholder_gets_a_real_value(self):
-        lines = self.runner_lines()
-        for role, payload in (("planner", "planner.md"), ("tech", "tech.md"),
-                              ("qa", "qa.md")):
-            ln = next(l for l in lines if f"--as {role}" in l)
-            self.assertIn(str(self.spec_dir / "spawns" / "wave-2" / payload), ln)
-            self.assertIn(f"--cwd {self.spec_dir}", ln)
-            self.assertIn(f"--skill {SKILL}", ln)
 
 
 class Exec007MaxWavesTests(unittest.TestCase):
@@ -1524,38 +1434,6 @@ class Exec007MaxWavesTests(unittest.TestCase):
         self.assertEqual((d / "task.md").read_bytes(), task_before,
                          "wave 2 never ran (no task-breaker seed)")
 
-    def test_max_waves_two_proceeds_one_wave_further(self):
-        self._tmp = Path(tempfile.mkdtemp(prefix="exec007c-"))
-        d = wave2_fixture(self._tmp)
-        self.seed(d, "planner",
-                  "# Plan: demo\n\n## Milestone 1: multiply lands\n"
-                  "All FR-001 and FR-002 work lands here; checkpoint: pytest "
-                  "green.\n\n## Parallelization map\n- planner area: "
-                  "`repo/calc.py` disjoint from `repo/test_calc.py`\n")
-        self.seed(d, "tech",
-                  "# Tech spec: demo\n\n## Approach\nA plain function in the "
-                  "arithmetic module (FR-001).\n\n### D-001: plain function\n"
-                  "Context: small module. Decision: plain function. "
-                  "Consequences: none.\n")
-        self.seed(d, "qa",
-                  "# Test cases: demo\n\n## TC-001 — multiply\n"
-                  "- **Traces to**: FR-001\n"
-                  "- **Pass condition**: `python3 -c 'print(42)'` exits 0\n")
-        task_seed = (
-            "# Tasks: demo\n\n"
-            "## Burndown\n| Phase | Total | Done |\n|-------|-------|"
-            "------|\n| 1     | 1     | 0    |\n| **Σ** | 1     | 0    |"
-            "\n\n## Phase 1: multiply (FR-001)\n"
-            "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
-        self.seed(d, "task-breaker", task_seed)
-        r = run_cli(d, "--run", "--max-waves", "2",
-                    "--runner", self.progress_runner(d))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.count("== wave"), 2)
-        self.assertIn("max-waves", r.stdout)
-        self.assertEqual((d / "task.md").read_text(encoding="utf-8"),
-                         task_seed, "wave 2 ran the task-breaker payload")
-
 
 class Exec008VerifyInRunTests(unittest.TestCase):
     """EXEC-008: the mechanical verify node runs check.py directly inside
@@ -1615,23 +1493,6 @@ class Exec009PayloadBuildingTests(unittest.TestCase):
         self.assertFalse((wave / "implementer-T003.md").exists(),
                          "at-fix-cap task is never auto-scheduled")
 
-    def test_researcher_payload_carries_research_questions(self):
-        self._tmp = Path(tempfile.mkdtemp(prefix="exec009b-"))
-        d = spec_only(self._tmp)
-        spec = (FIXTURE / "spec.md").read_text(encoding="utf-8")
-        write(d / "spec.md", spec +
-              "\n## Open questions\n"
-              "- Which integer overflow convention should multiply follow?\n"
-              "- Should the operation accept bool operands (int subclass)?\n")
-        r = run_cli(d, "--emit-spawns")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        payload = (d / "spawns" / "wave-1" / "researcher.md").read_text(
-            encoding="utf-8")
-        self.assertIn("Which integer overflow convention should multiply "
-                      "follow?", payload)
-        self.assertIn("Should the operation accept bool operands", payload)
-        self.assertIn("**FR-001**", payload)
-
 
 class Exec010CrossModeNamingTests(unittest.TestCase):
     """EXEC-010: --emit-spawns and --run --dry-run use identical payload
@@ -1652,41 +1513,6 @@ class Exec010CrossModeNamingTests(unittest.TestCase):
             self.assertEqual(emitted, planned)
             for rel in planned:
                 self.assertIn(rel, r.stdout.replace("\\", "/"))
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-
-class RunWaveDirTests(unittest.TestCase):
-    """Scrutiny round-1 finding 2: --wave-dir is honored by --run too —
-    payloads land in DIR instead of the default spawns/wave-<N>/, the same
-    override semantics --emit-spawns --wave-dir already has, and the
-    runner sees the overridden path."""
-
-    def run_wave(self, tmp: Path) -> tuple[Path, Path, subprocess.CompletedProcess]:
-        d = wave2_fixture(tmp)
-        out = tmp / "custom-wave"
-        r = run_cli(d, "--run", "--max-waves", "1", "--wave-dir", str(out))
-        return d, out, r
-
-    def test_run_writes_payloads_into_wave_dir(self):
-        tmp = Path(tempfile.mkdtemp(prefix="execrundir-"))
-        try:
-            d, out, r = self.run_wave(tmp)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(sorted(p.name for p in out.glob("*.md")),
-                             ["planner.md", "qa.md", "tech.md"])
-            self.assertFalse((d / "spawns").exists(),
-                             "--wave-dir must override the default location")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_runner_sees_the_overridden_payload_path(self):
-        tmp = Path(tempfile.mkdtemp(prefix="execrundir2-"))
-        try:
-            _d, out, r = self.run_wave(tmp)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn(str(out / "planner.md"),
-                          r.stdout.replace("\\", "/"))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1767,26 +1593,6 @@ class Exec011RepairDeltaTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_repair_emits_non_frontier_node_payload(self):
-        """wave2_fixture sits at wave 2 (plan ∥ tech ∥ qa; survey done) —
-        --repair survey adds the surveyor payload to that wave's dir and
-        says so; the non-git tmp gets the plain full-survey shape."""
-        tmp = Path(tempfile.mkdtemp(prefix="exec011f-"))
-        try:
-            d = wave2_fixture(tmp)
-            r = run_cli(d, "--emit-spawns", "--repair", "survey")
-            self.assertEqual(r.returncode, 0, r.stderr)
-            wave = d / "spawns" / "wave-2"
-            self.assertEqual(sorted(p.name for p in wave.glob("*.md")),
-                             ["planner.md", "qa.md", "surveyor.md",
-                              "tech.md"])
-            payload = (wave / "surveyor.md").read_text(encoding="utf-8")
-            self.assertIn("baseline: mini-calc v1 @ 3fa9c21", payload)
-            self.assertNotIn("- DELTA RE-SURVEY:", payload)  # non-git tmp
-            self.assertIn("repair: survey emitted", r.stdout)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
 
     def test_docs_only_delta_excludes_the_specs_tree(self):
         """A commit touching only specs/ (task ticks, survey.md's own
@@ -1819,20 +1625,6 @@ class Exec011RepairDeltaTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_repair_frontier_node_is_not_duplicated(self):
-        tmp = Path(tempfile.mkdtemp(prefix="exec011g-"))
-        try:
-            d = spec_only(tmp)  # survey IS the frontier
-            r = run_cli(d, "--emit-spawns", "--repair", "survey")
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(
-                sorted(p.name for p in (d / "spawns" / "wave-1")
-                       .glob("*.md")),
-                ["researcher.md", "surveyor.md"])
-            self.assertIn("already in the frontier", r.stdout)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
 
 class Exec012RunnerFailureTests(unittest.TestCase):
     """EXEC-012 (FR-008/AC8): a runner that exits nonzero or raises stops
@@ -1843,77 +1635,6 @@ class Exec012RunnerFailureTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def test_nonzero_runner_exits_three_and_stops_everything(self):
-        self._tmp = Path(tempfile.mkdtemp(prefix="exec012a-"))
-        d = wave2_fixture(self._tmp)  # wave 2: planner ∥ tech ∥ qa
-        r = run_cli(d, "--run", "--runner", "exit 7")
-        self.assertEqual(r.returncode, graph.RUNNER_FAILED_EXIT, r.stderr)
-        self.assertEqual(r.stdout.count("== wave"), 1, "no later wave")
-        self.assertEqual(r.stdout.count("→ exit"), 1,
-                         "the wave's remaining payloads are not invoked")
-        self.assertIn("role planner", r.stdout)
-        self.assertIn("node plan", r.stdout)
-        self.assertIn("exited 7", r.stdout)
-        self.assertNotIn("no doc-state change", r.stdout)
-
-    def test_raised_runner_exits_three_with_diagnostic(self):
-        self._tmp = Path(tempfile.mkdtemp(prefix="exec012b-"))
-        d = wave2_fixture(self._tmp)
-        real_run = subprocess.run
-        shell_calls = []
-
-        def raising_run(cmd, **kwargs):
-            # The runner invocation is the only shell=True subprocess.run
-            # (check.py/audit.py probes never use the shell).
-            if kwargs.get("shell"):
-                shell_calls.append(cmd)
-                raise OSError("cannot spawn the runner")
-            return real_run(cmd, **kwargs)
-
-        buf = io.StringIO()
-        with unittest.mock.patch.object(graph.subprocess, "run",
-                                        side_effect=raising_run), \
-                contextlib.redirect_stdout(buf):
-            rc = graph.run_loop(d, None, "agentx run {prompt_file}", False,
-                                None)
-        self.assertEqual(rc, graph.RUNNER_FAILED_EXIT)
-        self.assertEqual(len(shell_calls), 1, "fail-fast: one attempt only")
-        self.assertIn("role planner", buf.getvalue())
-        self.assertIn("node plan", buf.getvalue())
-        self.assertIn("raised", buf.getvalue())
-        self.assertNotIn("Traceback", buf.getvalue())
-
-    def test_failing_runner_progresses_then_stops_at_later_wave(self):
-        """A multi-wave run (TC-008's shape): wave 2's runners really land
-        plan/tech/qa, wave 3's task-breaker fails — wave 3 is the last one
-        started and the exit is nonzero."""
-        self._tmp = Path(tempfile.mkdtemp(prefix="exec012c-"))
-        d = wave2_fixture(self._tmp)
-        self.seed_ok_outputs(d)
-        task_seed = (
-            "# Tasks: demo\n\n"
-            "## Burndown\n| Phase | Total | Done |\n|-------|-------|"
-            "------|\n| 1     | 1     | 0    |\n| **Σ** | 1     | 0    |"
-            "\n\n## Phase 1: multiply (FR-001)\n"
-            "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
-        write(Path(f"{d}-seed-task-breaker.md"), task_seed)
-        task_before = (d / "task.md").read_bytes()  # scaffold template
-        runner = (f'python3 -c "import shutil,sys;r=sys.argv[1];'
-                  f'm={{\'planner\':\'plan.md\',\'tech\':\'tech-spec.md\','
-                  f'\'qa\':\'test.md\'}};'
-                  f'sys.exit(1) if r==\'task-breaker\' else '
-                  f'shutil.copy(sys.argv[2]+\'-seed-\'+r+\'.md\','
-                  f' sys.argv[2]+\'/\'+m.get(r,\'x\'))" '
-                  f'{{role}} {{spec_dir}}')
-        r = run_cli(d, "--run", "--runner", runner)
-        self.assertEqual(r.returncode, graph.RUNNER_FAILED_EXIT, r.stderr)
-        self.assertEqual(r.stdout.count("== wave"), 2)
-        self.assertIn("role task-breaker", r.stdout)
-        self.assertIn("node tasks", r.stdout)
-        self.assertTrue((d / "plan.md").exists(), "wave 2 really ran")
-        self.assertEqual((d / "task.md").read_bytes(), task_before,
-                         "the failing runner wrote nothing")
 
     def seed_ok_outputs(self, spec_dir: Path) -> None:
         for role, text in (
@@ -2180,35 +1901,6 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         # a fresh scaffold reads the template's default: standard
         self.assertEqual(compute(self.fresh)["effort"], "standard")
 
-    def test_standard_collapses_the_design_wave_to_designer_plus_qa(self):
-        # D-024 as amended by D-027: the standard tier's plan ∥ tech wave
-        # (plus the tasks wave it feeds) collapses into ONE merged designer
-        # payload — but qa is NOT collapsed into it: test.md always comes
-        # from an implementation-blind qa spawn of its own, riding the
-        # same wave
-        lines = self.payload_lines(self.standard)
-        self.assertEqual(len(lines), 2, lines)
-        self.assertIn("designer.md", lines[0])
-        self.assertIn("role: designer", lines[0])
-        self.assertIn("node: design", lines[0])
-        self.assertIn("qa.md", lines[1])
-        self.assertIn("role: qa", lines[1])
-        self.assertIn("node: qa", lines[1])
-        text = next(self.standard.glob("spawns/*/designer.md")).read_text(
-            encoding="utf-8")
-        # three briefs in authoring order, the protocol exactly once
-        self.assertEqual(text.count("### agents/"), 1)  # designer once
-        for lens in ("plan", "tech", "tasks"):
-            self.assertIn(f"## Carried lens — {lens} ", text)
-        self.assertEqual(text.count("## Shared protocol"), 1)
-        self.assertIn("## Briefs — the designer archetype", text)
-        self.assertIn("Tier: standard", text)
-        self.assertIn("test.md belongs to the parallel qa spawn", text)
-        # qa's own payload keeps the implementation-blindness contract
-        qa_text = next(self.standard.glob("spawns/*/qa.md")).read_text(
-            encoding="utf-8")
-        self.assertIn("never tech-spec.md or plan.md", qa_text)
-
     def test_merged_missing_brief_skip_names_the_real_file(self):
         # the merged designer item's brief field is None (it carries
         # briefs[]): a missing brief file must be named in the skip line,
@@ -2231,22 +1923,6 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertIn("SKIPPED (brief not found: agents/qa.md)",
                       buf.getvalue())
         self.assertNotIn("agents/None", buf.getvalue())
-
-    def test_large_keeps_the_three_payload_design_wave(self):
-        roles = sorted(ln.split("role: ")[1].split(",")[0]
-                       for ln in self.payload_lines(self.large))
-        self.assertEqual(roles, ["planner", "qa", "tech"])
-
-    def test_repair_stays_single_role_at_standard_tier(self):
-        # D-024: --repair always emits single-role payloads — a repair run
-        # must never carry the merged whole-docset designer payload
-        wave = self._tmp / "repair-wave"
-        r = run_cli(self.standard, "--emit-spawns", "--repair", "plan",
-                    "--wave-dir", str(wave))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(sorted(p.name for p in wave.glob("*.md")),
-                         ["planner.md", "qa.md", "tech.md"])
-        self.assertIn("repair: plan already in the frontier", r.stdout)
 
     def test_standard_design_stretch_launches_as_a_wave(self):
         # D-027: the default tier's design stretch is TWO payloads — the
@@ -2330,6 +2006,22 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         # frontier immediately
         self.assertIsNone(graph.find_pause(st))
         self.assertEqual(st["frontier"], ["survey"])
+
+
+class ExecuteSpanTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="graphspan-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+
+    def test_execute_span_admits_approved_and_green(self):
+        d = approved_fixture(self._tmp / "exec")
+        r = run_cli(d, "--emit-spawns", "--span", "execute")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        waves = sorted((d / "spawns").glob("wave-*"))
+        payloads = sorted(p.name for w in waves for p in w.glob("*.md"))
+        self.assertTrue(payloads, "the execute span emits the wave")
+        self.assertTrue(all(n.startswith("implementer")
+                            for n in payloads), payloads)
 
 
 if __name__ == "__main__":

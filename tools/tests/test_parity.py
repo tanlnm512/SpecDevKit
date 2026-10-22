@@ -35,22 +35,36 @@ class DiscoveryTests(unittest.TestCase):
             ["spec-execute", "spec-intent", "spec-shape"])
 
 class ArchetypeParityTests(unittest.TestCase):
-    """The five archetype briefs and the shared protocol are byte-shared
-    across the spec trio; sync.sh refuses a divergent install, this
-    fails it in CI first."""
+    """Each skill ships only the archetypes its span spawns; a brief
+    shipped by several skills is byte-shared — sync.sh refuses a
+    divergent install, this fails it in CI first."""
 
-    BRIEFS = ("scout.md", "designer.md", "qa.md", "reviewer.md",
-              "builder.md", "_shared-protocol.md")
+    SHIPPED = {
+        "spec-intent": {"scout.md", "_lenses.md", "_shared-protocol.md"},
+        "spec-shape": {"scout.md", "designer.md", "qa.md", "reviewer.md",
+                       "_lenses.md", "_shared-protocol.md"},
+        "spec-execute": {"builder.md", "reviewer.md",
+                         "_shared-protocol.md"},
+    }
+    SPAN_LOCAL = {"_lenses.md"}
 
-    def test_archetype_briefs_identical_across_the_trio(self):
-        agents = {skill: REPO_ROOT / "skills" / skill / "agents"
-                  for skill in GRAPH_SKILLS}
-        for name in self.BRIEFS:
+    def test_each_skill_ships_only_its_span_archetypes(self):
+        for skill, want in self.SHIPPED.items():
+            agents = REPO_ROOT / "skills" / skill / "agents"
+            self.assertEqual({p.name for p in agents.glob("*.md")}, want,
+                             skill)
+
+    def test_shared_briefs_identical_across_the_trio(self):
+        owners: dict[str, list[Path]] = {}
+        for skill, names in self.SHIPPED.items():
+            for name in names - self.SPAN_LOCAL:
+                owners.setdefault(name, []).append(
+                    REPO_ROOT / "skills" / skill / "agents" / name)
+        for name, paths in owners.items():
             with self.subTest(brief=name):
-                digests = {skill: hashlib.sha256(
-                    (d / name).read_bytes()).hexdigest()
-                    for skill, d in agents.items()}
-                self.assertEqual(len(set(digests.values())), 1, digests)
+                digests = {hashlib.sha256(p.read_bytes()).hexdigest()
+                           for p in paths}
+                self.assertEqual(len(digests), 1, paths)
 
 
 class ParityTests(unittest.TestCase):

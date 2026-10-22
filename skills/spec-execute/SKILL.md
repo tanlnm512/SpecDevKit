@@ -160,8 +160,8 @@ its proof step — the plan lands all-or-nothing.
   mode is spec-shape's); writes NOTHING, and is the one role exempt from
   `_shared-protocol.md`.
 
-Scout, designer, and qa also ship here (the engine's byte-identical
-copy) but this span never spawns them.
+Scout, designer, and qa ship with spec-shape, not here — this span
+never spawns them (D-031).
 
 `graph.py --emit-spawns --span execute` builds each payload — brief
 body verbatim + input payload from doc state (the task entry

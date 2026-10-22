@@ -31,15 +31,17 @@ core never grows harness-specific code (C-03).
   - root `agents/` personas ← `skills/*/agents/*.md` via
     `tools/agent-defs.py`
   - `plugin.json` / `marketplace.json` ← `tools/plugin-manifest.py`
-  - the `§ Engineering rules` sections in `skills/spec-intent/agents/
-    builder.md`, `skills/spec-shape/agents/builder.md`,
-    `skills/spec-execute/agents/builder.md`, and
+  - the `§ Engineering rules` sections in
+    `skills/spec-execute/agents/builder.md` and
     `skills/spec-code-review/agents/code-review-fixer.md` ←
     `rules/engineering-rules.md` via `tools/kit-rules.py`
     (`tools/sync.sh` also refreshes them before every install)
 - **Agent briefs live in `skills/<skill>/agents/`** — root `agents/`
-  copies are generated views. The per-harness workflow dialects are
-  retired (D-035/D-016): the shared review oracle
+  copies are generated views. Each skill ships only the archetypes its
+  span spawns (intent: scout · shape: scout, designer, qa, reviewer ·
+  execute: builder, reviewer); a brief shipped twice stays
+  byte-identical (`tools/tests/test_parity.py`). The per-harness
+  workflow dialects are retired (D-035/D-016): the shared review oracle
   (`scripts/review_orchestrator.py`, D-014) and `graph.py --run` are
   the one executable form each — shared state, systems, asks and
   report assembly live once there, fetched through one probe per

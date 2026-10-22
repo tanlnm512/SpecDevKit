@@ -73,9 +73,7 @@ def flat(text: str) -> str:
 
 
 class KitRulesParityTests(unittest.TestCase):
-    CARRIERS = (SINT / "agents" / "builder.md",
-                SSHAPE / "agents" / "builder.md",
-                SEXEC / "agents" / "builder.md",
+    CARRIERS = (SEXEC / "agents" / "builder.md",
                 SCR / "agents" / "code-review-fixer.md")
 
     def test_carriers_match_the_canonical_source(self):
@@ -99,14 +97,13 @@ class KitRulesWiringTests(unittest.TestCase):
     test_workflow_copies.py), and orchestrators via each SKILL.md."""
 
     def test_phase_skill_mds_point_at_the_canonical_section(self):
-        # the two phase skills whose SKILL.md documents the payload
-        # embed name the canonical section and its injector
-        for skill in (SSHAPE, SEXEC):
-            text = flat((skill / "SKILL.md").read_text(encoding="utf-8"))
-            for anchor in ("§ Engineering rules",
-                           "builder.md",
-                           "tools/kit-rules.py"):
-                self.assertIn(anchor, text, f"{skill.name}: {anchor}")
+        # the builder's home skill names the canonical section and its
+        # injector
+        text = flat((SEXEC / "SKILL.md").read_text(encoding="utf-8"))
+        for anchor in ("§ Engineering rules",
+                       "builder.md",
+                       "tools/kit-rules.py"):
+            self.assertIn(anchor, text, anchor)
 
     def test_scr_skill_md_points_at_the_fixer_carrier(self):
         text = flat((SCR / "SKILL.md").read_text(encoding="utf-8"))
@@ -129,11 +126,12 @@ class KitRulesWiringTests(unittest.TestCase):
 
     def test_only_code_writing_briefs_carry_the_rules(self):
         for skill in (SINT, SSHAPE, SEXEC):
-            for name in ("scout.md", "designer.md", "qa.md", "reviewer.md",
-                         "_shared-protocol.md"):
-                text = (skill / "agents" / name).read_text(encoding="utf-8")
-                self.assertNotIn(SECTION_HEADING, text,
-                                 f"{skill.name}/{name}")
+            for brief in (skill / "agents").glob("*.md"):
+                if brief.name == "builder.md":
+                    continue
+                self.assertNotIn(SECTION_HEADING,
+                                 brief.read_text(encoding="utf-8"),
+                                 f"{skill.name}/{brief.name}")
 
     def test_brainstorming_panel_carries_no_engineering_rules(self):
         # D-005: the lenses are read-only — the rules must NOT ride

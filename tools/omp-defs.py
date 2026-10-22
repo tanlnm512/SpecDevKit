@@ -56,7 +56,9 @@ current hash is recorded there, and output is staged before the first
 write, each file landing via a destination-local temp replaced
 atomically. A foreign file at a role name — byte-different or even
 byte-identical, with or without a manifest — is refused with a nonzero
-exit and nothing written: never clobbered, never silently adopted.
+exit and nothing written: never clobbered, never silently adopted. A
+role proven by a sibling kit skill's manifest is taken over and struck
+from that manifest.
 
 Run by tools/sync.sh; standalone:
 
@@ -148,11 +150,31 @@ def manifest_path_for(out: Path, skill_dir: Path) -> Path:
     return out / f".spec-dev-kit-omp-defs-{skill_dir.name}"
 
 
-def write_manifest(path: Path, out: Path, names: set) -> None:
-    lines = sorted(f"{file_sha(out / n)} {n}" for n in names)
+def sibling_manifests(out: Path, own: Path) -> list:
+    """Other kit skills' provenance manifests in the shared --out dir."""
+    return sorted(m for m in out.glob(".spec-dev-kit-omp-defs-*")
+                  if m != own and not m.name.endswith(".tmp"))
+
+
+def write_ledger(path: Path, entries: dict) -> None:
+    lines = sorted(f"{sha} {name}" for name, sha in entries.items())
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text("\n".join(lines) + ("\n" if lines else ""))
     os.replace(tmp, path)
+
+
+def write_manifest(path: Path, out: Path, names: set) -> None:
+    write_ledger(path, {n: file_sha(out / n) for n in names})
+
+
+def release_from_siblings(siblings: list, taken: dict) -> None:
+    """Strike each taken-over role from the sibling manifest that proved
+    it, so that skill's stale removal never deletes the new owner's file."""
+    for m in siblings:
+        entries = ownership.read_ledger(m)
+        kept = {n: s for n, s in entries.items() if taken.get(n) != s}
+        if kept != entries:
+            write_ledger(m, kept)
 
 
 def main(argv=None) -> int:
@@ -189,13 +211,17 @@ def main(argv=None) -> int:
         # The per-skill manifest is the provenance ledger: a destination
         # may be replaced only when its current hash is recorded there.
         # Anything else at a role name is foreign — refused before any
-        # write, never clobbered, never silently adopted.
+        # write, never clobbered, never silently adopted. A sibling kit
+        # skill's manifest also proves a role, which moves between skills
+        # when the archetypes a span ships change.
         try:
             prev = ownership.read_ledger(mpath)
+            siblings = sibling_manifests(out, mpath)
             planned, refused = [], []
             for fname in sorted(rendered):
                 d = ownership.plan_file(stage / fname, out / fname,
-                                        name=fname, ledger_file=mpath)
+                                        name=fname,
+                                        ledger_file=[mpath, *siblings])
                 (refused if d.kind == ownership.REFUSE else planned).append(
                     (d, fname))
         except (ValueError, OSError) as e:
@@ -207,6 +233,8 @@ def main(argv=None) -> int:
                       f"generated, not a prior deploy); resolve manually")
             return 1
 
+        taken = {fname: d.dest_sha for d, fname in planned
+                 if d.dest_sha is not None and prev.get(fname) != d.dest_sha}
         out.mkdir(parents=True, exist_ok=True)
         for d, fname in planned:
             if d.kind == ownership.UNCHANGED:
@@ -232,6 +260,7 @@ def main(argv=None) -> int:
                   f"{out} (first run establishes it; delete renamed roles' "
                   f"old files manually this once)")
         write_manifest(mpath, out, keep)
+        release_from_siblings(siblings, taken)
         return 0
     finally:
         shutil.rmtree(stage, ignore_errors=True)
