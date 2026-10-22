@@ -429,7 +429,7 @@ class IntentNodeTests(unittest.TestCase):
         s = compute(spec_only(self._tmp))
         n = s["nodes"]
         self.assertEqual(n["intent"]["state"], "SKIPPED")
-        self.assertIn("FR-008", n["intent"]["reason"])
+        self.assertIn("legacy path", n["intent"]["reason"])
         self.assertEqual(n["survey"]["state"], "READY")
         self.assertEqual(s["frontier"], ["survey"])
         data = {(e["from"], e["to"]) for e in s["edges"]
@@ -489,7 +489,7 @@ class IntentNodeTests(unittest.TestCase):
         s = compute(d)
         n = s["nodes"]
         self.assertEqual(n["intent"]["state"], "SKIPPED")
-        self.assertIn("FR-008", n["intent"]["reason"])
+        self.assertIn("legacy path", n["intent"]["reason"])
         for name in ("survey", "plan", "tech", "qa", "tasks"):
             self.assertEqual(n[name]["state"], "SKIPPED", name)
 

@@ -290,7 +290,7 @@ def main(argv=None):
     v = sub.add_parser("validate", help="record a conversational case's transcript verdicts")
     v.add_argument("selector")
     v.add_argument("transcript", nargs="?", help="transcript file carrying per-criterion verdicts")
-    v.add_argument("--contract-bent", help="record the contract bent (FR-003 kill finding)")
+    v.add_argument("--contract-bent", help="record the contract bent (a kill finding)")
     v.add_argument("--overwrite", action="store_true")
     pr = sub.add_parser("procedure", help="print a case's session procedure (or Run command)")
     pr.add_argument("selector")

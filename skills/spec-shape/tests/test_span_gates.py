@@ -298,7 +298,7 @@ class LegacyDirCompatTests(TelemetryStoreTestCase):
         self.assertEqual(self.telemetry_rows("intake_refusal"), [])
         state = json.loads(self.run_cli(d, "--state-json").stdout)
         self.assertEqual(state["nodes"]["intent"]["state"], "SKIPPED")
-        self.assertIn("FR-008", state["nodes"]["intent"]["reason"])
+        self.assertIn("legacy path", state["nodes"]["intent"]["reason"])
 
     def test_bare_full_span_report_matches_the_pre_split_vocabulary(self):
         d = copy_mini_spec(self._tmp / "vocab")

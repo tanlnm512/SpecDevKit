@@ -1167,7 +1167,7 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
         return {**advisory, "weight": "wave", "launch_workflow": True,
                 "reason": "one merged design payload — three briefs "
                           "(plan/tech/tasks) authoring plan, tech-spec, "
-                          "and task (D-024, D-027) — heavy span, launch "
+                          "and task — heavy span, launch "
                           "the spec-run workflow"}
     if len(payloads) == 1 and payloads[0]["node"] != "execute":
         return {**advisory, "weight": "single",
@@ -1446,7 +1446,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     # reads DONE.
     if docs["intent.md"] is None:
         nodes["intent"] = {"state": SKIPPED, "reason":
-                           "no intent.md — legacy path (FR-008): the "
+                           "no intent.md — legacy path: the "
                            "docset contract is unchanged, shape and "
                            "execute accept this dir as-is"}
     elif not filled["intent.md"]:
@@ -1532,7 +1532,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                           ("qa", "test.md"), ("tasks", "task.md")):
             nodes[node] = {"state": SKIPPED, "reason":
                            f"tier: tiny — no {doc}; the one-file contract "
-                           "holds tasks in spec.md § Tasks (D-037)"}
+                           "holds tasks in spec.md § Tasks"}
     else:
         authored("plan", "plan.md", ["survey"])
         authored("tech", "tech-spec.md", ["survey"],
@@ -1881,7 +1881,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="with --run: stop after N waves")
     p.add_argument("--span", choices=("intent", "shape", "execute", "full"),
                    default=None, metavar="PHASE",
-                   help="bound the wave to one phase's frontier (D-003), "
+                   help="bound the wave to one phase's frontier "
                         "with --run/--emit-spawns: intent (the scout node), "
                         "shape (intent + authoring + verify + the approve "
                         "handoff), execute (execute + tick-commit + "

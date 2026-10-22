@@ -90,7 +90,7 @@ def render_skill_table() -> str:
     for node, kind, ready, done in NODE_TABLE:
         if node in TINY_SKIPPED:
             rows.append(f"| `{node}` | {kind} | {ready} — *SKIPPED at "
-                        f"Tier: tiny (D-037)* | {done} — *not required at "
+                        f"Tier: tiny* | {done} — *not required at "
                         "Tier: tiny* |")
         else:
             rows.append(f"| `{node}` | {kind} | {ready} | {done} |")

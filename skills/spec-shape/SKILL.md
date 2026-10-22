@@ -40,11 +40,11 @@ prints any node's ready/done conditions and why it sits where it sits.
 | `research-gate` | gate | spec.md done | research.md exists (real content → ran, or the skip marker → skipped) |
 | `research` | agent | the research gate is resolved `run` | research.md exists, non-marker, non-empty |
 | `intent` | agent | intent.md present and unfilled, or `check.py --intent-only` fails (absent → SKIPPED: legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 |
-| `survey` | agent | spec.md done — *SKIPPED at Tier: tiny (D-037)* | survey.md filled AND `check.py <spec-dir> --survey-only` exits 0 — *not required at Tier: tiny* |
-| `plan` | agent | spec + survey done — *SKIPPED at Tier: tiny (D-037)* | plan.md exists, non-empty, filled — *not required at Tier: tiny* |
-| `tech` | agent | spec + survey done AND research resolved (either form) — *SKIPPED at Tier: tiny (D-037)* | tech-spec.md exists, non-empty, filled — *not required at Tier: tiny* |
-| `qa` | agent | spec + survey done (never reads plan/tech — parallel-safe) — *SKIPPED at Tier: tiny (D-037)* | test.md exists, non-empty, filled — *not required at Tier: tiny* |
-| `tasks` | agent | plan + tech + survey done — *SKIPPED at Tier: tiny (D-037)* | task.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `survey` | agent | spec.md done — *SKIPPED at Tier: tiny* | survey.md filled AND `check.py <spec-dir> --survey-only` exits 0 — *not required at Tier: tiny* |
+| `plan` | agent | spec + survey done — *SKIPPED at Tier: tiny* | plan.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `tech` | agent | spec + survey done AND research resolved (either form) — *SKIPPED at Tier: tiny* | tech-spec.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `qa` | agent | spec + survey done (never reads plan/tech — parallel-safe) — *SKIPPED at Tier: tiny* | test.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `tasks` | agent | plan + tech + survey done — *SKIPPED at Tier: tiny* | task.md exists, non-empty, filled — *not required at Tier: tiny* |
 | `verify` | mechanical | plan, tech, qa, tasks, survey all done | `check.py <spec-dir>` exits 0 |
 | `approve` | human | verify done (HUMAN gate) | spec.md Status: approved (or later) |
 | `execute` | mechanical | approved | every task entry implemented, ticked [x], or struck ~~ |

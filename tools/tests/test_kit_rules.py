@@ -1,5 +1,7 @@
 """Kit-wide engineering rules: each carrier's injected section matches the
-canonical source, and only the code-writing briefs carry the section.
+canonical source, the rules keep their load-bearing phrases, each
+audience's entry file points at them, and only the code-writing briefs
+carry the section.
 
 The canonical text is rules/engineering-rules.md, injected by
 tools/kit-rules.py. Run via tools/tests/run.sh (needs Python >= 3.10).
@@ -23,6 +25,35 @@ _spec.loader.exec_module(kit_rules)
 
 SECTION_HEADING = "## Engineering rules (kit-wide)"
 
+# Phrases that carry each rule's load: watering one down fails here first.
+ANCHORS = (
+    "does not apply to you",
+    "smallest test that reliably proves it",
+    "one owner test at the strongest boundary",
+    "Do not create exports, wrappers, or seams that only tests use",
+    "fail on the pre-fix code",
+    "NEVER poll a",
+    "you will be woken with its output",
+    "Explain why, not what",
+    "git history owns that",
+    "Never embed volatile",
+)
+
+# Where each audience is routed to the rules.
+POINTERS = (
+    (SEXEC / "SKILL.md",
+     ("§ Engineering rules", "builder.md", "tools/kit-rules.py")),
+    (SEXEC / "agents" / "builder.md", ("§ Engineering rules", "they win")),
+    (SCR / "SKILL.md",
+     ("§ Engineering rules", "code-review-fixer.md", "NEVER poll a")),
+    (SBR / "SKILL.md",
+     ("## Operator rules", "NEVER poll a", "_shared-protocol.md")),
+)
+
+
+def flat(text: str) -> str:
+    return " ".join(text.split())
+
 
 class KitRulesParityTests(unittest.TestCase):
     CARRIERS = (SEXEC / "agents" / "builder.md",
@@ -35,8 +66,20 @@ class KitRulesParityTests(unittest.TestCase):
             self.assertEqual(current, kit_rules.inject(current, body),
                              carrier)
 
+    def test_source_keeps_every_anchor(self):
+        body = flat(SOURCE.read_text(encoding="utf-8"))
+        for anchor in ANCHORS:
+            self.assertIn(anchor, body)
+
 
 class KitRulesWiringTests(unittest.TestCase):
+    def test_each_audience_points_at_the_rules(self):
+        for path, anchors in POINTERS:
+            text = flat(path.read_text(encoding="utf-8"))
+            for anchor in anchors:
+                with self.subTest(file=path.name, anchor=anchor):
+                    self.assertIn(anchor, text)
+
     def test_only_code_writing_briefs_carry_the_rules(self):
         for skill in (SINT, SSHAPE, SEXEC):
             for brief in (skill / "agents").glob("*.md"):
