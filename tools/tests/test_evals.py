@@ -64,8 +64,8 @@ class RealCorpusTests(unittest.TestCase):
         # 20 across the corpus since the split moved the authoring
         # classes (E1–E3, E7) to spec-shape and the execution classes
         # (E4–E6) to spec-execute — count unchanged by the moves
-        # (17 pre-intent + I1–I3 = 20)
-        self.assertEqual(len(self.cases), 20)
+        # (17 pre-intent + I1–I3 = 20), plus spec-shape E8
+        self.assertEqual(len(self.cases), 21)
         self.assertTrue(all(c.conversational for c in self.cases))
         selectors = {c.selector for c in self.cases}
         self.assertIn("spec-code-review/e2", selectors)
@@ -76,6 +76,7 @@ class RealCorpusTests(unittest.TestCase):
         # spec-to-prod selectors are gone with the retired tree (T023)
         self.assertIn("spec-shape/e1", selectors)
         self.assertIn("spec-shape/e7", selectors)
+        self.assertIn("spec-shape/e8", selectors)
         self.assertIn("spec-execute/e4", selectors)
         self.assertIn("spec-execute/e6", selectors)
         self.assertNotIn("spec-to-prod/e1", selectors)

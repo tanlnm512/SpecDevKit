@@ -822,7 +822,7 @@ def tiny_check(spec_dir: Path) -> int:
     for f_ in fails:
         print(f"  FAIL  {f_}")
     from telemetry import record
-    record("spec-to-prod", "check_run", spec=spec_dir.name,
+    record(Path(__file__).resolve().parent.parent.name, "check_run", spec=spec_dir.name,
            fails=len(fails), warns=len(warns), frs=len(frs),
            tasks=len(entries) if section else 0)
     return 1 if fails else 0
@@ -1405,7 +1405,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  FAIL  {f_}")
     print(f"  {'PASS' if not fails else 'FAIL'} ({len(fails)} fail, {len(warns)} warn)")
     from telemetry import record  # fire-and-forget local telemetry
-    record("spec-to-prod", "check_run", spec=spec_dir.name,
+    record(Path(__file__).resolve().parent.parent.name, "check_run", spec=spec_dir.name,
            fails=len(fails), warns=len(warns),
            frs=len(frs), tasks=total_tasks)
     return 1 if fails else 0

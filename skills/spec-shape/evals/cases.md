@@ -78,3 +78,19 @@ part of the evidence — the frontier is the only scheduler being judged.
   with no Tier header behaves exactly as before (no "tier: tiny"
   anywhere in its graph).
 - **Run**: session: the thin-floor suite (`tests/`, the mechanical half) plus a real small fix authored end-to-end at tiny tier to the approve handoff and judged against the pass criteria above
+
+## E8 — Intake handoff: draft the spec, review the contract, stop at approve
+
+- **Setup**: scratch repo with a real test runner; `/spec-idea <name>`
+  run to a green `specs/<name>/intent.md` and NO spec.md; then
+  `/spec-gen <name>`.
+- **Pass criteria**: the span is admitted (no exit 4); the run stops
+  with "draft it from intent.md" and the orchestrator writes spec.md
+  from intent.md and the template, with a NEEDS CLARIFICATION marker for
+  each question the intent left open; the waves then run as in E1; a
+  planted check.py FAIL reports `verify RED` with a nonzero exit, never
+  an approve handoff; once verify is green the orchestrator prepares
+  `reviewer-contract.md`, spawns the read-only reviewer, and every BLOCK
+  is repaired or explicitly ruled before the digest; the digest carries
+  the review findings and the freeze runs before `Status: approved`.
+- **Run**: session: scratch repo per **Setup**; run the authoring span in a session; judge the transcript, the `--state-json` snapshot sequence, and the docs against the pass criteria above

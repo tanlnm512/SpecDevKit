@@ -7,6 +7,15 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- Contract review at the approve stop: `reviewer-contract.md` is
+  prepared when approve is READY (D-043); SKILL.md gains a generated
+  spawn table, drift-checked against `graph.py`.
+- Engineering rules move to the builder brief; briefs lose the retired
+  spec-to-prod wording and gain the intent lens on the scout (D-042).
+- spec-gen drafts spec.md from a green intent (D-041): the intake →
+  shape handoff no longer exits 4; `verify RED` exits 1; `scaffold.sh
+  --into-existing`; the node table's `{done}` cells render.
+
 - `/spec-shape` → `/spec-gen` and the `/spec-to-prod` alias is
   removed early (D-006): eleven commands install; a skill may name
   no self-titled command. Migration: re-run `bash tools/sync.sh`.

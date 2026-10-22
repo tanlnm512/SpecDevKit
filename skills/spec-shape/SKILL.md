@@ -28,8 +28,8 @@ is `/spec-execute <name>`; this skill never implements, never commits.
 
 State lives in the docs, never memory: `scripts/graph.py` derives every
 node's state from the spec dir alone (node states, the ready frontier,
-loop edges). The table below is generated from `scripts/contract.py`
-(D-038) — never hand-edit it; `graph.py <spec-dir> --explain NODE`
+loop edges). The table below is generated from `scripts/contract.py` — never
+hand-edit it; `graph.py <spec-dir> --explain NODE`
 prints any node's ready/done conditions and why it sits where it sits.
 
 <!-- BEGIN generated: node-table (scripts/contract.py --render skill-table) -->
@@ -39,12 +39,12 @@ prints any node's ready/done conditions and why it sits where it sits.
 | `clarify` | loop | open NEEDS CLARIFICATION markers exist in spec.md | markers resolved (removed/answered in spec.md) |
 | `research-gate` | gate | spec.md done | research.md exists (real content → ran, or the skip marker → skipped) |
 | `research` | agent | the research gate is resolved `run` | research.md exists, non-marker, non-empty |
-| `intent` | agent | spec.md done and intent.md missing/unfilled or `check.py --intent-only` fails (absent → SKIPPED: the FR-008 legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 |
-| `survey` | agent | spec.md done — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
-| `plan` | agent | spec + survey done — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
-| `tech` | agent | spec + survey done AND research resolved (either form) — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
-| `qa` | agent | spec + survey done (never reads plan/tech — parallel-safe) — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
-| `tasks` | agent | plan + tech + survey done — *SKIPPED at Tier: tiny (D-037)* | {done} — *not required at Tier: tiny* |
+| `intent` | agent | intent.md present and unfilled, or `check.py --intent-only` fails (absent → SKIPPED: legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 |
+| `survey` | agent | spec.md done — *SKIPPED at Tier: tiny (D-037)* | survey.md filled AND `check.py <spec-dir> --survey-only` exits 0 — *not required at Tier: tiny* |
+| `plan` | agent | spec + survey done — *SKIPPED at Tier: tiny (D-037)* | plan.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `tech` | agent | spec + survey done AND research resolved (either form) — *SKIPPED at Tier: tiny (D-037)* | tech-spec.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `qa` | agent | spec + survey done (never reads plan/tech — parallel-safe) — *SKIPPED at Tier: tiny (D-037)* | test.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `tasks` | agent | plan + tech + survey done — *SKIPPED at Tier: tiny (D-037)* | task.md exists, non-empty, filled — *not required at Tier: tiny* |
 | `verify` | mechanical | plan, tech, qa, tasks, survey all done | `check.py <spec-dir>` exits 0 |
 | `approve` | human | verify done (HUMAN gate) | spec.md Status: approved (or later) |
 | `execute` | mechanical | approved | every task entry implemented, ticked [x], or struck ~~ |
@@ -54,155 +54,169 @@ prints any node's ready/done conditions and why it sits where it sits.
 
 ## When to use
 
-- **A validated intent exists** — spec-intent's handoff (`/spec-shape
-  <name>` after its gate exits 0): author the docset from intent +
-  spec, wave by wave, to the approve gate.
+- **A validated intent exists** — `/spec-idea` finished (its gate exits
+  0): draft spec.md from it, then author the docset wave by wave to the
+  approve gate.
 - **A pre-existing docset continues** — spec.md already authored, from
-  any era or hand: the intent.md-absent path is the FR-008 legacy
-  shape; the graph proceeds unchanged and no intent is demanded.
+  any era or hand; no intent.md is demanded.
 - **Repair asks** — "re-survey <spec>", "refresh the tech spec",
   "rebuild the task list", a red `check.py` naming its node: the
-  single-node repair runs below.
+  single-node repair below.
 
-Not here: a raw idea, a red or absent-on-a-new-spec intent
-(`/spec-intent` — the intake gate below routes there by refusing), and
-anything past approval — implementer waves, proofs, ticks, commits
-(`/spec-execute`).
+Not here: a raw idea or a red intent (`/spec-idea`), and anything past
+approval — implementer waves, proofs, ticks, commits (`/spec-execute`).
 
 ## The intake gate (exit 4)
 
-`--span shape` refuses to start when the intent node reads BLOCKED —
-the invocation-time gate, not a mid-run block:
+`--span shape` refuses at invocation when the intent node is BLOCKED:
 
-- **intent.md absent** → SKIPPED (the FR-008 legacy path) — the span
-  passes; the docset contract is unchanged for existing dirs.
-- **intent.md filled but red** — `check.py <spec-dir> --intent-only`
-  exits nonzero: a baseline drifted past HEAD (stale), open NEEDS
-  CLARIFICATION markers, or malformed content — → BLOCKED, and the
-  span entry **exits 4** printing the blocking gate and its reason
-  (`graph.py <spec-dir> --emit-spawns --span shape` alike). Zero
-  authoring docs are written. Route to `/spec-intent` — the repair
-  (re-scout, re-grill, re-gate) is intake's, never waved through here.
-- **intent.md unfilled template** → the intent node is READY and rides
-  this span: hand it to `/spec-intent` to fill and gate, or run the
-  node's scout payload here.
+- **intent.md absent** → SKIPPED; the span passes (legacy docset).
+- **intent.md filled but red** (`check.py <spec-dir> --intent-only`
+  nonzero: stale baseline, open NEEDS CLARIFICATION, malformed) →
+  **exit 4**, printing the gate and reason; no authoring doc is written.
+  Route to `/spec-idea` — repair is intake's, never waved through here.
+- **intent.md unfilled template** → the run prints `AWAITING` and
+  stops; fill and gate it with `/spec-idea`.
 
-Every refusal records an `intake_refusal` telemetry event under this
-skill's own name (below).
+Every refusal records an `intake_refusal` telemetry event.
 
-## The run (one engine, one span)
+## Draft spec.md from intent
+
+A green intent with no spec.md reads `spec` READY ("draft it from
+intent.md") and the run stops there. You write spec.md inline — start
+from `templates/spec.md` (`scripts/scaffold.sh --tier full
+--into-existing <name>` copies the full skeleton without touching
+intent.md): FRs/ACs/NFRs from the grilled requirements, scope from the
+intent's Problem, and a NEEDS CLARIFICATION marker for anything the
+intent left open. Resolve markers with the user (`clarify` loop), then
+re-run.
+
+## The run
 
 ```sh
 python3 <skill_dir>/scripts/graph.py specs/<name> --run --span shape
 ```
 
-The frontier is the only scheduler: compute, run the ready wave,
-recompute, repeat — bounded to the shape span's nodes. Typical waves:
+The frontier is the only scheduler. Loop: run → spawn the printed
+payloads in ONE message → re-run, until the span drains. Typical waves:
 **survey → plan ∥ tech ∥ qa → tasks → verify → approve handoff**.
 
 - **Survey** (scout · survey lens) — code-state ground truth into
-  survey.md (+ `specs/context/` on the repo's first survey); the
-  surveyor self-checks (`check.py --survey-only`) before returning.
-- **plan ∥ tech ∥ qa** (designer · plan/tech lenses; qa) — the
-  authoring wave, one message, three independent spawns; qa never
-  reads plan.md or tech-spec.md (implementation blindness, below).
+  survey.md (+ `specs/context/` on the repo's first survey); the scout
+  self-checks with `check.py --survey-only`.
+- **plan ∥ tech ∥ qa** (designer · plan/tech lenses; qa) — independent
+  spawns; qa never reads plan.md or tech-spec.md.
 - **tasks** (designer · tasks lens) — task.md from plan + tech +
   survey; statuses from survey evidence only.
-- **verify** — mechanical: the engine runs `check.py <spec-dir>`
-  directly. Fix small failures inline; substantive ones go back to the
-  responsible agent (repair runs, below).
-- **approve** — the human gate; a drained shape span prints the
-  approve handoff and stops.
+- **verify** — mechanical: the engine runs `check.py <spec-dir>`. Fix
+  typo-level or burndown failures inline (`check.py --fix-burndown`);
+  anything substantive goes back to its owner (repair, below).
+- **approve** — the human gate; a drained span prints the handoff.
 
-`Effort: standard` collapses the plan ∥ tech wave (plus tasks) into
-ONE merged designer payload with qa separate in the same wave (D-024);
-`Tier: tiny` SKIPPEDs the authoring nodes entirely — the one-file
-contract whose task list lives in spec.md § Tasks. Right-size the
-artifacts, never the gates.
+`Effort: standard` (the template default) merges plan + tech + tasks
+into ONE designer payload with qa separate in the same wave, when plan,
+tech, and qa are all in the frontier together. `Tier: tiny` SKIPs the
+authoring nodes — the task list lives in spec.md § Tasks. Right-size
+the artifacts, never the gates.
+
+| Exit | Meaning |
+|------|---------|
+| 0 | span drained, gate pause, or AWAITING (read the last line) |
+| 1 | bad spec dir, or `verify RED` — check.py FAILs printed above |
+| 2 | usage error |
+| 3 | a `--runner` failed |
+| 4 | intake gate refused (red intent) |
 
 ### The research gate (your judgment, never tooling)
 
-`research-gate` pauses the run `gate:undetermined` until research.md
-resolves it. Derive the questions from the spec's open technical
-choices: ≥1 real open question → **run** — the researcher joins
-out-of-band (the shape span never decides or spawns it; emit its
-payload with the engine's undetermined-gate instrument,
-`--emit-spawns` on the full span, which prepares `researcher.md`)
-carrying the scout brief + the research lens from
-`agents/_lenses.md`; zero → **skip** — the scaffold already shipped
-research.md with the exact `not applicable — no open questions at
-Stage 0` marker line; leave it. Manufacturing questions to justify a
-spawn is the failure mode the gate exists to prevent.
+The gate stays `undetermined` until research.md resolves it. Derive 3–6
+questions from the spec's open technical choices and write them into
+spec.md. ≥1 real question → **run**: replace the skip-marker research.md
+with `templates/research.md`, then
+`graph.py <spec-dir> --emit-spawns` (full span) prepares
+`researcher.md` — scout brief + research lens, spawned out-of-band (the
+shape span never spawns it). Zero → **skip**: leave the scaffold's
+`not applicable — no open questions at Stage 0` marker. Manufacturing
+questions to justify a spawn is the failure mode this gate prevents.
 
 ## Spawn mechanics
 
-1. Resolve `skill_dir` once per session (the root this skill mounted
-   from — `scripts/skill-dir.sh` prints it); every payload carries it.
-2. `--emit-spawns --span shape` writes one self-contained payload per
-   frontier agent (header + input payload from doc state + brief body
-   + lens section + `_shared-protocol.md` verbatim). Prefer its output
-   as-is; `--repair NODE` emits one node's payload out of the frontier.
-3. Spawn the whole wave in one message (archetypes `spec-scout`,
-   `spec-designer`, `spec-qa` where the harness supports agent types —
-   briefs `agents/{scout,designer,qa}.md`; lens sections ride the
-   payload from `agents/_lenses.md`). Agents write their artifact to
-   disk and return only their digest — never pipe file content.
-4. A gap in a digest → re-brief the owner; never let one agent edit
-   another's file. You are the sole spawner, status writer, and
-   re-briefer; agents never coordinate peer-to-peer.
+Payload wiring per node (the research gate's out-of-band `researcher.md`
+is scout + research lens, full span only):
 
-`agents/_shared-protocol.md` rides every payload — its § Engineering
-rules (kit-wide) are canonical there, injected from the kit's single
-source by `tools/kit-rules.py`.
+<!-- BEGIN generated: spawn-table (scripts/contract.py --render spawn-table) -->
+| Node | Brief | Lens / mode | Span |
+|------|-------|-------------|------|
+| `intent` | `scout.md` | intent | intent |
+| `survey` | `scout.md` | survey | shape |
+| `plan` | `designer.md` | plan | shape |
+| `tech` | `designer.md` | tech | shape |
+| `qa` | `qa.md` | qa | shape |
+| `tasks` | `designer.md` | tasks | shape |
+| `approve` | `reviewer.md` | contract | shape |
+| `execute` | `builder.md` | build | execute |
+| `tick-commit` | `reviewer.md` | implementation-diff | execute |
+<!-- END generated: spawn-table -->
+
+1. `--emit-spawns --span shape` writes one self-contained payload per
+   frontier agent (header, input from doc state, brief, lens section,
+   `_shared-protocol.md`); every payload carries `skill_dir`.
+   `--repair NODE` emits one node's payload out of the frontier.
+2. Spawn the whole wave in one message (`spec-scout`, `spec-designer`,
+   `spec-qa` where the harness has agent types; briefs live in
+   `agents/`, lenses in `agents/_lenses.md`). Agents write their
+   artifact to disk and return only a digest.
+3. A gap in a digest → re-brief the owner; never edit another agent's
+   file. You are the sole spawner, status writer, and re-briefer.
+
+`agents/_shared-protocol.md` rides every payload. § Engineering rules
+(tests, comments) live in `agents/builder.md` only — injected from the
+kit's single source by `tools/kit-rules.py`; the authoring briefs write
+docs, not code.
 
 ## Repair runs (single agent, never the wave)
 
-One artifact stale or red → run just that node (`--emit-spawns
---repair <node>`): re-survey on a drifted baseline (the payload
-carries the DELTA RE-SURVEY block — merge, don't rebuild), plan lens
-when milestones reorder, tech lens when a decision changed, qa for
-appended FRs, tasks lens for traceability/burndown failures. Current
-docs are inputs; IDs are never renumbered; `check.py` runs after.
+One artifact stale or red → `--emit-spawns --repair <node>` with the
+node name: `survey` on a drifted baseline (the payload carries a DELTA
+RE-SURVEY block — merge, don't rebuild), `plan` when milestones
+reorder, `tech` when a decision changed, `qa` for appended FRs,
+`tasks` for traceability/burndown failures. IDs are never renumbered;
+`check.py` runs after.
 
 ## The hard stop — approve is the user's
 
-With verify green: present the spec-set digest — approach, phase/task
-counts, burndown, open WARNs, every D-### so far — and wait. The
-explicit yes is recorded the moment it is given: spec.md
-`Status: approved`, then `scripts/freeze.py <spec-dir> --record` (the
-approval freeze; a later correction is a fresh approval, never an
-unrecorded rewrite). A non-answer ends the turn — never adopt, never
-progress the status yourself. The engine's drained-span stop names the
-next step: `/spec-execute <name>` once approved. No implementer is
-ever spawned from here.
+With verify green, run `graph.py <spec-dir> --emit-spawns --span shape`
+and spawn the read-only `spec-reviewer` on `reviewer-contract.md`;
+resolve every BLOCK (repair run) or rule it explicitly. Then present
+the digest — review findings, approach, phase/task counts,
+burndown, check.py WARN lines, every D-### so far — and wait. On the
+explicit yes: run `scripts/freeze.py <spec-dir> --record` (add
+`--force` when re-approving a corrected spec); only on exit 0 set
+spec.md `Status: approved`. A non-answer ends the turn — never adopt
+approval or progress the status yourself. Next step: `/spec-execute
+<name>`. No implementer is ever spawned from here.
 
 ## Templates and scaffolding
 
-`scripts/scaffold.sh <name>` writes the docset skeleton from this
-skill's `templates/` (resolved relative to the skill dir): spec.md /
-spec-tiny.md, plan.md, tech-spec.md, task.md, test.md, survey.md,
-research.md (skip marker), constitution.md — the shapes every authoring
-wave fills. `scripts/migrate.py grow <spec-dir>` moves a tiny-tier
-spec up to the full docset, verbatim. Intent.md is NOT among them —
-spec-intent's template owns it.
+`scripts/scaffold.sh [--tier tiny|full] [--into-existing] <name>`
+writes the skeleton from `templates/` (default `tiny`: spec.md with
+§ Tasks, research.md skip marker, constitution; `full`: spec, plan,
+tech-spec, task, test, survey too). `--into-existing` fills an intake
+dir without overwriting anything. Growing a tiny spec to full:
+spec-execute's `scripts/migrate.py grow <spec-dir>`. intent.md's
+template belongs to spec-intent.
 
 ## Telemetry
 
-Runs record local, content-free telemetry (waves, gate pauses,
-intake refusals — counts and node names, never prose) under
-`~/.spec-dev-kit/telemetry/spec-shape.jsonl`: fire-and-forget,
-`KIT_TELEMETRY=off` disables, and nothing under `specs/` ever reads
-it (C-01).
+Local, content-free (counts and node names) under
+`~/.spec-dev-kit/telemetry/spec-shape.jsonl`; `KIT_TELEMETRY=off`
+disables.
 
 ## Commands and neighbors
 
-- `/spec-gen <verb> <name>` — this skill's router
+- `/spec-gen [verb] <name>` — this skill's router
   (`commands/spec-gen.md`): authoring, plan/tech/qa/tasks, re-survey,
   continue-spec asks land here.
-- (retired) the `/spec-to-prod` thin alias was removed ahead of its
-  one-release window (user decision 2026-10-11; D-006 amended): intake
-  is `/spec-idea` (spec-intent), authoring is `/spec-gen` (here),
-  execution is `/spec-execute`.
-- The five execution-phase lifecycle commands (`/spec-plan`,
-  `/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship`) live with
-  spec-execute — the post-approve half this skill hands off to.
+- Intake is `/spec-idea` (spec-intent); execution and the lifecycle
+  commands (`/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship`)
+  are spec-execute's.

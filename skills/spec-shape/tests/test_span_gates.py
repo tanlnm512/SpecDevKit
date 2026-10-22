@@ -212,9 +212,8 @@ class ShapeIntakeRefusalTests(TelemetryStoreTestCase):
         r = self.run_cli(d, "--emit-spawns", "--span", "shape")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("span entry refused", r.stdout)
-        self.assertEqual(
-            sorted(p.name for p in (d / "spawns" / "wave-1").glob("*.md")),
-            ["surveyor.md"])
+        self.assertFalse((d / "spawns").exists(),
+                         "the shape span never spawns the intent scout")
         self.assertEqual(self.telemetry_rows("intake_refusal"), [])
 
     def test_empty_intent_file_is_ready_never_refused(self):
@@ -249,6 +248,25 @@ class ShapeValidIntentRunTests(TelemetryStoreTestCase):
                          "the authoring wave's own payload set")
         self.assertEqual(self.telemetry_rows("intake_refusal"), [])
 
+    def test_green_intent_without_spec_md_is_admitted_and_asks_for_a_draft(self):
+        d = scaffold_spec(self._tmp / "nospec")
+        (d / "spec.md").unlink()
+        write(d / "intent.md", GOOD_INTENT.format(sha="3fa9c21"))
+        r = self.run_cli(d, "--run", "--span", "shape")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("span entry refused", r.stdout)
+        self.assertIn("draft it from intent.md", r.stdout)
+        self.assertEqual(self.telemetry_rows("intake_refusal"), [])
+
+    def test_approve_boundary_prepares_the_contract_review_payload(self):
+        d = copy_mini_spec(self._tmp / "contract")
+        r = self.run_cli(d, "--emit-spawns", "--span", "shape")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payloads = sorted(p.name for p in (d / "spawns").rglob("*.md"))
+        self.assertEqual(payloads, ["reviewer-contract.md"])
+        text = next((d / "spawns").rglob("reviewer-contract.md")).read_text()
+        self.assertIn("Mode: contract", text)
+
     def test_drained_span_stops_at_approve_and_never_executes(self):
         # the committed mini-spec sits exactly at the approve boundary:
         # draft Status, verify green, approve the whole frontier
@@ -257,7 +275,7 @@ class ShapeValidIntentRunTests(TelemetryStoreTestCase):
         r = self.run_cli(d, "--run", "--span", "shape")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("span drained — approve handoff", r.stdout)
-        self.assertIn("--span execute", r.stdout)
+        self.assertIn("/spec-execute", r.stdout)
         self.assertNotIn("AWAITING HUMAN", r.stdout)
         self.assertNotIn("== wave", r.stdout)
         self.assertNotIn("implementer", r.stdout)
@@ -304,8 +322,6 @@ class LegacyDirCompatTests(TelemetryStoreTestCase):
         self.assertNotEqual(r.returncode, 4, r.stdout)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("span entry refused", r.stdout)
-        self.assertIn("no shape-span agent payloads", r.stdout)
-        self.assertFalse((d / "spawns").exists())
         self.assertEqual(self.telemetry_rows("intake_refusal"), [])
         state = json.loads(self.run_cli(d, "--state-json").stdout)
         self.assertEqual(state["nodes"]["intent"]["state"], "SKIPPED")

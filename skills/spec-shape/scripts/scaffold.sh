@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
 # Scaffold a spec folder from the skill's templates.
-# Usage: scaffold.sh [--tier tiny|full] <kebab-case-spec-name> [target-root]
+# Usage: scaffold.sh [--tier tiny|full] [--into-existing] <kebab-case-spec-name> [target-root]
 # Default tier: tiny — the ONE-FILE contract (spec.md carries the task
 # list in § Tasks; D-037). --tier full scaffolds the 7-file docset (the
 # pre-D-037 shape). Both register in <target-root>/specs/INDEX.md.
+# --into-existing fills an intake dir (intent.md already there) without
+# overwriting any file that exists.
 set -euo pipefail
 
 tier=tiny
-if [ "${1:-}" = "--tier" ]; then
-  tier="${2:?--tier needs tiny|full}"
-  case "$tier" in tiny|full) ;; *) echo "ERROR: --tier must be tiny|full" >&2; exit 2 ;; esac
-  shift 2
-fi
+existing=0
+while [ "${1:-}" = "--tier" ] || [ "${1:-}" = "--into-existing" ]; do
+  if [ "$1" = "--into-existing" ]; then
+    existing=1
+    shift
+  else
+    tier="${2:?--tier needs tiny|full}"
+    case "$tier" in tiny|full) ;; *) echo "ERROR: --tier must be tiny|full" >&2; exit 2 ;; esac
+    shift 2
+  fi
+done
 
-name="${1:?usage: scaffold.sh [--tier tiny|full] <kebab-case-spec-name> [target-root]}"
+name="${1:?usage: scaffold.sh [--tier tiny|full] [--into-existing] <kebab-case-spec-name> [target-root]}"
 root="${2:-.}"
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target="$root/specs/$name"
@@ -22,17 +30,17 @@ if ! [[ "$name" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
   echo "ERROR: '$name' is not kebab-case (e.g. postgres-backend)" >&2
   exit 1
 fi
-if [[ -e "$target" ]]; then
-  echo "ERROR: $target already exists — refusing to overwrite" >&2
+if [[ -e "$target" && "$existing" = 0 ]]; then
+  echo "ERROR: $target already exists — refusing to overwrite (--into-existing to fill it)" >&2
   exit 1
 fi
 
 mkdir -p "$target"
 if [ "$tier" = tiny ]; then
-  cp "$skill_dir/templates/spec-tiny.md" "$target/spec.md"
+  cp -n "$skill_dir/templates/spec-tiny.md" "$target/spec.md"
 else
   for f in spec plan tech-spec task test survey; do
-    cp "$skill_dir/templates/$f.md" "$target/$f.md"
+    cp -n "$skill_dir/templates/$f.md" "$target/$f.md"
   done
 fi
 # research.md ships as the resolved skip marker, not the template: the
@@ -40,8 +48,8 @@ fi
 # the default, so no run ever pauses "undetermined" on a fresh scaffold
 # (D-025). The orchestrator flips it to run by replacing this file with
 # the filled template when the spec has real open questions.
-printf 'not applicable — no open questions at Stage 0\n' \
-  > "$target/research.md"
+[ -e "$target/research.md" ] || \
+  printf 'not applicable — no open questions at Stage 0\n' > "$target/research.md"
 
 # Register the new spec in the INDEX registry (create if absent, no duplicates).
 index="$root/specs/INDEX.md"
@@ -70,7 +78,7 @@ if [ "$tier" = tiny ]; then
   echo "      2) author § Tasks with the user, then run the graph — the"
   echo "         analysis/authoring nodes are SKIPPED at this tier"
   echo "      Grow to the full docset when risk appears:"
-  echo "         python3 $skill_dir/scripts/migrate.py grow $target"
+  echo "         python3 <spec-execute skill_dir>/scripts/migrate.py grow $target"
 else
-  echo "      2) spawn the analysis wave (see SKILL.md workflow graph)"
+  echo "      2) spawn the analysis wave (see SKILL.md § The run)"
 fi

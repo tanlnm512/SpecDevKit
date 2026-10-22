@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""contract.py — the spec-to-prod graph's single declarative source
+"""contract.py — the spec workflow graph's single declarative source
 (D-038).
 
 One table owns every node's identity, readiness, done-signal, and
@@ -14,6 +14,7 @@ Tier rows note where `**Tier**: tiny` (D-037) SKIPPEDs a node.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 # (node, kind, ready-when, done-when) — kind: entry | loop | gate |
 # agent | mechanical | human | terminal. The ready/done strings are
@@ -32,8 +33,8 @@ NODE_TABLE = [
      "the research gate is resolved `run`",
      "research.md exists, non-marker, non-empty"),
     ("intent", "agent",
-     "spec.md done and intent.md missing/unfilled or `check.py "
-     "--intent-only` fails (absent → SKIPPED: the FR-008 legacy path)",
+     "intent.md present and unfilled, or `check.py --intent-only` fails "
+     "(absent → SKIPPED: legacy path)",
      "intent.md filled AND `check.py <spec-dir> --intent-only` exits 0"),
     ("survey", "agent",
      "spec.md done",
@@ -90,11 +91,40 @@ def render_skill_table() -> str:
     for node, kind, ready, done in NODE_TABLE:
         if node in TINY_SKIPPED:
             rows.append(f"| `{node}` | {kind} | {ready} — *SKIPPED at "
-                        "Tier: tiny (D-037)* | {done} — *not required at "
+                        f"Tier: tiny (D-037)* | {done} — *not required at "
                         "Tier: tiny* |")
         else:
             rows.append(f"| `{node}` | {kind} | {ready} | {done} |")
     return "\n".join([BEGIN] + rows + [END])
+
+
+SPAWN_BEGIN = "<!-- BEGIN generated: spawn-table (scripts/contract.py " \
+              "--render spawn-table) -->"
+SPAWN_END = "<!-- END generated: spawn-table -->"
+
+REVIEWER_MODES = {"approve": "contract", "tick-commit": "implementation-diff"}
+
+
+def render_spawn_table() -> str:
+    """The SKILL.md spawn-table block: which brief and lens each node's
+    payload carries, and which span prepares it — read from graph.py's
+    AGENT_BRIEFS and SPAN_AGENT_NODES so the docs cannot drift."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import graph
+    rows = ["| Node | Brief | Lens / mode | Span |",
+            "|------|-------|-------------|------|"]
+    for node, _, _, _ in NODE_TABLE:
+        spans = [sp for sp, nodes in graph.SPAN_AGENT_NODES.items()
+                 if node in nodes]
+        if not spans:
+            continue
+        if node in graph.AGENT_BRIEFS:
+            _, brief, lens = graph.AGENT_BRIEFS[node]
+        else:
+            brief, lens = "reviewer.md", REVIEWER_MODES[node]
+        rows.append(f"| `{node}` | `{brief}` | {lens} | "
+                    f"{', '.join(spans)} |")
+    return "\n".join([SPAWN_BEGIN] + rows + [SPAWN_END])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -102,7 +132,11 @@ def main(argv: list[str] | None = None) -> int:
     if argv == ["--render", "skill-table"]:
         print(render_skill_table())
         return 0
-    print("usage: contract.py --render skill-table", file=sys.stderr)
+    if argv == ["--render", "spawn-table"]:
+        print(render_spawn_table())
+        return 0
+    print("usage: contract.py --render skill-table|spawn-table",
+          file=sys.stderr)
     return 2
 
 

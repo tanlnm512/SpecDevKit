@@ -17,7 +17,7 @@ exit 0 releases; exit 1 names what drifted and what owns it:
               the shared core                        at skills/spec-shape/
                                                      scripts/ (tools/parity.py
                                                      --check)
-  diagrams    diagrams/spec-to-prod-workflow.mmd     vs the workflow graph
+  diagrams    diagrams/spec-workflow.mmd     vs the workflow graph
                                                      contract in
                                                      scripts/graph.py
                                                      (NODES and the edge
@@ -49,7 +49,7 @@ from pathlib import Path
 PKG_ROOT = Path(__file__).resolve().parent.parent
 SKILL = PKG_ROOT / "skills" / "spec-shape"
 SHAPE = SKILL
-MODEL = SKILL / "diagrams" / "spec-to-prod-workflow.mmd"
+MODEL = SKILL / "diagrams" / "spec-workflow.mmd"
 DIAGRAMS_DIR = SKILL / "diagrams"
 FIXTURE = SHAPE / "examples" / "mini-spec" / "specs" / "mini-spec"
 
@@ -119,30 +119,30 @@ def diagram_problems(g) -> list[str]:
     canonical_nodes = set(g.NODES)
     model_nodes = set(names.values())
     if model_nodes != canonical_nodes:
-        bad.append("diagrams/spec-to-prod-workflow.mmd — node set differs "
+        bad.append("diagrams/spec-workflow.mmd — node set differs "
                    f"from scripts/graph.py NODES: {_diff(canonical_nodes, model_nodes)}")
 
     canonical_solid = {tuple(e) for e in g.DATA_EDGES}
     if solid != canonical_solid:
-        bad.append("diagrams/spec-to-prod-workflow.mmd — solid edges differ "
+        bad.append("diagrams/spec-workflow.mmd — solid edges differ "
                    f"from scripts/graph.py DATA_EDGES: {_diff(canonical_solid, solid)}")
 
     conditional = {tuple(e) for e in g.CONDITIONAL_EDGES}
     loops = {(e[0], e[1]) for e in g.LOOP_EDGES}
     for a, b in sorted(conditional):
         if (a, b) not in dotted:
-            bad.append(f"diagrams/spec-to-prod-workflow.mmd — conditional "
+            bad.append(f"diagrams/spec-workflow.mmd — conditional "
                        f"edge {a} -.-> {b} of scripts/graph.py "
                        f"CONDITIONAL_EDGES is not drawn")
     for a, b in sorted(loops):
         if (a, b) not in dotted and (b, a) not in dotted:
-            bad.append(f"diagrams/spec-to-prod-workflow.mmd — loop edge "
+            bad.append(f"diagrams/spec-workflow.mmd — loop edge "
                        f"{a} <-> {b} of scripts/graph.py LOOP_EDGES is not "
                        f"drawn")
     for a, b in sorted(dotted):
         if (a, b) in conditional or any({a, b} == {x, y} for x, y in loops):
             continue
-        bad.append(f"diagrams/spec-to-prod-workflow.mmd — dotted edge "
+        bad.append(f"diagrams/spec-workflow.mmd — dotted edge "
                    f"{a} -.-> {b} is in no scripts/graph.py "
                    f"CONDITIONAL_EDGES/LOOP_EDGES table")
 
@@ -156,7 +156,7 @@ def diagram_problems(g) -> list[str]:
             if node not in rendered:
                 bad.append(f"diagrams/ — model node \"{node}\" appears in no "
                            f"HTML render; regenerate the renders from "
-                           f"diagrams/spec-to-prod-workflow.mmd")
+                           f"diagrams/spec-workflow.mmd")
     return bad
 
 
@@ -182,7 +182,17 @@ def check_contract() -> int:
         print("  regenerate: python3 skills/spec-shape/scripts/"
               "contract.py --render skill-table (replace the block)")
         return 1
-    print("  OK  skills/spec-shape/SKILL.md node table")
+    s_start, s_end = text.find(mod.SPAWN_BEGIN), text.find(mod.SPAWN_END)
+    if s_start < 0 or s_end < 0:
+        print("  DRIFT: SKILL.md lost the generated spawn-table sentinels")
+        return 1
+    if (text[s_start:s_end + len(mod.SPAWN_END)]
+            != mod.render_spawn_table()):
+        print("  DRIFT: SKILL.md spawn table differs from graph.py")
+        print("  regenerate: python3 skills/spec-shape/scripts/"
+              "contract.py --render spawn-table (replace the block)")
+        return 1
+    print("  OK  skills/spec-shape/SKILL.md node table and spawn table")
     return 0
 
 
@@ -210,7 +220,7 @@ def check_diagrams() -> int:
     try:
         problems = diagram_problems(load_graph_contract())
     except KeyError as e:
-        print(f"DRIFT diagrams/spec-to-prod-workflow.mmd — edge references "
+        print(f"DRIFT diagrams/spec-workflow.mmd — edge references "
               f"an undefined node {e}")
         return 1
     for problem in problems:
