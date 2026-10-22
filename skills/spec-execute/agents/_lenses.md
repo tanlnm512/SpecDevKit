@@ -4,7 +4,7 @@ One `## Lens: <name>` section per lens, byte-verbatim into the spawn
 payload of the archetype that carries it — scout (survey · research),
 designer (plan · tech · tasks). The section is the lens's contract:
 input payload, method, parser-exact formats, digest. The archetype
-brief carries the spine; this file carries the specialization (D-036).
+brief carries the spine; this file carries the specialization.
 
 ## Lens: survey (scout → survey.md)
 
@@ -17,7 +17,7 @@ current HEAD).
 **Method**:
 1. If the repo keeps a domain glossary (GLOSSARY.md, CONTEXT.md, or
    docs/glossary*), read it first and word items, statuses, and the
-   context files in the project's own terms (D-032). No glossary
+   context files in the project's own terms. No glossary
    exists? The domain terms you meet while surveying are worth a line
    in specs/context/tech.md's conventions for the later docs to reuse.
 2. For each item: grep/read (`rg`) the codebase for it (see the spine's
@@ -51,8 +51,9 @@ unknowns <n> · surprises <one line>`
 ## Lens: research (scout → research.md)
 
 **Input payload**: the spec's What/Why + FR/NFR list (verbatim); the
-spec dir path; 3–6 research questions (the orchestrator derives them
-from the spec's open technical choices).
+spec dir path; 3–6 research questions (the orchestrator
+derived them from the spec's open technical choices and wrote them
+into spec.md).
 
 **Method**:
 1. Search per the spine (WebSearch/WebFetch; paper-fetch /
@@ -117,7 +118,8 @@ hard nos).
 2. **Audit current architecture**: how the touched areas actually work
    today, from survey evidence; map the blast radius of the symbols
    the spec touches into § Impact analysis (what breaks, who depends
-   on it, precise+fuzzy resolution caveat for common names). WHERE any
+   on it; for a common name, say when a grep match may be a different
+   symbol). WHERE any
    decision flips a default (flag, keyword, return shape), the impact
    table MUST also sweep the test tree for that API and classify the
    assertions: flag pins, exact-count pins, exact-traffic pins,
@@ -128,8 +130,8 @@ hard nos).
    finding or a survey constraint — not taste).
 4. Apply the spine's design screens; a red flag you keep ships as a
    D-### with its why.
-5. Draw the architecture diagram per `references/mermaid-cheatsheet.md`
-   (vendored); inline mermaid block is the deliverable; load the
+5. Draw the architecture diagram as an inline mermaid block (the
+   deliverable); load the
    `creating-mermaid-diagrams` skill only for exported image files.
    Simple > pretty.
 6. Write § Quality, threats, and rollback: map every applicable NFR to
@@ -143,7 +145,7 @@ hard nos).
    (context/decision/consequences). Bugfix specs insert § Root-cause
    analysis before § Solution: ranked falsifiable causes with
    predictions, the confirmed cause carrying its proof, a missing
-   correct regression seam named in Regression risk (D-031).
+   correct regression seam named in Regression risk.
 
 **Parser-exact**: D-### decisions are `### D-###:` headings — a
 bullet-form decision never defines its ID and check.py FAILs every
@@ -189,5 +191,5 @@ paths, directories, or globs.
 <done>/<partial>/<todo> · ungrounded <task ids or none>`
 
 **Guardrails**: never delete dropped tasks (strike them with a D-###
-reference); `check.py <spec-dir>` passes its task-related checks
-before you return.
+reference); run `check.py <spec-dir>` and clear the task-related
+FAILs before you return (test.md and TC-coverage FAILs belong to qa).

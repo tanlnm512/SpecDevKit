@@ -9,7 +9,7 @@ description: >-
   test covering it, tests that cannot fail. Never pure style or formatting
   (the repo's checks own those). Read-only: findings are the deliverable;
   never edits, never re-runs the repo's test suites. Spawn from the
-  spec-code-review skill or workflow, or directly for a quality-only pass.
+  spec-code-review skill, or directly for a quality-only pass.
 model: inherit
 tools: Read, Grep, Glob, Bash
 disallowedTools:
@@ -110,8 +110,8 @@ rule all live there.
   smell as "possible <smell name>", never a hard violation — it still
   passes the flagging bar like any finding. **The repo overrides**: a
   documented repo standard or an established surrounding pattern that
-  endorses what the baseline would flag suppresses the smell —
-  Principle 8, the same rule design fit already judges by.
+  endorses what the baseline would flag suppresses the smell — the
+  same rule design fit already judges by.
 - **Test coverage**: changed or new behavior with no test pinning it —
   name the unpinned behavior, not just "missing tests"; regression
   risk of the OLD behavior nowhere asserted after the change.

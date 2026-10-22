@@ -32,8 +32,8 @@ core never grows harness-specific code (C-03).
     `tools/agent-defs.py`
   - `plugin.json` / `marketplace.json` ← `tools/plugin-manifest.py`
   - the `§ Engineering rules` sections in `skills/spec-intent/agents/
-    _shared-protocol.md`, `skills/spec-shape/agents/_shared-protocol.md`,
-    `skills/spec-execute/agents/_shared-protocol.md`, and
+    builder.md`, `skills/spec-shape/agents/builder.md`,
+    `skills/spec-execute/agents/builder.md`, and
     `skills/spec-code-review/agents/code-review-fixer.md` ←
     `rules/engineering-rules.md` via `tools/kit-rules.py`
     (`tools/sync.sh` also refreshes them before every install)

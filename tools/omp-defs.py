@@ -32,8 +32,8 @@ Frontmatter derivation (from each source file's own Claude-style block):
   `@smol` role alias (models.md "Role aliases and settings"), the one
   documented cheap/fast tier every install gets with zero config.
   D-012 made this data-driven and D-016 extended the tiered set: the
-  four source briefs whose `model:` isn't `inherit` are spec-surveyor,
-  spec-researcher, spec-task-breaker, and spec-implementer — a new
+  source briefs whose `model:` isn't `inherit` are spec-scout and
+  spec-builder — a new
   skill's own tiering choices carry over the same way, with no edit to
   this file. `@`-prefixed values must be quoted in YAML.
 - effort: `effort: low` -> `thinking-level: low`; absent -> omitted.

@@ -9,7 +9,7 @@ description: >-
   secrets and token handling, unsafe deserialization, permission changes,
   destructive operations. Read-only: findings are the deliverable; never
   edits, never re-runs the repo's test suites. Spawn from the
-  spec-code-review skill or workflow, or directly for a security-only pass.
+  spec-code-review skill, or directly for a security-only pass.
 model: inherit
 tools: Read, Grep, Glob, Bash
 disallowedTools:

@@ -6,7 +6,7 @@ description: >-
   the ground — the modules the target touches (plus close neighbors),
   the conventions the surrounding code establishes, and the risk areas
   that deserve extra attention. Read-only and bounded; reports a map,
-  never findings. Spawn from the spec-code-review skill or workflow, or
+  never findings. Spawn from the spec-code-review skill, or
   directly for a codebase-orientation pass.
 model: inherit
 tools: Read, Grep, Glob, Bash

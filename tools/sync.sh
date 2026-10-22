@@ -76,7 +76,7 @@
 #                                 `agy plugin install` copies; agy owns
 #                                 ~/.gemini/config/plugins itself).
 #   rules/engineering-rules.md -> the § Engineering rules sections in
-#                              the spec trio's agents/_shared-protocol.md
+#                              the spec trio's agents/builder.md
 #                              (spec-intent, spec-shape, spec-execute)
 #                              and skills/spec-code-review/agents/
 #                              code-review-fixer.md — COMMITTED

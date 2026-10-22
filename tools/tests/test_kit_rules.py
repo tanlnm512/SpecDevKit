@@ -73,9 +73,9 @@ def flat(text: str) -> str:
 
 
 class KitRulesParityTests(unittest.TestCase):
-    CARRIERS = (SINT / "agents" / "_shared-protocol.md",
-                SSHAPE / "agents" / "_shared-protocol.md",
-                SEXEC / "agents" / "_shared-protocol.md",
+    CARRIERS = (SINT / "agents" / "builder.md",
+                SSHAPE / "agents" / "builder.md",
+                SEXEC / "agents" / "builder.md",
                 SCR / "agents" / "code-review-fixer.md")
 
     def test_carriers_match_the_canonical_source(self):
@@ -104,7 +104,7 @@ class KitRulesWiringTests(unittest.TestCase):
         for skill in (SSHAPE, SEXEC):
             text = flat((skill / "SKILL.md").read_text(encoding="utf-8"))
             for anchor in ("§ Engineering rules",
-                           "_shared-protocol.md",
+                           "builder.md",
                            "tools/kit-rules.py"):
                 self.assertIn(anchor, text, f"{skill.name}: {anchor}")
 
@@ -126,6 +126,14 @@ class KitRulesWiringTests(unittest.TestCase):
             encoding="utf-8"))
         self.assertIn("§ Engineering rules", text)
         self.assertIn("they win", text)
+
+    def test_only_code_writing_briefs_carry_the_rules(self):
+        for skill in (SINT, SSHAPE, SEXEC):
+            for name in ("scout.md", "designer.md", "qa.md", "reviewer.md",
+                         "_shared-protocol.md"):
+                text = (skill / "agents" / name).read_text(encoding="utf-8")
+                self.assertNotIn(SECTION_HEADING, text,
+                                 f"{skill.name}/{name}")
 
     def test_brainstorming_panel_carries_no_engineering_rules(self):
         # D-005: the lenses are read-only — the rules must NOT ride

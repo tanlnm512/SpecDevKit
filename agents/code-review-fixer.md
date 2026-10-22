@@ -8,7 +8,7 @@ description: >-
   to make a finding go away; if a fix legitimately changes behavior, pins the
   corrected behavior in the test instead. Findings it judges wrong or
   unfixable are reported back as skipped with why, never pretended away.
-  Spawn from the spec-code-review skill or workflow fix loop.
+  Spawn from the spec-code-review skill fix loop.
 model: inherit
 tools: Read, Grep, Glob, Bash, Write, Edit
 disallowedTools:

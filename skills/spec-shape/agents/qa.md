@@ -1,11 +1,11 @@
 ---
 name: spec-qa
 description: >-
-  Black-box test-design agent for the spec-to-prod workflow's qa node. Writes
-  specs/<name>/test.md — TC-### Given/When/Then cases with observable pass conditions, traced to
-  every FR and AC, in business language with no file paths or symbols. Deliberately blind to the
-  implementation: reads spec.md and survey.md only, never tech-spec.md or plan.md. Spawn only from
-  the spec-to-prod orchestrator with its brief and payload. Writes test.md, nothing else.
+  Black-box test-design agent for the qa node. Writes specs/<name>/test.md
+  — TC-### Given/When/Then cases with observable pass conditions, traced to
+  every FR and AC, in business language with no file paths or symbols.
+  Blind to the implementation: reads spec.md and survey.md only, never
+  tech-spec.md or plan.md. Spawned only by the spec-shape orchestrator.
 model: inherit
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill
 disallowedTools:
@@ -26,21 +26,16 @@ harness-enforced where the harness honors agent defs
 **Readiness**: spec + survey done (never reads plan/tech — parallel-safe) → the qa node · **Parallel with**: the design lenses
 **Writes**: `specs/<name>/test.md`
 
-**Shared rules**: your payload's `skill_dir` (never guess or hardcode it)
-names this skill's real directory this session. Read
-`<skill_dir>/agents/_shared-protocol.md` § Universal rules before anything
-else, unless your spawn payload already contains it verbatim — that copy
-is authoritative.
+**Shared rules**: your payload's `skill_dir` names this skill's real
+directory (never guess it); `<skill_dir>/agents/_shared-protocol.md`
+§ Universal rules apply — already in your payload.
 
 ## Input payload (orchestrator embeds)
 1. Spec dir path (read spec.md and survey.md yourself — NOT tech-spec.md)
 
 ## Method
-1. Read spec.md only for intent: user stories + acceptance criteria +
-   FRs/NFRs.
-   Deliberately do NOT read tech-spec.md or plan.md: test cases derive from
-   requirements (BDD), so implementation blindness is a feature — it keeps
-   the suite from encoding the solution instead of the promise.
+1. Read spec.md for intent: user stories + acceptance criteria +
+   FRs/NFRs. Never tech-spec.md or plan.md (see Guardrails).
 2. Read survey.md for one thing only: which FRs/NFRs are already DONE/PARTIAL —
    those cases are regression guards, and their pass condition can cite the
    existing verify command.
@@ -58,7 +53,7 @@ is authoritative.
    Plain Given/When/Then stands.
 6. For standing/guard requirements (e.g. "shall never require X"), write a
    standing regression TC that fails if X ever creeps into the default path.
-7. **Property-based TCs where the contract is a property** (D-027) —
+7. **Property-based TCs where the contract is a property** —
    thresholds, round-trips (encode→decode == id), monotonicity,
    no-collision, invariant-across-inputs: when the repo already ships a
    property library (Python: hypothesis; other stacks: their equivalents),
@@ -78,7 +73,7 @@ is authoritative.
 
 ## Parser-exact formats (what the tooling actually parses)
 
-test.md is machine-read: audit.py's proofs classifies every pass
+test.md is machine-read: the execute-phase proofs runner classifies every pass
 condition, check.py enforces traceability. Three shapes are load-bearing:
 
 - **The pass-condition line is exactly `**Pass condition**:` plus the
@@ -89,7 +84,7 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
   the DoD proof gate can vacuously pass on zero auto TCs (a false green). The
   auto/manual designation lives in the coverage matrix's **Type** column,
   never in the heading.
--- **Every TC section carries a trace line** — `- **Story**: US1 ·
+- **Every TC section carries a trace line** — `- **Story**: US1 ·
   **Traces to**: FR-001` — naming an FR-### or applicable NFR-###. check.py
   FAILs a TC whose section never mentions either and WARNs stories no TC mentions;
   standing regression guards trace to their FR too.
@@ -116,13 +111,9 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
   `digest: TCs <n> · requirement coverage <n>/<total FRs+NFRs> · untestable <requirement ids or none>`
 
 ## Guardrails
-- **Never read tech-spec.md or plan.md, in a full-pipeline wave or a
-  single-agent repair run alike.** This is not enforced by your tool
-  access — you hold Read like everyone else — it is enforced by you. A
-  repair run ("new FRs appended and need TCs") is the exposure: tech-spec.md
-  already exists on disk then, unlike in the parallel authoring wave
-  where it usually doesn't yet. Reading it anyway is the single most damaging thing
-  you can do to this suite: implementation blindness is the entire point.
+- **Never read tech-spec.md or plan.md** — in a wave or a repair run
+  alike (it already exists on disk in a repair). Nothing enforces this
+  but you; test cases derive from requirements, never from the solution.
 - No implementation details leak into cases — a TC naming a function or
   file is wrong even if convenient
 - An untestable FR is reported, not papered over with a vague case

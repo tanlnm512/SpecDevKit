@@ -59,7 +59,7 @@ ROUTER_COMMANDS = (
     "spec-intent",
 )
 BARE_COMMANDS = (
-    "spec-idea", "spec-gen", "spec-plan", "spec-build",
+    "spec-idea", "spec-gen", "spec-build",
     "spec-test", "spec-review", "spec-ship",
 )
 ALL_COMMANDS = ROUTER_COMMANDS + BARE_COMMANDS
@@ -93,17 +93,18 @@ SYNC_CORPUS = (
     f"{SHAPE_SKILL}/commands/spec-gen.md",
     f"{SHAPE_SKILL}/commands/extra.txt",
     f"{SHAPE_SKILL}/agents/_shared-protocol.md",
+    f"{SHAPE_SKILL}/agents/builder.md",
     f"{SHAPE_SKILL}/agents/reviewer.md",
     f"{EXECUTE_SKILL}/SKILL.md",
     f"{EXECUTE_SKILL}/VERSION",
     f"{EXECUTE_SKILL}/commands/spec-execute.md",
-    f"{EXECUTE_SKILL}/commands/spec-plan.md",
     f"{EXECUTE_SKILL}/commands/spec-build.md",
     f"{EXECUTE_SKILL}/commands/spec-test.md",
     f"{EXECUTE_SKILL}/commands/spec-review.md",
     f"{EXECUTE_SKILL}/commands/spec-ship.md",
     f"{EXECUTE_SKILL}/commands/extra.txt",
     f"{EXECUTE_SKILL}/agents/_shared-protocol.md",
+    f"{EXECUTE_SKILL}/agents/builder.md",
     f"{EXECUTE_SKILL}/agents/qa.md",
     "agents/builder.md",
     "agents/reviewer.md",
@@ -191,7 +192,7 @@ class SyncShTests(SyncShBase):
     def test_bare_name_redistribution_installs_the_same_total_set(self):
         # FR-006/T019 + the 2026-10-11 renames: spec-idea to
         # spec-intent, spec-gen replacing spec-shape's self-titled
-        # router, the five lifecycle verbs to spec-execute — eleven
+        # router, the four lifecycle verbs to spec-execute — ten
         # commands, nothing more, nothing less.
         self.assertEqual(self.run_sync().returncode, 0)
         for root in (".agents", ".claude", ".zcode"):
@@ -587,10 +588,17 @@ class KitRulesSyncTests(SyncShBase):
     rules/engineering-rules.md before installing, and --check reports a
     hand-edited carrier as DRIFT without writing anything."""
 
+    @staticmethod
+    def hand_edit(carrier):
+        heading = "## Engineering rules (kit-wide)\n"
+        carrier.write_text(carrier.read_text().replace(
+            heading, heading + "stale hand-edit\n", 1))
+
     def test_sync_refreshes_a_stale_carrier_and_installs_fresh(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        carrier = self.repo / SHAPE_SKILL / "agents" / "_shared-protocol.md"
-        carrier.write_text(carrier.read_text() + "stale hand-edit\n")
+        carrier = (self.repo / "skills" / "spec-code-review" / "agents"
+                   / "code-review-fixer.md")
+        self.hand_edit(carrier)
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         # the committed carrier was regenerated back to the source
@@ -602,8 +610,9 @@ class KitRulesSyncTests(SyncShBase):
 
     def test_check_reports_stale_carrier_as_drift_and_writes_nothing(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        carrier = self.repo / SHAPE_SKILL / "agents" / "_shared-protocol.md"
-        carrier.write_text(carrier.read_text() + "stale hand-edit\n")
+        carrier = (self.repo / "skills" / "spec-code-review" / "agents"
+                   / "code-review-fixer.md")
+        self.hand_edit(carrier)
         before = self.home_snapshot()
         r = self.run_sync("--check")
         self.assertNotEqual(r.returncode, 0)
@@ -614,8 +623,9 @@ class KitRulesSyncTests(SyncShBase):
     def test_stale_carrier_cannot_wedge_a_fresh_install(self):
         # the refresh runs before the first install write, so even a
         # never-installed HOME ends up with the source-fresh section
-        carrier = self.repo / SHAPE_SKILL / "agents" / "_shared-protocol.md"
-        carrier.write_text(carrier.read_text() + "stale hand-edit\n")
+        carrier = (self.repo / "skills" / "spec-code-review" / "agents"
+                   / "code-review-fixer.md")
+        self.hand_edit(carrier)
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn(

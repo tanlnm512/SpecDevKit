@@ -7,21 +7,13 @@ editable file). This tool injects it verbatim as the
 "## Engineering rules (kit-wide)" section into the carrier files the
 kit's spawn channels already load:
 
-  skills/spec-intent/agents/_shared-protocol.md    (embedded into every
-                                                     spawn payload by
-                                                     graph.py build_payload
-                                                     — the intent
-                                                     phase's own carrier)
-  skills/spec-shape/agents/_shared-protocol.md     (same embed — the
-                                                     shape phase's own
-                                                     carrier)
-  skills/spec-execute/agents/_shared-protocol.md   (same embed — the
-                                                     execute phase's
-                                                     own carrier)
+  skills/spec-intent/agents/builder.md             (the code-writing
+  skills/spec-shape/agents/builder.md               archetype — the only
+  skills/spec-execute/agents/builder.md             spec-suite role that
+                                                     writes code or tests)
   skills/spec-code-review/agents/code-review-fixer.md
-                                                     (runtime-loaded into
-                                                      the fix loop by both
-                                                      workflow dialects)
+                                                     (the fix loop's
+                                                      author agent)
 
 Edit the rules in the source file, run this tool, re-run drift-check.
 --check verifies the committed carriers match a fresh injection (this is
@@ -41,11 +33,11 @@ SOURCE = PKG_ROOT / "rules" / "engineering-rules.md"
 HEADING = "## Engineering rules (kit-wide)"
 CARRIERS = (
     PKG_ROOT / "skills" / "spec-intent" / "agents"
-    / "_shared-protocol.md",
+    / "builder.md",
     PKG_ROOT / "skills" / "spec-shape" / "agents"
-    / "_shared-protocol.md",
+    / "builder.md",
     PKG_ROOT / "skills" / "spec-execute" / "agents"
-    / "_shared-protocol.md",
+    / "builder.md",
     PKG_ROOT / "skills" / "spec-code-review" / "agents"
     / "code-review-fixer.md",
 )

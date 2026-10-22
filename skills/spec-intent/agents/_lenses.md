@@ -5,7 +5,7 @@ payload of the archetype that carries it — here the scout's intent
 lens (the survey · research lenses belong to the shape phase's scout).
 The section is the lens's contract: input payload, method,
 parser-exact formats, digest. The archetype brief carries the spine;
-this file carries the specialization (D-036).
+this file carries the specialization.
 
 ## Lens: intent (scout → intent.md)
 

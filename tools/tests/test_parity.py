@@ -34,6 +34,25 @@ class DiscoveryTests(unittest.TestCase):
             GRAPH_SKILLS,
             ["spec-execute", "spec-intent", "spec-shape"])
 
+class ArchetypeParityTests(unittest.TestCase):
+    """The five archetype briefs and the shared protocol are byte-shared
+    across the spec trio; sync.sh refuses a divergent install, this
+    fails it in CI first."""
+
+    BRIEFS = ("scout.md", "designer.md", "qa.md", "reviewer.md",
+              "builder.md", "_shared-protocol.md")
+
+    def test_archetype_briefs_identical_across_the_trio(self):
+        agents = {skill: REPO_ROOT / "skills" / skill / "agents"
+                  for skill in GRAPH_SKILLS}
+        for name in self.BRIEFS:
+            with self.subTest(brief=name):
+                digests = {skill: hashlib.sha256(
+                    (d / name).read_bytes()).hexdigest()
+                    for skill, d in agents.items()}
+                self.assertEqual(len(set(digests.values())), 1, digests)
+
+
 class ParityTests(unittest.TestCase):
     def test_closure_files_byte_identical_across_master_and_replicas(self):
         for name in CLOSURE:
