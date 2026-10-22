@@ -21,7 +21,7 @@ Run the mechanical gate first, on the exact default or
 user-named artifact path:
 
 ```sh
-python3 skills/spec-brainstorming/scripts/check.py ARTIFACT
+python3 <skill_dir>/scripts/check.py ARTIFACT
 ```
 
 Exit 1 is not a handoff: fix each named artifact failure and
@@ -59,7 +59,7 @@ and exits 0 only when all of these pass:
 ### Run-boundary checks
 
 - Nothing under `specs/` was touched.
-- The final message names the artifact path and `/spec <name>`
+- The final message names the artifact path and `/spec-idea <name>`
   as the next step.
 
 When any criterion fails, the run is not handed off — fix the

@@ -50,7 +50,7 @@ project.
 
 ## After the handoff
 
-Run `/spec <name>` (spec-to-prod) with the design spec as intent
+Run `/spec-idea <name>` (spec-intent) with the design spec as intent
 input. The brainstorm doc stays where it is — provenance for the
 direction the spec develops. Nothing under `specs/` is ever
 touched by this skill.

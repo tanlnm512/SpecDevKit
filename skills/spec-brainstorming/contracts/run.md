@@ -13,7 +13,7 @@ SKILL.md summarizes; this file arbitrates. The agent-facing subset
 | 2 — perspective multiplication | three lens agents spawned fresh, in parallel, from one payload; angles presented distinctly labeled, no synthesis between them | all three digests are presented |
 | 3 — trade-off matrix | one table — Angle / Pros / Cons / Implementation speed / Best when — carrying no recommendation | the table is presented; the next move is the user's |
 | 4 — socratic refinement | single questions, strictly one per turn, each shaped by the previous answer; soft cap five, then a summary asking confirmation | the user confirms the selection or blend |
-| 5 — handoff | `brainstorms/<name>.md` written from `templates/design-spec.md`; an existing file is read first and its collision resolved by ONE question | the artifact is on disk, the mechanical check exits 0 after any fix-and-rerun, the judgment criteria hold, and the final message names `/spec <name>` |
+| 5 — handoff | `brainstorms/<name>.md` written from `templates/design-spec.md`; an existing file is read first and its collision resolved by ONE question | the artifact is on disk, the mechanical check exits 0 after any fix-and-rerun, the judgment criteria hold, and the final message names `/spec-idea <name>` |
 
 The panel never picks the direction. Every stage ends in the
 user's words, and the artifact records the user's chosen
@@ -66,7 +66,7 @@ it.
 - Before `/spec-idea` is named, run this on the exact artifact path:
 
   ```sh
-  python3 skills/spec-brainstorming/scripts/check.py ARTIFACT
+  python3 <skill_dir>/scripts/check.py ARTIFACT
   ```
 
   The checker uses the operator-named path without assuming

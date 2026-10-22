@@ -22,4 +22,4 @@ flowchart TD
     S5 --> COLL{brainstorms/<name>.md<br/>already exists?}
     COLL -- yes --> ASK["ONE question: overwrite or version the name<br/>never a silent clobber"] --> WRITE
     COLL -- no --> WRITE["write from templates/design-spec.md<br/>direction · problem · personas · MVP · risks"]
-    WRITE --> NEXT(["/spec <name> — the doc is intent input<br/>nothing was ever written under specs/"])
+    WRITE --> NEXT(["/spec-idea <name> — the doc is intent input<br/>nothing was ever written under specs/"])

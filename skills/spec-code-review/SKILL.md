@@ -2,21 +2,14 @@
 name: spec-code-review
 description: >-
   Portable three-stage code review for any git repository — a change, a
-  pull request, a branch, or the whole project. Stage 1
-  runs the repo's own checks as the mechanical gate (Makefile,
-  npm scripts, cargo, go, pytest/unittest, shell syntax, secret shapes).
-  A preflight scout then maps the codebase and modules (roles,
-  conventions, risks) so every reviewer starts from the same
-  ground. Stage 2 reviews the target through separate lenses —
-  correctness, security, quality & tests (one general reviewer when
-  small) — one editor triages, every kept finding independently
-  confirmed. Stage 3 synthesizes risk, test gaps and residual
-  risks. An optional fix loop has an author agent fix the confirmed
-  findings in the working tree, verify each fix, re-run the gate, and
-  recommend merge / fix-first / human. Use when the user asks to review
-  a change — "review the diff", "review and fix" — a pull request
+  pull request, a branch, or the whole project: the repo's own checks as
+  the mechanical gate, a preflight scout, specialist lenses (correctness,
+  security, quality & tests) with independent confirmation of every kept
+  finding, and an optional verified fix loop. Use when the user asks to
+  review a change — "review the diff", "review and fix" — a pull request
   ("review PR 12"), a branch's recent changes ("review what's on this
-  branch") — or the codebase as a whole ("review the project").
+  branch"), or the codebase as a whole ("review the project"). Not a
+  spec's delivery review (spec-execute).
 metadata:
   owner: platform-core
   version: "0.1.0"
@@ -36,7 +29,8 @@ The user asks to review a change: "review the diff", "review this
 change", "review the last commit", "look over my working tree before I
 commit" — a pull request: "review PR 12", "review this pull request" —
 a branch's recent changes: "review what's on this branch", "review the
-recent changes on this branch" — or to review AND fix any of these:
+recent changes on this branch" — the whole codebase: "review the
+project" — or to review AND fix any of these:
 "review and fix the findings". The default change scope is a diff base:
 the working tree (default), `HEAD~1` for the last commit, or any
 ref/branch.
@@ -56,9 +50,8 @@ change is wrong — not the rule.
    re-derive from its evidence is not a finding.
 3. **Independence beats volume.** The reviewer, the confirmer, the
    fixer and the fresh-eyes fix reviewer are different agents. One
-   verified finding is worth five unverified ones — the industry's
-   2026 lesson: precision, not recall, is what makes an AI reviewer
-   trustworthy.
+   verified finding is worth five unverified ones: precision, not
+   recall, is what makes an AI reviewer trustworthy.
 4. **Zero findings is success.** Clean targets get empty lists; noise
    is never manufactured to seem busy, and style/formatting is never a
    finding (the repo's checks own it).
@@ -124,17 +117,9 @@ bash <skill-dir>/scripts/gate.sh --plan             # what it would run
 ```
 
 It detects and runs the repo's OWN checks (Makefile targets, npm
-scripts, cargo/go, pytest or unittest discover (pytest resolved via PATH,
-the repo's venv, or `uv run` when the repo is uv-locked), plus two
-always-on families when git is available: `bash -n` on every changed
-`*.sh` — every tracked `*.sh` in project mode — and a high-precision
-secret-shape scan (AWS/GitHub/GitLab/Stripe/Slack/Google/npm/Anthropic
-key shapes, private-key headers) over the change's added lines and
-untracked files; project mode skips the secret family to avoid
-false-positive fixtures; a line carrying the inline marker
-`spec-review:allow` is skipped — the gitleaks-style escape hatch that
-lets tests for this family hold fixture tokens) and prints a JSON array — one
-`{name, exit_code, tail}` per check. Rules:
+scripts, cargo/go, pytest or unittest discover), plus `bash -n` on
+changed `*.sh` and a secret-shape scan of the change's added lines,
+and prints a JSON array — one `{name, exit_code, tail}` per check. Rules:
 
 - A red gate ends the review: report the failing checks with their
   tails as the findings, and stop. Mechanical failures are fixed before
@@ -324,11 +309,11 @@ commit decision and message are the user's.
 
 ## Launch discipline
 
-- **Any harness** (one shape — D-017): the `/spec-code-review` router
+- **Any harness** (one shape): the `/spec-code-review` router
   command (`commands/spec-code-review.md`, installed by tools/sync.sh)
   routes review/fix/gate/plan asks into this skill, and the session
   executes the stages inline as written — the shared review oracle
-  (`scripts/review_orchestrator.py`, D-014) resolves targets, runs the
+  (`scripts/review_orchestrator.py`) resolves targets, runs the
   gate plan, parses findings and assembles the report for any caller
   (args: `base`, `target` `diff`/`branch`/`pr`/`project`, `pr` (the
   pull request, pr mode), `intent` (the author's stated intent),
@@ -358,13 +343,7 @@ mode, as the branch is ready to merge.
 
 `contracts/panel.md` is the canonical contract (this file summarizes;
 it arbitrates). `gates/recommendation.md` arbitrates stop conditions
-and recommendation criteria. `decisions/` holds the panel's ADRs
-(D-001…D-013 — gate-first, independent confirmation, advisory-only,
-targets-collapse-to-diffs, the fix loop, dialect retirement
-(D-017 — the oracle is the one executable form),
-precision-over-recall, the preflight scout, sub-repo targets, sharded
-project coverage, audits continuing past red gates, kit-wide
-engineering rules, finding ids and the report-markdown carrier).
+and recommendation criteria. `decisions/` holds the panel's ADRs.
 `references/quickstart.md` is navigation, not
 a second contract. `evals/cases.md` + `examples/review-target/` are
 the standing live-eval scenarios with a seeded-bug answer key;

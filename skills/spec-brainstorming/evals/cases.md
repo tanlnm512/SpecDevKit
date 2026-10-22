@@ -52,7 +52,7 @@ average — aggregate.
   dealbreaker from the panel appears in
   the risk table or is explicitly accepted; nothing was written
   under `specs/`; the final message names the artifact path and
-  `/spec <name>` as the next step.
+  `/spec-idea <name>` as the next step.
 - **Run**: session: run the flow to stage 5 per **Setup**; judge `brainstorms/<name>.md` against the pass criteria above
 
 ## B4 — Compile-only and collision behavior

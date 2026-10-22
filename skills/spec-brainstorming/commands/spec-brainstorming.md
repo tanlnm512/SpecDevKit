@@ -16,7 +16,7 @@ run):
   implementation speed / best-when), socratic refinement (single
   questions, soft cap five) to a selected or blended direction,
   then the handoff — `brainstorms/<name>.md` written from the
-  pinned template, with `/spec <name>` named as the next step.
+  pinned template, with `/spec-idea <name>` named as the next step.
 - `handoff [name]` → compile-only: the exploring already happened
   in this conversation; jump to the handoff stage and write the
   design spec from what was discussed. If

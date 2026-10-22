@@ -59,7 +59,7 @@ on any conflict the canonical file wins.
 | eval case | an entry in a skill's `evals/cases.md`; every increment names its served case (C-10) | `specs/CONSTITUTION.md` |
 | sync | `tools/sync.sh` — the one harness-neutral install pipeline to every machine harness root | `tools/` |
 | telemetry | the local append-only run record (`scripts/telemetry.py` → `~/.spec-dev-kit/telemetry/*.jsonl`) — evidence for self-improvement, never status, never contents | `skills/*/scripts/telemetry.py` |
-| lifecycle commands | the `/spec-*` verb wrappers — `/spec-idea`, `/spec-plan`, `/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship` | D-029 |
+| lifecycle commands | the `/spec-*` verb wrappers — `/spec-idea`, `/spec-gen`, `/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship` | D-029 |
 
 ## Terms to avoid
 

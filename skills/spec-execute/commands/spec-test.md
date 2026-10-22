@@ -6,7 +6,7 @@ skills: spec-execute
 
 Run the spec-execute skill (auto-mounted) for this request: $ARGUMENTS
 
-VERIFY entry of the lifecycle — delivery-pass steps 7–8 (proof +
+VERIFY entry of the lifecycle — delivery-pass steps 1–2 (proof +
 regression). Requires the execute node done: every task implemented and
 every digest orchestrator-confirmed — otherwise the entry point is
 /spec-build.

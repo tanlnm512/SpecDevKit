@@ -23,8 +23,7 @@ grill the user, produce a validated `intent.md`), `spec-shape` (gated
 authoring — the docset waves through verify, stopping at the human
 approve gate; the shared-core master and the workflow graph's node
 table live here), and `spec-execute` (post-approve implementer waves,
-the delivery pass, the lifecycle commands). `/spec-idea` (intake) or `/spec-gen` survives
-one release as a thin verb-only alias routing to the three. Beside
+the delivery pass, the lifecycle commands). Beside
 them: `spec-code-review` — the portable three-stage code review (the
 repo's own detected checks as a mechanical gate, then a preflight
 scout that maps the codebase and modules, then specialist lenses with
@@ -93,7 +92,7 @@ rollback design, and both reviewer modes).
 
 | Harness | Skills | Agent defs | Entry |
 |---------|--------|-----------|-------|
-| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | `/spec-intent`, `/spec-gen`, `/spec-execute` routers + `/spec-idea`…`/spec-ship` (and the one-release `/spec-idea` (intake) or `/spec-gen` alias); stages inline or via `graph.py --run` |
+| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | `/spec-intent`, `/spec-gen`, `/spec-execute` routers + `/spec-idea`, `/spec-build`…`/spec-ship`; stages inline or via `graph.py --run` |
 | omp | native root / marketplace | `~/.omp/agent/agents/` regenerated (omp dialect) | `/skill:spec-intent`, `/skill:spec-shape`, `/skill:spec-execute` |
 | zcode | plugin / sync | none — fallback spawn carries briefs in the payload | `/spec-intent`, `/spec-gen`, `/spec-execute`; stages inline or via `graph.py --run` |
 | opencode | `~/.agents/skills/` (compatibility root it scans) | `~/.config/opencode/agents/` regenerated (permission map) | `skill` tool / `@spec-scout`-style archetype names |
@@ -286,9 +285,9 @@ that copies out:
   in-tree; sync.sh regenerates and verifies them every run.
 - **Commands** — a skill's `commands/<name>.md` router (only if it
   ships one) plus each skill's bare names opted into via its own
-  `commands/extra.txt` (ADR-013 — `/spec-idea` claims spec-intent, the five
-  `/spec-plan`…`/spec-ship` wrappers claim spec-execute, the
-  one-release `/spec-idea` (intake) or `/spec-gen` alias claims spec-shape) →
+  `commands/extra.txt` (ADR-013 — `/spec-idea` claims spec-intent,
+  `/spec-gen` claims spec-shape, the four `/spec-build`…`/spec-ship`
+  wrappers claim spec-execute) →
   `~/.agents/commands/`, `~/.claude/commands/`,
   `~/.zcode/commands/` (omp needs none — `/skill:<name>`
   auto-registers); a foreign file at a destination is refused, not
@@ -306,7 +305,7 @@ Two invocation surfaces:
  │ Idea │ ───▶ │ Spec │ ───▶ │ Code │ ───▶ │ Test │ ───▶ │  QA  │ ───▶ │  Go  │
  │Refine│      │  PRD │      │ Impl │      │Debug │      │ Gate │      │ Live │
  └──────┘      └──────┘      └──────┘      └──────┘      └──────┘      └──────┘
-  /spec        /spec-plan     /spec-build   /spec-test    /spec-review  /spec-ship
+  /spec-idea   /spec-gen      /spec-build   /spec-test    /spec-review  /spec-ship
 ```
 
 `/spec-brainstorming` is the optional stage BEFORE this lifecycle:
@@ -314,12 +313,12 @@ five rigid stages — one clarifying question, a parallel three-lens
 panel (Visionary / Cynic / Minimalist), a trade-off matrix, socratic
 refinement — ending in a design specification at
 `brainstorms/<name>.md`. It writes nothing under `specs/`; the doc is
-pointed at as intent input for `/spec <name>`, not parsed.
+pointed at as intent input for `/spec-idea <name>`, not parsed.
 
 | Command | Lands on |
 |---|---|
-| `/spec <name>` | spec-intent's intake: scout + grill until the question frontier is empty, producing a validated `intent.md` (a bug takes the bugfix deltas) |
-| `/spec-plan <spec>` | spec-shape's authoring waves from current doc state through verify to the approve gate |
+| `/spec-idea <name>` | spec-intent's intake: scout + grill until the question frontier is empty, producing a validated `intent.md` (a bug takes the bugfix deltas) |
+| `/spec-gen <spec>` | spec-shape's authoring waves: draft spec.md from the intent, then survey → plan ∥ tech ∥ qa → tasks → verify, to the approve gate |
 | `/spec-build <spec> [T###]` | spec-execute's implementer waves; nothing ticked or committed |
 | `/spec-test <spec>` | the proof pass: every TC pass condition green + regression gate |
 | `/spec-review <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
@@ -351,11 +350,6 @@ human/CI gates. On omp the entries are `/skill:spec-intent`,
 | `implement <spec> [T###]` | the execute node: waves of implementer agents; nothing commits until the plan-wide delivery pass proves every task |
 | `archive <spec>` | after `Status: done`: `scripts/archive.sh <spec>` moves the dir to `specs/archive/<date>-<name>/` and repoints INDEX |
 
-`/spec-to-prod <verb> <spec-name>` survives exactly one release as a
-thin alias (split D-006): scaffold/intake verbs route to
-`/spec-intent`, authoring to `/spec-gen`, execute verbs to
-`/spec-execute` — no pipeline body of its own.
-
 A typical pass: `scaffold` → author spec.md with the user → resolve the
 researcher gate → wave 1 (survey ∥ research) → wave 2 (plan ∥ tech ∥ qa)
 → tasks → verify (`check.py` green) → pre-flight (baseline green on the
@@ -377,7 +371,7 @@ alternates the two —
 
 | Step | Surface | What happens |
 |---|---|---|
-| 1 | session — `/spec <name>` | author spec.md + intent.md with the user (clarify loop), decide the researcher gate: `skip` → write the not-applicable marker line yourself; `run` → spawn the researcher here (the loop pauses at an undetermined gate, so resolve it first) |
+| 1 | session — `/spec-idea <name>`, then `/spec-gen <name>` | intake grills the idea into a validated intent.md; spec-gen drafts spec.md from it (clarify loop) and decides the researcher gate: `skip` → keep the not-applicable marker; `run` → replace research.md with the template and spawn the researcher out-of-band |
 | 2 | engine — `graph.py --run --span shape` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
 | 3 | session | pre-flight (baseline green on the spec's branch), present the docset, get approval → `Status: approved` + `freeze.py --record` |
 | 4 | engine — rerun `--run --span execute` | execute waves hands-off: one implementer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
@@ -444,7 +438,7 @@ walking `skills/*/`, never by a hardcoded name:
 3. `skills/<name>/commands/<name>.md` — optional: a router command
    (`/<name> <verb> …`) if the skill benefits from one — lives inside
    the skill dir so it stays a self-contained plugin root.
-   Short-lifecycle command wrappers (`/spec-idea`, `/spec-plan`, …) are an
+   Short-lifecycle command wrappers (`/spec-idea`, `/spec-build`, …) are an
    explicit per-skill opt-in — a `commands/extra.txt` file in the
    skill (one line of space-separated bare names; ADR-013) — because
    generic names land flat in shared global command roots; the
@@ -475,7 +469,7 @@ skills/
 │   │                       #   the workflow node table (scripts/contract.py), and the workflow diagram live here
 │   ├── SKILL.md            # the authoring playbook (workflow graph node table, spawn mechanics, rules)
 │   ├── .claude-plugin/plugin.json  # this skill's plugin manifest (tools/plugin-manifest.py)
-│   ├── commands/           # spec-shape router + spec.md intake verb + the one-release spec-to-prod alias
+│   ├── commands/           # the /spec-gen router
 │   ├── agents/*.md         # 5 archetype briefs = harness defs (frontmatter + body) + _lenses.md lens table + _shared-protocol.md
 │   ├── templates/          # 7 scaffolded doc templates + assurance/release records
 │   ├── scripts/            # the shared core (master copy) + scaffold.sh · skill-dir.sh
@@ -484,7 +478,7 @@ skills/
 │   ├── examples/mini-spec/ # green fixture used by the test suite
 │   └── tests/ · evals/ · VERSION · CHANGELOG.md
 ├── spec-execute/           # phase 3 — post-approve: implementer waves, delivery pass, tick/commit gates;
-│   │                       #   the five lifecycle commands (spec-plan…spec-ship) + execute-only machinery
+│   │                       #   the four lifecycle commands (spec-build…spec-ship) + execute-only machinery
 │   │                       #   (tick.py · audit.py · archive.sh · migrate.py)
 ├── spec-code-review/       # portable three-stage gated code review (same skeleton, own test suite)
 └── spec-brainstorming/     # five-stage pre-spec brainstorm panel (own test suite)

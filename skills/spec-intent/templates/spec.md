@@ -5,15 +5,12 @@
                                 auto-satisfied) → active once the first task spawns
                                 → done when all tasks are ticked and `check.py`
                                 re-runs green -->
-**Effort**: standard       <!-- tiny | standard | large (SKILL.md § Effort scaling):
-                                standard = ONE merged design spawn authors
-                                plan/tech-spec/task (D-024, amended by D-027:
-                                test.md always comes from qa's own
-                                implementation-blind spawn); large = the full
-                                plan ∥ tech ∥ qa wave + a separate tasks wave; tiny =
-                                all-inline. Gates and audits are identical at every
-                                tier. Bump to large for multi-area, auth,
-                                persistence, migration, or research-heavy work. -->
+**Effort**: standard       <!-- standard = one merged design spawn authors
+                                plan/tech-spec/task, qa separate; large = the full
+                                plan ∥ tech ∥ qa wave + a separate tasks wave.
+                                Gates are identical at every effort. Bump to
+                                large for multi-area, auth, persistence,
+                                migration, or research-heavy work. -->
 **Created**: YYYY-MM-DD
 **Branch**: `<type>/<name>`
 

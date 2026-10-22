@@ -1,6 +1,6 @@
 ---
 description: Approved-spec execution - implementer waves over the per-task frontier, fix rounds, the ONE delivery pass, the tick-commit gate; refuses anything not approved (exit 4); never authors or approves
-argument-hint: <verb> <spec-name>
+argument-hint: "[verb] <spec-name>"
 skills: spec-execute
 ---
 
@@ -18,16 +18,16 @@ run):
 - `build <spec> [T###]` → the execute node: implementer waves, no
   ticks, no commits.
 - `test <spec>` → the proof pass: `audit.py proofs --run` + the
-  regression gate (delivery-pass steps 7–8).
+  regression gate (delivery-pass steps 1–2).
 - `review <spec>` → the review instruments: scope diff, cleanliness
   sweep, mutation pass, DoD scorecard, implementation-diff reviewer
-  (step 9).
+  (step 3).
 - `ship <spec>` → tick with proof notes, implementation commit C1 +
   delivery-record C2, `Status: done`, archive on request
-  (steps 10–12); refuses unless test and review are green.
+  (steps 4–6); refuses unless test and review are green.
 - `continue <spec>` / `resume` → the same run, resumed from doc
   state (the frontier recomputes from task.md alone; `(fix n/5)`
   counts survive the resume).
 - authoring asks (plan/tech/qa/tasks waves, re-survey, doc repair,
   approve) → not here; route to `/spec-gen` (intake →
-  `/spec-intent`) — this skill never authors or approves anything.
+  `/spec-idea`) — this skill never authors or approves anything.

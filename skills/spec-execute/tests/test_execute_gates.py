@@ -52,10 +52,10 @@ FIXTURE_REPO = SKILL / "examples" / "mini-spec" / "repo"
 COMMANDS = SKILL / "commands"
 
 # The moved lifecycle commands (T016) plus the skill's own router verb.
-LIFECYCLE_COMMANDS = ("spec-plan.md", "spec-build.md", "spec-test.md",
-                      "spec-review.md", "spec-ship.md")
-CLAIMED_BARE_NAMES = ["spec-execute", "spec-plan", "spec-build",
-                      "spec-test", "spec-review", "spec-ship"]
+LIFECYCLE_COMMANDS = ("spec-build.md", "spec-test.md", "spec-review.md",
+                      "spec-ship.md")
+CLAIMED_BARE_NAMES = ["spec-execute", "spec-build", "spec-test",
+                      "spec-review", "spec-ship"]
 
 # Payload vocabulary the execute span may never emit: the authoring
 # nodes live in spec-shape's span, so their appearance here would mean

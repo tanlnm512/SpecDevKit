@@ -6,7 +6,7 @@ skills: spec-intent
 
 Run the spec-intent skill (auto-mounted) for this request: $ARGUMENTS
 
-`/spec <name>` is the intake verb of the suite's split form: given an
+`/spec-idea <name>` is the intake verb of the suite's split form: given an
 idea name, run the spec-intent skill —
 
 - scaffold-lite `specs/<name>/intent.md` from the skill's own

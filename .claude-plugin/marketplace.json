@@ -22,7 +22,7 @@
     },
     {
       "name": "spec-code-review",
-      "description": "Portable three-stage code review for any git repository \u2014 a change, a pull request, a branch, or the whole project.",
+      "description": "Portable three-stage code review for any git repository \u2014 a change, a pull request, a branch, or the whole project: the repo's own checks as the mechanical gate, a preflight scout, specialist lenses (correctness, security, quality & tests) with independent confirmation of every kept finding, and an optional verified fix loop.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"

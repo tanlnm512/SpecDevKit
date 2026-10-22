@@ -6,12 +6,12 @@ skills: spec-execute
 
 Run the spec-execute skill (auto-mounted) for this request: $ARGUMENTS
 
-BUILD entry of the lifecycle — the execute node (the router's
-`implement` verb). Requires `Status: approved`.
+BUILD entry of the lifecycle — the execute node (the router's `build`
+verb). Requires `Status: approved`.
 
 - work the per-task frontier in waves — all runnable, file-disjoint
   tasks in ONE message; chained tasks serially; `(after T###)`
-  dependencies gate on landed evidence + ruling, not ticks
+  dependencies gate on ticked, struck, or `(implemented)`
 - implementers return digests only; you triage asks, append D-###s
 - nothing is committed — the proof-and-delivery pass comes after every
   task

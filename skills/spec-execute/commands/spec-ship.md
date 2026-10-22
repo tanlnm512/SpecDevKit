@@ -20,10 +20,8 @@ ONE delivery pass in steps, never three gates).
   delivery metadata and the final tree must be clean
 - delivery summary: every D-### (decision, why, cost if wrong) plus every
   irreversible or state-mutating change the plan shipped
-- archive node (`/spec-to-prod archive <spec>`) on request; for
-  operator-facing work, copy `templates/release-handoff.md` into the spec
-  and complete it before handing C1/C2 to the release owner
+- archive on request: `scripts/archive.sh specs/<spec>`
 
 Boundary: /spec-ship ends at the verified commit. Push, PR, deploy, publish
-are human/CI actions by design (ADR-014) — the skill stop-and-asks
+are human/CI actions by design — the skill stop-and-asks
 before any out-of-workspace side effect; it never releases on its own.

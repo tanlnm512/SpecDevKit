@@ -5,6 +5,11 @@ back half of the split spec suite (spec-to-prod-split): implementer
 waves over approved task.md frontiers through the tick-commit gate —
 authoring is spec-shape's, intake spec-intent's.
 
+## Unreleased
+
+- `/spec-plan` retired; the reviewer is implementation-diff only; the
+  delivery pass is numbered 1–6 (D-030).
+
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (`graph.py --span execute` — invocation

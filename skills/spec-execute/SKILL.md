@@ -2,16 +2,14 @@
 name: spec-execute
 description: >-
   Approved-spec execution — the suite's back half. Runs implementer
-  waves over the per-task frontier of an approved task.md (any docset
-  with spec.md Status: approved — shaped by /spec-gen or
-  hand-authored), fix rounds capped at 5 per task, the ONE delivery
-  pass (TC proofs, regression gate, review instruments), the
-  tick-commit gate, and archive — driven by graph.py --span execute.
-  The invocation gate refuses anything not approved and verify-green
-  (exit 4 naming the blocking gate); this skill never authors or
-  approves anything. Use when the user says "execute", "build",
-  "resume the spec", names a T### task, or asks for proofs, the
-  scope diff, or delivery.
+  waves over the per-task frontier of an approved task.md (shaped by
+  /spec-gen or hand-authored), fix rounds capped at 5 per task, the ONE
+  delivery pass (TC proofs, regression gate, review instruments), the
+  tick-commit gate, and archive. Refuses anything not approved and
+  verify-green; never authors or approves. Use when the user says
+  "execute", "build", "resume the spec", names a T### task, or asks for
+  a spec's proofs, scope diff, or delivery — not for general code review
+  (spec-code-review).
 metadata:
   owner: platform-core
   version: "0.1.0"
@@ -34,8 +32,8 @@ any node's ready/done conditions and why it sits where it sits.
 ## When to use
 
 - **An approved docset** — spec.md `Status: approved` (or later):
-  shaped by `/spec-gen` or hand-authored, FR-008 reads both the
-  same. Implement, prove, and deliver it here.
+  shaped by `/spec-gen` or hand-authored. Implement, prove, and
+  deliver it here.
 - **Execution asks** — "execute/build <spec>", a T### task named,
   "run the proofs", "scope diff", "ship it": the run below.
 - **Resume** — a session killed mid-execute: the same invocation;
@@ -43,7 +41,7 @@ any node's ready/done conditions and why it sits where it sits.
   and `(fix n/5)` counts surviving in the docs.
 
 Not here: anything before approval — authoring waves, doc repair,
-re-approval (`/spec-gen`), intake (`/spec-intent`). This skill
+re-approval (`/spec-gen`), intake (`/spec-idea`). This skill
 never authors a doc, never edits an unapproved plan, and never
 grants approval; the gate below refuses a red docset too.
 
@@ -124,28 +122,28 @@ The moment the last task lands, the tick-commit gate opens. One
 pass over the whole plan — the three lifecycle commands below are
 steps of this ONE pass, never three gates:
 
-7. **Proofs** — `scripts/audit.py proofs <spec-dir> --run`: every
+1. **Proofs** — `scripts/audit.py proofs <spec-dir> --run`: every
    TC pass condition green, fresh in this session (command and
    output on record); MANUAL TCs stay yours; a flaky rerun is a
    finding — a waived flake is a lying green.
-8. **Regression gate** — the repo's broader check per conventions,
+2. **Regression gate** — the repo's broader check per conventions,
    green (optional floor: `audit.py coverage`).
-9. **Review instruments** — `audit.py scope` (every changed path
+3. **Review instruments** — `audit.py scope` (every changed path
    mentioned by a doc or listed UNMENTIONED — revert or rule),
    `audit.py clean` (debug debris), `audit.py mutate` (a survived
    mutant is a test gap), `audit.py dod` (the scorecard), and the
    read-only reviewer in implementation-diff mode (`--emit-spawns`
    prepares `reviewer-diff.md` while delivery is pending).
    Resolve every BLOCK; own or rule every WARN/NIT.
-10. **Tick** — every task `- [x]` with its proof note via
-    `scripts/tick.py`, burndown recomputed (`check.py
-    --fix-burndown`); surface every D-### and every irreversible
-    change in the delivery summary.
-11. **C1 — the implementation commit**: code + tests + ticked
-    task.md together.
-12. **C2 — the delivery record**: `Delivered: commit @ <C1>`,
-    `Status: done`, INDEX updated, archive on request
-    (`scripts/archive.sh`).
+4. **Tick** — every task `- [x]` with its proof note via
+   `scripts/tick.py`, burndown recomputed (`check.py
+   --fix-burndown`); surface every D-### and every irreversible
+   change in the delivery summary.
+5. **C1 — the implementation commit**: code + tests + ticked
+   task.md together.
+6. **C2 — the delivery record**: `Delivered: commit @ <C1>`,
+   `Status: done`, INDEX updated, archive on request
+   (`scripts/archive.sh`).
 
 Anything fails → nothing ticked, nothing committed: localize with
 the scope diff, run the fix round, and re-run the ENTIRE pass from
@@ -158,9 +156,12 @@ its proof step — the plan lands all-or-nothing.
   notes/T###.md exception aside), never commits; returns a digest
   and a suggested commit line.
 - **reviewer** (`agents/reviewer.md`, `spec-reviewer`) — read-only
-  findings machine: the contract review during verification and the
-  implementation-diff review before tick/delivery; writes NOTHING,
-  and is the one role exempt from `_shared-protocol.md`.
+  implementation-diff review before tick/delivery (the brief's contract
+  mode is spec-shape's); writes NOTHING, and is the one role exempt from
+  `_shared-protocol.md`.
+
+Scout, designer, and qa also ship here (the engine's byte-identical
+copy) but this span never spawns them.
 
 `graph.py --emit-spawns --span execute` builds each payload — brief
 body verbatim + input payload from doc state (the task entry
@@ -169,9 +170,9 @@ reviewer's excepted). Spawn the whole wave in one message; agents
 write artifacts to disk and return digests only; you are the sole
 spawner, status writer, and re-briefer.
 
-`agents/_shared-protocol.md` rides every payload — its
-§ Engineering rules (kit-wide) are canonical there, injected from
-the kit's single source by `tools/kit-rules.py`.
+`agents/_shared-protocol.md` rides every payload. § Engineering rules
+(tests, comments) live in `agents/builder.md`, injected from the kit's
+single source by `tools/kit-rules.py`.
 
 ## Execution-only machinery (single-copy here)
 
@@ -192,17 +193,16 @@ are spec-execute's own):
 
 ## The lifecycle commands
 
-Five thin commands ship in this package (`commands/`), installed
+Four thin commands ship in this package (`commands/`), installed
 flat alongside the router — the addyosmani-style surface, each a
 landing into the graph:
 
 | Command | Landing |
 |---------|---------|
-| `/spec-plan <spec>` | PLAN — waves from current doc state through verify to the approve gate |
 | `/spec-build <spec> [T###]` | BUILD — the execute node: implementer waves, no ticks, no commits |
-| `/spec-test <spec>` | VERIFY — delivery-pass steps 7–8: proofs + regression gate |
-| `/spec-review <spec>` | REVIEW — step 9: the review instruments |
-| `/spec-ship <spec>` | SHIP — steps 10–12: tick, C1 + C2, `Status: done`, archive on request |
+| `/spec-test <spec>` | VERIFY — delivery-pass steps 1–2: proofs + regression gate |
+| `/spec-review <spec>` | REVIEW — step 3: the review instruments |
+| `/spec-ship <spec>` | SHIP — steps 4–6: tick, C1 + C2, `Status: done`, archive on request |
 
 "Prod" is production-READY, not deployed: the terminal path is
 execute → tick-commit → archive; push, PR, deploy, and publish are
@@ -210,19 +210,14 @@ out-of-workspace side effects that stay human/CI actions.
 
 ## Telemetry
 
-Runs record local, content-free telemetry (waves, gate pauses,
-intake refusals — counts and node names, never prose) under
-`~/.spec-dev-kit/telemetry/spec-execute.jsonl`: fire-and-forget,
-`KIT_TELEMETRY=off` disables, and nothing under `specs/` ever reads
-it (C-01).
+Local, content-free (counts and node names) under
+`~/.spec-dev-kit/telemetry/spec-execute.jsonl`; `KIT_TELEMETRY=off`
+disables.
 
 ## Commands and neighbors
 
-- `/spec-execute <verb> <name>` — this skill's router
+- `/spec-execute [verb] <name>` — this skill's router
   (`commands/spec-execute.md`): execute, build/test/review/ship
   steps, resume/continue asks land here.
 - `/spec-gen` — everything before approval: authoring waves, doc
-  repair, the approve gate and its freeze; `/spec-intent` — intake.
-- `/spec-idea` (intake) or `/spec-gen` — the one-release thin alias routing the retired
-  monolith's verbs (intake → intent, authoring → shape, execute
-  verbs → here).
+  repair, the approve gate and its freeze; `/spec-idea` — intake.

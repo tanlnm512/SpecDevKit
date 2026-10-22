@@ -18,7 +18,7 @@ metadata:
 
 # spec-intent — intake: raw idea → validated intent.md
 
-The suite's front end. Everything downstream (spec-shape's docset,
+The suite's front end. Everything downstream (spec-shape's (`/spec-gen`) docset,
 spec-execute's waves) keys off one artifact this skill produces:
 `specs/<name>/intent.md` — the problem in the user's words, the
 audience, the constraints, the closed questions, the FR seeds, all
@@ -95,8 +95,8 @@ from intent.md when answers arrive.
 python3 <skill_dir>/scripts/check.py specs/<name> --intent-only
 ```
 
-`<skill_dir>` is this skill's mounted root (resolve once per
-session). The gate must exit 0: it refuses surviving placeholders,
+`<skill_dir>` is this skill's mounted root (the directory holding
+this SKILL.md). The gate must exit 0: it refuses surviving placeholders,
 open NEEDS CLARIFICATION markers, and a baseline that is not the
 repo's HEAD (stale — re-scout, don't wave it through). Fix each named
 failure in the artifact and rerun. Green, flip `**Status**:` to
@@ -125,15 +125,13 @@ agent inherits.
 The kit's one engine (`scripts/graph.py`) computes doc state; this
 skill's span is `--span intent` — engine-driven runs
 (`graph.py --emit-spawns|--run --span intent`) bound the wave to the
-intent node (the scout payload; spec.md-done dirs with an unfilled or
-red intent.md), and a drained intent span stops at the shape handoff.
-Session-driven runs consult `graph.py specs/<name>` for state the
-same way; the frontier is the only scheduler.
+intent node (the scout payload; dirs whose intent.md is unfilled or
+red), and a drained intent span stops at the shape handoff
+(`/spec-gen`). Session-driven runs consult `graph.py specs/<name>`
+for state the same way; the frontier is the only scheduler.
 
 ## Telemetry
 
-Runs record local, content-free telemetry (waves, gate pauses,
-refusals — counts and node names, never prose) under
-`~/.spec-dev-kit/telemetry/spec-intent.jsonl`: fire-and-forget,
-`KIT_TELEMETRY=off` disables, and nothing under `specs/` ever reads
-it (C-01).
+Local, content-free (counts and node names) under
+`~/.spec-dev-kit/telemetry/spec-intent.jsonl`; `KIT_TELEMETRY=off`
+disables.
