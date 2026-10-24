@@ -16,6 +16,28 @@ guessing at an answer you haven't heard yet. A question whose answer
 depends on another still-open question belongs to a *later* round,
 never this one.
 
+## Failure patterns in drafts
+
+Before building the tree, scan the draft for these phrasing failures —
+each is a frontier question waiting to be asked, or a fact to fetch
+yourself (never a reason to guess):
+
+| The draft says | The failure | What it becomes |
+|----------------|-------------|-----------------|
+| "improve X" / "help with Y" | vague verb, no operation | which behavior changes, where, for whom |
+| "make it better / faster" | no acceptance criterion | the observable result that proves done |
+| "it's broken" / "it sucks" | symptom, not fault | the exact input, expected vs actual |
+| "as we discussed" / "the usual way" | assumed prior knowledge | restate the decision, or fetch it from the doc that holds it |
+| "like \<competitor\>" | undefined reference | which named example, which property of it |
+| "users want this" | undefined audience | who uses this, at what skill level |
+| "a summary" / "an overview" | implicit shape | length, structure, format |
+| "professional" / "clean" | vague aesthetic | the concrete, checkable property |
+| "do whatever it takes" | no boundary | what the solution must not touch |
+
+A pattern found is not a question dumped on the user — the facts
+behind a row (what exists, what the reference actually does) stay the
+runner's job; only the judgment call goes to the frontier.
+
 ## The round
 
 Ask the *whole* frontier in one batched round. Each question:

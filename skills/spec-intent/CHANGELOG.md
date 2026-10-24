@@ -7,6 +7,12 @@ stop — the docset is spec-shape's, execution spec-execute's.
 
 ## Unreleased
 
+- Grilling gains a failure-patterns scan — nine draft phrasings
+  (vague verbs, missing acceptance criteria, assumed prior
+  knowledge, vague aesthetics, no boundary) and the frontier
+  question each becomes; facts behind a row stay the runner's
+  job. Serves eval case I1.
+
 - Replica engine suites removed; spec-shape owns them (spec-shape
   D-045).
 - `agents/` ships the scout alone — the only archetype the intent

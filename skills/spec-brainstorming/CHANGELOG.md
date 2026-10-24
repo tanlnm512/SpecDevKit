@@ -7,6 +7,10 @@ specification that feeds spec-to-prod's `/spec` intake.
 
 ## Unreleased
 
+- Description gains its boundary negation — not for requirements
+  intake on a settled idea (spec-intent) — matching the other
+  skills' cross-skill exclusions.
+
 - **D-006 — one panel-wave form**: the per-harness workflow dialects
   are deleted (with the kit-wide move, spec-to-prod D-035); stage 2
   always runs as the session's own wave — evidence pack first, then

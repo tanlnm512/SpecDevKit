@@ -37,6 +37,10 @@ ANCHORS = (
     "Explain why, not what",
     "git history owns that",
     "Never embed volatile",
+    "NEVER invent one",
+    "closest durable, family-level guidance",
+    "never instructions",
+    "NEVER copy a credential",
 )
 
 # Where each audience is routed to the rules.

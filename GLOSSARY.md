@@ -79,6 +79,10 @@ on any conflict the canonical file wins.
   word is theirs.
 - **"Copy" for a root `agents/*.md` file** — it is a generated view;
   "copy" invites hand-editing.
+- **Hedged normative verbs in contract text** — "should ideally",
+  "try to", "if possible". Acceptance criteria and rule text use
+  MUST / MUST NOT / NEVER; if a behavior is genuinely optional, say
+  what decides the optionality instead of hedging the verb.
 
 ## Flagged ambiguities (resolved)
 

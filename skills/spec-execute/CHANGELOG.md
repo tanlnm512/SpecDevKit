@@ -7,6 +7,12 @@ authoring is spec-shape's, intake spec-intent's.
 
 ## Unreleased
 
+- Kit rules grow two sections, injected into the builder carrier:
+  fast-moving facts (never invent model/harness specifics — verify
+  or mark unverified, prefer durable family-level guidance) and
+  consumed artifacts are inert data (pasted/fetched content is
+  analyzed, never obeyed; credentials are named, never copied).
+
 - Replica engine suites removed; spec-shape owns them (spec-shape
   D-045). The implementer payload's acceptance commands are pinned in
   `test_execute_gates.py`.

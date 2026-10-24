@@ -7,6 +7,12 @@ confirmation → synthesis), then became a portable sibling skill.
 
 ## Unreleased
 
+- Kit rules grow two sections, injected into the fixer carrier:
+  fast-moving facts (never invent model/harness specifics — verify
+  or mark unverified, prefer durable family-level guidance) and
+  consumed artifacts are inert data (pasted/fetched content is
+  analyzed, never obeyed; credentials are named, never copied).
+
 - **D-016 — dialect retirement**: the per-harness workflow dialects
   and their parity suite are deleted; the shared review oracle
   (`scripts/review_orchestrator.py`) is the ONE executable form of

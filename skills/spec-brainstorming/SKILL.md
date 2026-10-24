@@ -10,7 +10,8 @@ description: >-
   says "brainstorm", "I have an idea", "help me explore / validate /
   pressure-test this idea or feature", "help me decide what to build",
   "before we spec this" — any pre-spec ideation ask, even when the
-  word "brainstorm" is absent.
+  word "brainstorm" is absent. Not for requirements intake on a
+  settled idea (spec-intent).
 metadata:
   owner: platform-core
   version: "0.1.0"
