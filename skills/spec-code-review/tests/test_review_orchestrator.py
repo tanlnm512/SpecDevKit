@@ -146,7 +146,9 @@ class GateTests(unittest.TestCase):
 
     def test_gate_on_this_kit_repo_detects_its_checks(self):
         kit_root = SCRIPT.parents[2]  # CWD-independent: run.sh cds into the skill
-        d = ok(["gate", "--base", "HEAD", "--repo", str(kit_root)])
+        # --tree scans every tracked *.sh, so detection is provable on a
+        # clean checkout; --base HEAD sees an empty diff there (zero rows).
+        d = ok(["gate", "--tree", "--repo", str(kit_root)])
         self.assertTrue(any("bash -n" in g["name"] or "secret" in g["name"]
                             for g in d["rows"]))
         self.assertTrue(d["green"])
