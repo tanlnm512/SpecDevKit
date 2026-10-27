@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diff-facing review instruments for a spec-to-prod spec: scope diff,
+"""Diff-facing review instruments for a spec-suite spec: scope diff,
 cleanliness sweep, TC proofs, DoD scorecard — the evidence-gathering
 tools the orchestrator runs after execute lands (no pipeline gates of
 their own; findings are adjudicated by the orchestrator).
@@ -268,16 +268,18 @@ def scope_data(spec_dir: Path, repo: Path, base: str | None) -> tuple[list[str],
                 unmentioned.append(p)
             continue
         # This spec's own contract/evidence tree is expected delivery
-        # surface. Shared specs files are allowed only when a contract doc
-        # names them; every other specs/ path is scope creep.
+        # surface, and so are the kit-owned registry surfaces scaffold.sh
+        # and archive.sh maintain (INDEX, CONSTITUTION) — mechanical
+        # writes no implementer owns. Shared context files are allowed
+        # only when a contract doc names them; every other specs/ path
+        # is scope creep.
         if p.startswith(own_prefix + "/"):
             continue
-        shared = (
-            p == "specs/INDEX.md"
-            or p == "specs/CONSTITUTION.md"
-            or p.startswith("specs/context/")
-        )
-        if not shared or (p not in docs and Path(p).name not in docs):
+        if p == "specs/INDEX.md" or p == "specs/CONSTITUTION.md":
+            continue
+        if not p.startswith("specs/context/") or (
+            p not in docs and Path(p).name not in docs
+        ):
             unmentioned.append(p)
     return paths, unmentioned
 
@@ -1120,7 +1122,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         rc = mode_proofs(spec_dir, repo, run)
     from telemetry import record  # fire-and-forget local telemetry
-    record("spec-to-prod", "audit", mode=mode, rc=rc,
+    record("spec-execute", "audit", mode=mode, rc=rc,
            spec=spec_dir.name if spec_dir else "")
     return rc
 
