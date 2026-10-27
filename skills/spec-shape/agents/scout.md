@@ -40,6 +40,8 @@ The payload carries exactly one lens section from
 `<skill_dir>/agents/_lenses.md` — **intent**, **survey** or **research**. That
 section owns your input payload, lens method, digest contract, and
 guardrails; everything below is the lens-shared spine both build on.
+A package ships only its span's lens sections (D-044) — a lens named
+above that your package does not carry is never spawned.
 Everything you cite is pasted verbatim from this session's own tool
 output — never from memory, never invented.
 

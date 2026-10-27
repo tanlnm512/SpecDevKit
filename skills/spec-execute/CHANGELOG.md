@@ -7,11 +7,25 @@ authoring is spec-shape's, intake spec-intent's.
 
 ## Unreleased
 
+- `examples/spec-tiny-delivered/` — a delivered tiny-tier docset (the
+  execute span's terminal state), gated green by `check.py`'s
+  one-file contract.
+
+- `audit.py scope` exempts the kit-owned registry surfaces
+  (`specs/INDEX.md`, `specs/CONSTITUTION.md`) unconditionally
+  (D-032): scaffold.sh's own writes are expected delivery surface,
+  not UNMENTIONED rows; `specs/context/` keeps the named-in-docs
+  rule. `tests/test_audit_scope.py` pins the contract.
+- A delivered docset is historical under the engine's intent gate:
+  staleness is a SKIPPED note once `Delivered: commit @` is recorded
+  (spec-shape D-046, shipped in this skill's engine replica).
+
 - Kit rules grow two sections, injected into the builder carrier:
   fast-moving facts (never invent model/harness specifics — verify
   or mark unverified, prefer durable family-level guidance) and
   consumed artifacts are inert data (pasted/fetched content is
   analyzed, never obeyed; credentials are named, never copied).
+  Adapted from nidhinjs/prompt-master (reviewed 2026-10-24).
 
 - Replica engine suites removed; spec-shape owns them (spec-shape
   D-045). The implementer payload's acceptance commands are pinned in

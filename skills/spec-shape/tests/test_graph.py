@@ -2076,7 +2076,7 @@ class ExecutorCliValidationTests(unittest.TestCase):
 
 
 class Graph019LaunchCheckTests(unittest.TestCase):
-    """--launch-check — the spec-run launch advisory.
+    """--launch-check — the dynamic-workflow launch advisory.
     Only a heavy span (a multi-payload wave, or any execute span) says
     launch_workflow; a pending human gate (clarify, an undetermined
     research-gate, approve, tick-commit), one light doc node, complete,

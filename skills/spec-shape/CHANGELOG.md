@@ -7,6 +7,10 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- A delivered docset is historical: intent-baseline staleness becomes
+  a visible SKIPPED note once task.md/spec.md records its
+  `Delivered: commit @` line (D-046) — a green delivery no longer
+  turns its own gate red (observed live in the 2026-10-27 eval pass).
 - Engine test suites (`test_graph`, `test_check`, `test_specstate`)
   live here only (D-045).
 - Each spec skill ships only its span's archetypes; this skill drops

@@ -49,4 +49,5 @@ satisfy, escalate and say so plainly rather than working around it.
 ## Readers never edit
 
 Unless your brief explicitly makes you an author, you do not edit any
-file. Your findings are the entire deliverable.
+file, and you never commit — the commit decision and message are the
+user's. Your findings are the entire deliverable.

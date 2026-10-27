@@ -26,7 +26,7 @@ Modes:
   --state-json   the same state as machine-readable JSON: nodes (state+reason
                  each), edges, frontier, loops, counts, git, status. The
                  authoritative oracle for tests and validators.
-  --launch-check  the spec-run launch advisory as JSON: whether the dynamic
+  --launch-check  the dynamic-workflow launch advisory as JSON: whether the dynamic
                  workflow should be launched for this doc state at all.
                  weight `wave` (a multi-payload wave, an execute span, or
                  the merged design payload — the heavy spans the loop
@@ -1121,7 +1121,7 @@ def print_complete_or_held(state: dict) -> None:
 
 
 def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
-    """--launch-check: should the spec-run dynamic workflow be launched for
+    """--launch-check: should the dynamic workflow be launched for
     this doc state, or is the span light enough to run inline? The
     workflow's value is the multi-wave loop with parallel fan-out; a launch
     on a light state reads state once and stops seconds later, deciding
@@ -1168,7 +1168,7 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
                 "reason": "one merged design payload — three briefs "
                           "(plan/tech/tasks) authoring plan, tech-spec, "
                           "and task — heavy span, launch "
-                          "the spec-run workflow"}
+                          "a dynamic workflow"}
     if len(payloads) == 1 and payloads[0]["node"] != "execute":
         return {**advisory, "weight": "single",
                 "reason": "one light doc node ("
@@ -1178,7 +1178,7 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     return {**advisory, "weight": "wave", "launch_workflow": True,
             "reason": f"{len(payloads)} payload(s) across "
                       f"{', '.join(advisory['frontier_agents'])} — heavy "
-                      "span, launch the spec-run workflow"}
+                      "span, launch a dynamic workflow"}
 
 
 def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
@@ -1841,7 +1841,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--state-json", action="store_true",
                    help="print the full state as machine-readable JSON")
     p.add_argument("--launch-check", action="store_true",
-                   help="print the spec-run launch advisory as JSON — "
+                   help="print the dynamic-workflow launch advisory as JSON — "
                         "launch the dynamic workflow only on weight "
                         "`wave`; `gate`/`single`/`complete`/`held` spans "
                         "run inline (pure read, nothing written)")

@@ -71,118 +71,73 @@ change is wrong — not the rule.
 
 ## Review targets
 
-One `target` picks what the panel reviews. The first three all resolve
-to a diff, so the panel machinery, the gate and the fix loop run
-identically underneath — only the resolution differs:
+One `target` picks what the panel reviews; `contracts/panel.md`
+§ Targets is the canonical resolution table:
 
-- **diff** (default) — the change against a base ref: the working tree
-  (`base: HEAD`), the last commit (`HEAD~1`), or any ref/branch.
-- **branch** — the current branch's recent changes: the merge-base diff
-  against a base branch (explicit `base`, else the remote's default —
-  `origin/HEAD`, then main/master). Uncommitted work on the branch is
-  included and noted in the report.
-- **pr** — a GitHub pull request (`pr`: number, URL or owner/repo#N,
-  resolved with the gh CLI). The panel reads the working tree, so the PR
-  head must be checked out: on a clean tree the review checks it out
-  itself (announced, with the previous HEAD in the log); on a dirty tree
-  it refuses rather than hide uncommitted work. The diff is the
-  merge-base against the PR's base commit — the same PR-diff semantics
-  GitHub uses — and the report names the PR (number, title, author,
-  base, URL).
-- **project** — the codebase as it stands (see below). In a multi-repo
-  workspace whose root is not itself a git repository, pass `repo`:
-  the sub-repo directory (absolute, or relative to the working
-  directory), resolved to its absolute toplevel before anything runs —
-  every git call, the gate's `--repo`, and the absolute file paths the
-  reviewers read root there. The runtime's cwd is not guaranteed to be
-  the workspace root, so nothing may rely on a relative repo path.
-  `repo` is supported for `project` only; change/branch/pr targets
-  refuse it — run those from inside the repository.
+- **diff** (default) — the change against a base ref: the working
+  tree (`base: HEAD`), the last commit (`HEAD~1`), or any ref/branch.
+- **branch** — the merge-base diff against a base branch (explicit
+  `base`, else the remote's default); uncommitted work is included
+  and noted in the report.
+- **pr** — a GitHub pull request (`pr`: number, URL, or
+  `owner/repo#N`, resolved with the gh CLI). The panel reads the
+  working tree: on a clean tree the review checks the head out itself
+  (announced); on a dirty tree it refuses rather than hide
+  uncommitted work.
+- **project** — the codebase as it stands; in a multi-repo workspace
+  pass `repo`: the sub-repo directory, resolved to its absolute
+  toplevel before anything runs (see panel.md § Targets for the
+  resolution and sharding rules). `repo` is supported for `project`
+  only.
 
-Stage 1 always runs first with the resolved base: `--base <merge-base>`
-in diff/branch/pr mode, `--tree` in project mode.
+Stage 1 always runs first with the resolved base: `--base
+<merge-base>` in diff/branch/pr mode, `--tree` in project mode.
 
 ## The three stages (and the optional fourth)
 
 ### Stage 1 — the mechanical gate, always first
 
-Run `scripts/gate.sh` from this skill before any reviewer works:
-
 ```bash
 bash <skill-dir>/scripts/gate.sh --base HEAD        # working-tree changes
 bash <skill-dir>/scripts/gate.sh --base HEAD~1      # the last commit
-bash <skill-dir>/scripts/gate.sh --base <merge-base>  # branch / PR mode (resolved first)
-bash <skill-dir>/scripts/gate.sh --tree             # every tracked *.sh (project mode)
+bash <skill-dir>/scripts/gate.sh --base <merge-base>  # branch / PR mode
+bash <skill-dir>/scripts/gate.sh --tree             # project mode
 bash <skill-dir>/scripts/gate.sh --plan             # what it would run
 ```
 
 It detects and runs the repo's OWN checks (Makefile targets, npm
 scripts, cargo/go, pytest or unittest discover), plus `bash -n` on
 changed `*.sh` and a secret-shape scan of the change's added lines,
-and prints a JSON array — one `{name, exit_code, tail}` per check. Rules:
-
-- A red gate ends the review: report the failing checks with their
-  tails as the findings, and stop. Mechanical failures are fixed before
-  reviewer attention is spent.
-- An empty detection (no markers, no git) is NOT a green light to skip
-  the floor: ask the repo for its documented check command (README, CI
-  config) and run that instead; say so in the report if none exists.
-- Never let a reviewer re-run the suites — the gate already decided
-  them; reviewers spend their turn on what only a reader can see.
+and prints a JSON array — one `{name, exit_code, tail}` per check.
+Rules: a red gate ends a fresh review — report the failing checks
+with their tails as the findings, and stop; an empty detection is NOT
+a green light (ask the repo for its documented check command and run
+that instead; say so if none exists); reviewers never re-run the
+suites. The one exception — a project audit continues past a red gate,
+each failing check becoming a high-severity gate finding (panel.md
+§ The mechanical gate).
 
 ### Whole-project mode (target: project)
 
-When the ask is the codebase as a whole — "review the project",
-"review the whole codebase" — the review target becomes the project
-instead of a diff:
-
-- The gate runs with `--tree` (shell syntax over every tracked
-  script); everything else about the gate is unchanged — its suites
-  were always project-wide. One exception to the gate-first rule: a
-  project audit does not stop at a red gate — each failing check
-  becomes a high-severity gate finding and the panel still reads the
-  code, because for an audit the failures are themselves findings.
-- The review target is every tracked source file: extension-filtered,
-  with lockfiles, generated code and vendored/build directories
-  excluded. A target too large for one reviewer's turn is sharded:
-  contiguous runs of the path-sorted list (directories stay together),
-  closed at ~240 KB or 32 files per part, byte-balanced — and every
-  lens reads every part, so coverage is complete. Narrow the target
-  further with explicit `paths`.
-- There is no diff: reviewers read the listed files, the flagging
-  bar's "introduced by this change" becomes "present in the code as it
-  stands", and confirmation drops the introduced-by-the-change clause.
-- The fix loop is unchanged — the fixer's edits are still an
-  uncommitted diff, so fix verification and the fresh-eyes fix review
-  work identically.
-- In project mode the `merge` recommendation reads as "the code is
-  ready as it stands".
+The gate runs `--tree`; the review target is every tracked source
+file (extension-filtered; lockfiles, generated code and vendored/build
+directories excluded), sharded when too large for one turn (bounds in
+panel.md § Targets — every lens reads every part, so coverage is
+complete). There is no diff: the flagging bar's "introduced by this
+change" becomes "present in the code as it stands", and confirmation
+drops the introduced-by clause. The fix loop is unchanged; `merge`
+reads "the code is ready as it stands". Narrow the target with
+explicit `paths`.
 
 ### Preflight (stage 1.5) — the scout maps the ground
 
 Between a green gate and the first reviewer, one read-only scout
-explores the codebase and the modules the target touches and returns
-the map the panel starts from:
-
-- `modules` — the target's modules plus their close neighbors
-  (name, path, one-line role; within two hops);
-- `conventions` — the patterns the surrounding code establishes, the
-  ones design fit is judged against (error-handling idiom, test
-  layout, naming, module boundaries — AGENTS.md/CLAUDE.md folded in);
-- `riskAreas` — paths in or near the target that deserve extra
-  reviewer attention, one line each.
-
-The map rides the reviewer asks and the final assessment as context —
-verify against the code, never cite it as evidence. Confirmers never
-see it: independent confirmation verifies from the code alone, and a
-scout error must not rubber-stamp a finding. The scout reports a map,
-never findings — a defect it noticed travels only as a `riskAreas`
-line with a path, and the reviewers still must find it. A scout that
-fails degrades to the raw target (named under `notCovered`), and
-`fix_from` runs skip the step entirely (their review stages are
-skipped). The step runs in fast mode too — one bounded turn (≤8
-modules, ≤6 conventions, ≤6 risk areas) buys every reviewer the same
-starting ground.
+returns `modules` / `conventions` / `riskAreas` — bounded, and riding
+the reviewer asks and final assessment as context, never as evidence
+(confirmers never see it, so a scout error cannot rubber-stamp a
+finding). A scout that fails degrades to the raw target (named under
+`notCovered`); `fix_from` runs skip the step. Canonical: panel.md
+§ Preflight; the brief is `agents/code-review-scout.md`.
 
 ### Stage 2 — specialist review with triage and confirmation
 
@@ -194,93 +149,66 @@ parallel where you can:
 - **security** — untrusted input paths, injection, secrets and tokens,
   permissions, destructive operations;
 - **quality & tests** — complexity the next reader pays for,
-  misleading names, doc drift, design fit (whether the change follows
-  the patterns the surrounding code establishes instead of inventing
-  a parallel way, checked against a labelled design-smell baseline —
-  Fowler shapes, always judgement calls, the repo overriding), and
-  tests: changed behavior with no covering test, tests that cannot
-  fail.
+  misleading names, doc drift, design fit (against a labelled
+  design-smell baseline — always judgement calls, the repo
+  overriding), and tests: changed behavior with no covering test,
+  tests that cannot fail.
 
 Each side of this rubric is materialized as an agent brief inside the
 skill — `agents/code-review-correctness.md`, `-security.md`,
 `-quality.md` (each carrying the full checklist for its side) over the
 shared `agents/_panel-protocol.md`; the fix loop's author role is
 `agents/code-review-fixer.md`. Where the harness supports subagent
-dispatch (Claude Code, omp, opencode, Factory Droid — sync installs
-the briefs as real subagent types), spawn one brief per lens instead
-of simulating a lens yourself: same rubric, same bar, real
-independence. Where it does not, cover the lenses inline — the briefs'
-rubric sections are the checklist, so a lens is never covered from
-memory alone.
+dispatch, spawn one brief per lens instead of simulating a lens
+yourself: same rubric, same bar, real independence. Where it does not,
+cover the lenses inline — the briefs' rubric sections are the
+checklist, so a lens is never covered from memory alone. Small diffs
+(roughly ≤400 added lines and ≤5 files) may collapse to one general
+reviewer covering all three lenses.
 
-Small diffs (roughly ≤400 added lines and ≤5 files) may collapse to one
-general reviewer covering all three lenses.
+Every reviewer follows the panel contract (`_panel-protocol.md` is
+canonical): read the FULL target and the surrounding files, following
+call sites when a defect depends on them; read the repo's rules
+(`AGENTS.md`/`CLAUDE.md`) first and cite any rule a finding violates;
+the flagging bar — discrete, in-target, demonstrable, fixable; an
+impact sentence above the minor level; the exclusions (speculation,
+style/formatting, intentional behavior changes, pre-existing problems
+the change does not worsen); the severity ladder; `path:line` on the
+new side; zero findings is the expected answer for a clean target.
 
-Every reviewer follows the same contract:
-
-1. Read the FULL target — the diff in change review, the listed files
-   in project mode; open the surrounding files for context; follow call
-   sites when a defect depends on them.
-2. Read the repo's rules first — `AGENTS.md` / `CLAUDE.md` at the root,
-   if present — and cite any rule a finding violates.
-3. The flagging bar — a finding must be ALL of: discrete and
-   actionable; part of the target under review (in change review:
-   introduced by this change); demonstrable from the code (quote the
-   deciding lines); something the author would reasonably fix.
-4. Impact — one sentence on what the defect breaks and when it bites
-   (which callers, what data is at risk), on every finding above the
-   minor level.
-5. Exclusions: speculative might-fail concerns, style/formatting (the
-   gate owns those), intentional behavior changes — and, in change
-   review, pre-existing problems the change does not worsen.
-6. Severity: `high` = data loss, crash, wrong result, security
-   compromise; `medium` = a real defect the author should fix; `low` =
-   minor. Cite every finding as `path:line` in the code (on the new
-   side in change review).
-7. Zero findings is the expected answer for a clean target. Never
-   invent one to seem busy.
-
-**Stated intent.** When the author's intent is available — the
-`intent` arg, or the PR description in pr mode — reviewers, triage and
-the final assessment receive it verbatim and judge against it: a
-deliberate choice the intent states up front is an intentional
-behavior change, not a finding. This is the author's rebuttal channel
-for unattended runs, and it never waives a demonstrable defect.
-Confirmation stays intent-blind on purpose: the confirmer verifies
-from the code alone.
+**Stated intent.** The `intent` arg (or the PR description in pr mode)
+reaches reviewers and triage verbatim and judges against it: a
+deliberate choice stated up front is an intentional behavior change,
+not a finding — the author's rebuttal channel for unattended runs,
+which never waives a demonstrable defect. Confirmation stays
+intent-blind on purpose.
 
 One **triage editor** dedupes across lenses and drops style nits,
 speculation and pre-existing issues (with a one-line reason each) —
-stingy, but never suppressing a real defect. Then every KEPT finding is
-**independently confirmed** by someone who did not write it: re-read
-the location, check the change introduced it, answer verified or
-unconfirmed. Findings that fail confirmation are kept and labelled
-`unconfirmed`, never silently dropped.
+stingy, but never suppressing a real defect. Then every KEPT finding
+is **independently confirmed** by someone who did not write it.
+Findings that fail confirmation are kept and labelled `unconfirmed`,
+never silently dropped.
 
 ### Stage 3 — synthesis
 
 One assessment (the triage editor, for a consistent scale) produces:
-overall **risk** (low/medium/high), **test gaps** (changed behavior no
-test covers), **residual risks** (what remains unverified), and a
-verdict. Report what was checked (the gate's commands) and what was
-not. A change over the split bounds (`SUGGEST_SPLIT_LINES` 1000 added
-lines / `SUGGEST_SPLIT_FILES` 20 files) also earns a one-line
-recommendation to split it into smaller, independently reviewable
-chunks — reviewers read whole targets, and coverage thins as size
-grows.
+overall **risk** (low/medium/high), **test gaps**, **residual
+risks**, and a verdict — reporting what was checked (the gate's
+commands) and what was not. A change over the split bounds (panel.md
+§ The report) also earns a one-line recommendation to split it.
 
 ### Stage 4 (optional) — the fix loop
 
 When the user asked to fix as well, run bounded rounds (default 2):
 
-1. An **author/fixer** fixes the confirmed findings in the working
-   tree: reads the repo's AGENTS.md/CLAUDE.md first, minimal, repo
-   style, NEVER commits, never weakens a test to
-   make a finding go away (pin corrected behavior instead). Dispatch
-   `agents/code-review-fixer.md` where the harness supports subagents.
-   That brief carries the kit-wide engineering rules (§ Engineering
-   rules: test discipline, backgrounded-job discipline, code
-   commenting) — they bind the fix loop's every edit.
+1. An **author/fixer** (`agents/code-review-fixer.md`) fixes the
+   confirmed findings in the working tree: repo rules first, minimal,
+   repo style, NEVER commits, never weakens a test to make a finding
+   go away (pin corrected behavior instead). That brief carries the
+   kit-wide engineering rules (§ Engineering rules: test discipline,
+   backgrounded-job discipline, code commenting) — they bind the fix
+   loop's every edit.
 2. Every attempted fix is verified by an independent reader: `fixed` /
    `unfixed` / `worse`.
 3. The gate re-runs; failures become findings the fixer must clear.
@@ -288,19 +216,13 @@ When the user asked to fix as well, run bounded rounds (default 2):
    touched, for NEW defects the fixes introduce.
 5. Loop until everything is fixed or rounds run out.
 
-**The review-then-ask flow.** An unattended run cannot pause mid-run to
-ask the user, so the decision gate is a second run, and `fix_from`
-makes it cheap: run a review first (`fix_rounds: 0`), present the
-findings with their severity and impact, and let the user decide. If
-they fix, run again with `fix_from` — the previous
-report's markdown (the saved report file; its findings section parses
-back, ids included), or its findings JSON inline or as a file path
-(each item `{id, where, what, evidence, severity, lens, status,
-impact, fixStatus}`; ids are optional — an id-less item gets
-`carried-N`; items already marked fixed are dropped) — plus
-`fix_rounds`. That run skips the review stages entirely: it loads the
-carried findings, runs the fix loop on them, and ends with the
-recommendation. `fix_rounds` defaults to 2 in this mode.
+**The review-then-ask flow.** An unattended run cannot pause mid-run
+to ask, so the decision gate is a second run: run a review first
+(`fix_rounds: 0`), present the findings, and if the user fixes, run
+again with `fix_from` — the previous report's markdown, or its
+findings JSON (schema: `templates/fix-from-findings.json`) — plus
+`fix_rounds`. That run skips the review stages entirely and ends with
+the recommendation.
 
 End with a **recommendation**: `merge` (everything fixed, gate green,
 nothing new), `fix-first` (ordinary findings remain), or `human`
@@ -309,46 +231,40 @@ commit decision and message are the user's.
 
 ## Launch discipline
 
-- **Any harness** (one shape): the `/spec-code-review` router
-  command (`commands/spec-code-review.md`, installed by tools/sync.sh)
-  routes review/fix/gate/plan asks into this skill, and the session
-  executes the stages inline as written — the shared review oracle
-  (`scripts/review_orchestrator.py`) resolves targets, runs the
-  gate plan, parses findings and assembles the report for any caller
-  (args: `base`, `target` `diff`/`branch`/`pr`/`project`, `pr` (the
-  pull request, pr mode), `intent` (the author's stated intent),
-  `fix_from` (the previous report's markdown or its findings JSON —
-  fix-only continuation), `paths` (project mode), `mode` fast/full/
-  auto, `fix_rounds`). A repo may keep its own project-scoped copy
+- **Any harness** (one shape): the `/spec-code-review` router command
+  (`commands/spec-code-review.md`) routes review/fix/gate/plan asks
+  into this skill, and the session executes the stages inline as
+  written — the shared review oracle
+  (`scripts/review_orchestrator.py`) resolves targets, runs the gate
+  plan, parses findings and assembles the report for any caller
+  (args: `base`, `target`, `pr`, `intent`, `fix_from`, `paths`,
+  `mode`, `fix_rounds`). A repo may keep its own project-scoped copy
   tuned to its exact CI set; the project copy wins there. Harnesses
-  with subagent dispatch spawn the panel briefs; harnesses without run
-  the lenses inline from the same briefs' rubric sections.
+  with subagent dispatch spawn the panel briefs; harnesses without
+  run the lenses inline from the same briefs' rubric sections.
 - **Long foreground calls** (this skill runs none itself, but a fix
-  loop may) may be auto-backgrounded by the harness; the result
-  arrives as a follow-up when the job finishes. NEVER poll a
-  backgrounded job (`sleep`, `ps`, `pgrep`, `top`) — do other work or
-  end your reply; you will be woken with its output.
+  loop may) may be auto-backgrounded by the harness; NEVER poll a
+  backgrounded job — do other work or end your reply; you will be
+  woken with its output.
 
 ## Reading the result
 
 Findings carry `path:line`, evidence, severity, lens, and a
-verified/unconfirmed status (or fixed/unfixed/worse after a fix round).
-Triage drops are listed with reasons — "dropped at triage" means judged
-out of scope, not missed. `notCovered` distinguishes "found nothing"
-from "looked nowhere": read it before trusting a clean report. In pr
-mode the `merge` recommendation reads as the PR is ready; in branch
-mode, as the branch is ready to merge.
+verified/unconfirmed status (or fixed/unfixed/worse after a fix
+round). Triage drops are listed with reasons — "dropped at triage"
+means judged out of scope, not missed. `notCovered` distinguishes
+"found nothing" from "looked nowhere": read it before trusting a
+clean report. Field semantics: panel.md § Findings and § The report.
 
 ## Resource map
 
 `contracts/panel.md` is the canonical contract (this file summarizes;
 it arbitrates). `gates/recommendation.md` arbitrates stop conditions
-and recommendation criteria. `decisions/` holds the panel's ADRs.
-`references/quickstart.md` is navigation, not
-a second contract. `evals/cases.md` + `examples/review-target/` are
-the standing live-eval scenarios with a seeded-bug answer key;
+and recommendation criteria. `references/quickstart.md` is navigation,
+not a second contract. `evals/cases.md` + `examples/review-target/`
+are the standing live-eval scenarios with a seeded-bug answer key;
 `templates/fix-from-findings.json` is the continuation payload
-template; `diagrams/` holds the flow graph (.mmd canonical + an HTML
-render); `observations/open-items.md` is the living open-items list;
+template; `decisions/` holds the panel's ADRs, `diagrams/` the flow
+graph, `observations/open-items.md` the living open-items list;
 `scripts/skill-dir.sh` prints the active skill dir per the launch
 priority order.

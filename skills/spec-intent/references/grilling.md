@@ -36,7 +36,9 @@ yourself (never a reason to guess):
 
 A pattern found is not a question dumped on the user — the facts
 behind a row (what exists, what the reference actually does) stay the
-runner's job; only the judgment call goes to the frontier.
+runner's job; only the judgment call goes to the frontier. The
+pattern families are adapted from nidhinjs/prompt-master (reviewed
+2026-10-24).
 
 ## The round
 

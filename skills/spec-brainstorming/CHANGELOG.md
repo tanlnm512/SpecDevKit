@@ -9,7 +9,8 @@ specification that feeds spec-to-prod's `/spec` intake.
 
 - Description gains its boundary negation — not for requirements
   intake on a settled idea (spec-intent) — matching the other
-  skills' cross-skill exclusions.
+  skills' cross-skill exclusions. Adapted from
+  nidhinjs/prompt-master (reviewed 2026-10-24).
 
 - **D-006 — one panel-wave form**: the per-harness workflow dialects
   are deleted (with the kit-wide move, spec-to-prod D-035); stage 2

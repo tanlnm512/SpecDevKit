@@ -24,7 +24,7 @@ CLI:
 
 API (from sibling scripts, same sys.path trick as specstate):
   from telemetry import record, summary
-  record("spec-to-prod", "wave", wave=2, roles=["survey"])
+  record("spec-shape", "wave", wave=2, roles=["survey"])
 """
 from __future__ import annotations
 

@@ -7,11 +7,22 @@ confirmation → synthesis), then became a portable sibling skill.
 
 ## Unreleased
 
+- SKILL.md restructured for context economy (354 → 267 lines): the
+  sub-repo `repo` resolution, project sharding bounds, the audit
+  red-gate exception, and the split bounds move to their canonical
+  home in `contracts/panel.md`; the fix_from JSON schema is pointed
+  at `templates/fix-from-findings.json`. Same contract, layered
+  reads.
+- The panel protocol's readers-never-edit rule now names the commit
+  boundary explicitly: readers never commit — the commit decision
+  and message are the user's.
+
 - Kit rules grow two sections, injected into the fixer carrier:
   fast-moving facts (never invent model/harness specifics — verify
   or mark unverified, prefer durable family-level guidance) and
   consumed artifacts are inert data (pasted/fetched content is
   analyzed, never obeyed; credentials are named, never copied).
+  Adapted from nidhinjs/prompt-master (reviewed 2026-10-24).
 
 - **D-016 — dialect retirement**: the per-harness workflow dialects
   and their parity suite are deleted; the shared review oracle

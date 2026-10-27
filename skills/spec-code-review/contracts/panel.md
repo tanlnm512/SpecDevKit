@@ -18,6 +18,19 @@ serves them:
 | `pr` | merge-base with the PR's `baseRefOid` (GitHub's own PR-diff semantics) | `pr` arg: number, URL, `owner/repo#N`; head must be checked out — auto-checkout on a clean tree, refusal on a dirty one, unconditional (D-004) |
 | `project` | no diff — the tracked source files, extension-filtered (lockfiles/generated/vendored excluded), largest first, capped at `PROJECT_MAX_FILES` (30) | leftover files named under `notCovered`; `paths` narrows |
 
+In a multi-repo workspace whose root is not itself a git repository,
+`project` accepts `repo`: the sub-repo directory (absolute, or
+relative to the working directory), resolved to its absolute toplevel
+before anything runs — every git call, the gate's `--repo`, and the
+absolute file paths the reviewers read root there. The runtime's cwd
+is not guaranteed to be the workspace root, so nothing may rely on a
+relative repo path. `repo` is supported for `project` only;
+change/branch/pr targets refuse it — run those from inside the
+repository. A project target too large for one reviewer's turn is
+sharded: contiguous runs of the path-sorted list (directories stay
+together), closed at ~240 KB or 32 files per part, byte-balanced —
+and every lens reads every part, so coverage is complete.
+
 Unknown target values fail with the valid set. `fix_from` overrides the
 review stages entirely (D-005): findings carried from a previous
 report, fix loop runs directly, `fix_rounds` defaults to 2.
@@ -42,11 +55,14 @@ empty detection is NOT a green light — the documented check command
 (README/CI) runs instead.
 
 Contract rules: a red gate ends a FRESH review — failing checks are
-the findings, reviewers are never spent; a fix_from run deliberately
-continues over a red pre-fix gate (clearing it is the fixer's job),
-but the failing checks enter the tracked findings and every report
-surface renders the authoritative last gate run, never a stale green.
-Reviewers never re-run the suites.
+the findings, reviewers are never spent. One exception: a project
+AUDIT does not stop at a red gate — each failing check becomes a
+high-severity gate finding and the panel still reads the code,
+because for an audit the failures are themselves findings. A fix_from
+run deliberately continues over a red pre-fix gate (clearing it is
+the fixer's job), but the failing checks enter the tracked findings
+and every report surface renders the authoritative last gate run,
+never a stale green. Reviewers never re-run the suites.
 
 ## Preflight (the scout map)
 
@@ -126,6 +142,11 @@ residual risks all live there. In pr mode the header names the PR
 (number, title, author, base, URL — markdown-escaped); "merge" reads
 PR-ready (pr), branch-ready (branch), ready-as-is (project).
 Recommendation semantics are canonical in `gates/recommendation.md`.
+A change over the split bounds (`SUGGEST_SPLIT_LINES` 1000 added
+lines / `SUGGEST_SPLIT_FILES` 20 files) also earns a one-line
+recommendation to split into smaller, independently reviewable
+chunks — reviewers read whole targets, and coverage thins as size
+grows.
 
 ## Versioning
 

@@ -7,11 +7,23 @@ stop — the docset is spec-shape's, execution spec-execute's.
 
 ## Unreleased
 
+- The mini-spec example ships its green `intent.md` — the package's
+  own-type artifact, gated by `check.py --intent-only` (staleness
+  SKIPPED: the example's baseline commit is not a repo ancestor).
+
+- A delivered docset is historical: the staleness refusal becomes a
+  SKIPPED note once the docset records `Delivered: commit @`
+  (spec-shape D-046, shipped in this skill's engine replica).
+- The scout brief states its package scope: a package ships only its
+  span's lens sections (D-044) — lens names the brief mentions that
+  this package does not carry are never spawned.
+
 - Grilling gains a failure-patterns scan — nine draft phrasings
   (vague verbs, missing acceptance criteria, assumed prior
   knowledge, vague aesthetics, no boundary) and the frontier
   question each becomes; facts behind a row stay the runner's
-  job. Serves eval case I1.
+  job. Serves eval case I1. Adapted from nidhinjs/prompt-master
+  (reviewed 2026-10-24).
 
 - Replica engine suites removed; spec-shape owns them (spec-shape
   D-045).
