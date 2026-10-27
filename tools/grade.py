@@ -67,19 +67,26 @@ JUDGMENT_ITEMS = {
     ],
 }
 
+# `sonnet` is the sanctioned family-level tier alias the install
+# pipeline translates (omp-defs.py -> @smol, D-012); only provider-
+# specific names are portability defects.
 HARDCODED_MODEL = re.compile(
-    r"^model:\s*(sonnet|opus|haiku|gpt-[\w.-]*|glm-[\w.-]*|"
+    r"^model:\s*(opus|haiku|gpt-[\w.-]*|glm-[\w.-]*|"
     r"gemini-[\w.-]*|claude-[\w.-]*)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
-# The kit's real brief grammar: the spec suite's roles carry Method/Done
-# when, panel agents carry How to work/Output. Both are complete.
+# The kit's real brief grammar: panel agents carry How to work/Output,
+# spec-suite roles carry Method/Done when or a named spine (Evidence
+# discipline, Design spine, Spine) with method/digest detail in the
+# lens sections the payload prepends.
 AGENT_SECTIONS = [
     ("frontmatter name", re.compile(r"^name:\s+\S", re.M), 3),
     ("frontmatter description", re.compile(r"^description:", re.M), 2),
     ("mission", re.compile(r"\*\*Mission\*\*", re.M), 4),
-    ("method", re.compile(r"^#{1,3}\s+(?:How to work|Method)\b", re.M), 4),
+    ("method", re.compile(
+        r"^#{1,3}\s+(?:How to work|Method|Evidence discipline|Design spine|Spine)\b",
+        re.M), 4),
     ("output contract", re.compile(r"^#{1,3}\s+(?:Output|Done when)\b", re.M), 4),
     (
         "rules barrier",
@@ -120,12 +127,16 @@ def discover_agents():
 
 
 def skill_protocol_text(skill):
+    """Every prepend the spawn payload carries — the shared protocol
+    plus the lens sections — graded as one composite, the text the
+    agent actually reads (D-036 moved method/digest into lenses)."""
     agents_dir = SKILLS_DIR / skill / "agents"
-    for name in ("_shared-protocol.md", "_panel-protocol.md"):
+    parts = []
+    for name in ("_shared-protocol.md", "_panel-protocol.md", "_lenses.md"):
         p = agents_dir / name
         if p.exists():
-            return p.read_text(encoding="utf-8")
-    return ""
+            parts.append(p.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------- skill ----
@@ -214,6 +225,32 @@ def skill_dogfood_targets(skill):
             (f"examples/review-target/{rel}", None)
             for rel in ("base/app.py", "change.diff", "EXPECTED.md")
         ]
+    if skill == "spec-intent":
+        checker = SKILLS_DIR / skill / "scripts" / "check.py"
+        # own-type artifacts: the shipped green example + every live
+        # intent the repo currently holds
+        dirs = [SKILLS_DIR / skill / "examples" / "mini-spec" / "specs"
+                / "mini-spec"]
+        dirs += [p.parent for p in sorted((ROOT / "specs").glob("*/intent.md"))]
+        return [
+            (str(d.relative_to(ROOT)),
+             [sys.executable, str(checker), str(d), "--intent-only"])
+            for d in dirs
+        ]
+    if skill == "spec-execute":
+        checker = SKILLS_DIR / skill / "scripts" / "check.py"
+        # execute's own-type artifact is a delivered docset: the shipped
+        # tiny-tier delivered example, plus any live spec whose task.md
+        # records the C1 commit
+        dirs = [SKILLS_DIR / skill / "examples" / "spec-tiny-delivered"]
+        dirs += [
+            p.parent for p in sorted((ROOT / "specs").glob("*/task.md"))
+            if "Delivered: commit @" in p.read_text(encoding="utf-8")
+        ]
+        return [
+            (str(d.relative_to(ROOT)), [sys.executable, str(checker), str(d)])
+            for d in dirs
+        ]
     return []
 
 
@@ -222,7 +259,8 @@ def skill_dogfood(skill):
     if not targets:
         # Distinguish "nothing of its type exists" from a mapping blind
         # spot: an unmapped skill must be named, not silently zeroed.
-        known = skill in ("spec-brainstorming", "spec-shape", "spec-code-review")
+        known = skill in ("spec-brainstorming", "spec-shape",
+                          "spec-code-review", "spec-intent", "spec-execute")
         return {"earned": 0, "max": 7, "detail": (
             f"NO DOGFOOD MAPPING for skill '{skill}' — add one to "
             "skill_dogfood_targets or document why none applies"
@@ -318,13 +356,17 @@ def grade_agent(skill, path):
 
     disallowed = re.search(r"^disallowedTools:\n((?:\s+-\s+\S+.*\n)+)", text, re.M)
     blocked = disallowed.group(1) if disallowed else ""
+    tools_line = re.search(r"^tools:\s*(.+)$", text, re.M)
     # A disallowedTools entry carrying Agent/Task/SendMessage is a
     # stronger spawn prohibition than prose — count either.
     no_spawn = bool(re.search(r"never spawn|do (?:not|NOT) spawn", effective, re.I)) or bool(
         re.search(r"\bAgent\b|\bTask\b|\bSendMessage\b", blocked)
     )
-    no_commit = bool(re.search(r"never commit|NEVER commit|do (?:not|NOT) commit", effective, re.I))
-    tools_line = re.search(r"^tools:\s*(.+)$", text, re.M)
+    # A tools list without Bash cannot run git commit — machinery
+    # outranks prose.
+    no_commit = bool(
+        re.search(r"never commit|NEVER commit|do (?:not|NOT) commit", effective, re.I)
+    ) or (tools_line is not None and "Bash" not in tools_line.group(1))
     write_scoped = bool(re.search(r"\bWrite\b|\bEdit\b", blocked)) or tools_line is not None
 
     model_hits = HARDCODED_MODEL.findall(text)

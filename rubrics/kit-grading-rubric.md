@@ -104,18 +104,26 @@ concrete miss. `--skip-suites` / `--skip-sync` mark those checks
   fixture files); disclosed limitations 3 (`observations/open-items.md`
   exists and discloses accepted limitations).
 
-### Agent brief (skips `_shared-*` / `_panel-*`)
+### Agent brief (skips `_`-prefixed files as units; their text is graded
+as part of the composite below)
 
 - **A1 (25)** — frontmatter `name` + `description` 5; `**Mission**` 4;
-  a How-to-work/Method section 4; an Output/deliverable contract 4;
+  a method section 4 (How to work / Method, or a named spine — Evidence
+  discipline, Design spine, Spine); an Output/deliverable contract 4;
   Guardrails 4; a `digest:` grammar or findings-list contract 4.
-- **A2 (20)** — never-spawn rule 5; never-commit rule 5; write
+  Sections are sought in the composite the spawn payload carries: the
+  brief plus `_shared-protocol.md`/`_panel-protocol.md` plus
+  `_lenses.md` (D-036 moved method/digest into lens sections).
+- **A2 (20)** — never-spawn rule 5; never-commit rule 5 (prose, or a
+  `tools:` list without Bash — machinery outranks prose); write
   scoping 10 (reviewers: `disallowedTools` carrying Write/Edit; other
   briefs: a `tools:` list that omits Write, or an explicit write
   scope).
-- **A3 (10)** — 10 minus 3 per hardcoded concrete model name in
-  frontmatter (`sonnet`, `opus`, `haiku`, `gpt-*`, `glm-*`,
-  `gemini-*`, `claude-*`), floor 0.
+- **A3 (10)** — 10 minus 3 per hardcoded provider-specific model name
+  in frontmatter (`opus`, `haiku`, `gpt-*`, `glm-*`, `gemini-*`,
+  `claude-*`), floor 0. `sonnet` is exempt: the family-level tier
+  alias omp-defs translates to `@smol` (D-012), not a portability
+  defect.
 
 ## 5. Judgment checklist
 
@@ -199,3 +207,4 @@ the assessor fills defects and judgment columns.
 | 2026-10-05 | S4 real-repo evidence now reads the eval runner's self-labeling `- repo:` line (scratch runs are labeled scratch and never count) |
 | 2026-10-06 | W1/W2 anchors updated for D-014: review twins anchor on the shared oracle path; the commit-stays-yours line is an enforced boundary form |
 | 2026-10-09 | Workflow unit type retired (dialects deleted, spec-to-prod D-035): skills + agent briefs remain, 11 dimensions |
+| 2026-10-27 | A1 grades the payload composite (brief + protocol + `_lenses.md`; spine headings count as method); A2 credits a Bash-less tools list as enforced no-commit; A3 exempts `sonnet` as the translated tier alias (D-012); intent/execute dogfood mappings added (own-type artifacts are live when they exist) |

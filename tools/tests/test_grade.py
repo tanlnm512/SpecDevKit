@@ -52,17 +52,25 @@ class RubricContractTests(unittest.TestCase):
 
 class HelperTests(unittest.TestCase):
     def test_hardcoded_model_detection(self):
-        hit = "---\nmodel: sonnet\n---\nbody"
+        hit = "---\nmodel: opus\n---\nbody"
+        tier = "---\nmodel: sonnet\n---\nbody"
         miss = "---\nmodel: inherit\n---\nbody"
-        self.assertEqual(grade.HARDCODED_MODEL.findall(hit), ["sonnet"])
+        self.assertEqual(grade.HARDCODED_MODEL.findall(hit), ["opus"])
+        self.assertEqual(grade.HARDCODED_MODEL.findall(tier), [])
         self.assertEqual(grade.HARDCODED_MODEL.findall(miss), [])
 
     def test_agent_sections_accept_both_brief_grammars(self):
         spec_style = "---\nname: x\ndescription: y\n---\n# X\n\n**Mission**: m\n\n## Method\n\n## Done when\n\ndigest: task T001\n\n## Guardrails\n"
         panel_style = "---\nname: x\ndescription: y\n---\n# X\n\n**Mission**: m\n\n## How to work\n\n## Output\n\nA findings list.\n\n## Readers never edit\n"
-        for text in (spec_style, panel_style):
+        spine_style = "---\nname: x\ndescription: y\n---\n# X\n\n**Mission**: m\n\n## Evidence discipline\n\n## Done when\n\ndigest: statuses 1 DONE\n\n## Guardrails\n"
+        for text in (spec_style, panel_style, spine_style):
             missing = [n for n, rx, _ in grade.AGENT_SECTIONS if not rx.search(text)]
             self.assertEqual(missing, [], f"sections missed in brief grammar: {missing}")
+
+    def test_composite_text_carries_lens_sections(self):
+        composite = grade.skill_protocol_text("spec-shape")
+        self.assertIn("## Lens: survey", composite)
+        self.assertIn("digest:", composite)
 
     def test_bucket_boundaries(self):
         self.assertEqual(grade.bucket(300, [(300, 5), (600, 4)], 2), 5)
