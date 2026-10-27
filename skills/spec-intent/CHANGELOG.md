@@ -7,6 +7,9 @@ stop — the docset is spec-shape's, execution spec-execute's.
 
 ## Unreleased
 
+- One command per skill (spec-execute D-033): the `/spec-intent` twin
+  router is retired — `/spec-idea` is this skill's one command.
+
 - The mini-spec example ships its green `intent.md` — the package's
   own-type artifact, gated by `check.py --intent-only` (staleness
   SKIPPED: the example's baseline commit is not a repo ancestor).

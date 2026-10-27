@@ -229,7 +229,11 @@ atomic_put() {  # <src> <dest>
 claimed_command_names() {
   local name base
   for name in "${SKILLS[@]}"; do
-    printf '%s\n' "$name"
+    # a skill's own name is claimed only when its router file actually
+    # ships — a skill without commands/<name>.md does not hold the
+    # flat-root name (spec-execute D-033 left orphans behind otherwise)
+    [ -f "$PKG_ROOT/skills/$name/commands/$name.md" ] \
+      && printf '%s\n' "$name"
     for base in $(extra_commands "$name"); do
       printf '%s\n' "$base"
     done

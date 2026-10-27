@@ -7,6 +7,9 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- Cross-refs updated to the one-command-per-skill surface
+  (spec-execute D-033): execution's lifecycle verbs ride
+  `/spec-execute`.
 - sync no longer deploys skills to `~/.zcode/skills/` (D-047): zcode
   discovers them through the `~/.agents` compatibility root it also
   scans — the native copy only duplicated every skill in its list.

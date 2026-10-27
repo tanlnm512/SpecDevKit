@@ -40,11 +40,11 @@ FIXTURE = SKILL / "examples" / "mini-spec" / "specs" / "mini-spec"
 FIXTURE_REPO = SKILL / "examples" / "mini-spec" / "repo"
 COMMANDS = SKILL / "commands"
 
-# The lifecycle commands plus the skill's own router verb.
-LIFECYCLE_COMMANDS = ("spec-build.md", "spec-test.md", "spec-review.md",
-                      "spec-ship.md")
-CLAIMED_BARE_NAMES = ["spec-execute", "spec-build", "spec-test",
-                      "spec-review", "spec-ship"]
+# One command per skill (D-033): the router is this package's single
+# command; the lifecycle verbs ride it as arguments.
+ROUTER_COMMAND = "spec-execute.md"
+CLAIMED_BARE_NAMES = ["spec-execute"]
+LIFECYCLE_VERBS = ("build", "test", "review", "ship")
 
 # Payload vocabulary the execute span may never emit: the authoring
 # nodes live in spec-shape's span, so their appearance here would mean
@@ -599,24 +599,22 @@ class Gate004HandAuthoredEquivalenceTests(unittest.TestCase):
 
 
 class Gate005LifecycleCommandSurfaceTests(unittest.TestCase):
-    """The lifecycle commands live in spec-execute's commands dir, each
-    carrying the skill's frontmatter binding, and extra.txt claims every
-    bare name exactly once. Install-level behavior is tested elsewhere."""
+    """One command per skill (D-033): spec-execute.md is this package's
+    single command, every lifecycle verb rides it, and extra.txt claims
+    exactly its name. Install-level behavior is tested elsewhere."""
 
-    def test_the_five_lifecycle_commands_exist_with_content(self):
-        for name in LIFECYCLE_COMMANDS:
-            p = COMMANDS / name
-            self.assertTrue(p.exists(), name)
-            text = p.read_text(encoding="utf-8")
-            self.assertGreater(len(text.strip()), 100, name)
-            self.assertIn("skills: spec-execute", text, name)
-
-    def test_the_skill_router_verb_exists(self):
-        p = COMMANDS / "spec-execute.md"
-        self.assertTrue(p.exists())
-        text = p.read_text(encoding="utf-8")
+    def test_exactly_one_command_and_it_is_the_router(self):
+        cmds = sorted(p.name for p in COMMANDS.glob("*.md"))
+        self.assertEqual(cmds, [ROUTER_COMMAND])
+        text = (COMMANDS / ROUTER_COMMAND).read_text(encoding="utf-8")
+        self.assertGreater(len(text.strip()), 100)
         self.assertIn("skills: spec-execute", text)
         self.assertIn("--span execute", text)
+
+    def test_every_lifecycle_verb_rides_the_router(self):
+        text = (COMMANDS / ROUTER_COMMAND).read_text(encoding="utf-8")
+        for verb in LIFECYCLE_VERBS:
+            self.assertIn(f"`{verb} <spec>", text, verb)
 
     def test_extra_txt_claims_every_bare_name_exactly_once(self):
         text = (COMMANDS / "extra.txt").read_text(encoding="utf-8")

@@ -191,18 +191,18 @@ are spec-execute's own):
   the current contract shape (dry-run, idempotent); `grow` moves a
   tiny-tier spec up to the full docset, verbatim.
 
-## The lifecycle commands
+## The lifecycle verbs (on this skill's one router)
 
-Four thin commands ship in this package (`commands/`), installed
-flat alongside the router — the addyosmani-style surface, each a
-landing into the graph:
+One command per skill (D-033): this package's single command is
+`/spec-execute`, and the lifecycle landings are its verbs — each a
+thin landing into the graph:
 
-| Command | Landing |
+| Verb | Landing |
 |---------|---------|
-| `/spec-build <spec> [T###]` | BUILD — the execute node: implementer waves, no ticks, no commits |
-| `/spec-test <spec>` | VERIFY — delivery-pass steps 1–2: proofs + regression gate |
-| `/spec-review <spec>` | REVIEW — step 3: the review instruments |
-| `/spec-ship <spec>` | SHIP — steps 4–6: tick, C1 + C2, `Status: done`, archive on request |
+| `/spec-execute build <spec> [T###]` | BUILD — the execute node: implementer waves, no ticks, no commits |
+| `/spec-execute test <spec>` | VERIFY — delivery-pass steps 1–2: proofs + regression gate |
+| `/spec-execute review <spec>` | REVIEW — step 3: the review instruments |
+| `/spec-execute ship <spec>` | SHIP — steps 4–6: tick, C1 + C2, `Status: done`, archive on request |
 
 "Prod" is production-READY, not deployed: the terminal path is
 execute → tick-commit → archive; push, PR, deploy, and publish are

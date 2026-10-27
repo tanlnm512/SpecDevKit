@@ -1,1 +1,1 @@
-spec-execute spec-build spec-test spec-review spec-ship
+spec-execute

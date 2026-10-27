@@ -41,8 +41,8 @@ only state.** Every workflow node's readiness is derived from it; nothing
 else (no session log, no step ledger) is consulted.
 
 New-user entry point: `skills/spec-shape/SKILL.md` (the authoring
-playbook and the workflow graph's node table); the phase routers are
-`/spec-intent`, `/spec-gen`, `/spec-execute`.
+playbook and the workflow graph's node table); the phase commands are
+`/spec-idea`, `/spec-gen`, `/spec-execute`.
 
 ## How the workflow works
 
@@ -92,12 +92,12 @@ rollback design, and both reviewer modes).
 
 | Harness | Skills | Agent defs | Entry |
 |---------|--------|-----------|-------|
-| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | `/spec-intent`, `/spec-gen`, `/spec-execute` routers + `/spec-idea`, `/spec-build`…`/spec-ship`; stages inline or via `graph.py --run` |
+| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | the five `/spec-*` commands (one per skill); `/spec-execute` takes the build/test/review/ship verbs; stages inline or via `graph.py --run` |
 | omp | native root / marketplace | `~/.omp/agent/agents/` regenerated (omp dialect) | `/skill:spec-intent`, `/skill:spec-shape`, `/skill:spec-execute` |
-| zcode | plugin / sync | none — fallback spawn carries briefs in the payload | `/spec-intent`, `/spec-gen`, `/spec-execute`; stages inline or via `graph.py --run` |
+| zcode | plugin / sync | none — fallback spawn carries briefs in the payload | the five `/spec-*` commands via `~/.agents/commands/`; stages inline or via `graph.py --run` |
 | opencode | `~/.agents/skills/` (compatibility root it scans) | `~/.config/opencode/agents/` regenerated (permission map) | `skill` tool / `@spec-scout`-style archetype names |
-| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | `/spec-idea`…`/spec-ship` via `~/.factory/commands` (gated) |
-| Kilo | `~/.config/kilo/skills/` (native config-dir scan; D-040) + `~/.agents/skills/` (compatibility root) | `~/.config/kilo/agent/` regenerated (subagent permission map) | `/spec-intent`, `/spec-gen`, `/spec-execute` + `/spec-idea`…`/spec-ship` via `~/.config/kilo/command/` (gated); stages run inline — no dynamic workflow runtime |
+| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | the five `/spec-*` commands via `~/.factory/commands` (gated) |
+| Kilo | `~/.config/kilo/skills/` (native config-dir scan; D-040) + `~/.agents/skills/` (compatibility root) | `~/.config/kilo/agent/` regenerated (subagent permission map) | the five `/spec-*` commands via `~/.config/kilo/command/` (gated); stages run inline — no dynamic workflow runtime |
 | Antigravity (agy) | this repo as a plugin | committed root `agents/` personas (byte-verbatim) | `agy plugin install` |
 
 ADR-015 records the model: one skill copy at `~/.agents/skills/` feeds
@@ -286,8 +286,9 @@ that copies out:
 - **Commands** — a skill's `commands/<name>.md` router (only if it
   ships one) plus each skill's bare names opted into via its own
   `commands/extra.txt` (ADR-013 — `/spec-idea` claims spec-intent,
-  `/spec-gen` claims spec-shape, the four `/spec-build`…`/spec-ship`
-  wrappers claim spec-execute) →
+  `/spec-gen` claims spec-shape) — five commands total, exactly one
+  per skill (spec-execute D-033: its build/test/review/ship ride
+  `/spec-execute` as verbs) →
   `~/.agents/commands/`, `~/.claude/commands/`,
   `~/.zcode/commands/` (omp needs none — `/skill:<name>`
   auto-registers); a foreign file at a destination is refused, not
@@ -305,7 +306,7 @@ Two invocation surfaces:
  │ Idea │ ───▶ │ Spec │ ───▶ │ Code │ ───▶ │ Test │ ───▶ │  QA  │ ───▶ │  Go  │
  │Refine│      │  PRD │      │ Impl │      │Debug │      │ Gate │      │ Live │
  └──────┘      └──────┘      └──────┘      └──────┘      └──────┘      └──────┘
-  /spec-idea   /spec-gen      /spec-build   /spec-test    /spec-review  /spec-ship
+  /spec-idea   /spec-gen     /spec-execute build · test · review · ship
 ```
 
 `/spec-brainstorming` is the optional stage BEFORE this lifecycle:
@@ -319,12 +320,12 @@ pointed at as intent input for `/spec-idea <name>`, not parsed.
 |---|---|
 | `/spec-idea <name>` | spec-intent's intake: scout + grill until the question frontier is empty, producing a validated `intent.md` (a bug takes the bugfix deltas) |
 | `/spec-gen <spec>` | spec-shape's authoring waves: draft spec.md from the intent, then survey → plan ∥ tech ∥ qa → tasks → verify, to the approve gate |
-| `/spec-build <spec> [T###]` | spec-execute's implementer waves; nothing ticked or committed |
-| `/spec-test <spec>` | the proof pass: every TC pass condition green + regression gate |
-| `/spec-review <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
-| `/spec-ship <spec>` | tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
+| `/spec-execute build <spec> [T###]` | spec-execute's implementer waves; nothing ticked or committed |
+| `/spec-execute test <spec>` | the proof pass: every TC pass condition green + regression gate |
+| `/spec-execute review <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
+| `/spec-execute ship <spec>` | tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
 
-`/spec-test`, `/spec-review`, `/spec-ship` are three steps of the ONE
+`/spec-execute test`, `review`, `ship` are three steps of the ONE
 delivery pass,
 never three gates. "Prod" means production-READY (ADR-014):
 the flow ends at a verified single commit; push/deploy/publish stay
@@ -333,7 +334,7 @@ human/CI gates. On omp the entries are `/skill:spec-intent`,
 
 ### Router verbs
 
-`/spec-intent`, `/spec-gen`, `/spec-execute` each take
+`/spec-idea`, `/spec-gen`, `/spec-execute` each take
 `<verb> <spec-name>` — single nodes and repair runs (or naturally:
 "re-survey the auth spec"):
 
@@ -375,7 +376,7 @@ alternates the two —
 | 2 | engine — `graph.py --run --span shape` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
 | 3 | session | pre-flight (baseline green on the spec's branch), present the docset, get approval → `Status: approved` + `freeze.py --record` |
 | 4 | engine — rerun `--run --span execute` | execute waves hands-off: one implementer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
-| 5 | session — `/spec-test` `/spec-review` `/spec-ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
+| 5 | session — `/spec-execute test/review/ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
 
 Rules of thumb: the loop stops `AWAITING HUMAN` at every judgment
 gate — resolve the gate in-session, rerun, and the loop resumes from
@@ -438,7 +439,7 @@ walking `skills/*/`, never by a hardcoded name:
 3. `skills/<name>/commands/<name>.md` — optional: a router command
    (`/<name> <verb> …`) if the skill benefits from one — lives inside
    the skill dir so it stays a self-contained plugin root.
-   Short-lifecycle command wrappers (`/spec-idea`, `/spec-build`, …) are an
+   Bare-name commands (`/spec-idea`, `/spec-gen`) are an
    explicit per-skill opt-in — a `commands/extra.txt` file in the
    skill (one line of space-separated bare names; ADR-013) — because
    generic names land flat in shared global command roots; the

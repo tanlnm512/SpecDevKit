@@ -59,7 +59,7 @@ on any conflict the canonical file wins.
 | eval case | an entry in a skill's `evals/cases.md`; every increment names its served case (C-10) | `specs/CONSTITUTION.md` |
 | sync | `tools/sync.sh` — the one harness-neutral install pipeline to every machine harness root | `tools/` |
 | telemetry | the local append-only run record (`scripts/telemetry.py` → `~/.spec-dev-kit/telemetry/*.jsonl`) — evidence for self-improvement, never status, never contents | `skills/*/scripts/telemetry.py` |
-| lifecycle commands | the `/spec-*` verb wrappers — `/spec-idea`, `/spec-gen`, `/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship` | D-029 |
+| lifecycle commands | the five `/spec-*` commands, exactly one per skill — `/spec-brainstorming`, `/spec-idea`, `/spec-gen`, `/spec-execute`, `/spec-code-review`; execute's build/test/review/ship ride its router as verbs (D-033) | D-029, spec-execute D-033 |
 
 ## Terms to avoid
 
@@ -68,7 +68,7 @@ on any conflict the canonical file wins.
 - **Bare `/review`, `/plan`, `/build`, `/test`, `/ship`** — retired by
   D-029; they collide with harness modes and built-ins. Use the
   `/spec-*` forms, and say `spec-code-review` for standalone review —
-  "review" alone is ambiguous with `/spec-review`.
+  "review" alone is ambiguous with `/spec-execute review`.
 - **"Workflow dialect" / "twin"** for current surfaces — retired with
   D-035; the term now names history only. Say "the oracle"
   (spec-code-review) or "`graph.py --run`" (the spec suite's engine,
@@ -86,7 +86,7 @@ on any conflict the canonical file wins.
 
 ## Flagged ambiguities (resolved)
 
-- **"review"** splits three ways (D-029): `/spec-review` is
+- **"review"** splits three ways (D-029): `/spec-execute review` is
   spec-execute's implementation-diff review step; `spec-code-review`
   is the standalone skill; harness built-ins keep their own names.
 - **"agent"** covers four things — say role agent (spawned), brief

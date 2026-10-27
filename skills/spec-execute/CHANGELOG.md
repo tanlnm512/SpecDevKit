@@ -7,6 +7,12 @@ authoring is spec-shape's, intake spec-intent's.
 
 ## Unreleased
 
+- One command per skill (D-033): the four thin lifecycle wrappers
+  (`/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship`) are
+  retired — the verbs ride `/spec-execute` unchanged
+  (`/spec-execute build|test|review|ship <spec>`); `extra.txt`
+  claims only `spec-execute`.
+
 - `examples/spec-tiny-delivered/` — a delivered tiny-tier docset (the
   execute span's terminal state), gated green by `check.py`'s
   one-file contract.

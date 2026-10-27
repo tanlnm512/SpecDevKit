@@ -216,6 +216,5 @@ disables.
 - `/spec-gen [verb] <name>` — this skill's router
   (`commands/spec-gen.md`): authoring, plan/tech/qa/tasks, re-survey,
   continue-spec asks land here.
-- Intake is `/spec-idea` (spec-intent); execution and the lifecycle
-  commands (`/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship`)
-  are spec-execute's.
+- Intake is `/spec-idea` (spec-intent); execution and its lifecycle
+  verbs (`/spec-execute build|test|review|ship`) are spec-execute's.

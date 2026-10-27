@@ -43,14 +43,14 @@ INTENT_SKILL = "skills/spec-intent"
 SHAPE_SKILL = "skills/spec-shape"
 EXECUTE_SKILL = "skills/spec-execute"
 # The exact flat-command set a fresh install must land in every command
-# root: the skill routers plus the bare names redistributed across skills.
+# root: one command per skill (spec-execute D-033) — the skill-named
+# routers plus the bare names redistributed across skills. The bijection
+# is pinned by test_commands_map_one_to_one_to_skills.
 ROUTER_COMMANDS = (
     "spec-brainstorming", "spec-code-review", "spec-execute",
-    "spec-intent",
 )
 BARE_COMMANDS = (
-    "spec-idea", "spec-gen", "spec-build",
-    "spec-test", "spec-review", "spec-ship",
+    "spec-idea", "spec-gen",
 )
 ALL_COMMANDS = ROUTER_COMMANDS + BARE_COMMANDS
 SYNC_CORPUS = (
@@ -73,7 +73,6 @@ SYNC_CORPUS = (
     "skills/spec-code-review/agents/code-review-fixer.md",
     f"{INTENT_SKILL}/SKILL.md",
     f"{INTENT_SKILL}/VERSION",
-    f"{INTENT_SKILL}/commands/spec-intent.md",
     f"{INTENT_SKILL}/commands/spec-idea.md",
     f"{INTENT_SKILL}/commands/extra.txt",
     f"{INTENT_SKILL}/agents/_shared-protocol.md",
@@ -88,10 +87,6 @@ SYNC_CORPUS = (
     f"{EXECUTE_SKILL}/SKILL.md",
     f"{EXECUTE_SKILL}/VERSION",
     f"{EXECUTE_SKILL}/commands/spec-execute.md",
-    f"{EXECUTE_SKILL}/commands/spec-build.md",
-    f"{EXECUTE_SKILL}/commands/spec-test.md",
-    f"{EXECUTE_SKILL}/commands/spec-review.md",
-    f"{EXECUTE_SKILL}/commands/spec-ship.md",
     f"{EXECUTE_SKILL}/commands/extra.txt",
     f"{EXECUTE_SKILL}/agents/_shared-protocol.md",
     f"{EXECUTE_SKILL}/agents/builder.md",
@@ -179,7 +174,7 @@ class SyncShTests(SyncShBase):
         self.assertEqual(list(self.home.rglob(f"{LEDGER}.tmp*")), [])
 
     def test_bare_name_redistribution_installs_the_same_total_set(self):
-        # bare names map to their owning skills: ten commands, nothing
+        # bare names map to their owning skills: five commands, nothing
         # more, nothing less.
         self.assertEqual(self.run_sync().returncode, 0)
         for root in (".agents", ".claude", ".zcode"):
@@ -188,6 +183,34 @@ class SyncShTests(SyncShBase):
             self.assertEqual(
                 installed, {f"{base}.md" for base in ALL_COMMANDS},
                 f"~/{root}/commands vs the redistributed total set")
+
+    def test_commands_map_one_to_one_to_skills(self):
+        """One /spec-* command per skill (spec-execute D-033): the
+        shipped routers' `skills:` frontmatter names every shipping
+        skill exactly once — a bijection — and every command root
+        installs exactly that set."""
+        shipped = sorted((self.repo / "skills").glob("*/commands/*.md"))
+        self.assertEqual(len(shipped), 5, [str(p) for p in shipped])
+        owners = []
+        for p in shipped:
+            for line in p.read_text(encoding="utf-8").splitlines():
+                if line.startswith("skills:"):
+                    owners.append(line.split(":", 1)[1].strip())
+                    break
+            else:
+                self.fail(f"{p} carries no `skills:` frontmatter")
+        skills = sorted(
+            q.name for q in (self.repo / "skills").iterdir()
+            if (q / "SKILL.md").is_file())
+        self.assertEqual(len(skills), 5, skills)
+        self.assertEqual(sorted(owners), skills,
+                         "command→skill ownership is not one-to-one")
+        self.assertEqual(self.run_sync().returncode, 0)
+        for root in (".agents", ".claude", ".zcode"):
+            installed = sorted(
+                p.stem for p in (self.home / root / "commands")
+                .glob("spec-*.md"))
+            self.assertEqual(installed, sorted(ALL_COMMANDS), root)
 
     def test_installer_scratch_leftover_is_not_a_foreign_file(self):
         # Atomic replacement stages through LEDGER_NAME-prefixed
