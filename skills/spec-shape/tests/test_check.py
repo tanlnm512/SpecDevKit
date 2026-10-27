@@ -431,6 +431,21 @@ class IntentOnlyTests(unittest.TestCase):
         self.assertIn(f"intent.md baseline {base}, HEAD {head}", out)
         self.assertIn("re-scout", out)
 
+    def test_baseline_mismatch_passes_once_delivered(self):
+        root, spec = self._intent_root()
+        base = self._commit(root, "first")
+        head = self._commit(root, "second")
+        (spec / "intent.md").write_text(
+            self.GOOD.format(sha=base), encoding="utf-8")
+        (spec / "task.md").write_text(
+            f"# Task\n\n- [x] T001 do it (FR-001)\n\n"
+            f"Delivered: commit @ {head}\n",
+            encoding="utf-8")
+        code, out = run_check(str(spec), "--intent-only")
+        self.assertEqual(code, 0, out)
+        self.assertIn(
+            "intent staleness: SKIPPED — delivery recorded", out)
+
     def test_empty_intent_fails(self):
         root, spec = self._intent_root()
         (spec / "intent.md").write_text("", encoding="utf-8")
@@ -464,6 +479,39 @@ class IntentOnlyTests(unittest.TestCase):
         code, out = run_check(str(spec))
         self.assertEqual(code, 1, out)
         self.assertIn("intent.md: 1 line(s) with unfilled placeholder(s)", out)
+
+    def test_full_docset_stale_intent_passes_once_delivered(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        root = spec.parents[1]
+        subprocess.run(["git", "-C", str(root), "init", "-q"],
+                       check=True, capture_output=True)
+
+        def commit(message):
+            (root / "note.txt").write_text(message, encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "-A"],
+                           check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(root), "-c", "user.name=kit",
+                 "-c", "user.email=kit@example.com", "commit", "-qm", message],
+                check=True, capture_output=True)
+            return subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+        base = commit("first")
+        head = commit("second")
+        (spec / "intent.md").write_text(
+            IntentOnlyTests.GOOD.format(sha=base), encoding="utf-8")
+        task = spec / "task.md"
+        task.write_text(
+            task.read_text(encoding="utf-8")
+            + f"\nDelivered: commit @ {head}\n",
+            encoding="utf-8")
+        code, out = run_check(str(spec), "--repo", str(root))
+        self.assertEqual(code, 0, out)
+        self.assertIn("delivery recorded", out)
 
 
 class MainArgvTests(unittest.TestCase):

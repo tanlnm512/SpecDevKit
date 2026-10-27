@@ -82,6 +82,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     QUOTE_SPAN,
     TaskEntry,
     defined_ids,
+    delivery_state,
     lifecycle_shas,
     next_ids,
     paths_overlap,
@@ -415,15 +416,25 @@ def survey_only_check(spec_dir: Path, repo_root: Path) -> int:
     return 1 if fails else 0
 
 
-def intent_failures(intent: str, repo_root: Path) -> tuple[list[str], list[str]]:
+def _delivery_recorded(*doc_texts: str) -> bool:
+    """True when any doc text carries the Delivered commit record —
+    the docset is historical and HEAD-vs-baseline comparisons are moot
+    (C1/C2 move HEAD by design)."""
+    return any(delivery_state(t)[0] == "delivered" for t in doc_texts)
+
+
+def intent_failures(intent: str, repo_root: Path,
+                    delivered: bool = False) -> tuple[list[str], list[str]]:
     """(failures, notes) for the intent artifact's refusal families:
     unfilled/empty artifact, surviving template placeholders, open NEEDS
     CLARIFICATION markers (the grilling vocabulary — the same marker scan
-    spec.md uses), and baseline-vs-HEAD staleness. intent.md carries
+    spec.md uses), and baseline-vs-HEAD staleness — intent.md carries
     survey.md's `**Baseline**:` header shape, so the same staleness
-    diagnosis reads it unchanged. Shared by --intent-only and the
-    full check's optional-input path — one discipline, never a second
-    checker."""
+    diagnosis reads it unchanged. `delivered` exempts the staleness
+    comparison: once the docset records its delivery commit, HEAD has
+    moved by design and a stale baseline is history, not drift. Shared
+    by --intent-only and the full check's optional-input path — one
+    discipline, never a second checker."""
     if not intent.strip():
         return ["intent.md is unfilled or empty"], []
     fails: list[str] = []
@@ -466,11 +477,17 @@ def intent_failures(intent: str, repo_root: Path) -> tuple[list[str], list[str]]
         elif head and head != sha.lower() and not (
             head.startswith(sha.lower()) or sha.lower().startswith(head)
         ):
-            where = f" (repo: {repo_hit.name})" if repo_hit != repo_root else ""
-            fails.append(
-                f"intent.md baseline {sha}, HEAD {head}{where} — "
-                "re-scout before trusting the artifact"
-            )
+            if delivered:
+                notes.append(
+                    "intent staleness: SKIPPED — delivery recorded; "
+                    "the docset is historical"
+                )
+            else:
+                where = f" (repo: {repo_hit.name})" if repo_hit != repo_root else ""
+                fails.append(
+                    f"intent.md baseline {sha}, HEAD {head}{where} — "
+                    "re-scout before trusting the artifact"
+                )
     return fails, notes
 
 
@@ -485,7 +502,11 @@ def intent_only_check(spec_dir: Path, repo_root: Path) -> int:
         return 1
     intent = INVISIBLE.sub(
         "", p.read_text(encoding="utf-8", errors="replace"))
-    fails, notes = intent_failures(intent, repo_root)
+    delivered = _delivery_recorded(*(
+        (spec_dir / f).read_text(encoding="utf-8", errors="replace")
+        for f in ("task.md", "spec.md") if (spec_dir / f).exists()
+    ))
+    fails, notes = intent_failures(intent, repo_root, delivered)
     print(f"intent-only check: {p}")
     for n_ in notes:
         print(f"  {n_}")
@@ -893,7 +914,9 @@ def main(argv: list[str] | None = None) -> int:
     if intent_path.exists():
         intent_text = INVISIBLE.sub(
             "", intent_path.read_text(encoding="utf-8", errors="replace"))
-        intent_fails_, intent_notes = intent_failures(intent_text, repo_root)
+        delivered = _delivery_recorded(texts["task.md"], texts["spec.md"])
+        intent_fails_, intent_notes = intent_failures(
+            intent_text, repo_root, delivered)
         notes.extend(intent_notes)
         fails.extend(intent_fails_)
 
