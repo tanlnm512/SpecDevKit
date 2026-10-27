@@ -238,7 +238,7 @@ class SyncShTests(SyncShBase):
         master.write_text(master.read_text() + "# touched by master\n")
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        dest = (self.home / ".zcode" / "skills" / "spec-code-review"
+        dest = (self.home / ".agents" / "skills" / "spec-code-review"
                 / "scripts" / "gate.sh")
         self.assertIn("# touched by master", dest.read_text())
 
@@ -246,20 +246,20 @@ class SyncShTests(SyncShBase):
         # a foreign file anywhere in the tree defers every removal too
         self.assertEqual(self.run_sync().returncode, 0)
         (self.repo / CMD_SKILL / "scripts" / "gate.sh").unlink()
-        zcode_skill = (self.home / ".zcode" / "skills" / "spec-code-review")
-        foreign = zcode_skill / "scripts" / "review_orchestrator.py"
+        skill_tree = (self.home / ".agents" / "skills" / "spec-code-review")
+        foreign = skill_tree / "scripts" / "review_orchestrator.py"
         foreign.write_text(foreign.read_text() + "# hand-edited\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("REFUSE", r.stdout)
         # stale-own gate.sh survives: nothing is removed from a tree
         # that holds a foreign file
-        self.assertTrue((zcode_skill / "scripts" / "gate.sh").is_file())
+        self.assertTrue((skill_tree / "scripts" / "gate.sh").is_file())
         self.assertIn("hand-edited", foreign.read_text())
 
     def test_stale_own_file_is_cleaned_via_ledger(self):
         self.assertEqual(self.run_sync().returncode, 0)
-        dest = (self.home / ".zcode" / "skills" / "spec-code-review"
+        dest = (self.home / ".agents" / "skills" / "spec-code-review"
                 / "scripts" / "gate.sh")
         self.assertTrue(dest.is_file())
         # master (the repo copy) drops the file: ledger proves we shipped
@@ -571,7 +571,7 @@ class KitRulesSyncTests(SyncShBase):
         # the committed carrier was regenerated back to the source
         self.assertNotIn("stale hand-edit", carrier.read_text())
         # and the installed copies carry the fresh section too
-        installed = (self.home / ".zcode" / "skills" / "spec-code-review"
+        installed = (self.home / ".agents" / "skills" / "spec-code-review"
                      / "agents" / "code-review-fixer.md").read_text()
         self.assertNotIn("stale hand-edit", installed)
 

@@ -7,6 +7,9 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- sync no longer deploys skills to `~/.zcode/skills/` (D-047): zcode
+  discovers them through the `~/.agents` compatibility root it also
+  scans — the native copy only duplicated every skill in its list.
 - A delivered docset is historical: intent-baseline staleness becomes
   a visible SKIPPED note once task.md/spec.md records its
   `Delivered: commit @` line (D-046) — a green delivery no longer

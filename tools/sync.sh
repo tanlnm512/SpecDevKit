@@ -5,10 +5,14 @@
 # Topology — N skills (skills/<name>/) x the harness roots below:
 #   skills/<name>/            -> ~/.agents/skills/<name>/
 #                              -> ~/.claude/skills/<name>/
-#                              -> ~/.zcode/skills/<name>/
 #                              -> ~/.omp/agent/skills/<name>/
 #                                 (omp-native root, priority-100 provider
 #                                 — omp sessions load this copy)
+#                                 zcode discovers the same copy through
+#                                 the ~/.agents compatibility root it
+#                                 also scans — a native ~/.zcode/skills
+#                                 deploy only duplicated every skill in
+#                                 its list (D-047)
 #   skills/<name>/commands/<name>.md -> ~/.agents/commands/,
 #                              ~/.claude/commands/, ~/.zcode/commands/
 #                              — plus the bare names the skill opts into
@@ -132,7 +136,6 @@ fi
 SKILLS_ROOTS=(
   "$HOME/.agents/skills"
   "$HOME/.claude/skills"
-  "$HOME/.zcode/skills"
   "$HOME/.omp/agent/skills"
 )
 COMMANDS_ROOTS=(
