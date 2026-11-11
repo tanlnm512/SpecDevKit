@@ -60,7 +60,7 @@ from that manifest.
 
 Run by tools/sync.sh; standalone:
 
-    tools/omp-defs.py --skill-dir skills/spec-author --out ~/.omp/agent/agents
+    tools/omp-defs.py --skill-dir skills/spec-design --out ~/.omp/agent/agents
 """
 import hashlib
 import os

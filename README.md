@@ -1,8 +1,9 @@
 # SpecDevKit
 
 Spec-driven development as a skill suite: an orchestrator (your main
-session) plus five archetype agents (scout · designer · qa · builder ·
-reviewer, lens payloads riding the spawn) drive the frontier loop of
+session) plus archetype agents (analyst · architect · tester · developer ·
+auditor, plus integrator and release-manager for the outward phases;
+lens payloads riding the spawn) drive the frontier loop of
 `graph.py` and produce a grounded, execution-ready doc set per feature
 under `specs/<name>/` — ONE file by default (`Tier: tiny`, D-037) or
 the full seven-file docset (`spec.md`, `plan.md`, `task.md` (the
@@ -18,32 +19,38 @@ This repo — published on GitHub as **SpecDevKit**
 every skill lives at `skills/<name>/`, and one shared, harness-neutral install
 pipeline (`tools/sync.sh`) installs every skill it finds there to every
 supported coding-agent harness in one pass. The spec pipeline ships as
-THREE phase skills: `spec-intake` (pre-spec intake — scout the repo,
-grill the user, produce a validated `intent.md`), `spec-author` (gated
+THREE phase skills: `spec-define` (pre-spec intake — probe the repo,
+grill the user, produce a validated `intent.md`), `spec-design` (gated
 authoring — the docset waves through verify, stopping at the human
 approve gate; the shared-core master and the workflow graph's node
-table live here), and `spec-execute` (post-approve builder waves,
-the delivery pass, the build/test/review/ship verbs). Beside
-them: `spec-code-review` — the portable three-stage code review (the
+table live here), and `spec-build` (post-approve developer waves,
+the delivery pass, the implement/test/audit/ship verbs). Beside
+them: `spec-review` — the portable three-stage code review (the
 repo's own detected checks as a mechanical gate, then a preflight
 scout that maps the codebase and modules, then specialist lenses with
 triage and independent confirmation of every finding, then synthesis,
 plus an optional author-fix loop ending in a merge recommendation) —
-and `spec-brainstorming` — the pre-spec front door (one clarifying
+and `spec-discover` — the pre-spec front door (one clarifying
 question, a spawned three-lens panel of Visionary / Cynic /
 Minimalist, a trade-off matrix, socratic refinement, then a durable
-design specification at `brainstorms/<name>.md` that feeds `/spec-intake` as
-intent input). § Adding a skill to this repo below is the contract any
-further one follows.
+idea brief at `brainstorms/<name>.md` that feeds `/spec-define` as
+intent input). Two outward phases close the lifecycle: `spec-ship`
+(push, PR drafted from the spec's records, CI, review comments,
+re-pointing the delivery record after a squash-merge) and
+`spec-release` (collect delivered specs since the last tag, version,
+changelog + notes, cut, post-release checklist) — every outward action
+waits for the user's yes. § Adding a skill to this repo below is the
+contract any further one follows.
 
 The single organizing rule: **the doc state under `specs/<name>/` is the
 only state.** Every node's readiness is derived from it; no session log
 or step ledger is consulted.
 
-New-user entry point: the lifecycle start — `/spec-brainstorming`
-(optional, for an idea still to pressure-test) or `/spec-intake`, then
-`/spec-author`, then `/spec-execute`. The authoring playbook and the
-workflow graph's node table live in `skills/spec-author/SKILL.md`.
+New-user entry point: the lifecycle start — `/spec-discover`
+(optional, for an idea still to pressure-test) or `/spec-define`, then
+`/spec-design`, then `/spec-build`, then `/spec-ship` and
+`/spec-release`; `/spec-review` fits any time. The authoring playbook and the
+workflow graph's node table live in `skills/spec-design/SKILL.md`.
 
 ## How the workflow works
 
@@ -59,8 +66,8 @@ drive execute — D-037):
    `gate:undetermined` / `SKIPPED`) with reasons, derived from doc state
    alone.
 2. **Run the ready frontier as one wave** — every ready agent node
-   spawns in a single message (scout survey ∥ research, then designer
-   plan ∥ tech with qa, then designer tasks, then builder batches).
+   spawns in a single message (analyst survey ∥ research, then architect
+   plan ∥ tech with the tester, then architect tasks, then developer batches).
    Each agent writes its artifact to disk and returns only a short
    digest.
 3. **Recompute and repeat** until the graph completes (archive).
@@ -80,7 +87,7 @@ waves to a configurable `--runner`.
 
 **The freeze is the approval** (D-050, D-051, D-052): a spec with
 `Status: approved` and no `approvals/approval.md` (`freeze.py
---record`) fails `check.py` and `/spec-execute` refuses it, at both
+--record`) fails `check.py` and `/spec-build` refuses it, at both
 tiers. Full tier also needs `approvals/review.md` — the orchestrator's
 record of the contract review, bound to the docset fingerprint, so a
 repair after the review forces a re-review. A tiny spec's freeze
@@ -91,7 +98,7 @@ and prints `deferred: T### (<why>)` for the rest.
 
 One proof-and-delivery pass runs per plan, after every task is
 implemented: proofs, regression, and the review instruments (scope
-diff, cleanliness sweep, DoD scorecard, implementation-diff reviewer)
+diff, cleanliness sweep, DoD scorecard, implementation-diff auditor)
 feed the ticks' proof notes — then the implementation commit C1 and
 delivery record C2. Nothing is committed before it.
 
@@ -99,19 +106,20 @@ Right-sizing is explicit at two axes: the CONTRACT tier (`Tier: tiny`
 — one file with § Tasks inside, the scaffold default; `full` — the
 seven-file docset; `migrate.py grow` promotes between them with ids
 preserved — D-037) and the effort tier (standard merges the design
-wave; large/high-risk changes add NFR triage, threat modeling,
-rollback design, and both reviewer modes).
+wave; large/high-risk changes add threat modeling, rollback design,
+and both auditor modes). Every full-tier spec triages the six NFR
+families; a `**Type**` header names the work type at either tier.
 
 ## Harness support
 
 | Harness | Skills | Agent defs | Entry |
 |---------|--------|-----------|-------|
-| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | the five `/spec-*` commands (one per skill); `/spec-execute` takes the build/test/review/ship verbs; stages inline or via `graph.py --run` |
-| omp | native root / marketplace | `~/.omp/agent/agents/` regenerated (omp dialect) | `/skill:spec-intake`, `/skill:spec-author`, `/skill:spec-execute` |
-| zcode | `~/.agents/skills/` (compatibility root; D-047) / plugin | none — fallback spawn carries briefs in the payload | the five `/spec-*` commands via `~/.agents/commands/`; stages inline or via `graph.py --run` |
-| opencode | `~/.agents/skills/` (compatibility root it scans) | `~/.config/opencode/agents/` regenerated (permission map) | `skill` tool / `@spec-scout`-style archetype names |
-| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | the five `/spec-*` commands via `~/.factory/commands` (gated) |
-| Kilo | `~/.config/kilo/skills/` (native config-dir scan; D-040) + `~/.agents/skills/` (compatibility root) | `~/.config/kilo/agent/` regenerated (subagent permission map) | the five `/spec-*` commands via `~/.config/kilo/command/` (gated); stages run inline — no dynamic workflow runtime |
+| Claude Code | plugin / sync | `~/.claude/agents/` as-is (frontmatter-enforced) | the seven `/spec-*` commands (one per skill); `/spec-build` takes the implement/test/audit/ship verbs; stages inline or via `graph.py --run` |
+| omp | native root / marketplace | `~/.omp/agent/agents/` regenerated (omp dialect) | `/skill:spec-define`, `/skill:spec-design`, `/skill:spec-build`, `/skill:spec-ship`, `/skill:spec-release` |
+| zcode | `~/.agents/skills/` (compatibility root; D-047) / plugin | none — fallback spawn carries briefs in the payload | the seven `/spec-*` commands via `~/.agents/commands/`; stages inline or via `graph.py --run` |
+| opencode | `~/.agents/skills/` (compatibility root it scans) | `~/.config/opencode/agents/` regenerated (permission map) | `skill` tool / `@spec-analyst`-style archetype names |
+| Factory Droid | `~/.agents/skills/` (personal-compatibility root) | `~/.factory/droids/` regenerated (Task subagent_types) | the seven `/spec-*` commands via `~/.factory/commands` (gated) |
+| Kilo | `~/.config/kilo/skills/` (native config-dir scan; D-040) + `~/.agents/skills/` (compatibility root) | `~/.config/kilo/agent/` regenerated (subagent permission map) | the seven `/spec-*` commands via `~/.config/kilo/command/` (gated); stages run inline — no dynamic workflow runtime |
 | Antigravity (agy) | this repo as a plugin | committed root `agents/` personas (byte-verbatim) | `agy plugin install` |
 
 ADR-015 records the model: one skill copy at `~/.agents/skills/` feeds
@@ -143,7 +151,7 @@ platform list, `tools/sync.sh` proves the harness list.
   config home is skipped loudly, never created.
 
 **Migrating existing docsets**: docsets authored under the version-1
-lifecycle upgrade in place with `skills/spec-execute/scripts/migrate.py`:
+lifecycle upgrade in place with `skills/spec-build/scripts/migrate.py`:
 a dry-run previews the added lifecycle fields, apply is idempotent, and
 migration only inserts explicit pending evidence markers — missing
 evidence never becomes passed evidence. Archived docsets stay readable
@@ -151,16 +159,20 @@ and report a compatibility warning instead.
 
 **Migration**: three changes need a one-time step. (1) A docset whose
 Status was `approved`, `active`, or `done` before the approval freeze
-existed is re-approved once: from spec-author, `graph.py <spec-dir>
---emit-spawns --repair approve`, spawn the reviewer on the payload,
+existed is re-approved once: from spec-design, `graph.py <spec-dir>
+--emit-spawns --repair approve`, spawn the auditor on the payload,
 write its findings digest, rulings, and the payload's `Docset
 fingerprint` line to `approvals/review.md`, then on the user's yes
 `freeze.py <spec-dir> --record` (a tiny spec needs only the
 `--record`). (2) `(fix n/5)` is an open round: a landed fix written
 `(implemented) (fix n/5)` re-opens its task until the marker is
-rewritten `(fixed n/5)`. (3) Two plugins were renamed: marketplace
-users install `spec-intake` and `spec-author` and uninstall the old
-`spec-intent` and `spec-shape`.
+rewritten `(fixed n/5)`. (3) Every plugin was renamed (skills after
+SDLC phases, agents after roles — spec-design D-054): marketplace users
+install `spec-discover`, `spec-define`, `spec-design`, `spec-build`,
+and `spec-review` and uninstall the old `spec-brainstorming`,
+`spec-intent`, `spec-shape`, `spec-execute`, and `spec-code-review`;
+`tools/sync.sh` sweeps the old skill trees, commands, and agent defs
+it installed.
 
 **Safe commands**: read-only on any docset — `check.py` (without
 `--fix-burndown`), `graph.py --state-json|--mermaid|--explain`,
@@ -188,11 +200,13 @@ default.
 
 ```shell
 /plugin marketplace add tanlnm512/SpecDevKit
-/plugin install spec-brainstorming@spec-dev-kit
-/plugin install spec-intake@spec-dev-kit
-/plugin install spec-author@spec-dev-kit
-/plugin install spec-execute@spec-dev-kit
-/plugin install spec-code-review@spec-dev-kit
+/plugin install spec-discover@spec-dev-kit
+/plugin install spec-define@spec-dev-kit
+/plugin install spec-design@spec-dev-kit
+/plugin install spec-build@spec-dev-kit
+/plugin install spec-review@spec-dev-kit
+/plugin install spec-ship@spec-dev-kit
+/plugin install spec-release@spec-dev-kit
 ```
 
 **omp (Oh My Pi)** reads the same `.claude-plugin/marketplace.json` as
@@ -201,7 +215,7 @@ is published, since the content would be identical:
 
 ```
 /marketplace add tanlnm512/SpecDevKit
-/marketplace install spec-author@spec-dev-kit
+/marketplace install spec-design@spec-dev-kit
 ```
 
 **zcode** understands the same marketplace.json shape (its own local
@@ -211,8 +225,8 @@ plugin/marketplace command.
 
 **Antigravity (agy)** installs the repo itself as a plugin — the root
 `plugin.json` marks it, `skills/` carries the skills, and the committed
-root `agents/` provides the role personas (the five archetypes plus
-the panel and code-review roles):
+root `agents/` provides the role personas (the archetypes plus the integrator,
+release-manager, panel and code-review roles):
 
 ```shell
 agy plugin install /path/to/SpecDevKit   # or the git URL
@@ -265,7 +279,7 @@ that copies out:
   time beside the flat `~/.claude/agents/` and `~/.claude/commands/`
   copies (D-049); `agents/` and `protocol/` stay, since spawn payloads
   read them by path. Every copy omits `tests/` (dev-only). Run
-  `skills/spec-author/scripts/skill-dir.sh`
+  `skills/spec-design/scripts/skill-dir.sh`
   from a workspace to print the active skill dir — the
   orchestrator resolves it once per session and carries it in every
   spawn payload.
@@ -308,9 +322,9 @@ that copies out:
   regenerates and verifies them every run.
 - **Commands** — a skill's `commands/<name>.md` router (only if it
   ships one) plus any bare names opted into via its own
-  `commands/extra.txt` (ADR-013) — five commands total, exactly one
-  per skill and named for it (spec-author D-048; spec-execute D-033:
-  its build/test/review/ship ride `/spec-execute` as verbs) →
+  `commands/extra.txt` (ADR-013) — seven commands total, exactly one
+  per skill and named for it (spec-design D-048, D-054; spec-build D-033:
+  its implement/test/audit/ship ride `/spec-build` as verbs) →
   `~/.agents/commands/`, `~/.claude/commands/`,
   `~/.zcode/commands/` (omp needs none — `/skill:<name>`
   auto-registers); a foreign file at a destination is refused, not
@@ -328,34 +342,41 @@ Two invocation surfaces:
  │ Idea │ ───▶ │ Spec │ ───▶ │ Code │ ───▶ │ Test │ ───▶ │  QA  │ ───▶ │  Go  │
  │Refine│      │  PRD │      │ Impl │      │Debug │      │ Gate │      │ Live │
  └──────┘      └──────┘      └──────┘      └──────┘      └──────┘      └──────┘
-  /spec-intake   /spec-author     /spec-execute build · test · review · ship
+  /spec-define   /spec-design     /spec-build implement · test · audit · ship
 ```
 
-`/spec-brainstorming` is the optional stage BEFORE this lifecycle:
+Then `/spec-ship <name>` (push, PR, CI, review comments), then
+`/spec-release` (version, changelog, tag); `/spec-review` runs any time.
+
+`/spec-discover` is the optional stage BEFORE this lifecycle:
 five rigid stages — one clarifying question, a parallel three-lens
 panel (Visionary / Cynic / Minimalist), a trade-off matrix, socratic
-refinement — ending in a design specification at
+refinement — ending in an idea brief at
 `brainstorms/<name>.md`. It writes nothing under `specs/`; the doc is
-pointed at as intent input for `/spec-intake <name>`, not parsed.
+pointed at as intent input for `/spec-define <name>`, not parsed.
 
 | Command | Lands on |
 |---|---|
-| `/spec-intake <name>` | intake: scout + grill until the question frontier is empty, producing a validated `intent.md` (a bug takes the bugfix deltas) |
-| `/spec-author <spec>` | the authoring waves: draft spec.md from the intent, then survey → plan ∥ tech ∥ qa → tasks → verify, to the approve gate |
-| `/spec-execute build <spec> [T###]` | spec-execute's builder waves; nothing ticked or committed |
-| `/spec-execute test <spec>` | the proof pass: every TC pass condition green + regression gate |
-| `/spec-execute review <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
-| `/spec-execute ship <spec>` | tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request |
+| `/spec-define <name>` | intake: analyst + grill until the question frontier is empty, producing a validated `intent.md` (a bug takes the bugfix deltas) |
+| `/spec-design <spec>` | the authoring waves: draft spec.md from the intent, then survey → plan ∥ tech ∥ qa → tasks → verify, to the approve gate |
+| `/spec-build implement <spec> [T###]` | spec-build's developer waves; nothing ticked or committed |
+| `/spec-build test <spec>` | the proof pass: every TC pass condition green + regression gate |
+| `/spec-build audit <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
+| `/spec-build ship <spec>` | tick with proof notes, implementation commit C1 + delivery-record C2, `Status: done`, archive on request (local commits — the PR is `/spec-ship`) |
+| `/spec-ship [preflight\|pr\|checks\|comments\|continue\|status] <spec>` | push + PR from the spec's records, CI read, review comments → fix-round evidence, re-point the record after merge; records `Shipped: PR <url>`; never force-pushes or merges |
+| `/spec-release [collect\|notes\|preflight\|cut\|verify\|status] [version]` | releasable delivered specs since the last tag, version bump, changelog + notes from recorded facts, cut (commit + tag, then push + GitHub release on a second yes), `Released:` record, post-release checklist; never deploys |
 
-`/spec-execute test`, `review`, `ship` are three steps of the ONE
+`/spec-build test`, `audit`, `ship` are three steps of the ONE
 delivery pass, never three gates. "Prod" means production-READY
-(ADR-014): the flow ends at a verified single commit; push/deploy/
-publish stay human/CI gates. On omp the entries are
-`/skill:spec-intake`, `/skill:spec-author`, `/skill:spec-execute`.
+(ADR-014): `/spec-build` ends at a verified single commit; push/PR and
+tag/publish are `/spec-ship` and `/spec-release`, each only on the
+user's yes to a shown preview; deploy stays a human/CI gate. On omp the
+entries are `/skill:spec-define`, `/skill:spec-design`,
+`/skill:spec-build`, `/skill:spec-ship`, `/skill:spec-release`.
 
 ### Router verbs
 
-`/spec-intake`, `/spec-author`, `/spec-execute` each take
+`/spec-define`, `/spec-design`, `/spec-build` each take
 `<verb> <spec-name>` — single nodes and repair runs (or naturally:
 "re-survey the auth spec"):
 
@@ -369,14 +390,14 @@ publish stay human/CI gates. On omp the entries are
 | `check <spec>` | `scripts/check.py specs/<spec>` and triage the output |
 | `freeze <spec>` | after an explicit user yes only: `scripts/freeze.py <spec> --record` writes the approval hash manifest |
 | `converge <spec>` | re-survey, then `scripts/audit.py converge specs/<spec> --repo <path>` (`--repo` defaults to the spec dir's grandparent); append a task per NEW GAP/REGRESSED |
-| `build <spec> [T###]` | the execute node: waves of builder agents; nothing commits until the plan-wide delivery pass proves every task |
+| `implement <spec> [T###]` | the execute node: waves of developer agents; nothing commits until the plan-wide delivery pass proves every task |
 | `archive <spec>` | after `Status: done`: `scripts/archive.sh <spec>` moves the dir to `specs/archive/<date>-<name>/` and repoints INDEX |
 
 A typical pass: `scaffold` → author spec.md with the user → research
 gate → survey ∥ research → plan ∥ tech ∥ qa → tasks → verify
 (`check.py` green) → pre-flight (baseline green) → contract review +
 `approvals/review.md` → user approval → `freeze.py --record` → execute
-(builder waves) → delivery pass → ticks → C1 → C2 → `archive`.
+(developer waves) → delivery pass → ticks → C1 → C2 → `archive`.
 
 ### The engine — graph.py --run (one loop, every harness)
 
@@ -390,11 +411,11 @@ alternates the two —
 
 | Step | Surface | What happens |
 |---|---|---|
-| 1 | session — `/spec-intake <name>`, then `/spec-author <name>` | intake grills the idea into a validated intent.md; spec-author drafts spec.md from it (clarify loop) and decides the research gate: `skip` → keep the not-applicable marker; `run` → replace research.md with the template and spawn the research scout out-of-band |
+| 1 | session — `/spec-define <name>`, then `/spec-design <name>` | intake grills the idea into a validated intent.md; spec-design drafts spec.md from it (clarify loop) and decides the research gate: `skip` → keep the not-applicable marker; `run` → replace research.md with the template and spawn the research analyst out-of-band |
 | 2 | engine — `graph.py --run --span shape` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
 | 3 | session | pre-flight (baseline green on the spec's branch), contract review recorded in `approvals/review.md` (full tier), present the docset, get the explicit yes → `freeze.py --record`, then `Status: approved` |
-| 4 | engine — rerun `--run --span execute` | execute waves hands-off: one builder per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
-| 5 | session — `/spec-execute test/review/ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
+| 4 | engine — rerun `--run --span execute` | execute waves hands-off: one developer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
+| 5 | session — `/spec-build test/audit/ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
 
 Rules of thumb: the loop stops `AWAITING HUMAN` at every judgment
 gate — resolve the gate in-session, rerun, and the loop resumes from
@@ -410,19 +431,20 @@ design) per harness.
 ## Scripts reference
 
 The shared core ships in every spec-suite skill's `scripts/`
-(byte-identical, mastered at `skills/spec-author/scripts/`); the
-execute-only machinery ships with spec-execute. Run from a workspace
+(byte-identical, mastered at `skills/spec-design/scripts/`); the
+execute-only machinery ships with spec-build. Run from a workspace
 root:
 
 | Script | Purpose |
 |---|---|
 | `scaffold.sh [--tier tiny\|full] <name> [root]` | create `specs/<name>/` (`tiny`: spec.md only, the default; `full`: the seven templates), register in INDEX; refuses overwrite, requires kebab-case |
 | `check.py <spec-dir>` | the doc-set validator: 7 files, FR/NFR→T→TC traceability, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze integrity, constitution; `--survey-only`, `--intent-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
-| `freeze.py <spec-dir>` | approval freeze: `--record` writes the approved-doc hash manifest after explicit sign-off (existing manifests refuse overwrite; `--record --force` represents a fresh approval); `--verify` is read-only |
+| `freeze.py <spec-dir>` | approval freeze: `--record` writes the approved-doc hash manifest after explicit sign-off (existing manifests refuse overwrite; `--record --force` represents a fresh approval; `--by "<name>"` records each approver); `--verify` is read-only |
+| `index.py <spec-dir>` | render the spec's `specs/INDEX.md` line (status · type · tier · depends on) — the INDEX's only writer; `--all <specs-root>` renders every spec |
 | `audit.py <sub> <spec-dir>` | review instruments: `scope` (defaults to the approval-freeze SHA), `clean`, `proofs --run`, `mutate` (mutation testing over the changed files), `coverage` (line-coverage floor over the tasks' intended files), `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
 | `graph.py <spec-dir>` | the workflow engine: frontier report, `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads; `--native-agents` names the registered agent type and omits the brief it already carries), `--run [--runner] [--dry-run] [--max-waves N]`, `--span intent\|shape\|execute\|full` |
-| `tick.py` | the atomic task tick with its proof note (spec-execute) |
-| `migrate.py grow <spec-dir>` | promote a tiny-tier docset to the full seven-file contract, ids preserved (spec-execute) |
+| `tick.py` | the atomic task tick with its proof note (spec-build) |
+| `migrate.py grow <spec-dir>` | promote a tiny-tier docset to the full seven-file contract, ids preserved (spec-build) |
 | `archive.sh <name> [root]` | move a `Status: done` spec to `specs/archive/<date>-<name>/`, repoint INDEX |
 | `skill-dir.sh` | print the active skill directory (spawn-payload `skill_dir`) |
 
@@ -464,7 +486,7 @@ walking `skills/*/`, never by a hardcoded name:
    skill-named router needs no entry.
 4. `skills/<name>/tests/` — expected for anything with its own scripts;
    each skill owns and runs its own suite
-   (`skills/spec-author/tests/run.sh` is the existing example). Changes
+   (`skills/spec-design/tests/run.sh` is the existing example). Changes
    to the shared install tooling itself are covered separately, by
    `tools/tests/`.
 5. Run `tools/sync.sh` from anywhere in the repo — it discovers the new
@@ -482,13 +504,13 @@ plugin.json                     # Antigravity plugin marker — `agy plugin inst
 agents/                         # agy personas: byte-verbatim brief copies (committed, regenerate-only)
 LICENSE
 skills/
-├── spec-intake/            # phase 1 — pre-spec intake: scout + grill → validated intent.md
-├── spec-author/             # phase 2 — gated authoring: intent → approved docset; the shared-core MASTER
+├── spec-define/            # phase 1 — pre-spec intake: analyst + grill → validated intent.md
+├── spec-design/             # phase 2 — gated authoring: intent → approved docset; the shared-core MASTER
 │   │                       #   (graph.py · check.py · contract.py · specstate.py · telemetry.py · freeze.py),
 │   │                       #   the workflow node table (scripts/contract.py), and the workflow diagram live here
 │   ├── SKILL.md            # the authoring playbook (workflow graph node table, spawn mechanics, rules)
 │   ├── .claude-plugin/plugin.json  # this skill's plugin manifest (tools/plugin-manifest.py)
-│   ├── commands/           # the /spec-author router
+│   ├── commands/           # the /spec-design router
 │   ├── agents/*.md         # archetype briefs = harness defs (frontmatter + body), roles only
 │   ├── protocol/           # lenses.md lens table + shared-protocol.md (shared prose the briefs point at)
 │   ├── templates/          # 7 scaffolded doc templates + assurance/release records
@@ -497,14 +519,16 @@ skills/
 │   ├── diagrams/           # workflow graph (.mmd + 1 HTML render)
 │   ├── examples/mini-spec/ # green fixture used by the test suite
 │   └── tests/ · evals/ · VERSION · CHANGELOG.md
-├── spec-execute/           # phase 3 — post-approve: builder waves, delivery pass, tick/commit gates;
-│   │                       #   the build/test/review/ship verbs + execute-only machinery
+├── spec-build/           # phase 3 — post-approve: developer waves, delivery pass, tick/commit gates;
+│   │                       #   the implement/test/audit/ship verbs + execute-only machinery
 │   │                       #   (tick.py · audit.py · archive.sh · migrate.py)
-├── spec-code-review/       # portable three-stage gated code review (same skeleton, own test suite)
-└── spec-brainstorming/     # five-stage pre-spec brainstorm panel (own test suite)
+├── spec-review/       # portable three-stage gated code review (same skeleton, own test suite)
+├── spec-ship/         # integration: push, PR from the spec's records, CI, review comments (own test suite)
+├── spec-release/      # release: collect, version, changelog + notes, cut, post-release checklist (own test suite)
+└── spec-discover/     # five-stage pre-spec brainstorm panel (own test suite)
 tools/
 ├── sync.sh                 # shared installer: every skills/<name>/ → every harness root, SHA-verified
-├── parity.py               # shared: regenerates the shared core from the spec-author master into every replica
+├── parity.py               # shared: regenerates the shared core from the spec-design master into every replica
 ├── omp-defs.py             # shared: Claude-style agents/*.md frontmatter → omp task-agent frontmatter
 ├── agent-defs.py           # shared: Claude-style agents/*.md frontmatter → opencode / droid / kilo / agy defs
 ├── plugin-manifest.py      # shared: generates .claude-plugin/marketplace.json + per-skill plugin.json
@@ -528,11 +552,11 @@ From the repo root:
 ```bash
 bash tools/tests/run.sh                                         # shared install-tooling suite
 python3 tools/plugin-manifest.py                                # regenerate plugin/marketplace manifests
-claude plugin validate ./skills/spec-author                      # sanity-check a skill's plugin manifest
+claude plugin validate ./skills/spec-design                      # sanity-check a skill's plugin manifest
 agy plugin validate .                                          # Antigravity plugin shape (skills + agents)
 ```
 
-From `skills/spec-author/`:
+From `skills/spec-design/`:
 
 ```bash
 bash tests/run.sh                                              # full suite
@@ -541,9 +565,9 @@ python3 scripts/graph.py examples/mini-spec/specs/mini-spec --state-json
 ```
 
 Normative docs: each skill's `SKILL.md` is its orchestrator entry
-point (`spec-author/SKILL.md` carries the workflow graph's node table);
+point (`spec-design/SKILL.md` carries the workflow graph's node table);
 the docset contract lives in `scripts/check.py` and the scaffold
 templates; `decisions/` records why (read
-`skills/spec-author/decisions/010-graph-dynamic-workflow.md` for the
+`skills/spec-design/decisions/010-graph-dynamic-workflow.md` for the
 graph refactor and `002-retirement-of-spec-to-prod.md` for the split's
 move map).

@@ -194,7 +194,7 @@ def skill_dogfood_targets(skill):
     """Every in-repo artifact of the skill's own type, with the command
     that proves it passes its own gate — the check that catches a kit
     whose outputs drift past its own checkers."""
-    if skill == "spec-brainstorming":
+    if skill == "spec-discover":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
         artifacts = [SKILLS_DIR / skill / "examples" / "decision-tracker"
                      / "decision-tracker.md"]
@@ -203,12 +203,12 @@ def skill_dogfood_targets(skill):
             (str(p.relative_to(ROOT)), [sys.executable, str(checker), str(p)])
             for p in artifacts
         ]
-    if skill == "spec-author":
+    if skill == "spec-design":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
         # the shared core's master home: the checker is
         # contract-shaped, so it gates every live docset
         # plus the mini-spec fixture shipped beside it
-        dirs = [SKILLS_DIR / "spec-author" / "examples" / "mini-spec" / "specs" / "mini-spec"]
+        dirs = [SKILLS_DIR / "spec-design" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [
             p.parent
             for p in sorted((ROOT / "specs").glob("*/spec.md"))
@@ -218,12 +218,12 @@ def skill_dogfood_targets(skill):
             (str(d.relative_to(ROOT)), [sys.executable, str(checker), str(d)])
             for d in dirs
         ]
-    if skill == "spec-code-review":
+    if skill == "spec-review":
         return [
             (f"examples/review-target/{rel}", None)
             for rel in ("base/app.py", "change.diff", "EXPECTED.md")
         ]
-    if skill == "spec-intake":
+    if skill == "spec-define":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
         # own-type artifacts: the shipped green example + every live
         # intent the repo currently holds
@@ -235,7 +235,7 @@ def skill_dogfood_targets(skill):
              [sys.executable, str(checker), str(d), "--intent-only"])
             for d in dirs
         ]
-    if skill == "spec-execute":
+    if skill == "spec-build":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
         # execute's own-type artifact is a delivered docset: the shipped
         # tiny-tier delivered example, plus any live spec whose task.md
@@ -257,8 +257,9 @@ def skill_dogfood(skill):
     if not targets:
         # Distinguish "nothing of its type exists" from a mapping blind
         # spot: an unmapped skill must be named, not silently zeroed.
-        known = skill in ("spec-brainstorming", "spec-author",
-                          "spec-code-review", "spec-intake", "spec-execute")
+        known = skill in ("spec-discover", "spec-design",
+                          "spec-review", "spec-define", "spec-build",
+                          "spec-ship", "spec-release")
         return {"earned": 0, "max": 7, "detail": (
             f"NO DOGFOOD MAPPING for skill '{skill}' — add one to "
             "skill_dogfood_targets or document why none applies"

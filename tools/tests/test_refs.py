@@ -9,7 +9,11 @@ ROOT_AGENTS = SKILLS.parent / "agents"
 
 RETIRED = re.compile(
     r"spec-to-prod|`/spec`|/spec <|/spec-plan|/spec-idea|/spec-gen"
-    r"|spec-intent|spec-shape")
+    r"|spec-intent|spec-shape|spec-brainstorming|spec-intake|spec-author"
+    r"|spec-execute|spec-code-review|brainstorm-panelist|spec-scout"
+    r"|spec-designer|spec-qa\b|spec-reviewer|spec-builder"
+    r"|code-review-(?:scout|correctness|security|quality|fixer)"
+    r"|design-spec\.md")
 PATH_REF = re.compile(
     r"`((?:scripts|references|templates|agents|gates|contracts)/"
     r"[A-Za-z0-9_./-]+\.(?:py|sh|md|json|txt))`")

@@ -100,7 +100,7 @@ concrete miss. `--skip-suites` / `--skip-sync` mark those checks
 - **S6 (10)** — own-artifact dogfood 7 (the skill's checker over
   every in-repo artifact of its type: brainstorming → every
   `brainstorms/*.md`; spec-to-prod → the mini-spec example + every
-  live `specs/*/` docset; spec-code-review → the seeded example
+  live `specs/*/` docset; spec-review → the seeded example
   fixture files); disclosed limitations 3 (`observations/open-items.md`
   exists and discloses accepted limitations).
 

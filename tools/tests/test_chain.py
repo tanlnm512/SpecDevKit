@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SHAPE = REPO / "skills" / "spec-author"
+SHAPE = REPO / "skills" / "spec-design"
 MINI = SHAPE / "examples" / "mini-spec"
 
 INTENT = (
@@ -43,16 +43,16 @@ class ChainTests(unittest.TestCase):
         (self.spec / "spec.md").unlink()
         (self.spec / "intent.md").write_text(INTENT, encoding="utf-8")
 
-        shape = run_graph("spec-author", self.spec, "--run", "--span", "shape")
+        shape = run_graph("spec-design", self.spec, "--run", "--span", "shape")
         self.assertEqual(shape.returncode, 0, shape.stdout + shape.stderr)
         self.assertIn("draft it from intent.md", shape.stdout)
 
         (self.spec / "spec.md").write_text(spec_md, encoding="utf-8")
-        shape = run_graph("spec-author", self.spec, "--run", "--span", "shape")
+        shape = run_graph("spec-design", self.spec, "--run", "--span", "shape")
         self.assertEqual(shape.returncode, 0, shape.stdout + shape.stderr)
-        self.assertIn("/spec-execute", shape.stdout)
+        self.assertIn("/spec-build", shape.stdout)
 
-        refused = run_graph("spec-execute", self.spec, "--run", "--span",
+        refused = run_graph("spec-build", self.spec, "--run", "--span",
                             "execute")
         self.assertEqual(refused.returncode, 4, refused.stdout)
 
@@ -60,16 +60,16 @@ class ChainTests(unittest.TestCase):
                           spec_md, count=1)
         (self.spec / "spec.md").write_text(approved, encoding="utf-8")
         # a Status word alone is not an approval — the freeze is its record
-        flipped = run_graph("spec-execute", self.spec, "--run", "--span",
+        flipped = run_graph("spec-build", self.spec, "--run", "--span",
                             "execute")
         self.assertEqual(flipped.returncode, 4, flipped.stdout)
 
-        emitted = run_graph("spec-author", self.spec, "--emit-spawns",
+        emitted = run_graph("spec-design", self.spec, "--emit-spawns",
                             "--span", "shape")
         self.assertNotIn("reviewer-contract.md", emitted.stdout,
                          "an unfrozen approved Status is not the approve gate")
         (self.spec / "spec.md").write_text(spec_md, encoding="utf-8")
-        emitted = run_graph("spec-author", self.spec, "--emit-spawns",
+        emitted = run_graph("spec-design", self.spec, "--emit-spawns",
                             "--span", "shape")
         payload = next(self.spec.glob("spawns/*/reviewer-contract.md"))
         fingerprint = re.search(r"Docset fingerprint: (\w+)",
@@ -84,7 +84,7 @@ class ChainTests(unittest.TestCase):
              str(self.spec), "--record"], capture_output=True, text=True)
         self.assertEqual(frozen.returncode, 0, frozen.stderr)
         (self.spec / "spec.md").write_text(approved, encoding="utf-8")
-        admitted = run_graph("spec-execute", self.spec, "--run", "--span",
+        admitted = run_graph("spec-build", self.spec, "--run", "--span",
                              "execute")
         self.assertNotEqual(admitted.returncode, 4, admitted.stdout)
 

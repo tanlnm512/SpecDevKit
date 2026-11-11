@@ -71,13 +71,13 @@ destination ledger.
 
 Run by tools/sync.sh; standalone:
 
-    tools/agent-defs.py --target opencode --skill-dir skills/spec-author \
+    tools/agent-defs.py --target opencode --skill-dir skills/spec-design \
         --out ~/.config/opencode/agents
-    tools/agent-defs.py --target droid    --skill-dir skills/spec-author \
+    tools/agent-defs.py --target droid    --skill-dir skills/spec-design \
         --out ~/.factory/droids
-    tools/agent-defs.py --target kilo     --skill-dir skills/spec-author \
+    tools/agent-defs.py --target kilo     --skill-dir skills/spec-design \
         --out ~/.config/kilo/agent
-    tools/agent-defs.py --target agy      --skill-dir skills/spec-author \
+    tools/agent-defs.py --target agy      --skill-dir skills/spec-design \
         --out agents
 """
 import re

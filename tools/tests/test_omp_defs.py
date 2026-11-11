@@ -28,7 +28,7 @@ def staged_archetypes() -> Path:
     atexit.register(shutil.rmtree, root, ignore_errors=True)
     agents = root / "agents"
     agents.mkdir()
-    for skill in ("spec-intake", "spec-author", "spec-execute"):
+    for skill in ("spec-define", "spec-design", "spec-build"):
         for f in (REPO_ROOT / "skills" / skill / "agents").glob("*.md"):
             shutil.copyfile(f, agents / f.name)
     return root
@@ -99,28 +99,28 @@ class ModelTierTests(unittest.TestCase):
         frontmatter is the tiering signal, read from the shipped files."""
         tiered = {n for n, f in _ROLE_FIELDS.items()
                   if f.get("model") and f["model"] != "inherit"}
-        self.assertEqual(tiered, {"spec-scout", "spec-builder"})
+        self.assertEqual(tiered, {"spec-analyst", "spec-developer"})
 
     def test_model_alias_is_quoted(self):
         """`@`-prefixed values are not valid unquoted YAML plain scalars
         (`@` is a reserved indicator) — an unquoted line is a parse
         hazard, not just a style nit."""
-        model_line = next(l for l in fm_lines("scout")
+        model_line = next(l for l in fm_lines("analyst")
                            if l.startswith("model:"))
         self.assertEqual(model_line, 'model: "@smol"')
 
     def test_non_tiered_roles_have_no_model_line(self):
-        for name in ("reviewer", "designer", "qa"):
+        for name in ("auditor", "architect", "tester"):
             self.assertFalse(
                 any(l.startswith("model:") for l in fm_lines(name)), name)
 
     def test_thinking_level_unaffected_by_model_tier(self):
-        """spec-scout and spec-builder get the cheap model; the other
+        """spec-analyst and spec-developer get the cheap model; the other
         roles inherit. The tier never sets thinking depth."""
         self.assertTrue(any(l.startswith("model:")
-                            for l in fm_lines("builder")))
+                            for l in fm_lines("developer")))
         # no archetype carries `effort:`; thinking depth stays the harness default
-        for name in ("scout", "builder", "designer", "qa", "reviewer"):
+        for name in ("analyst", "developer", "architect", "tester", "auditor"):
             self.assertFalse(any(l.startswith("thinking-level:")
                                  for l in fm_lines(name)), name)
 
@@ -142,11 +142,11 @@ class ToolMappingTests(unittest.TestCase):
 
     def test_every_shipped_role_tools_line_matches_expected(self):
         expected = {
-            "scout": "read, grep, glob, bash, write, edit, web_search",
-            "designer": "read, grep, glob, bash, write, edit",
-            "qa": "read, grep, glob, bash, write, edit",
-            "builder": "read, grep, glob, bash, write, edit",
-            "reviewer": "read, grep, glob",
+            "analyst": "read, grep, glob, bash, write, edit, web_search",
+            "architect": "read, grep, glob, bash, write, edit",
+            "tester": "read, grep, glob, bash, write, edit",
+            "developer": "read, grep, glob, bash, write, edit",
+            "auditor": "read, grep, glob",
         }
         for name, want in expected.items():
             tools_line = next(l for l in fm_lines(name) if l.startswith("tools:"))

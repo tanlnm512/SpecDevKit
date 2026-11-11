@@ -61,25 +61,25 @@ class RealCorpusTests(unittest.TestCase):
         self.cases = evals.load_cases()
 
     def test_discovers_every_conversational_case(self):
-        self.assertEqual(len(self.cases), 21)
+        self.assertEqual(len(self.cases), 34)
         self.assertTrue(all(c.conversational for c in self.cases))
         selectors = {c.selector for c in self.cases}
-        self.assertIn("spec-code-review/e2", selectors)
-        self.assertIn("spec-brainstorming/b5", selectors)
-        self.assertIn("spec-intake/i1", selectors)
+        self.assertIn("spec-review/e2", selectors)
+        self.assertIn("spec-discover/b5", selectors)
+        self.assertIn("spec-define/i1", selectors)
         # skill-prefixed selectors name each case's home skill
-        self.assertIn("spec-author/e1", selectors)
-        self.assertIn("spec-author/e7", selectors)
-        self.assertIn("spec-author/e8", selectors)
-        self.assertIn("spec-execute/e4", selectors)
-        self.assertIn("spec-execute/e6", selectors)
+        self.assertIn("spec-design/e1", selectors)
+        self.assertIn("spec-design/e7", selectors)
+        self.assertIn("spec-design/e8", selectors)
+        self.assertIn("spec-build/e4", selectors)
+        self.assertIn("spec-build/e6", selectors)
 
     def test_criteria_enumerate_from_pass_bullets(self):
         by_sel = {c.selector: c for c in self.cases}
         # semicolon-chained criteria enumerate separately
-        self.assertGreater(len(by_sel["spec-code-review/e2"].criteria), 1)
+        self.assertGreater(len(by_sel["spec-review/e2"].criteria), 1)
         # a single-clause bullet parses to exactly one
-        self.assertGreaterEqual(len(by_sel["spec-code-review/e1"].criteria), 1)
+        self.assertGreaterEqual(len(by_sel["spec-review/e1"].criteria), 1)
 
 
 class FixtureTests(unittest.TestCase):

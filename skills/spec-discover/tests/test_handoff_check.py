@@ -1,0 +1,250 @@
+"""CLI-bound owner suite for the handoff checker.
+
+The checker's command line is its only interface: behavioral
+assertions run it as a subprocess.
+"""
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+SKILL = Path(__file__).resolve().parents[1]
+CHECKER = SKILL / "scripts" / "check.py"
+FIXTURE = SKILL / "examples" / "decision-tracker" / "decision-tracker.md"
+TEMPLATE = SKILL / "templates" / "idea-brief.md"
+
+PROBLEM_STATEMENT_BLOCK = (
+    "## Problem Statement\n"
+    "\n"
+    "Teams lose decisions made in conversation and re-litigate them later.\n"
+    "\n"
+)
+
+DIRECTION_BLOCK = (
+    "## Direction\n"
+    "\n"
+    "- Selected: Minimalist core\n"
+    "- Rationale: fastest path to observable value\n"
+    "- Rejected: Visionary platform — displaces tools the team already trusts\n"
+    "\n"
+)
+
+RISK_ROW = (
+    "| Stale data | usage drops below five reads a week | "
+    "refresh prompt on open |\n"
+)
+
+BASE_ARTIFACT = (
+    "# Demo — idea brief\n"
+    "\n"
+    + DIRECTION_BLOCK
+    + PROBLEM_STATEMENT_BLOCK
+    + "## User Personas\n"
+    "\n"
+    "### Persona 1 — the on-call triager\n"
+    "\n"
+    "- Who: engineer mid-incident.\n"
+    "- Needs: one-glance status.\n"
+    "- Failed by: scattered dashboards.\n"
+    "\n"
+    "## Core MVP Features\n"
+    "\n"
+    "1. Status snapshot — serves the on-call triager. One command prints current state.\n"
+    "\n"
+    "**Out of scope (day-one cut list)**: web dashboards, refused to keep day one shippable.\n"
+    "\n"
+    "## Potential Risk Mitigations\n"
+    "\n"
+    "| Risk (from the panel) | Early warning | Mitigation or acceptance |\n"
+    "|---|---|---|\n"
+    + RISK_ROW
+    + "\n"
+    "**Kill criteria**: fewer than five uses per week after week three.\n"
+)
+
+
+def run_checker(path):
+    return subprocess.run(
+        [sys.executable, str(CHECKER), str(path)],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+
+
+def run_text(text, name="artifact.md"):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / name
+        path.write_text(text, encoding="utf-8")
+        return run_checker(path), path
+
+
+class HandoffCheckTests(unittest.TestCase):
+    def test_green_fixture_passes_and_discloses_judgment(self):
+        result = run_checker(FIXTURE)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertTrue(lines, result.stdout)
+        self.assertTrue(lines[-1].startswith("JUDGMENT:"), lines[-1:])
+
+    def test_missing_section_fails_located_with_exit_one(self):
+        result, _ = run_text(BASE_ARTIFACT.replace(PROBLEM_STATEMENT_BLOCK, ""))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        failures = [line for line in result.stdout.splitlines()
+                    if line.startswith("FAIL") and "Problem Statement" in line]
+        self.assertTrue(failures, result.stdout)
+        self.assertTrue(result.stdout.splitlines()[-1].startswith("JUDGMENT:"))
+
+    def test_out_of_order_sections_fail(self):
+        text = BASE_ARTIFACT.replace(
+            DIRECTION_BLOCK + PROBLEM_STATEMENT_BLOCK,
+            PROBLEM_STATEMENT_BLOCK + DIRECTION_BLOCK)
+        result, _ = run_text(text)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("section-order", result.stdout)
+
+    def test_placeholder_failure_names_token_and_line(self):
+        selected = "- Selected: <angle or blend>"
+        text = BASE_ARTIFACT.replace("- Selected: Minimalist core", selected)
+        line_number = text.splitlines().index(selected) + 1
+        result, _ = run_text(text)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        hits = [line for line in result.stdout.splitlines() if "<angle or blend>" in line]
+        self.assertTrue(hits, result.stdout)
+        self.assertTrue(any(str(line_number) in line for line in hits), hits)
+
+    def test_every_template_token_fails_in_any_case_except_the_kept_name(self):
+        tokens = {" ".join(t.split())
+                  for t in re.findall(r"<[^<>]+>", TEMPLATE.read_text(encoding="utf-8"))}
+        self.assertIn("<name>", tokens)
+        for token in sorted(tokens - {"<name>"}):
+            for variant in {token, token.lower(), token.upper()} - {"<name>"}:
+                with self.subTest(token=variant):
+                    text = BASE_ARTIFACT.replace(
+                        "- Rationale: fastest path to observable value",
+                        f"- Rationale: {variant}")
+                    result, _ = run_text(text)
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn("placeholder", result.stdout)
+        result, _ = run_text(BASE_ARTIFACT + "\nNext: `/spec-define <name>` or `decide why <term>`\n")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_ellipsis_only_items_and_cells_fail(self):
+        cases = (
+            ("feature", "1. Status snapshot — serves the on-call triager. "
+             "One command prints current state.\n",
+             "1. Status snapshot — serves the on-call triager. "
+             "One command prints current state.\n2. …\n", "placeholder"),
+            ("risk row", RISK_ROW, RISK_ROW + "| … | … | … |\n", "risk-row"),
+        )
+        for name, old, new, criterion in cases:
+            with self.subTest(name):
+                result, _ = run_text(BASE_ARTIFACT.replace(old, new))
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(criterion, result.stdout)
+
+    def test_blended_direction_may_reject_nothing(self):
+        rejected = "- Rejected: Visionary platform — displaces tools the team already trusts"
+        for line in ("- Rejected: none — blended all three angles",
+                     "- Rejected: none, blended: Visionary hook on a Minimalist core"):
+            with self.subTest(line):
+                result, _ = run_text(BASE_ARTIFACT.replace(rejected, line))
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_artifact_under_specs_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "specs" / "demo" / "design.md"
+            target.parent.mkdir(parents=True)
+            target.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(CHECKER), "specs/demo/design.md"],
+                capture_output=True, text=True, cwd=tmp)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("specs/", result.stdout)
+
+    def test_criterion_failures_are_named_on_failing_artifacts(self):
+        cases = (
+            ("incomplete Selected", "- Selected: Minimalist core",
+             "- Selected:", "Selected"),
+            ("missing Rationale", "- Rationale: fastest path to observable value\n",
+             "", "Rationale"),
+            ("Rejected without a reason",
+             "- Rejected: Visionary platform — displaces tools the team already trusts",
+             "- Rejected: Visionary platform", "Rejected"),
+            ("no numbered feature item",
+             "1. Status snapshot — serves the on-call triager. "
+             "One command prints current state.",
+             "- Status snapshot — serves the on-call triager.", "feature"),
+            ("empty out-of-scope cut list",
+             "**Out of scope (day-one cut list)**: web dashboards, "
+             "refused to keep day one shippable.",
+             "**Out of scope (day-one cut list)**:", "scope"),
+            ("missing kill criteria",
+             "**Kill criteria**: fewer than five uses per week after week three.\n",
+             "", "kill"),
+        )
+        for name, old, new, criterion in cases:
+            with self.subTest(name):
+                result, _ = run_text(BASE_ARTIFACT.replace(old, new))
+                self.assertEqual(result.returncode, 1, result.stdout)
+                hits = [line for line in result.stdout.splitlines()
+                        if line.startswith("FAIL")
+                        and criterion.lower() in line.lower()]
+                self.assertTrue(hits, result.stdout)
+
+    def test_incomplete_risk_rows_fail_in_the_located_line_format(self):
+        replacement = (
+            "| Stale data |  | refresh prompt on open |\n"
+            "| Adoption stalls | no team sign-up in week one |  |\n"
+        )
+        text = BASE_ARTIFACT.replace(RISK_ROW, replacement)
+        result, path = run_text(text)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        for risk in ("Stale data", "Adoption stalls"):
+            line_number = next(number for number, line in enumerate(
+                text.splitlines(), 1) if risk in line)
+            pattern = rf"^FAIL {re.escape(str(path))}:{line_number} [^:]+: .+$"
+            self.assertTrue(
+                any(re.match(pattern, line)
+                    for line in result.stdout.splitlines()),
+                f"{risk}: {result.stdout}",
+            )
+
+    def test_operator_named_path_outside_brainstorms_is_used_as_named(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "operator-picked-handoff.md"
+            path.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+            result = run_checker(path)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unreadable_path_fails_naming_the_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "does-not-exist.md"
+            result = run_checker(missing)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("does-not-exist.md", result.stdout + result.stderr)
+
+    def test_duplicate_required_section_heading_fails(self):
+        text = BASE_ARTIFACT.replace(
+            PROBLEM_STATEMENT_BLOCK, DIRECTION_BLOCK + PROBLEM_STATEMENT_BLOCK
+        )
+        result, _ = run_text(text)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertTrue(
+            any(line.startswith("FAIL") and "Direction" in line
+                for line in result.stdout.splitlines()),
+            result.stdout,
+        )
+
+    def test_risk_table_with_no_data_rows_fails(self):
+        result, _ = run_text(BASE_ARTIFACT.replace(RISK_ROW, ""))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertTrue(
+            any(line.startswith("FAIL") and "risk" in line.lower()
+                for line in result.stdout.splitlines()),
+            result.stdout,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -1,0 +1,115 @@
+# Grilling — the clarify-pass primitive
+
+The model-invoked interview discipline the suite's clarify node
+runs (extracted from the playbook, D-039 — one home, invoked by the
+orchestrator; the rigid single-question flow of spec-discover's
+stages 1/4 is a deliberate dialect of this primitive, not a copy).
+
+## Intent dialect
+
+In spec-define the draft is `specs/<name>/intent.md`, not spec.md:
+closures land in its Scope out and Assumptions sections and are folded
+into Problem, Audience, Constraints, and FR seeds. Open markers hold
+the intake gate (`check.py --intent-only`), not the `clarify` node,
+which belongs to spec.md in spec-design.
+
+## The model
+
+Map the draft's gaps — missing acceptance criteria, undefined edge
+cases, vague FRs, open NEEDS CLARIFICATION markers — as a **design
+tree**: every open decision branches into the decisions that hang off
+it. Work the tree in **rounds**. The **frontier** is every question
+whose prerequisites are already settled — askable now without
+guessing at an answer you haven't heard yet. A question whose answer
+depends on another still-open question belongs to a *later* round,
+never this one.
+
+## Failure patterns in drafts
+
+Before building the tree, scan the draft for these phrasing failures —
+each is a frontier question waiting to be asked, or a fact to fetch
+yourself (never a reason to guess):
+
+| The draft says | The failure | What it becomes |
+|----------------|-------------|-----------------|
+| "improve X" / "help with Y" | vague verb, no operation | which behavior changes, where, for whom |
+| "make it better / faster" | no acceptance criterion | the observable result that proves done |
+| "it's broken" / "it sucks" | symptom, not fault | the exact input, expected vs actual |
+| "as we discussed" / "the usual way" | assumed prior knowledge | restate the decision, or fetch it from the doc that holds it |
+| "like \<competitor\>" | undefined reference | which named example, which property of it |
+| "users want this" | undefined audience | who uses this, at what skill level |
+| "a summary" / "an overview" | implicit shape | length, structure, format |
+| "professional" / "clean" | vague aesthetic | the concrete, checkable property |
+| "do whatever it takes" | no boundary | what the solution must not touch |
+| nothing about load, data, access, failure, or screens | silent quality bounds | which of security, privacy, performance, reliability, observability, accessibility binds, and the bound — "none, because …" is an answer |
+
+A pattern found is not a question dumped on the user — the facts
+behind a row (what exists, what the reference actually does) stay the
+runner's job; only the judgment call goes to the frontier. The
+pattern families are adapted from nidhinjs/prompt-master (reviewed
+2026-10-24).
+
+## The round
+
+Ask the *whole* frontier in one batched round. Each question:
+numbered, titled, says why it matters, offers 2–3 viable options
+where useful, and carries a recommended answer:
+
+```
+❓ **Q1** — **<question title>**: <body>
+➡️ <recommended answer>
+---
+❓ **Q2** — **<question title>**: <body>
+➡️ <recommended answer>
+```
+
+- Word each question so **"yes" accepts the recommended answer** —
+  the user can confirm the ➡️ with one word. "Go with your
+  recommendations" is a valid blanket answer: close the round at its
+  ➡️ answers and record it as the blanket answer.
+- **First round: write the markers, then ask** — each frontier
+  question lands in the draft as an open marker before it is put to
+  the user.
+- **Partial answers** — questions left unanswered stay open markers
+  and are re-asked alone in the next round; silence is never assent.
+- **Put the round through the harness's structured question tool
+  where one exists** — each question one ask, its 2–3 viable
+  options the choices, the ➡️ recommended answer first and marked.
+  Where the tool caps questions per call, split the round across
+  consecutive calls — never truncate a frontier to fit. With no
+  such tool, print the round as formatted above: the ❓ block is
+  the one form every path — ask, fallback, transcript — shares.
+- **Finding facts is never the user's job** — "does X already exist /
+  is Y already handled" is a fact, not a decision: grep/read the repo
+  yourself (or spawn a scoped analyst probe for anything substantial)
+  and put only genuine judgment calls to the user.
+- Don't block the round on a running check — only the questions
+  downstream of it wait; ask the rest of the frontier now.
+
+## The non-answer rule (hard stop)
+
+A round put to the user is a HUMAN gate — an unanswered round is not
+an answer. Some harness modes resolve the ask without ever waiting —
+a structured-tool call auto-answered by the harness is D-018's
+observed case — and an empty or skipped reply is the same thing.
+On any non-answer:
+print the round exactly as formatted and **end the turn there** — do
+not adopt the ➡️ recommendations, do not resolve markers yourself, do
+not spawn anything. Stopping is safe by construction while open
+markers hold the graph at `clarify`; the run resumes from doc state
+when the user's answers arrive. The recommendation exists to make
+answering one glance cheap, not to make the round optional.
+
+## Closing
+
+Each round's answers reshape the tree and push the frontier outward;
+recompute and ask the next round. The pass ends when the frontier is
+**empty** — never at a fixed question count; a tree that keeps
+sprouting branches instead of closing (around round 4) is the signal
+to offer splitting the feature into separate intents, not to push more
+rounds. Every question closes in exactly one of three states —
+answered (resolved into the draft), explicitly deferred (Scope out),
+or a named assumption (Assumptions) — never left open; a deferral or
+assumption closes only on the user's explicit assent, never on the
+runner's recommendation alone. One ambiguity caught here is one
+ambiguity a downstream agent never sees.

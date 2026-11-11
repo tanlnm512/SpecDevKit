@@ -9,12 +9,12 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                      frontmatter + VERSION
                                                      (tools/plugin-manifest.py
                                                      --check)
-  kit-rules   agents/builder.md and                  vs the injection from
-              agents/code-review-fixer.md            rules/engineering-rules.md
+  kit-rules   agents/developer.md and                  vs the injection from
+              agents/review-fixer.md            rules/engineering-rules.md
               § Engineering rules sections           (tools/kit-rules.py
                                                      --check)
   parity      skills/*/scripts/ replica views of     vs the master closure
-              the shared core                        at skills/spec-author/
+              the shared core                        at skills/spec-design/
                                                      scripts/ (tools/parity.py
                                                      --check)
   diagrams    diagrams/spec-workflow.mmd     vs the workflow graph
@@ -24,8 +24,8 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                      tables), and the HTML
                                                      renders' coverage of
                                                      every model node
-  examples    skills/spec-author/examples/mini-spec —   must still pass
-               the green fixture                      skills/spec-author/
+  examples    skills/spec-design/examples/mini-spec —   must still pass
+               the green fixture                      skills/spec-design/
                                                        scripts/check.py
   personas    agents/*.md (agy personas)              vs a fresh
                                                       regeneration from
@@ -47,7 +47,7 @@ import tempfile
 from pathlib import Path
 
 PKG_ROOT = Path(__file__).resolve().parent.parent
-SKILL = PKG_ROOT / "skills" / "spec-author"
+SKILL = PKG_ROOT / "skills" / "spec-design"
 SHAPE = SKILL
 MODEL = SKILL / "diagrams" / "spec-workflow.mmd"
 DIAGRAMS_DIR = SKILL / "diagrams"
@@ -161,11 +161,11 @@ def diagram_problems(g) -> list[str]:
 
 
 def check_contract() -> int:
-    """The workflow node table: spec-author SKILL.md's generated block
+    """The workflow node table: spec-design SKILL.md's generated block
     must match a fresh render of its scripts/contract.py."""
-    print("== contract — canonical source: skills/spec-author/"
+    print("== contract — canonical source: skills/spec-design/"
           "scripts/contract.py")
-    skill = PKG_ROOT / "skills" / "spec-author"
+    skill = PKG_ROOT / "skills" / "spec-design"
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "s2p_contract", skill / "scripts" / "contract.py")
@@ -179,7 +179,7 @@ def check_contract() -> int:
     committed = text[start:end + len(mod.END)]
     if committed != mod.render_skill_table():
         print("  DRIFT: SKILL.md node table differs from contract.py")
-        print("  regenerate: python3 skills/spec-author/scripts/"
+        print("  regenerate: python3 skills/spec-design/scripts/"
               "contract.py --render skill-table (replace the block)")
         return 1
     s_start, s_end = text.find(mod.SPAWN_BEGIN), text.find(mod.SPAWN_END)
@@ -189,10 +189,10 @@ def check_contract() -> int:
     if (text[s_start:s_end + len(mod.SPAWN_END)]
             != mod.render_spawn_table()):
         print("  DRIFT: SKILL.md spawn table differs from graph.py")
-        print("  regenerate: python3 skills/spec-author/scripts/"
+        print("  regenerate: python3 skills/spec-design/scripts/"
               "contract.py --render spawn-table (replace the block)")
         return 1
-    print("  OK  skills/spec-author/SKILL.md node table and spawn table")
+    print("  OK  skills/spec-design/SKILL.md node table and spawn table")
     return 0
 
 
@@ -209,7 +209,7 @@ def check_kit_rules() -> int:
 
 
 def check_parity() -> int:
-    print("== parity — canonical source: skills/spec-author/scripts/ via "
+    print("== parity — canonical source: skills/spec-design/scripts/ via "
           "tools/parity.py")
     return run_tool(PKG_ROOT / "tools" / "parity.py", "--check")
 
@@ -230,7 +230,7 @@ def check_diagrams() -> int:
 
 def check_examples() -> int:
     print("== examples — canonical contract: the mini-spec green fixture "
-          "passes skills/spec-author/scripts/check.py")
+          "passes skills/spec-design/scripts/check.py")
     return run_tool(SHAPE / "scripts" / "check.py", FIXTURE)
 
 

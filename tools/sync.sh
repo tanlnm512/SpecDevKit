@@ -88,9 +88,9 @@
 #                                 `agy plugin install` copies; agy owns
 #                                 ~/.gemini/config/plugins itself).
 #   rules/engineering-rules.md -> the § Engineering rules sections in
-#                              skills/spec-execute/agents/builder.md
-#                              and skills/spec-code-review/agents/
-#                              code-review-fixer.md — COMMITTED
+#                              skills/spec-build/agents/developer.md
+#                              and skills/spec-review/agents/
+#                              review-fixer.md — COMMITTED
 #                              regenerate-only carrier views, refreshed
 #                              in-place by tools/kit-rules.py before
 #                              install and drift-checked in verify
@@ -107,15 +107,15 @@
 # Run from anywhere: tools/sync.sh — edits always land in skills/<name>/
 # first; this script is the only thing that copies out.
 #
-# Modes: plain `tools/sync.sh` applies the plan (pruning
-# stale flat-root command deploys the ledger proves it owns, and
-# sweeping the roots of skills named in tools/retired-skills.txt whose
-# masters no longer ship — ledger-proven deploys deleted, foreign files
-# refused); `--dry-run` prints the full plan — create/update/unchanged/
-# delete/stale-delete/refuse per destination — and exits; `--check`
-# reports refusals, stale command deploys (shipped names no skill
-# claims anymore), plus drift between the masters and what is
-# installed. Neither mode writes a destination or records ownership.
+# Modes: plain `tools/sync.sh` applies the plan (pruning stale
+# flat-root command and agent-def deploys the ledger proves it owns,
+# and sweeping the roots of skills named in tools/retired-skills.txt
+# whose masters no longer ship — ledger-proven deploys deleted, foreign
+# files refused); `--dry-run` prints the full plan — create/update/
+# unchanged/delete/stale-delete/refuse per destination — and exits;
+# `--check` reports refusals, stale command and agent-def deploys
+# (shipped names no skill claims anymore), plus drift between the
+# masters and what is installed. Neither mode writes a destination or records ownership.
 set -euo pipefail
 
 PKG_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -240,7 +240,7 @@ claimed_command_names() {
   for name in "${SKILLS[@]}"; do
     # a skill's own name is claimed only when its router file actually
     # ships — a skill without commands/<name>.md does not hold the
-    # flat-root name (spec-execute D-033 left orphans behind otherwise)
+    # flat-root name (spec-build D-033 left orphans behind otherwise)
     [ -f "$PKG_ROOT/skills/$name/commands/$name.md" ] \
       && printf '%s\n' "$name"
     for base in $(extra_commands "$name"); do
@@ -290,6 +290,59 @@ check_stale_commands() {  # <root>
     echo "STALE $root/$name.md (deployed name no longer shipped — rerun sync)"
     fail=1
   done < <(stale_commands_in "$root")
+}
+
+# Flat agent roots hold one def per brief file name, so a renamed or
+# retired role leaves its old file behind: a name this kit deployed
+# that no shipping brief produces anymore is a stale deploy — pruned
+# only while its hash still matches the root's ledger, as for commands.
+shipped_def_names() {
+  local f
+  for f in "$PKG_ROOT"/skills/*/agents/*.md; do
+    [ -e "$f" ] && basename "$f"
+  done
+  return 0
+}
+
+agent_def_roots() {  # the ledgered flat agent roots this machine has
+  printf '%s\n' "$CLAUDE_AGENTS_ROOT"
+  if [ -d "$HOME/.config/opencode" ]; then printf '%s\n' "$OPENCODE_AGENTS_ROOT"; fi
+  if [ -d "$HOME/.factory" ]; then printf '%s\n' "$DROID_AGENTS_ROOT"; fi
+  if [ -d "$KILO_HOME" ]; then printf '%s\n' "$KILO_AGENTS_ROOT"; fi
+  return 0
+}
+
+stale_defs_in() {  # <root> — ledgered, unshipped, hash-verified def names
+  local root="$1"
+  local ledger="$root/$LEDGER_NAME" name shipped
+  [ -f "$ledger" ] || return 0
+  shipped="$(shipped_def_names | sort -u)"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    [ -f "$root/$name" ] || continue
+    printf '%s\n' "$shipped" | grep -qxF "$name" && continue
+    ledger_entry_matches "$ledger" "$name" "$root/$name" || continue
+    printf '%s\n' "$name"
+  done < <(awk '{print $2}' "$ledger")
+}
+
+stale_defs() {  # plan (--dry-run), report (--check), or prune them
+  local root name
+  while IFS= read -r root; do
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      if [ "$DRY_RUN" = 1 ]; then
+        echo "plan  delete $root/$name"
+      elif [ "$CHECK" = 1 ]; then
+        echo "STALE $root/$name (deployed agent def no longer shipped — rerun sync)"
+        fail=1
+      else
+        rm "$root/$name"
+        ledger_forget "$root/$LEDGER_NAME" "$name"
+        echo "clean $root/$name (stale deploy)"
+      fi
+    done < <(stale_defs_in "$root")
+  done < <(agent_def_roots)
 }
 
 # --- retired-skills sweep ----------------------------------
@@ -814,6 +867,7 @@ fi
 # Retired skills: swept before the apply loop, so successor
 # skills redeploy anything byte-shared later in the same run.
 sweep_retired_skills
+stale_defs
 
 if [ "$DRY_RUN" = 1 ]; then
   echo "dry run complete — nothing was written, no ownership recorded"
@@ -833,7 +887,7 @@ if [ "$CHECK" = 0 ]; then
     echo "ERROR: kit-rules refresh failed — nothing installed"; exit 1
   }
   # Shared-core parity: regenerate the committed replica scripts/ from
-  # the master skills/spec-author/scripts/ BEFORE any install copies
+  # the master skills/spec-design/scripts/ BEFORE any install copies
   # them out — same committed regenerate-only discipline as the
   # kit-rules refresh above. Never runs in --dry-run or --check mode.
   python3 "$PKG_ROOT/tools/parity.py" || {

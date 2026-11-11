@@ -1,7 +1,7 @@
 ## Engineering rules (kit-wide)
 
-These bind the agents that write code and tests — the spec-execute
-builder and the spec-code-review fixer, which carry this section — and
+These bind the agents that write code and tests — the spec-build
+developer and the spec-review fixer, which carry this section — and
 the orchestrators that run them. A rule whose action you never perform
 does not apply to you; the one whose action you are taking right now
 binds absolutely.
