@@ -95,5 +95,17 @@ class MarketplaceCatalogTests(unittest.TestCase):
             self.assertEqual(p["source"], f"./skills/{p['name']}")
 
 
+class PluginAgentScanTests(unittest.TestCase):
+    def test_every_agents_file_is_a_role(self):
+        # Claude Code registers every agents/*.md of a plugin as an agent
+        for skill in skills():
+            for brief in sorted((skill / "agents").glob("*.md")):
+                with self.subTest(brief=f"{skill.name}/{brief.name}"):
+                    head = brief.read_text().split("\n---\n", 1)[0]
+                    self.assertTrue(head.startswith("---\n"))
+                    self.assertRegex(head, r"(?m)^name: \S")
+                    self.assertRegex(head, r"(?m)^description:")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -24,7 +24,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL = REPO_ROOT / "skills" / "spec-shape"
+SKILL = REPO_ROOT / "skills" / "spec-design"
 SCAFFOLD = SKILL / "scripts" / "scaffold.sh"
 CHECK = SKILL / "scripts" / "check.py"
 FREEZE = SKILL / "scripts" / "freeze.py"
@@ -37,6 +37,10 @@ _spec = importlib.util.spec_from_file_location(
     "specstate", SKILL / "scripts" / "specstate.py")
 specstate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(specstate)
+
+_freeze_spec = importlib.util.spec_from_file_location("freeze", FREEZE)
+freeze = importlib.util.module_from_spec(_freeze_spec)
+_freeze_spec.loader.exec_module(freeze)
 
 
 def run_py(script: Path, *argv, cwd: Path | None = None,
@@ -88,6 +92,7 @@ if __name__ == "__main__":
 SPEC_MD = f'''# Spec: {SPEC_NAME}
 
 **Status**: done
+**Type**: feature
 **Created**: {TODAY}
 **Branch**: `feature/{SPEC_NAME}`
 
@@ -121,6 +126,12 @@ need no repeated-addition workaround.
   return their integer product.
 - **FR-002**: IF either operand is zero, the system shall return 0 without
   special-casing at call sites.
+
+## Quality attributes
+- **NFR-001**: Security, Privacy, Performance, Reliability, Observability,
+  Accessibility — not applicable: a pure in-process integer function with
+  no input boundary, stored data, I/O, failure mode, signal, or interface
+  beyond its two operands.
 
 ## Scope
 **In**: the multiply operation, its tests, and the lifecycle records that
@@ -168,6 +179,10 @@ their proof is green.
 One end-of-plan commit on `feature/{SPEC_NAME}`; in a repository without
 git the Delivered record takes the `-` skip form. (ADR-001, tick-commit
 node.)
+
+### Rollout
+none — the function ships whole with the delivery commit, nothing calls
+it yet, and reverting that commit is the rollback.
 '''
 
 TECH_SPEC_MD = f'''# Tech Spec: {SPEC_NAME}
@@ -198,6 +213,12 @@ Stage 0.
 The module gains one function; no existing caller changes — the survey
 lists the test module as its only consumer.
 
+## Interfaces & data
+- **Interfaces**: one new public function, multiply, taking the same two
+  integer operands as add and subtract; existing signatures are unchanged.
+- **Data and migrations**: none — the module stores nothing.
+- **Compatibility**: additive; no existing caller changes.
+
 ## Code guide
 ### Arithmetic module
 - Touches: `multiply` in `calc.py` (survey.md evidence)
@@ -214,7 +235,7 @@ lists the test module as its only consumer.
 ## References
 - [survey.md](survey.md) — module baseline and evidence.
 - The lifecycle contract: this repo consumes the spec suite's
-  templates verbatim via scaffold.sh (mastered at spec-shape).
+  templates verbatim via scaffold.sh (mastered at spec-design).
 
 ## Decisions
 ### D-001: One pure function, no parser
@@ -342,7 +363,7 @@ generated files have each broken releases before these articles existed.
 '''
 
 INDEX_MD = (f"# Specs index\n"
-            f"- [{SPEC_NAME}]({SPEC_NAME}/spec.md) — done (created {TODAY})\n")
+            f"- [{SPEC_NAME}]({SPEC_NAME}/spec.md) — done · feature · full\n")
 
 
 def build_docset() -> tuple[Path, Path]:
@@ -371,6 +392,12 @@ def build_docset() -> tuple[Path, Path]:
         (repo / "specs" / "INDEX.md").write_text(INDEX_MD, encoding="utf-8")
         (repo / "calc.py").write_text(CALC_PY, encoding="utf-8")
         (repo / "test_calc.py").write_text(TEST_CALC_PY, encoding="utf-8")
+        (spec_dir / "approvals").mkdir()
+        (spec_dir / "approvals" / "review.md").write_text(
+            "# Contract review\n\nDocset fingerprint: "
+            f"{freeze.docset_fingerprint(spec_dir)}\n\n"
+            "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
+            encoding="utf-8")
         r = run_py(FREEZE, str(spec_dir), "--record", cwd=repo)
         if r.returncode != 0:
             raise AssertionError(f"freeze.py failed: {r.stdout}{r.stderr}")

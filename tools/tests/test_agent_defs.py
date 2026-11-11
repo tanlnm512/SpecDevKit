@@ -28,7 +28,7 @@ def staged_archetypes() -> Path:
     atexit.register(shutil.rmtree, root, ignore_errors=True)
     agents = root / "agents"
     agents.mkdir()
-    for skill in ("spec-intent", "spec-shape", "spec-execute"):
+    for skill in ("spec-define", "spec-design", "spec-build"):
         for f in (REPO_ROOT / "skills" / skill / "agents").glob("*.md"):
             shutil.copyfile(f, agents / f.name)
     return root
@@ -102,7 +102,7 @@ class OpencodeDefsTests(unittest.TestCase):
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "reviewer.md").read_text()
+            reviewer = (out / "auditor.md").read_text()
             fm = FM.match(reviewer).group(1)
             self.assertIn("  edit: deny", fm)
             self.assertIn("  bash: deny", fm)
@@ -119,7 +119,7 @@ class OpencodeDefsTests(unittest.TestCase):
     def test_researcher_gets_web_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            researcher = (out / "scout.md").read_text()
+            researcher = (out / "analyst.md").read_text()
             fm = FM.match(researcher).group(1)
             self.assertIn("  websearch: allow", fm)
             self.assertIn("  webfetch: allow", fm)
@@ -133,13 +133,13 @@ class DroidDefsTests(unittest.TestCase):
     def test_readonly_set_collapses_to_category(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "reviewer.md").read_text()
+            reviewer = (out / "auditor.md").read_text()
             self.assertIn("tools: read-only", reviewer)
 
     def test_tool_ids_map_to_factory_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            imp = (out / "builder.md").read_text()
+            imp = (out / "developer.md").read_text()
             for tid in ("Read", "Execute", "Create", "Edit"):
                 self.assertIn(f'"{tid}"', imp)
             self.assertNotIn('"Bash"', imp)
@@ -172,7 +172,7 @@ class KiloDefsTests(unittest.TestCase):
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "reviewer.md").read_text()
+            reviewer = (out / "auditor.md").read_text()
             fm = FM.match(reviewer).group(1)
             self.assertIn("  edit: deny", fm)
             self.assertIn("  bash: deny", fm)
@@ -196,7 +196,7 @@ class KiloDefsTests(unittest.TestCase):
     def test_qa_keeps_skill_allow(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            qa = (out / "qa.md").read_text()
+            qa = (out / "tester.md").read_text()
             fm = FM.match(qa).group(1)
             self.assertIn("  skill: allow", fm)
             self.assertIn("  edit: allow", fm)  # writes test.md

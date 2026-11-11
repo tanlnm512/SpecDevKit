@@ -16,15 +16,9 @@ Writes:
   skill directory a self-contained, independently installable plugin:
   its commands/ and agents/ already live inside it (the plugin root IS
   the skill root), both at Claude Code's own default scan locations, so
-  neither needs a manifest path override.
-
-Known limitation: a skill's agents/ dir may hold shared prose a role brief
-points at (_shared-protocol.md) that is not itself a role. Claude Code's
-default agents/ scan loads every file in it as an agent, and an `agents`
-manifest field merges with that scan rather than replacing it, so no
-manifest entry can exclude the file. Installing a spec-suite skill
-therefore shows one inert "<skill>:_shared-protocol" subagent entry.
-Moving the file out of agents/ would touch every cross-reference to it.
+  neither needs a manifest path override. Claude Code's default agents/
+  scan registers every file there as an agent, so agents/ holds roles
+  only; the shared prose they point at lives in protocol/.
 
 Run manually after adding a skill, bumping a skill's VERSION, or changing
 a SKILL.md description — not part of tools/sync.sh, since regenerating

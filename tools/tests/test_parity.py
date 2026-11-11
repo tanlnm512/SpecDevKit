@@ -28,7 +28,7 @@ class DiscoveryTests(unittest.TestCase):
         # discovery is keyed on graph.py shipping, never a hand list
         self.assertEqual(
             GRAPH_SKILLS,
-            ["spec-execute", "spec-intent", "spec-shape"])
+            ["spec-build", "spec-define", "spec-design"])
 
 
 class ArchetypeParityTests(unittest.TestCase):
@@ -37,26 +37,30 @@ class ArchetypeParityTests(unittest.TestCase):
     divergent install, this fails it in CI first."""
 
     SHIPPED = {
-        "spec-intent": {"scout.md", "_lenses.md", "_shared-protocol.md"},
-        "spec-shape": {"scout.md", "designer.md", "qa.md", "reviewer.md",
-                       "_lenses.md", "_shared-protocol.md"},
-        "spec-execute": {"builder.md", "reviewer.md",
-                         "_shared-protocol.md"},
+        "spec-define": {"agents/analyst.md", "protocol/lenses.md",
+                        "protocol/shared-protocol.md"},
+        "spec-design": {"agents/analyst.md", "agents/architect.md",
+                        "agents/tester.md", "agents/auditor.md",
+                        "protocol/lenses.md", "protocol/shared-protocol.md"},
+        "spec-build": {"agents/developer.md", "agents/auditor.md",
+                         "protocol/shared-protocol.md"},
     }
-    SPAN_LOCAL = {"_lenses.md"}
+    SPAN_LOCAL = {"protocol/lenses.md"}
 
     def test_each_skill_ships_only_its_span_archetypes(self):
         for skill, want in self.SHIPPED.items():
-            agents = REPO_ROOT / "skills" / skill / "agents"
-            self.assertEqual({p.name for p in agents.glob("*.md")}, want,
-                             skill)
+            root = REPO_ROOT / "skills" / skill
+            got = {str(p.relative_to(root))
+                   for d in ("agents", "protocol")
+                   for p in (root / d).glob("*.md")}
+            self.assertEqual(got, want, skill)
 
     def test_shared_briefs_identical_across_the_trio(self):
         owners: dict[str, list[Path]] = {}
         for skill, names in self.SHIPPED.items():
             for name in names - self.SPAN_LOCAL:
                 owners.setdefault(name, []).append(
-                    REPO_ROOT / "skills" / skill / "agents" / name)
+                    REPO_ROOT / "skills" / skill / name)
         for name, paths in owners.items():
             with self.subTest(brief=name):
                 digests = {hashlib.sha256(p.read_bytes()).hexdigest()
@@ -76,6 +80,19 @@ class ParityTests(unittest.TestCase):
                 self.assertEqual(len(shas), 1, f"{name} diverged")
 
 
+class GateCopyParityTests(unittest.TestCase):
+    """spec-build's regression gate is spec-review's gate, shipped as a
+    byte-identical copy: edit spec-review's, then copy it over."""
+
+    def test_spec_build_gate_copies_match_spec_review(self):
+        for name in ("gate.sh", "gate_helpers.py"):
+            with self.subTest(script=name):
+                master = REPO_ROOT / "skills" / "spec-review" / "scripts" / name
+                copy = REPO_ROOT / "skills" / "spec-build" / "scripts" / name
+                self.assertEqual(master.read_bytes(), copy.read_bytes(),
+                                 f"{copy} diverged from {master}")
+
+
 class DivergenceFixtureTests(unittest.TestCase):
     def test_mutated_replica_byte_fails_check_and_real_tree_is_green(self):
         tmp = Path(tempfile.mkdtemp(prefix="parity-test-"))
@@ -83,7 +100,7 @@ class DivergenceFixtureTests(unittest.TestCase):
         repo = tmp / "repo"
         shutil.copytree(REPO_ROOT, repo, ignore=shutil.ignore_patterns(
             ".git", ".DS_Store", "__pycache__"))
-        victim = repo / "skills" / "spec-intent" / "scripts" / "graph.py"
+        victim = repo / "skills" / "spec-define" / "scripts" / "graph.py"
         mutated = bytearray(victim.read_bytes())
         mutated[-1] ^= 1
         victim.write_bytes(bytes(mutated))
@@ -92,7 +109,7 @@ class DivergenceFixtureTests(unittest.TestCase):
             capture_output=True, text=True, timeout=300)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("DRIFT", r.stdout)
-        self.assertIn("skills/spec-intent/scripts/graph.py", r.stdout)
+        self.assertIn("skills/spec-define/scripts/graph.py", r.stdout)
         real = subprocess.run(
             [sys.executable, str(PARITY), "--check"],
             capture_output=True, text=True, timeout=300)

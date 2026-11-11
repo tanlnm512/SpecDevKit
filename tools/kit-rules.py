@@ -7,11 +7,11 @@ editable file). This tool injects it verbatim as the
 "## Engineering rules (kit-wide)" section into the carrier files the
 kit's spawn channels already load:
 
-  skills/spec-execute/agents/builder.md             (the code-writing
+  skills/spec-build/agents/developer.md             (the code-writing
                                                      archetype — the only
                                                      spec-suite role that
                                                      writes code or tests)
-  skills/spec-code-review/agents/code-review-fixer.md
+  skills/spec-review/agents/review-fixer.md
                                                      (the fix loop's
                                                       author agent)
 
@@ -30,10 +30,10 @@ PKG_ROOT = Path(__file__).resolve().parent.parent
 SOURCE = PKG_ROOT / "rules" / "engineering-rules.md"
 HEADING = "## Engineering rules (kit-wide)"
 CARRIERS = (
-    PKG_ROOT / "skills" / "spec-execute" / "agents"
-    / "builder.md",
-    PKG_ROOT / "skills" / "spec-code-review" / "agents"
-    / "code-review-fixer.md",
+    PKG_ROOT / "skills" / "spec-build" / "agents"
+    / "developer.md",
+    PKG_ROOT / "skills" / "spec-review" / "agents"
+    / "review-fixer.md",
 )
 
 

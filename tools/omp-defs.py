@@ -14,8 +14,8 @@ lowercase names, so the Claude frontmatter cannot be copied as-is. The
 brief bodies are shared verbatim with the source agents/*.md files; only
 the frontmatter is regenerated here, making these derived
 regenerate-only artifacts (same anti-drift shape as checklist.md),
-never hand-edited. Role files named with a leading underscore (e.g.
-_shared-protocol.md) are shared prose, not roles, and are skipped.
+never hand-edited. Shared prose a role brief points at lives in the
+skill's protocol/ dir, never agents/ — every agents/*.md is a role.
 
 Frontmatter derivation (from each source file's own Claude-style block):
 - name/description: copied as-is (description folded to one line —
@@ -60,7 +60,7 @@ from that manifest.
 
 Run by tools/sync.sh; standalone:
 
-    tools/omp-defs.py --skill-dir skills/spec-shape --out ~/.omp/agent/agents
+    tools/omp-defs.py --skill-dir skills/spec-design --out ~/.omp/agent/agents
 """
 import hashlib
 import os
@@ -192,8 +192,7 @@ def main(argv=None) -> int:
     if not agents.is_dir():
         sys.exit(f"{agents}: no agents/ dir")
     sources = sorted(p for p in agents.glob("*.md")
-                     if not p.name.startswith("_")
-                     and (only is None or p.name in only))
+                     if only is None or p.name in only)
     mpath = manifest_path_for(out, skill_dir)
 
     stage = Path(tempfile.mkdtemp(prefix="omp-defs-stage-"))

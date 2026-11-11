@@ -32,9 +32,9 @@ def load(skill):
 
 class ParityTests(unittest.TestCase):
     def test_all_five_skills_ship_the_module(self):
-        self.assertEqual(SKILLS, ["spec-brainstorming", "spec-code-review",
-                                  "spec-execute", "spec-intent",
-                                  "spec-shape"])
+        self.assertEqual(SKILLS, ["spec-build", "spec-define",
+                                  "spec-design", "spec-discover",
+                                  "spec-review"])
 
     def test_modules_are_byte_identical(self):
         shas = {(REPO_ROOT / "skills" / s / "scripts" / "telemetry.py")
@@ -61,58 +61,58 @@ class BehaviorTests(unittest.TestCase):
                 os.environ[k] = v
 
     def test_record_appends_jsonl_and_summary_aggregates(self):
-        t = load("spec-shape")
-        t.record("spec-shape", "wave", wave=1, payloads=3)
-        t.record("spec-shape", "wave", wave=2, payloads=5)
-        t.record("spec-shape", "gate_pause", node="approve")
-        p = self.store / "spec-shape.jsonl"
+        t = load("spec-design")
+        t.record("spec-design", "wave", wave=1, payloads=3)
+        t.record("spec-design", "wave", wave=2, payloads=5)
+        t.record("spec-design", "gate_pause", node="approve")
+        p = self.store / "spec-design.jsonl"
         rows = [json.loads(l) for l in p.read_text().splitlines()]
         self.assertEqual([r["event"] for r in rows],
                          ["wave", "wave", "gate_pause"])
         self.assertEqual(rows[0]["payload"], {"wave": 1, "payloads": 3})
         self.assertEqual(rows[0]["schema"], 1)
-        s = t.summary("spec-shape")
+        s = t.summary("spec-design")
         self.assertIn("**wave**: 2", s)
         self.assertIn("**gate_pause**: 1", s)
         self.assertIn("payloads: mean 4.0", s)
         self.assertIn("p90 5.0", s)
 
     def test_off_switch_writes_nothing(self):
-        t = load("spec-shape")
+        t = load("spec-design")
         os.environ["KIT_TELEMETRY"] = "off"
         try:
-            t.record("spec-shape", "wave", wave=1)
+            t.record("spec-design", "wave", wave=1)
         finally:
             os.environ.pop("KIT_TELEMETRY", None)
-        self.assertFalse((self.store / "spec-shape.jsonl").exists())
+        self.assertFalse((self.store / "spec-design.jsonl").exists())
 
     def test_record_swallows_errors(self):
-        t = load("spec-shape")
+        t = load("spec-design")
         # store dir occupied by a regular file -> mkdir fails -> swallowed
         blocker = self.store / "blocker"
         blocker.parent.mkdir(parents=True, exist_ok=True)
         os.environ["KIT_TELEMETRY_DIR"] = str(blocker)
         try:
-            t.record("spec-shape", "wave", wave=1)  # must not raise
+            t.record("spec-design", "wave", wave=1)  # must not raise
         finally:
             os.environ["KIT_TELEMETRY_DIR"] = str(self.store)
 
     def test_summary_on_missing_store_is_honest(self):
-        t = load("spec-code-review")
+        t = load("spec-review")
         self.assertIn("no telemetry recorded",
-                      t.summary("spec-code-review"))
+                      t.summary("spec-review"))
 
     def test_cli_record_and_summary(self):
         import subprocess, sys
-        mod = REPO_ROOT / "skills" / "spec-shape" / "scripts" \
+        mod = REPO_ROOT / "skills" / "spec-design" / "scripts" \
             / "telemetry.py"
         r = subprocess.run(
-            [sys.executable, str(mod), "record", "spec-shape",
+            [sys.executable, str(mod), "record", "spec-design",
              "check_run", '{"fails": 0, "warns": 1}'],
             env=self.env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         r2 = subprocess.run(
-            [sys.executable, str(mod), "summary", "spec-shape"],
+            [sys.executable, str(mod), "summary", "spec-design"],
             env=self.env, capture_output=True, text=True)
         self.assertIn("**check_run**: 1", r2.stdout)
         self.assertIn("warns: mean 1.0", r2.stdout)

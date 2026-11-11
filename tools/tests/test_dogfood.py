@@ -22,26 +22,26 @@ def run(cmd, cwd=None):
 
 class BrainstormDogfoodTests(unittest.TestCase):
     def test_every_brainstorm_artifact_passes_the_handoff_checker(self):
-        artifacts = [SKILLS / "spec-brainstorming" / "examples"
+        artifacts = [SKILLS / "spec-discover" / "examples"
                      / "decision-tracker" / "decision-tracker.md"]
         artifacts += sorted(ROOT.glob("brainstorms/*.md"))
         self.assertTrue(artifacts, "no brainstorm artifacts found to gate")
-        checker = SKILLS / "spec-brainstorming" / "scripts" / "check.py"
+        checker = SKILLS / "spec-discover" / "scripts" / "check.py"
         for art in artifacts:
             with self.subTest(artifact=art.name):
                 r = run([sys.executable, str(checker), str(art)])
                 self.assertEqual(
                     r.returncode, 0,
-                    f"{art} fails spec-brainstorming's own handoff checker:\n"
+                    f"{art} fails spec-discover's own handoff checker:\n"
                     f"{r.stdout}\n{r.stderr}",
                 )
 
 
 class SpecDogfoodTests(unittest.TestCase):
     def test_every_live_specset_passes_check_py(self):
-        # the docset checker lives in spec-shape, with its fixture beside it
-        checker = SKILLS / "spec-shape" / "scripts" / "check.py"
-        dirs = [SKILLS / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec"]
+        # the docset checker lives in spec-design, with its fixture beside it
+        checker = SKILLS / "spec-design" / "scripts" / "check.py"
+        dirs = [SKILLS / "spec-design" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [
             p.parent
             for p in sorted((ROOT / "specs").glob("*/spec.md"))
@@ -53,7 +53,7 @@ class SpecDogfoodTests(unittest.TestCase):
                 r = run([sys.executable, str(checker), str(d)])
                 self.assertEqual(
                     r.returncode, 0,
-                    f"{d} fails spec-shape's own docset checker:\n"
+                    f"{d} fails spec-design's own docset checker:\n"
                     f"{r.stdout}\n{r.stderr}",
                 )
 

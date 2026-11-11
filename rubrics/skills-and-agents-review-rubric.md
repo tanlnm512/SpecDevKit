@@ -2,7 +2,7 @@
 
 A standalone rubric for reviewing the units this repo ships — every
 **skill** (`skills/*/SKILL.md` plus the package it names) and every
-**agent brief** (`skills/*/agents/*.md`, `_`-prefixed protocol/lens
+**agent brief** (`skills/*/agents/*.md`, with the `protocol/` and lens
 files as their data) — plus the **suite** the five skills form
 together. Built from a full read of the 2026-10-27 tree; it shares the
 mechanical/judgment split and anchor ladder of
@@ -70,7 +70,7 @@ weak · <6 failing.
 
 ### 3.2 Agent brief (weights sum 100)
 
-`_`-prefixed files are the brief's data; score the composite, but a
+`protocol/` files are the brief's data; score the composite, but a
 grammar that exists only outside the brief caps that dimension at 8.
 
 | ID | Dimension | Weight | Mechanical pts | Judgment pts |
@@ -101,8 +101,8 @@ never credited.
   `bash tools/sync.sh --check` stale count; `python3 tools/grade.py`
   as the companion grader (its output is input here, not authority:
   where its regexes miss the kit's own grammar — e.g. method or digest
-  delegated to `_lenses.md`, or a `Spine` heading — this rubric grades
-  the composite and says so).
+  delegated to `protocol/lenses.md`, or a `Spine` heading — this rubric
+  grades the composite and says so).
 - **K1 (3)** — frontmatter description present; a "When to use"
   section exists; ≥1 explicit not-use boundary naming the sibling
   skill/command (rg for `Not here|not for|belongs to`).
@@ -206,7 +206,7 @@ rule (principle 5) applies before banding.
 
 1. Run the §4 probes; save the output.
 2. Read every unit in full: all five SKILL.md files, every brief,
-  every `_`-protocol and `_lenses.md`, plus `GLOSSARY.md`,
+  every `protocol/` file, plus `GLOSSARY.md`,
   `rules/engineering-rules.md`, and the contracts each SKILL.md names
   as canonical.
 3. Spot-verify ≥3 claims per unit against the tree (a cross-reference,

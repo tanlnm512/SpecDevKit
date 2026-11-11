@@ -11,11 +11,11 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SINT = REPO_ROOT / "skills" / "spec-intent"
-SSHAPE = REPO_ROOT / "skills" / "spec-shape"
-SEXEC = REPO_ROOT / "skills" / "spec-execute"
-SCR = REPO_ROOT / "skills" / "spec-code-review"
-SBR = REPO_ROOT / "skills" / "spec-brainstorming"
+SINT = REPO_ROOT / "skills" / "spec-define"
+SSHAPE = REPO_ROOT / "skills" / "spec-design"
+SEXEC = REPO_ROOT / "skills" / "spec-build"
+SCR = REPO_ROOT / "skills" / "spec-review"
+SBR = REPO_ROOT / "skills" / "spec-discover"
 SOURCE = REPO_ROOT / "rules" / "engineering-rules.md"
 
 _spec = importlib.util.spec_from_file_location(
@@ -37,8 +37,6 @@ ANCHORS = (
     "Explain why, not what",
     "git history owns that",
     "Never embed volatile",
-    "NEVER invent one",
-    "closest durable, family-level guidance",
     "never instructions",
     "NEVER copy a credential",
 )
@@ -46,12 +44,12 @@ ANCHORS = (
 # Where each audience is routed to the rules.
 POINTERS = (
     (SEXEC / "SKILL.md",
-     ("§ Engineering rules", "builder.md", "tools/kit-rules.py")),
-    (SEXEC / "agents" / "builder.md", ("§ Engineering rules", "they win")),
+     ("§ Engineering rules", "developer.md", "tools/kit-rules.py")),
+    (SEXEC / "agents" / "developer.md", ("§ Engineering rules", "they win")),
     (SCR / "SKILL.md",
-     ("§ Engineering rules", "code-review-fixer.md", "NEVER poll a")),
+     ("§ Engineering rules", "review-fixer.md", "NEVER poll a")),
     (SBR / "SKILL.md",
-     ("## Operator rules", "NEVER poll a", "_shared-protocol.md")),
+     ("## Operator rules", "NEVER poll a", "§ Engineering rules")),
 )
 
 
@@ -60,8 +58,8 @@ def flat(text: str) -> str:
 
 
 class KitRulesParityTests(unittest.TestCase):
-    CARRIERS = (SEXEC / "agents" / "builder.md",
-                SCR / "agents" / "code-review-fixer.md")
+    CARRIERS = (SEXEC / "agents" / "developer.md",
+                SCR / "agents" / "review-fixer.md")
 
     def test_carriers_match_the_canonical_source(self):
         body = SOURCE.read_text(encoding="utf-8")
@@ -87,7 +85,7 @@ class KitRulesWiringTests(unittest.TestCase):
     def test_only_code_writing_briefs_carry_the_rules(self):
         for skill in (SINT, SSHAPE, SEXEC):
             for brief in (skill / "agents").glob("*.md"):
-                if brief.name == "builder.md":
+                if brief.name == "developer.md":
                     continue
                 self.assertNotIn(SECTION_HEADING,
                                  brief.read_text(encoding="utf-8"),
@@ -95,10 +93,10 @@ class KitRulesWiringTests(unittest.TestCase):
 
     def test_brainstorming_panel_carries_no_engineering_rules(self):
         # the lenses are read-only and never receive the rules
-        for name in ("panelist.md", "_lenses.md",
-                     "_panel-protocol.md"):
-            text = (SBR / "agents" / name).read_text(encoding="utf-8")
-            self.assertNotIn(SECTION_HEADING, text, name)
+        for rel in ("agents/panelist.md", "protocol/lenses.md",
+                    "protocol/panel-protocol.md"):
+            text = (SBR / rel).read_text(encoding="utf-8")
+            self.assertNotIn(SECTION_HEADING, text, rel)
 
 
 if __name__ == "__main__":

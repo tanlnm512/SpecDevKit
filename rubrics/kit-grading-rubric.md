@@ -100,11 +100,11 @@ concrete miss. `--skip-suites` / `--skip-sync` mark those checks
 - **S6 (10)** — own-artifact dogfood 7 (the skill's checker over
   every in-repo artifact of its type: brainstorming → every
   `brainstorms/*.md`; spec-to-prod → the mini-spec example + every
-  live `specs/*/` docset; spec-code-review → the seeded example
+  live `specs/*/` docset; spec-review → the seeded example
   fixture files); disclosed limitations 3 (`observations/open-items.md`
   exists and discloses accepted limitations).
 
-### Agent brief (skips `_`-prefixed files as units; their text is graded
+### Agent brief (skips `protocol/` files as units; their text is graded
 as part of the composite below)
 
 - **A1 (25)** — frontmatter `name` + `description` 5; `**Mission**` 4;
@@ -112,8 +112,8 @@ as part of the composite below)
   discipline, Design spine, Spine); an Output/deliverable contract 4;
   Guardrails 4; a `digest:` grammar or findings-list contract 4.
   Sections are sought in the composite the spawn payload carries: the
-  brief plus `_shared-protocol.md`/`_panel-protocol.md` plus
-  `_lenses.md` (D-036 moved method/digest into lens sections).
+  brief plus `protocol/shared-protocol.md`/`panel-protocol.md` plus
+  `protocol/lenses.md` (D-036 moved method/digest into lens sections).
 - **A2 (20)** — never-spawn rule 5; never-commit rule 5 (prose, or a
   `tools:` list without Bash — machinery outranks prose); write
   scoping 10 (reviewers: `disallowedTools` carrying Write/Edit; other

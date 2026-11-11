@@ -10,59 +10,81 @@
   },
   "plugins": [
     {
-      "name": "spec-brainstorming",
-      "description": "Five-stage idea co-design and pressure-testing before any spec or code exists \u2014 the pre-spec front door of the suite.",
+      "name": "spec-build",
+      "description": "Builds an approved spec \u2014 the suite's back half.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
       },
-      "source": "./skills/spec-brainstorming",
+      "source": "./skills/spec-build",
       "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-brainstorming"
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-build"
     },
     {
-      "name": "spec-code-review",
-      "description": "Portable three-stage code review for any git repository \u2014 a change, a pull request, a branch, or the whole project: the repo's own checks as the mechanical gate, a preflight scout, specialist lenses (correctness, security, quality & tests) with independent confirmation of every kept finding, and an optional verified fix loop.",
+      "name": "spec-define",
+      "description": "Requirements intake for a settled direction \u2014 turns a raw idea (or a spec-discover handoff) into one validated specs/<name>/intent.md: probes the repo, grills the open questions until none remain, gates the result, stops.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
       },
-      "source": "./skills/spec-code-review",
+      "source": "./skills/spec-define",
       "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-code-review"
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-define"
     },
     {
-      "name": "spec-execute",
-      "description": "Approved-spec execution \u2014 the suite's back half.",
+      "name": "spec-design",
+      "description": "Gated spec authoring for a spec that is not yet approved \u2014 an intent.md or spec.md exists.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
       },
-      "source": "./skills/spec-execute",
+      "source": "./skills/spec-design",
       "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-execute"
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-design"
     },
     {
-      "name": "spec-intent",
-      "description": "Intake front door of the spec-driven suite \u2014 turns a raw idea (or a spec-brainstorming handoff) into one validated artifact, specs/<name>/intent.md.",
+      "name": "spec-discover",
+      "description": "Five-stage idea discovery and pressure-testing \u2014 the pre-spec front door of the suite, for when WHETHER to build it or WHICH version is still open.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
       },
-      "source": "./skills/spec-intent",
+      "source": "./skills/spec-discover",
       "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-intent"
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-discover"
     },
     {
-      "name": "spec-shape",
-      "description": "Gated-intake spec authoring \u2014 the suite's middle phase.",
+      "name": "spec-release",
+      "description": "Cuts a release from work that is already merged and delivered \u2014 the suite's release phase.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
       },
-      "source": "./skills/spec-shape",
+      "source": "./skills/spec-release",
       "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-shape"
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-release"
+    },
+    {
+      "name": "spec-review",
+      "description": "Gated code review for any git repository \u2014 a diff, a pull request, a branch, or the whole project.",
+      "author": {
+        "name": "Stanley",
+        "email": "minhtan512@gmail.com"
+      },
+      "source": "./skills/spec-review",
+      "license": "MIT",
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-review"
+    },
+    {
+      "name": "spec-ship",
+      "description": "Takes a delivered spec from its commit to a merged pull request \u2014 the suite's integration phase.",
+      "author": {
+        "name": "Stanley",
+        "email": "minhtan512@gmail.com"
+      },
+      "source": "./skills/spec-ship",
+      "license": "MIT",
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-ship"
     }
   ]
 }
