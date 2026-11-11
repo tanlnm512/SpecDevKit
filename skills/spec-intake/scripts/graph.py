@@ -15,7 +15,9 @@ architecture.md §2.1/§2.2 and the READY_WHEN/DONE_WHEN tables below. In sum:
   (per-task frontier, fix-round loops ≤5) → tick-commit → archive,
   with loop edges: clarify, fix-round, re-brief, converge (survey staleness).
   intent? is the optional evidence node: intent.md absent → SKIPPED,
-  present-but-red → BLOCKED, green → survey proceeds.
+  present-but-red → BLOCKED, green → survey proceeds. It is an
+  intake-time gate: once spec.md is filled, a lost or stale intent
+  baseline is a note on a DONE node and survey.md owns freshness.
 
 Modes:
   default        human-readable report: per-node state + reason, the frontier
@@ -123,7 +125,8 @@ Mechanical probes: the survey node runs `check.py <spec-dir> --survey-only`
 and the verify node runs `check.py <spec-dir>` — skill-owned contract
 checkers, each only once its inputs are in place; the intent node probes
 `check.py <spec-dir> --intent-only` only when intent.md is present (absent
-→ SKIPPED). No inspection mode ever
+→ SKIPPED), and once spec.md is filled a red probe still reads DONE when
+only the baseline pair failed. No inspection mode ever
 executes repository or `test.md` commands, and proofs execute only on the
 explicit audit.py CLI. Human gates (clarify, approve, an undetermined
 research-gate, tick-commit) are never auto-satisfied by this script.
@@ -166,6 +169,7 @@ from check import (  # noqa: E402
     INVISIBLE,
     PLACEHOLDER,
     QUOTE_SPAN,
+    intent_failures,
 )
 import freeze  # noqa: E402
 import specstate  # noqa: E402
@@ -1753,7 +1757,8 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     # graph (no new blockers, survey readiness unchanged); present-but-red
     # is the ungated artifact the shape span gate refuses; present-and-green
     # reads DONE. Computed first: a missing spec.md is drafted only from a
-    # green intent.
+    # green intent. The baseline gates that handoff alone: under a filled
+    # spec.md the repo moves on by design (a teammate's commit, a squash).
     if docs["intent.md"] is None:
         intent_node = {"state": SKIPPED, "reason":
                        "no intent.md — legacy path: the "
@@ -1766,6 +1771,12 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                        f"(residue: {unfilled_hits(docs['intent.md']) or 'none'})"}
     else:
         irc = run_check(spec_dir, repo_override, ["--intent-only"])
+        baseline_history = None
+        if irc and filled["spec.md"]:
+            still_failing, baseline_notes = intent_failures(
+                docs["intent.md"], repo, specs_root=spec_dir.parent)
+            if not still_failing:
+                baseline_history = "; ".join(baseline_notes)
         if irc == 0:
             intent_node = {"state": DONE, "reason":
                            "intent.md filled and `check.py "
@@ -1773,6 +1784,11 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
         elif irc is None:
             intent_node = {"state": BLOCKED, "reason":
                            "check.py could not run — intent unverified"}
+        elif baseline_history is not None:
+            intent_node = {"state": DONE, "reason":
+                           "intent.md gated the intake handoff; spec.md "
+                           "is filled, so its baseline is history — "
+                           f"{baseline_history}"}
         else:
             intent_node = {"state": BLOCKED, "reason":
                            f"check.py --intent-only exits {irc} — fix "

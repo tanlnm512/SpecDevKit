@@ -504,20 +504,32 @@ class IntentOnlyTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("baseline 0123abc is not a commit in this repo", out)
 
-    def test_full_check_skips_a_baseline_the_repo_cannot_resolve(self):
-        # a squash, rebase, or shallow clone loses the baseline commit
-        # under a docset whose intake already passed
-        spec = fixture_copy()
-        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
-        root = spec.parents[1]
-        subprocess.run(["git", "-C", str(root), "init", "-q"],
-                       check=True, capture_output=True)
-        self._commit(root, "first")
-        (spec / "intent.md").write_text(
-            self.GOOD.format(sha="0123abc"), encoding="utf-8")
-        code, out = run_check(str(spec), "--repo", str(root))
-        self.assertEqual(code, 0, out)
-        self.assertIn("intent staleness: SKIPPED", out)
+    def test_full_check_notes_a_lost_or_stale_baseline(self):
+        # a squash, rebase, or shallow clone loses the baseline commit,
+        # and a teammate's commit moves the code, under a docset whose
+        # intake already passed
+        def lost(root):
+            self._commit(root, "first")
+            return "0123abc", "intent staleness: SKIPPED"
+
+        def stale(root):
+            base = self._commit(root, "first")
+            self._commit(root, "second")
+            return base, "intent staleness: stale"
+
+        for arrange in (lost, stale):
+            with self.subTest(arrange.__name__):
+                spec = fixture_copy()
+                root = spec.parents[1]
+                self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+                subprocess.run(["git", "-C", str(root), "init", "-q"],
+                               check=True, capture_output=True)
+                sha, note = arrange(root)
+                (spec / "intent.md").write_text(
+                    self.GOOD.format(sha=sha), encoding="utf-8")
+                code, out = run_check(str(spec), "--repo", str(root))
+                self.assertEqual(code, 0, out)
+                self.assertIn(note, out)
 
     def test_empty_required_section_and_missing_fr_seed_fail(self):
         root, spec = self._intent_root()

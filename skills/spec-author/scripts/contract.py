@@ -35,7 +35,9 @@ NODE_TABLE = [
     ("intent", "agent",
      "intent.md present and unfilled, or `check.py --intent-only` fails "
      "(absent → SKIPPED: legacy path)",
-     "intent.md filled AND `check.py <spec-dir> --intent-only` exits 0"),
+     "intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 — "
+     "or, once spec.md is filled, fails on its baseline alone (lost or "
+     "stale: an intake-time gate)"),
     ("survey", "agent",
      "spec.md done",
      "survey.md filled AND `check.py <spec-dir> --survey-only` exits 0"),

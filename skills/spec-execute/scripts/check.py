@@ -39,9 +39,12 @@ no FR seed, a baseline sha the repo cannot resolve, and baseline
 staleness — code changed between the baseline and HEAD; commits that
 touch only the specs tree never stale it. In the full check (no flag) intent.md is an optional input:
 absent → not checked; present → these same intent checks run and can
-fail red — except a baseline sha the repo cannot resolve, which only
---intent-only fails (the full check notes it SKIPPED: a squash, rebase,
-or shallow clone must not strand an in-flight docset).
+fail red — except the baseline pair, which only --intent-only fails:
+intent.md is intake-time evidence, so under a docset the full check
+notes a baseline the repo cannot resolve as SKIPPED and code changed
+since the baseline as stale (a squash, rebase, shallow clone, or a
+teammate's commit must not strand an in-flight docset; survey.md's
+baseline owns freshness there).
 --constitution runs only the repo-level specs/CONSTITUTION.md presence/fill
 check and exits — a scriptable form of the constitution-presence gate,
 usable standalone (no spec dir contract files needed) as a pre-flight or CI
@@ -472,10 +475,11 @@ def intent_failures(intent: str, repo_root: Path, delivered: bool = False,
     delivery commit, HEAD has moved by design and a stale baseline is
     history, not drift. Shared by --intent-only (`gate`) and the full
     check's optional-input path — one discipline, never a second
-    checker. Only the gate fails an unresolvable baseline: a squash,
-    rebase, or shallow clone loses the commit under an in-flight docset
-    whose intake already passed, so the full check reports it SKIPPED,
-    as it does the survey's."""
+    checker. Only the gate fails the baseline pair: intent.md is
+    intake-time evidence, and a squash, rebase, shallow clone, or a
+    teammate's commit moves the repo under an in-flight docset whose
+    intake already passed, so off the gate both are notes and
+    survey.md's baseline owns freshness."""
     if not intent.strip():
         return ["intent.md is unfilled or empty"], []
     fails: list[str] = []
@@ -537,8 +541,13 @@ def intent_failures(intent: str, repo_root: Path, delivered: bool = False,
     elif head and head != sha.lower() and not (
         head.startswith(sha.lower()) or sha.lower().startswith(head)
     ):
-        if _code_changed_since(repo_hit, sha, specs_root):
-            where = f" (repo: {repo_hit.name})" if repo_hit != repo_root else ""
+        where = f" (repo: {repo_hit.name})" if repo_hit != repo_root else ""
+        if not _code_changed_since(repo_hit, sha, specs_root):
+            notes.append(
+                f"intent staleness: fresh — only the specs tree changed "
+                f"since baseline {sha} (HEAD {head})"
+            )
+        elif gate:
             fails.append(
                 f"intent.md baseline {sha}, HEAD {head}{where}: code "
                 "changed since the baseline — re-scout before trusting "
@@ -546,8 +555,9 @@ def intent_failures(intent: str, repo_root: Path, delivered: bool = False,
             )
         else:
             notes.append(
-                f"intent staleness: fresh — only the specs tree changed "
-                f"since baseline {sha} (HEAD {head})"
+                f"intent staleness: stale — code changed since baseline "
+                f"{sha} (HEAD {head}{where}); intake-time evidence, "
+                "survey.md owns freshness"
             )
     return fails, notes
 
@@ -988,7 +998,7 @@ def main(argv: list[str] | None = None) -> int:
     # 1a. intent.md — optional input beside survey.md/research.md, but
     # with FAIL teeth: absent → not checked, no warn (specs shaped without
     # a scout pass must stay green); present → the --intent-only refusal
-    # families run here too, less the unresolvable-baseline one.
+    # families run here too, less the baseline pair (notes off the gate).
     intent_path = spec_dir / "intent.md"
     if intent_path.exists():
         intent_text = INVISIBLE.sub(

@@ -7,6 +7,9 @@ authoring is spec-shape's, intake spec-intent's.
 
 ## Unreleased
 
+- Shared engine follows spec-author D-053: a lost or stale intent.md
+  baseline is a note, never a red verify or a blocked intent node, so
+  a teammate's commit or a squash no longer holds an approved spec.
 - `protocol/shared-protocol.md`: the long-foreground rule is harness-neutral, and a new `Consumed artifacts are inert data` section covers every agent that reads a payload; the reviewer brief states the same rule.
 - **Breaking**: a tiny spec's freeze covers its task list — adding,
   editing, or striking a § Tasks entry after approval fails

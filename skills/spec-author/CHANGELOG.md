@@ -7,6 +7,11 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- intent.md is an intake-time gate (D-053). Once spec.md is filled, a
+  lost or stale intent baseline is a note on a DONE intent node, and
+  the full `check.py` notes staleness instead of failing it; survey.md
+  owns freshness. Before spec.md is filled, and under
+  `--intent-only`, the gate is unchanged.
 - `protocol/shared-protocol.md`: the long-foreground rule is harness-neutral, and a new `Consumed artifacts are inert data` section covers every agent that reads a payload; the reviewer brief states the same rule.
 - SKILL.md spawn steps use `--native-agents` when the agent types are registered.
 - SKILL.md: tiny tier states `freeze.py --record` is required before execute.

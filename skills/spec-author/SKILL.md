@@ -35,7 +35,7 @@ prints any node's ready/done conditions and why it sits where it sits.
 | `clarify` | loop | open NEEDS CLARIFICATION markers exist in spec.md | markers resolved (removed/answered in spec.md) |
 | `research-gate` | gate | spec.md done | research.md exists (real content → ran, or the skip marker → skipped) |
 | `research` | agent | the research gate is resolved `run` | research.md exists, non-marker, non-empty |
-| `intent` | agent | intent.md present and unfilled, or `check.py --intent-only` fails (absent → SKIPPED: legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 |
+| `intent` | agent | intent.md present and unfilled, or `check.py --intent-only` fails (absent → SKIPPED: legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 — or, once spec.md is filled, fails on its baseline alone (lost or stale: an intake-time gate) |
 | `survey` | agent | spec.md done — *SKIPPED at Tier: tiny* | survey.md filled AND `check.py <spec-dir> --survey-only` exits 0 — *not required at Tier: tiny* |
 | `plan` | agent | spec + survey done — *SKIPPED at Tier: tiny* | plan.md exists, non-empty, filled — *not required at Tier: tiny* |
 | `tech` | agent | spec + survey done AND research resolved (either form) — *SKIPPED at Tier: tiny* | tech-spec.md exists, non-empty, filled — *not required at Tier: tiny* |
@@ -71,6 +71,10 @@ approval — implementer waves, proofs, ticks, commits (`/spec-execute`).
   nonzero: stale baseline, open NEEDS CLARIFICATION, malformed) →
   **exit 4**, printing the gate and reason; no authoring doc is written.
   Route to `/spec-intake` — repair is intake's, never waved through here.
+- **spec.md filled** → the baseline is history: a stale or lost intent
+  baseline is a note on a DONE intent node, never a refusal — survey.md's
+  baseline owns freshness from here (D-053). Open markers and a
+  malformed artifact still refuse.
 - **intent.md unfilled template** → the run prints `AWAITING` and
   stops; fill and gate it with `/spec-intake`.
 - **no spec.md and no intent.md** → `AWAITING: … route to

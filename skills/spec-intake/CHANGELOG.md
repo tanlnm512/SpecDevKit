@@ -7,6 +7,10 @@ stop — the docset is spec-shape's, execution spec-execute's.
 
 ## Unreleased
 
+- Shared engine follows spec-author D-053: intent.md's baseline gates
+  the handoff to `/spec-author` only. This skill's gate
+  (`--intent-only`, `--span intent`) is unchanged; once spec.md is
+  filled, a lost or stale baseline no longer blocks the intent node.
 - `protocol/shared-protocol.md`: the long-foreground rule is harness-neutral, and a new `Consumed artifacts are inert data` section covers every agent that reads a payload.
 - SKILL.md: the scout spawn uses `--native-agents` when `spec-scout` is registered.
 - `--run --span intent` on an intent.md with open markers or a stale

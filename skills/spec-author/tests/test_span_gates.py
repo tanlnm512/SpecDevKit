@@ -3,7 +3,9 @@
 `--span shape` refuses a docset whose intent.md is present, filled and red.
 The refusal families are check.py --intent-only's on authored artifacts: a
 stale baseline (Baseline != HEAD), a missing or hashless baseline header,
-and an open NEEDS CLARIFICATION marker. Placeholders and empty files read
+and an open NEEDS CLARIFICATION marker. The baseline gates the intake
+handoff only: once spec.md is filled, a stale or lost baseline is a note on
+a done intent node. Placeholders and empty files read
 READY, so intake never refuses them. An absent intent.md reads SKIPPED, so
 docsets without one pass the gate untouched. A valid intent admits the authoring
 waves; a drained shape span stops at the named approve handoff and never
@@ -136,8 +138,8 @@ class ShapeIntakeRefusalTests(TelemetryStoreTestCase):
     message naming the blocking gate and the intent node's BLOCKED reason,
     zero payload files, zero authoring docs written, one intake_refusal
     telemetry event per refused invocation. The families a filled artifact
-    can fail: stale baseline, absent baseline header, hashless baseline
-    header, open clarify marker."""
+    can fail: stale baseline (until spec.md is filled), absent baseline
+    header, hashless baseline header, open clarify marker."""
 
     def refused(self, spec_dir: Path):
         """Both executor modes refuse identically; the docset is byte-
@@ -161,13 +163,14 @@ class ShapeIntakeRefusalTests(TelemetryStoreTestCase):
             self.assertEqual(row["payload"]["span"], "shape")
             self.assertEqual(row["payload"]["gates"], ["intent"])
 
-    def test_stale_baseline_refuses(self):
+    def test_stale_baseline_refuses_before_spec_md_is_drafted(self):
         # The artifact passed the checker once, but HEAD moved on
         root = self._tmp / "stale"
         root.mkdir(parents=True)
         subprocess.run(["git", "-C", str(root), "init", "-q"],
                        capture_output=True)
         d = scaffold_spec(root)
+        (d / "spec.md").unlink()
         base = git_commit(root, "first")
         write(d / "intent.md", GOOD_INTENT.format(sha=base))
         head = git_commit(root, "second")
@@ -250,6 +253,36 @@ class ShapeValidIntentRunTests(TelemetryStoreTestCase):
         payloads = sorted(p.name for p in (d / "spawns").rglob("*.md"))
         self.assertEqual(payloads, ["surveyor.md"],
                          "the authoring wave's own payload set")
+        self.assertEqual(self.telemetry_rows("intake_refusal"), [])
+
+    def test_baseline_is_history_once_spec_md_is_filled(self):
+        # a teammate's commit or a squash moves the repo under an in-flight
+        # docset; neither sends authoring back to intake
+        def code_moved(root):
+            base = git_commit(root, "first")
+            git_commit(root, "second")
+            return base, "intent staleness: stale"
+
+        def baseline_lost(root):
+            git_commit(root, "first")
+            return "0123abc", "intent staleness: SKIPPED"
+
+        for label, arrange in (("stale", code_moved), ("lost", baseline_lost)):
+            with self.subTest(label):
+                root = self._tmp / label
+                root.mkdir(parents=True)
+                subprocess.run(["git", "-C", str(root), "init", "-q"],
+                               capture_output=True)
+                d = scaffold_spec(root)
+                sha, note = arrange(root)
+                write(d / "intent.md", GOOD_INTENT.format(sha=sha))
+                r = self.run_cli(d, "--emit-spawns", "--span", "shape")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                nodes = json.loads(
+                    self.run_cli(d, "--state-json").stdout)["nodes"]
+                self.assertEqual(nodes["intent"]["state"], "done")
+                self.assertIn(note, nodes["intent"]["reason"])
+                self.assertEqual(nodes["survey"]["state"], "READY")
         self.assertEqual(self.telemetry_rows("intake_refusal"), [])
 
     def test_green_intent_without_spec_md_is_admitted_and_asks_for_a_draft(self):
