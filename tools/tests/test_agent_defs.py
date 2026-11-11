@@ -28,7 +28,7 @@ def staged_archetypes() -> Path:
     atexit.register(shutil.rmtree, root, ignore_errors=True)
     agents = root / "agents"
     agents.mkdir()
-    for skill in ("spec-intent", "spec-shape", "spec-execute"):
+    for skill in ("spec-intake", "spec-author", "spec-execute"):
         for f in (REPO_ROOT / "skills" / skill / "agents").glob("*.md"):
             shutil.copyfile(f, agents / f.name)
     return root

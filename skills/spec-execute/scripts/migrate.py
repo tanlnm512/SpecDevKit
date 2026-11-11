@@ -12,7 +12,8 @@ finds nothing missing and changes nothing.
 Refused (exit 1, nothing written): a missing spec.md/task.md or template,
 an unrecognizable spec.md Status, a Status other than draft/active (a done
 plan is a record), and any path under specs/archive/ — archived history is
-never migrated.
+never migrated. Migration never approves: a Status of approved, active, or
+done with no approvals/approval.md prints the one-time re-approval steps.
 
 Usage: migrate.py <spec-dir> [--template <path>] [--dry-run]
        migrate.py -h | --help        (prints this text, exit 0)
@@ -29,12 +30,14 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-import specstate  # noqa: E402 - the sys.path setup above runs first
+import freeze  # noqa: E402 - the sys.path setup above runs first
+import specstate  # noqa: E402
 from tick import _durable_replace, _fsync_dir, _rollback  # noqa: E402
 
 DEFAULT_TEMPLATE = Path(_SCRIPTS_DIR).parent / "templates" / "task.md"
 FIELD_LINE = re.compile(r"^\*\*([^*]+)\*\*:")
 MIGRATABLE_STATUS = ("draft", "active")
+FROZEN_STATUS = ("approved", "active", "done")
 
 
 def body_start(lines: list[str]) -> int | None:
@@ -171,6 +174,12 @@ def grow(spec_dir: Path) -> int:
           f"templates; Tier: full")
     print("next: the authoring nodes are READY — re-run the graph; "
           "check.py fails on the fresh templates by design")
+    if (spec_dir / "approvals" / "approval.md").exists():
+        print("next: the recorded approval froze the one-file contract and "
+              "no longer matches — set Status back to draft; once the "
+              "docset is check-green, re-approve through /spec-author: "
+              "the contract review, then on the user's explicit yes "
+              "`freeze.py <spec-dir> --record --force`")
     return 0
 
 
@@ -232,6 +241,12 @@ def main(argv: list[str] | None = None) -> int:
         spec_path.read_text(encoding="utf-8", errors="replace"))
     if status is None:
         return refuse("spec.md has no recognizable **Status**: line")
+    if status in FROZEN_STATUS and not (
+            spec_dir / "approvals" / "approval.md").exists():
+        print(f"note: Status {status} with no approvals/approval.md — "
+              "migration does not approve: check.py fails this docset "
+              "until it is re-approved once — "
+              + freeze.approval_steps(spec_dir))
     if status not in MIGRATABLE_STATUS:
         return refuse(f"spec.md Status is {status} — only draft or active "
                       "docsets migrate; a done plan is a record")

@@ -13,6 +13,8 @@ The version triple (VERSION · SKILL.md frontmatter · plugin.json)
 is owned by tools/tests/test_manifests.py.
 """
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -42,6 +44,9 @@ LENSES = [
     ("minimalist", "The Minimalist"),
 ]
 
+EXTRA_DIGEST_FIELD = {"cynic": "kill", "minimalist": "proof"}
+
+
 def read(rel: str) -> str:
     return (SKILL / rel).read_text()
 
@@ -62,7 +67,7 @@ class StageContractTests(unittest.TestCase):
 
 class PanelContractTests(unittest.TestCase):
     def test_every_lens_section_carries_the_digest_contract(self):
-        text = read("agents/_lenses.md")
+        text = read("protocol/lenses.md")
         for key, name in LENSES:
             section = text.split(f"## Lens: {key}", 1)[1] \
                           .split("## Lens:", 1)[0]
@@ -70,6 +75,14 @@ class PanelContractTests(unittest.TestCase):
                 for field in ("`angle:", "`pitch:", "`points:", "`watch:`"):
                     self.assertIn(field, section,
                                   f"{name}: digest field {field} not pinned")
+                extra = EXTRA_DIGEST_FIELD.get(key)
+                if extra:
+                    self.assertIn(f"`{extra}:`", section,
+                                  f"{name}: stage 5 needs digest field {extra}:")
+
+    def test_lens_sections_are_delimited_only_by_lens_headings(self):
+        h2 = re.findall(r"(?m)^## .*$", read("protocol/lenses.md"))
+        self.assertEqual(h2, [f"## Lens: {key}" for key, _ in LENSES])
 
     def test_panelist_brief_is_def_generator_compatible(self):
         body = read("agents/panelist.md")
@@ -97,26 +110,52 @@ class ArtifactContractTests(unittest.TestCase):
 
 
 class SkillDirScriptTests(unittest.TestCase):
-    def test_resolves_the_first_installed_root(self):
-        with tempfile.TemporaryDirectory() as home:
-            root = Path(home) / ".agents" / "skills" / "spec-brainstorming"
-            root.mkdir(parents=True)
+    @staticmethod
+    def install(base: Path, with_skill_md: bool = True) -> Path:
+        root = base / "skills" / "spec-brainstorming"
+        (root / "scripts").mkdir(parents=True)
+        shutil.copy(SKILL / "scripts" / "skill-dir.sh", root / "scripts")
+        if with_skill_md:
             (root / "SKILL.md").write_text("x")
-            r = subprocess.run(
-                ["bash", str(SKILL / "scripts" / "skill-dir.sh")],
-                capture_output=True, text=True,
-                env={**os.environ, "HOME": home}, cwd=SKILL,
-            )
+        return root
+
+    @staticmethod
+    def run_script(root: Path, home: str, **env):
+        return subprocess.run(
+            ["bash", str(root / "scripts" / "skill-dir.sh")],
+            capture_output=True, text=True, cwd=home,
+            env={**os.environ, "HOME": home, **env},
+        )
+
+    def test_prefers_its_own_copy_over_another_harness_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            own = self.install(Path(tmp) / "plugin-cache")
+            other = self.install(Path(tmp) / "home" / ".omp" / "agent")
+            r = self.run_script(own, str(other.parents[3]))
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(r.stdout.strip(), str(root))
+            self.assertEqual(Path(r.stdout.strip()).resolve(), own.resolve())
+
+    def test_plugin_root_is_used_when_the_script_sits_outside_a_skill_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stray = self.install(Path(tmp) / "stray", with_skill_md=False)
+            plugin = self.install(Path(tmp) / "cache")
+            r = self.run_script(stray, tmp, CLAUDE_PLUGIN_ROOT=str(plugin))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(Path(r.stdout.strip()).resolve(), plugin.resolve())
+
+    def test_root_scan_is_the_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stray = self.install(Path(tmp) / "stray", with_skill_md=False)
+            home = Path(tmp) / "home"
+            installed = self.install(home / ".agents")
+            r = self.run_script(stray, str(home))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(Path(r.stdout.strip()).resolve(), installed.resolve())
 
     def test_fails_loudly_when_not_installed(self):
-        with tempfile.TemporaryDirectory() as home:
-            r = subprocess.run(
-                ["bash", str(SKILL / "scripts" / "skill-dir.sh")],
-                capture_output=True, text=True,
-                env={**os.environ, "HOME": home}, cwd=SKILL,
-            )
+        with tempfile.TemporaryDirectory() as tmp:
+            stray = self.install(Path(tmp) / "stray", with_skill_md=False)
+            r = self.run_script(stray, tmp)
             self.assertEqual(r.returncode, 1)
             self.assertIn("ERROR", r.stderr)
 

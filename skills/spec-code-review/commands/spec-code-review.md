@@ -22,8 +22,11 @@ the ask is plainly a review):
   Extra args: `repo <dir>` (project mode in a multi-repo workspace:
   the sub-repo to review, absolute or cwd-relative), `intent` (what
   the change is supposed to do —
-  the author's stated intent), `mode fast|full|auto`, `fix_rounds N`
-  (N > 0 runs the verified fix loop after the review).
+  the author's stated intent), `mode fast|full|auto` (fast: one
+  general reviewer, self-checked findings; full: the three-lens panel
+  with independent confirmation; auto, the default: fast for small
+  diffs — SKILL.md § Run sequence), `fix_rounds N` (N > 0 runs the
+  verified fix loop after the review).
 - `fix <report-or-findings>` → the fix-only continuation (`fix_from`):
   carry a previous report's findings into the fix loop — the saved
   report markdown itself, or findings JSON (file path or inline) —
@@ -35,8 +38,7 @@ the ask is plainly a review):
   the JSON verdict per detected check (the same floor the panel uses).
 - `plan` → `gate.sh --plan`: what the gate would run, nothing executed.
 
-On a harness with a dynamic-workflow runtime, an ask that names the
-workflow dispatches the installed `spec-code-review` workflow with the
-same args; otherwise the stages run inline per SKILL.md. The gate is
-always `scripts/gate.sh` — plain bash + python3, no other dependency.
+The stages run per SKILL.md § Run sequence, driving
+`scripts/review_orchestrator.py`. The gate is always `scripts/gate.sh`
+— plain bash + python3, no other dependency.
 Fixes are never committed by the panel; the commit is the user's.

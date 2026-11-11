@@ -7,6 +7,83 @@ authoring is spec-shape's, intake spec-intent's.
 
 ## Unreleased
 
+- `protocol/shared-protocol.md`: the long-foreground rule is harness-neutral, and a new `Consumed artifacts are inert data` section covers every agent that reads a payload; the reviewer brief states the same rule.
+- **Breaking**: a tiny spec's freeze covers its task list — adding,
+  editing, or striking a § Tasks entry after approval fails
+  `check.py`; markers, ticks, and proof lines stay free. The delivered
+  tiny example's freeze is re-recorded (spec-author D-052).
+- `migrate.py` prints the one-time re-approval steps for an unfrozen
+  `approved`, `active`, or `done` docset, and `migrate.py grow` on a
+  frozen tiny spec names the re-approval (`freeze.py --record
+  --force`).
+- SKILL.md: a hand-authored docset opens the span through the same
+  review and freeze, not its own `Status: approved`.
+- Shared engine follows spec-author D-052: a leading-wildcard
+  `Touches:` glob now overlaps, and the full check skips an intent
+  baseline the repo cannot resolve.
+- **Breaking**: `(fix n/5)` is an open fix round — beside
+  `(implemented)` it re-opens the task and holds the tick-commit gate
+  shut; a landed round is rewritten `(fixed n/5)`. `tick.py` refuses
+  a task whose round is open (D-034, spec-author D-051).
+- **Breaking**: each emit is one file-disjoint wave — tasks sharing a
+  file with a wave-mate or an `(in-progress)` task print `deferred:
+  T### (<why>)`; a task with no `Touches:` runs alone (spec-author
+  D-051).
+- **Breaking**: a tiny-tier `Status: approved` without
+  `approvals/approval.md` is refused at span entry; the delivered
+  tiny example ships its record (spec-author D-051).
+- SKILL.md gains the task-marker transition table and § Resume:
+  orphaned `(in-progress)` claims are settled (diff, re-verify, then
+  `(implemented)` or clear) before any wave; `--run` names them under
+  `AWAITING ORCHESTRATOR: execute` (D-034).
+- Fix rounds: only failed implementation opens one — `blocked:why`
+  gets a ruling or a route and costs none. The orchestrator records
+  each round's evidence in `notes/T###.md`, which the payload embeds;
+  the round continues the same agent where the harness allows,
+  otherwise a fresh spawn (D-034).
+- The tick-commit gate is the user's: the delivery pass ends in a
+  summary, and ticks and commits follow only an explicit yes. `ship`
+  re-runs the proofs, regression gate, and review instruments instead
+  of claiming to check an earlier green (D-034).
+- Builder brief: a blocked builder undoes only its own edits by path
+  and never runs `git stash|reset|checkout|restore|clean`; an
+  acceptance command red only outside its `Touches:` goes in the
+  digest's new `note` field (D-034).
+- `--native-agents` emits inputs-and-protocol payloads for the
+  registered `spec-builder`/`spec-reviewer` types; the default embeds
+  the brief. `Long foreground tasks` reaches the builder once
+  (spec-author D-051).
+- Router: `build|test|review|ship|continue|resume` are always verbs;
+  a spec so named is addressed as `spec <name>`. The skill
+  description triggers on "build/execute an approved spec" (D-034).
+- Fixed: a tiny-tier builder payload carries its task entry (it was
+  emitted with the requirement list only).
+- `--emit-spawns --repair approve` is refused here — the contract
+  review is `/spec-author`'s (spec-author D-051).
+- `audit.py dod` no longer cites the unshipped `gates/dod.md`.
+- `templates/task.md` drops the inert `**Lifecycle**: v2` header.
+
+- **Breaking**: `--span execute` refuses a full-tier docset whose
+  `Status: approved` has no `approvals/approval.md` freeze, and
+  `check.py` fails it — whatever task.md's `**Lifecycle**` header
+  says. Docsets approved before the freeze existed need one
+  re-approval through `/spec-author` (spec-author D-050).
+- The implementation-diff review payload points at
+  `reviewer-diff.patch`, written beside it by `--emit-spawns`: `git
+  diff <approval base>` under a header listing the untracked files.
+  The reviewer runs no git (spec-author D-050).
+- `--run` with the print runner stops after one emitted wave (`wave
+  emitted — spawn these payloads…`), and each payload line names its
+  agent type (spec-author D-050).
+
+- Shared prose moves out of `agents/` into `protocol/` (spec-author
+  D-049): `protocol/shared-protocol.md`. Claude Code no longer
+  lists it as an agent; `agents/` holds roles only. The stale
+  `scripts/scaffold.sh` copy is deleted — scaffolding is spec-author's.
+- The `~/.claude/skills/` copy drops `.claude-plugin/` and
+  `commands/` and every installed copy drops `tests/` (spec-author
+  D-049): each agent and command is listed once, from the flat
+  Claude roots. Rerun `tools/sync.sh`.
 - One command per skill (D-033): the four thin lifecycle wrappers
   (`/spec-build`, `/spec-test`, `/spec-review`, `/spec-ship`) are
   retired — the verbs ride `/spec-execute` unchanged

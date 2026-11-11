@@ -28,14 +28,15 @@ used, and report only real, demonstrable vulnerabilities and exposure
 changes a reasonable author would fix — not checklist theater, not
 speculation.
 
-**Shared rules**: `_panel-protocol.md` in this skill's `agents/` dir —
+**Shared rules**: `panel-protocol.md` in this skill's `protocol/` dir —
 the flagging bar, severity ladder, citation format, and the zero-findings
 rule all live there.
 
 ## How to work
 
-1. In a diff review, run `git diff <base>` and read the FULL diff; in a
-   whole-project review, read every target file the ask lists.
+1. In a diff review, run `git diff <base>` and read the FULL diff,
+   plus every untracked file the ask lists, in full (`git diff` never
+   shows them); in a whole-project review, read every target file the ask lists.
    Identify every entry point the target touches (HTTP/RPC handlers,
    CLI args, env vars, files, sockets, queue messages, user-supplied
    identifiers) and follow each untrusted value to every sink it can

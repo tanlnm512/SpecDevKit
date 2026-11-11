@@ -1,7 +1,7 @@
 {
   "name": "spec-brainstorming",
   "version": "0.1.0",
-  "description": "Five-stage idea co-design and pressure-testing before any spec or code exists \u2014 the pre-spec front door of the suite.",
+  "description": "Five-stage idea co-design and pressure-testing \u2014 the pre-spec front door of the suite, for when WHETHER to build it or WHICH version is still open.",
   "author": {
     "name": "Stanley",
     "email": "minhtan512@gmail.com"

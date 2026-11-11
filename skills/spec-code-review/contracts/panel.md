@@ -2,7 +2,7 @@
 
 The canonical statement of what a spec-code-review run IS. SKILL.md
 summarizes; this file arbitrates. The agent-facing subset (the flagging
-bar every reviewer obeys) is canonical in `agents/_panel-protocol.md`;
+bar every reviewer obeys) is canonical in `protocol/panel-protocol.md`;
 this file is the orchestrator-facing complement.
 
 ## Targets
@@ -15,8 +15,14 @@ serves them:
 |---|---|---|
 | `diff` (default) | `base` arg, default `HEAD` | working tree, last commit, any ref |
 | `branch` | merge-base with explicit `base`, else `origin/HEAD` → `main`/`master` (remote form first) | uncommitted work included, surfaced in the report |
-| `pr` | merge-base with the PR's `baseRefOid` (GitHub's own PR-diff semantics) | `pr` arg: number, URL, `owner/repo#N`; head must be checked out — auto-checkout on a clean tree, refusal on a dirty one, unconditional (D-004) |
-| `project` | no diff — the tracked source files, extension-filtered (lockfiles/generated/vendored excluded), largest first, capped at `PROJECT_MAX_FILES` (30) | leftover files named under `notCovered`; `paths` narrows |
+| `pr` | merge-base with the PR's `baseRefOid` (GitHub's own PR-diff semantics) | `pr` arg: number, URL, `owner/repo#N`; head must be checked out — auto-checkout on a clean tree, refusal on a dirty one, unconditional (D-004); the prior checkout (`previous_ref`) is restored after the report, or the user is told; a fork PR's gate waits for the user's go-ahead, since it runs the PR author's code |
+| `project` | no diff — the tracked source files, extension-filtered; lockfiles, generated code and vendored/build directories excluded by whole path segment (`dist/` never matches `src/redist/`) | excluded paths named under `notCovered`; `paths` narrows; above 3 parts the run prints the part count and spawn estimate and waits for a go-ahead or narrower `paths` |
+
+Every diff-shaped target's scope is `git diff <base>` plus the
+untracked files (`git ls-files --others --exclude-standard`): they
+count toward `files` and `added`, are listed under `untracked`, and
+every lens reads them in full — `git diff` alone never shows them
+(D-018).
 
 In a multi-repo workspace whose root is not itself a git repository,
 `project` accepts `repo`: the sub-repo directory (absolute, or
@@ -41,18 +47,25 @@ Runs once before any reviewer (again after every fix round). stdout is
 a JSON array, one row per detected check:
 
 ```json
-{ "name": "<family label>", "exit_code": 0, "tail": "<last 8 lines>" }
+{ "name": "<family label>", "source": "repo|builtin", "status": "pass|fail|timed_out|planned",
+  "exit_code": 0, "tail": "<last 8 lines>" }
 ```
 
-Families: the repo's own checks (Makefile test/check/lint, npm
-test/lint/typecheck, cargo test, go test, pytest/unittest — pytest
-resolved PATH → repo venv → `uv run` → `python3 -m`), plus two
-always-on git-gated families: `bash -n` on changed `*.sh` (every
-tracked script in project mode) and the secret-shape scan over added
-diff lines plus untracked files (diff mode only — D-007). A family is
-skipped when its tool is absent; nothing is silently invented; an
-empty detection is NOT a green light — the documented check command
-(README/CI) runs instead.
+Families: the repo's own checks, `source: repo` (Makefile
+test/check/lint, npm test/lint/typecheck minus npm's "no test
+specified" stub, cargo test, go test, pytest/unittest — pytest
+resolved PATH → repo venv → `uv run` → `python3 -m`; a language
+family the Makefile `test` recipe visibly runs is not run twice),
+plus two always-on git-gated built-ins, `source: builtin`: `bash -n`
+on changed `*.sh` (every tracked script in project mode) and the
+secret-shape scan over added diff lines plus untracked files (diff
+mode only — D-007; a hit reports `path:line — pattern name`, never
+the token). Each repo check is killed after `GATE_CHECK_TIMEOUT`
+seconds (default 600) and reported `timed_out`. A family is skipped
+when its tool is absent; nothing is silently invented. Built-in rows
+are hygiene, not a floor (D-018): with no `repo` row the gate's note
+and the report header say no repo checks were detected, and the
+documented check command (README/CI) runs instead.
 
 Contract rules: a red gate ends a FRESH review — failing checks are
 the findings, reviewers are never spent. One exception: a project
@@ -133,10 +146,22 @@ expected answer for a clean target.
 Confirmation is intent-blind on purpose: the confirmer verifies from
 the code alone, with no access to the stated-intent channel.
 
+The fixer is guarded per round: HEAD and the stash-list length are
+snapshotted before its turn (`fix-snapshot`) and re-checked after it
+(`fix-check`); a moved HEAD or a changed stash list aborts the loop
+and is reported. `fix-check` also lifts the round's test-file edits — in
+tracked and untracked files alike — removed assertion lines, added
+skip markers — into the fix verifier
+and fresh-eyes asks, so a fix that weakens a test is judged `worse`.
+
 ## The report
 
 Every run returns `{conclusion, findings[], verified[], notCovered[]}`
-plus a markdown artifact. `notCovered` separates "found nothing" from
+plus a markdown artifact. The findings header counts confirmed
+(`verified`) separately from `unconfirmed`, and names how many of
+the unconfirmed were self-checked — confirmation run inline, never
+independent, so never `verified` (D-018). A carried fix_from item
+with no `status` is `unconfirmed`. `notCovered` separates "found nothing" from
 "looked nowhere" — caps left uncovered, undetected checks, test gaps,
 residual risks all live there. In pr mode the header names the PR
 (number, title, author, base, URL — markdown-escaped); "merge" reads

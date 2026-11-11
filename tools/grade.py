@@ -120,8 +120,6 @@ def discover_agents():
     out = []
     for skill in discover_skills():
         for p in sorted((SKILLS_DIR / skill / "agents").glob("*.md")):
-            if p.name.startswith("_"):
-                continue
             out.append((skill, p))
     return out
 
@@ -130,10 +128,10 @@ def skill_protocol_text(skill):
     """Every prepend the spawn payload carries — the shared protocol
     plus the lens sections — graded as one composite, the text the
     agent actually reads (D-036 moved method/digest into lenses)."""
-    agents_dir = SKILLS_DIR / skill / "agents"
+    protocol_dir = SKILLS_DIR / skill / "protocol"
     parts = []
-    for name in ("_shared-protocol.md", "_panel-protocol.md", "_lenses.md"):
-        p = agents_dir / name
+    for name in ("shared-protocol.md", "panel-protocol.md", "lenses.md"):
+        p = protocol_dir / name
         if p.exists():
             parts.append(p.read_text(encoding="utf-8"))
     return "\n".join(parts)
@@ -205,12 +203,12 @@ def skill_dogfood_targets(skill):
             (str(p.relative_to(ROOT)), [sys.executable, str(checker), str(p)])
             for p in artifacts
         ]
-    if skill == "spec-shape":
+    if skill == "spec-author":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
         # the shared core's master home: the checker is
         # contract-shaped, so it gates every live docset
         # plus the mini-spec fixture shipped beside it
-        dirs = [SKILLS_DIR / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec"]
+        dirs = [SKILLS_DIR / "spec-author" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [
             p.parent
             for p in sorted((ROOT / "specs").glob("*/spec.md"))
@@ -225,7 +223,7 @@ def skill_dogfood_targets(skill):
             (f"examples/review-target/{rel}", None)
             for rel in ("base/app.py", "change.diff", "EXPECTED.md")
         ]
-    if skill == "spec-intent":
+    if skill == "spec-intake":
         checker = SKILLS_DIR / skill / "scripts" / "check.py"
         # own-type artifacts: the shipped green example + every live
         # intent the repo currently holds
@@ -259,8 +257,8 @@ def skill_dogfood(skill):
     if not targets:
         # Distinguish "nothing of its type exists" from a mapping blind
         # spot: an unmapped skill must be named, not silently zeroed.
-        known = skill in ("spec-brainstorming", "spec-shape",
-                          "spec-code-review", "spec-intent", "spec-execute")
+        known = skill in ("spec-brainstorming", "spec-author",
+                          "spec-code-review", "spec-intake", "spec-execute")
         return {"earned": 0, "max": 7, "detail": (
             f"NO DOGFOOD MAPPING for skill '{skill}' — add one to "
             "skill_dogfood_targets or document why none applies"

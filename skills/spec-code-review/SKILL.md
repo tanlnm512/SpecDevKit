@@ -1,15 +1,16 @@
 ---
 name: spec-code-review
 description: >-
-  Portable three-stage code review for any git repository — a change, a
-  pull request, a branch, or the whole project: the repo's own checks as
-  the mechanical gate, a preflight scout, specialist lenses (correctness,
-  security, quality & tests) with independent confirmation of every kept
-  finding, and an optional verified fix loop. Use when the user asks to
-  review a change — "review the diff", "review and fix" — a pull request
-  ("review PR 12"), a branch's recent changes ("review what's on this
-  branch"), or the codebase as a whole ("review the project"). Not a
-  spec's delivery review (spec-execute).
+  Gated code review for any git repository — a diff, a pull request, a
+  branch, or the whole project. Costlier than a plain review: it runs
+  the repo's own checks as a mechanical gate, then a multi-lens
+  specialist panel (correctness, security, quality & tests),
+  independent confirmation of every kept finding, and an optional
+  verified fix loop — several subagent turns per run. Use for "review
+  the diff", "review PR 12", "review this branch", "review the
+  project", or "review and fix" when the verdict must hold up; for a
+  quick look, use a plain review. Not a spec's delivery review
+  (spec-execute).
 metadata:
   owner: platform-core
   version: "0.1.0"
@@ -106,14 +107,18 @@ bash <skill-dir>/scripts/gate.sh --plan             # what it would run
 ```
 
 It detects and runs the repo's OWN checks (Makefile targets, npm
-scripts, cargo/go, pytest or unittest discover), plus `bash -n` on
-changed `*.sh` and a secret-shape scan of the change's added lines,
-and prints a JSON array — one `{name, exit_code, tail}` per check.
-Rules: a red gate ends a fresh review — report the failing checks
-with their tails as the findings, and stop; an empty detection is NOT
-a green light (ask the repo for its documented check command and run
-that instead; say so if none exists); reviewers never re-run the
-suites. The one exception — a project audit continues past a red gate,
+scripts, cargo/go, pytest or unittest discover — `source: repo`),
+plus two built-in hygiene checks (`source: builtin`): `bash -n` on
+changed `*.sh` and a secret-shape scan of the change (hits name
+`path:line` and the pattern, never the token). It prints a JSON array
+— one `{name, source, status, exit_code, tail}` per check, `status`
+pass/fail/timed_out (each repo check is killed after
+`GATE_CHECK_TIMEOUT`, default 600 s). Rules: a red gate ends a fresh
+review — report the failing checks with their tails as the findings,
+and stop; no `repo` row is NOT a green light, whatever the built-in
+rows say (ask the repo for its documented check command and run that
+instead; say "no repo checks detected" if none exists); reviewers
+never re-run the suites. The one exception — a project audit continues past a red gate,
 each failing check becoming a high-severity gate finding (panel.md
 § The mechanical gate).
 
@@ -141,8 +146,9 @@ finding). A scout that fails degrades to the raw target (named under
 
 ### Stage 2 — specialist review with triage and confirmation
 
-Review the diff (`git diff <base>`) through separate lenses, in
-parallel where you can:
+Review the change — `git diff <base>` plus the untracked files scope
+lists, read in full — through separate lenses, in parallel where you
+can:
 
 - **correctness** — logic errors, edge cases, error handling,
   concurrency, caller/callee contracts;
@@ -157,16 +163,16 @@ parallel where you can:
 Each side of this rubric is materialized as an agent brief inside the
 skill — `agents/code-review-correctness.md`, `-security.md`,
 `-quality.md` (each carrying the full checklist for its side) over the
-shared `agents/_panel-protocol.md`; the fix loop's author role is
+shared `protocol/panel-protocol.md`; the fix loop's author role is
 `agents/code-review-fixer.md`. Where the harness supports subagent
 dispatch, spawn one brief per lens instead of simulating a lens
 yourself: same rubric, same bar, real independence. Where it does not,
 cover the lenses inline — the briefs' rubric sections are the
-checklist, so a lens is never covered from memory alone. Small diffs
-(roughly ≤400 added lines and ≤5 files) may collapse to one general
-reviewer covering all three lenses.
+checklist, so a lens is never covered from memory alone. `mode`
+(§ Run sequence) picks between one general reviewer and the full
+three-lens panel.
 
-Every reviewer follows the panel contract (`_panel-protocol.md` is
+Every reviewer follows the panel contract (`protocol/panel-protocol.md` is
 canonical): read the FULL target and the surrounding files, following
 call sites when a defect depends on them; read the repo's rules
 (`AGENTS.md`/`CLAUDE.md`) first and cite any rule a finding violates;
@@ -188,7 +194,11 @@ speculation and pre-existing issues (with a one-line reason each) —
 stingy, but never suppressing a real defect. Then every KEPT finding
 is **independently confirmed** by someone who did not write it.
 Findings that fail confirmation are kept and labelled `unconfirmed`,
-never silently dropped.
+never silently dropped. Confirmation run inline — no subagent
+dispatch, or `mode fast` — is not independent: mark each such finding
+`confirmation.self_checked: true` so the report labels it
+`unconfirmed (self-checked)`; a session never labels its own check
+`verified`.
 
 ### Stage 3 — synthesis
 
@@ -210,7 +220,7 @@ When the user asked to fix as well, run bounded rounds (default 2):
    backgrounded-job discipline, code commenting) — they bind the fix
    loop's every edit.
 2. Every attempted fix is verified by an independent reader: `fixed` /
-   `unfixed` / `worse`.
+   `unfixed` / `worse` — a fix that weakens a test is `worse`.
 3. The gate re-runs; failures become findings the fixer must clear.
 4. A fresh-eyes reviewer scans the diff of exactly the paths the fixer
    touched, for NEW defects the fixes introduce.
@@ -228,6 +238,92 @@ End with a **recommendation**: `merge` (everything fixed, gate green,
 nothing new), `fix-first` (ordinary findings remain), or `human`
 (judgment calls or unconfirmed residue). Fixes stay uncommitted — the
 commit decision and message are the user's.
+
+## Run sequence (driving the oracle)
+
+`O` = `python3 <skill-dir>/scripts/review_orchestrator.py`. Every call
+prints one JSON object; `status: error` stops the run, naming its
+`stage`.
+
+| Phase | Command | Read from the result |
+|---|---|---|
+| scope + gate | `O scope --target diff\|branch\|pr\|project [--base R] [--pr N] [--repo D] [--paths P] --include-gate` | `files` (tracked + `untracked`), `added`, `fast_mode_default`, `suggest_split`, `gate{rows, green, repo_checks, note}`; pr: `previous_ref`, `gate_deferred`; project: `parts`, `excluded`, `reviewer_spawns`, `confirm_before_spawn` |
+| gate re-run | `O gate --base <merge_base or base>` (project: `--tree`) | the same `gate` object |
+| prompts | `O systems`, once | system text per role; `lenses[]`, `general` |
+| asks | `O ask --kind K --ctx @ctx.json` — `{"batch": [{kind, ctx}, …]}` renders a wave | one ask per spawn |
+| ids | `O id-next --prefix <lens> --used N` | the id minted at confirmation |
+| fix_from | `O findings-parse --file F` | `tracked[]` |
+| fix guard | `O fix-snapshot` before each fixer turn; `O fix-check --head H --stash-count N --tree T` after it | error `fixer-moved-head` / `fixer-touched-stash` → abort the loop and report it; `test_hunks` → the verify and fix-review ctx |
+| report | `O report --kind review\|fix --data @report.json` | `markdown`, `reported_findings` |
+
+Ask ctx keys (`gate_line` = the gate object's `note`):
+
+- `scout`: base, project, files, repo_abs
+- `review`: base, files_n, lines, over_cap, untracked, lens (a
+  `systems.lenses` entry, or `systems.general` in fast mode),
+  gate_line, intent, scout_map
+- `review-project`: files (one part), part, parts, candidates, lens,
+  gate_line, repo_abs, scout_map
+- `triage` / `triage-project`: base, lens_label, findings, intent
+- `cross-lens`: base, kept
+- `confirm` / `confirm-project`: base, finding, untracked — never
+  intent or scout_map
+- `final` / `final-project`: base, summary, gate_line, untracked,
+  intent, scout_map (project: files, repo_abs)
+- `fixer`: round, project, base, unresolved, intent, repo_abs,
+  gate_feedback (round ≥ 2)
+- `verify`: tracked (one item), project, base, notes, repo_abs,
+  test_hunks
+- `fix-review`: paths, base, gate_green, repo_abs, test_hunks
+- `loop-final`: tracked, rounds_used, gate_green, changed_paths,
+  project, base, scout_map
+
+Report data: title, mode_line, tracked[] (`{finding: {id, where,
+what, evidence, severity, lens, impact, confirmation: {status, note,
+self_checked}}, fix, fixNote}`), gate_rows (verbatim — keep
+`source`), gate_green, assessment `{verdict, testGaps,
+residualRisks}`, dropped[], checked[], fix_checked[], rounds_used,
+fixer_notes[], conclusion.
+
+**Who runs each role** — a fresh spawn per ask, never the instance
+that wrote what it now judges:
+
+| Role | Agent type |
+|---|---|
+| Scout | `code-review-scout` |
+| Lens reviewer | `code-review-correctness` / `-security` / `-quality` (fast mode: one of them with the `general` lens) |
+| Fixer | `code-review-fixer` — the only role allowed to write |
+| Triage editor, final assessor | `code-review-quality` (read-only), with `systems.triage` ahead of the ask |
+| Confirmer, fix verifier | a read-only lens type — for a confirmer, not the finding's own lens — with `systems.verify` ahead of the ask |
+| Fresh-eyes fix reviewer | a read-only lens type with `systems.fix_review` ahead of the ask |
+
+**Mode** — `auto` (default) is `fast` when scope's
+`fast_mode_default` holds (≤ 400 added lines and ≤ 5 files), else
+`full`. `full`: the three lens spawns, per-lens triage, cross-lens
+pass, one independent confirmer per kept finding. `fast`: one general
+reviewer and inline confirmation, so every finding is `unconfirmed
+(self-checked)`. Without subagent dispatch every mode confirms inline.
+
+**Order**:
+
+1. `scope … --include-gate`. No files → "nothing to review". pr mode
+   with `gate_deferred` (a fork PR): tell the user the gate runs the
+   PR author's code and run `O gate` only on their go-ahead. Project
+   mode with `confirm_before_spawn`: print the part count and
+   `reviewer_spawns`, then wait for a go-ahead or narrower `paths`;
+   name `excluded` under notCovered.
+2. Gate red → stop (except a project audit and fix_from).
+   `repo_checks: 0` → find and run the documented check command
+   (README, CI config, AGENTS.md) or report "no repo checks detected".
+3. `systems`; the scout ask → the scout.
+4. The review wave (`batch`; project mode: every lens × every part).
+5. Triage per lens → cross-lens → confirm each kept finding.
+6. The final ask → `report --kind review`.
+7. Fix loop, per round: `fix-snapshot` → fixer → `fix-check` → `gate`
+   → verify each finding → fix-review → next round; then `loop-final`
+   → `report --kind fix`.
+8. pr mode with `previous_ref`: `git checkout <previous_ref>` once the
+   report is out, or tell the user the PR head is still checked out.
 
 ## Launch discipline
 
@@ -266,5 +362,5 @@ are the standing live-eval scenarios with a seeded-bug answer key;
 `templates/fix-from-findings.json` is the continuation payload
 template; `decisions/` holds the panel's ADRs, `diagrams/` the flow
 graph, `observations/open-items.md` the living open-items list;
-`scripts/skill-dir.sh` prints the active skill dir per the launch
-priority order.
+`scripts/skill-dir.sh` prints the active skill dir: the first installed
+copy across the harness roots, project roots before home.

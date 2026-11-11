@@ -48,11 +48,11 @@ average — aggregate.
   Problem Statement, User Personas, Core MVP Features with an
   out-of-scope list, Potential Risk Mitigations with early
   warnings); the mechanical handoff check (`scripts/check.py`)
-  exits 0 on the artifact before `/spec-idea` is named; every Cynic
+  exits 0 on the artifact before `/spec-intake` is named; every Cynic
   dealbreaker from the panel appears in
   the risk table or is explicitly accepted; nothing was written
   under `specs/`; the final message names the artifact path and
-  `/spec-idea <name>` as the next step.
+  `/spec-intake <name>` as the next step.
 - **Run**: session: run the flow to stage 5 per **Setup**; judge `brainstorms/<name>.md` against the pass criteria above
 
 ## B4 — Compile-only and collision behavior

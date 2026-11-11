@@ -56,10 +56,12 @@ class ScopeTests(unittest.TestCase):
         holder, repo = make_repo()
         with holder:
             (repo / "app.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+            (repo / "new.py").write_text("a = 1\nb = 2\n", encoding="utf-8")
             d = ok(["scope", "--target", "diff", "--base", "HEAD", "--repo", str(repo)])
             self.assertEqual(d["mode"], "diff")
-            self.assertEqual(d["files"], ["app.py"])
-            self.assertEqual(d["added"], 1)
+            self.assertEqual(d["files"], ["app.py", "new.py"])
+            self.assertEqual(d["untracked"], ["new.py"])
+            self.assertEqual(d["added"], 3)
             self.assertFalse(d["clean"])
 
     def test_branch_scope_no_base_stage(self):
@@ -104,6 +106,10 @@ class ScopeTests(unittest.TestCase):
             (repo / "pkg" / "skip.lock").write_text("", encoding="utf-8")
             (repo / "vendor").mkdir()
             (repo / "vendor" / "v.py").write_text("", encoding="utf-8")
+            (repo / "dist").mkdir()
+            (repo / "dist" / "bundle.js").write_text("", encoding="utf-8")
+            (repo / "src" / "redist").mkdir(parents=True)
+            (repo / "src" / "redist" / "core.py").write_text("y = 2\n", encoding="utf-8")
             git(repo, "add", "-A")
             git(repo, "commit", "-qm", "files")
             d = ok(["scope", "--target", "project", "--repo", str(repo)])
@@ -111,6 +117,10 @@ class ScopeTests(unittest.TestCase):
             self.assertNotIn("pkg/skip.lock", names)
             self.assertNotIn("vendor/v.py", names)
             self.assertIn("app.py", names)
+            # exclusion matches whole path segments: dist/ never swallows src/redist/
+            self.assertIn("src/redist/core.py", names)
+            self.assertEqual(sorted(d["excluded"]), ["dist/bundle.js", "vendor/v.py"])
+            self.assertFalse(d["confirm_before_spawn"])
             self.assertEqual(d["candidates"], len(names))
             self.assertTrue(all(isinstance(p, list) for p in d["parts"]))
 
@@ -133,6 +143,17 @@ class GateTests(unittest.TestCase):
             self.assertTrue(d["green"])
             self.assertIn("no mechanical floor", d["note"].lower())
 
+    def test_builtin_rows_alone_are_no_mechanical_floor(self):
+        holder, repo = make_repo()
+        with holder:
+            (repo / "pom.xml").write_text("<project/>\n", encoding="utf-8")
+            (repo / "Main.java").write_text("class Main {}\n", encoding="utf-8")
+            d = ok(["gate", "--repo", str(repo), "--base", "HEAD"])
+            self.assertTrue(d["rows"])  # the built-in secret scan still ran
+            self.assertIn("No repo checks were detected", d["note"])
+            self.assertNotIn("all passed", d["note"])
+            self.assertEqual(d["repo_checks"], 0)
+
     def test_gate_red_when_a_detected_check_fails(self):
         holder, repo = make_repo()
         with holder:
@@ -152,6 +173,44 @@ class GateTests(unittest.TestCase):
         self.assertTrue(any("bash -n" in g["name"] or "secret" in g["name"]
                             for g in d["rows"]))
         self.assertTrue(d["green"])
+
+
+class FixGuardTests(unittest.TestCase):
+    def test_fix_check_flags_test_weakening_and_aborts_on_moved_head(self):
+        holder, repo = make_repo()
+        with holder:
+            (repo / "tests").mkdir()
+            (repo / "tests" / "test_app.py").write_text(
+                "def test_x():\n    assert 1 == 1\n", encoding="utf-8")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-qm", "tests")
+            git(repo, "config", "diff.noprefix", "true")
+            snap = ok(["fix-snapshot", "--repo", str(repo)])
+            (repo / "tests" / "test_app.py").write_text(
+                "import pytest\n@pytest.mark.skip\ndef test_x():\n    pass\n", encoding="utf-8")
+            check = ["fix-check", "--repo", str(repo), "--head", snap["head"],
+                     "--stash-count", str(snap["stash_count"]), "--tree", snap["tree"]]
+            hunks = ok(check)["test_hunks"]
+            self.assertEqual(hunks[0]["path"], "tests/test_app.py")
+            self.assertEqual(hunks[0]["removed_asserts"], ["assert 1 == 1"])
+            self.assertEqual(hunks[0]["added_skips"], ["@pytest.mark.skip"])
+            git(repo, "commit", "-qam", "fixer committed")
+            d = json.loads(run(check).stdout)
+            self.assertEqual(d["stage"], "fixer-moved-head")
+
+    def test_fix_check_sees_a_fixer_edit_inside_an_untracked_test_file(self):
+        holder, repo = make_repo()
+        with holder:
+            (repo / "test_new.py").write_text(
+                "def test_x():\n    assert 1 == 1\n", encoding="utf-8")
+            snap = ok(["fix-snapshot", "--repo", str(repo)])
+            (repo / "test_new.py").write_text(
+                "def test_x():\n    pass\n", encoding="utf-8")
+            hunks = ok(["fix-check", "--repo", str(repo), "--head", snap["head"],
+                        "--stash-count", str(snap["stash_count"]),
+                        "--tree", snap["tree"]])["test_hunks"]
+            self.assertEqual(hunks[0]["path"], "test_new.py")
+            self.assertEqual(hunks[0]["removed_asserts"], ["assert 1 == 1"])
 
 
 class ShardTests(unittest.TestCase):
@@ -230,6 +289,8 @@ class FindingsParseTests(unittest.TestCase):
         self.assertEqual(len(d["tracked"]), 1)
         self.assertEqual(d["tracked"][0]["finding"]["id"], "F-9")
         self.assertEqual(d["tracked"][0]["finding"]["severity"], "high")
+        # no recorded confirmation is never promoted to verified
+        self.assertEqual(d["tracked"][0]["finding"]["confirmation"]["status"], "unconfirmed")
 
     def test_garbage_fails_loudly(self):
         msg = err(["findings-parse", "--text", "neither json nor a report"])
@@ -270,6 +331,26 @@ class ReportTests(unittest.TestCase):
         self.assertIn("## Dropped at triage (1)", md)
         self.assertIn("- no test for a.py", md)
         self.assertEqual(d["reported_findings"][0]["id"], "F-1")
+
+    def test_report_header_counts_confirmation_and_names_missing_floor(self):
+        def tracked(fid, status, **conf):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "w", "evidence": "e",
+                                "severity": "medium", "lens": "general",
+                                "confirmation": {"status": status, "note": "", **conf}},
+                    "fix": "pending"}
+        data = {"tracked": [tracked("F-1", "verified"), tracked("F-2", "unconfirmed"),
+                            tracked("F-3", "verified", self_checked=True)],
+                "gate_rows": [{"name": "secrets (token patterns on the change)", "exit_code": 0,
+                               "source": "builtin", "tail": ""}],
+                "gate_green": True}
+        d = ok(["report", "--kind", "review", "--data", json.dumps(data)])
+        md = d["markdown"]
+        self.assertIn("no repo checks detected — no mechanical floor", md)
+        self.assertIn("## Findings (3 · 1 confirmed · 2 unconfirmed (1 self-checked)", md)
+        self.assertIn("### [F-3 · MEDIUM · unconfirmed (self-checked) · general]", md)
+        reparsed = ok(["findings-parse", "--text", md])["tracked"]
+        self.assertEqual([t["finding"]["confirmation"]["status"] for t in reparsed],
+                         ["verified", "unconfirmed", "unconfirmed"])
 
     def test_bad_report_data_fails_loudly(self):
         msg = err(["report", "--kind", "review", "--data", "@/no/such/file.json"])
@@ -337,6 +418,12 @@ class AskRenderingTests(unittest.TestCase):
         batch = ok(["ask", "--kind", "batch", "--ctx", json.dumps(
             {"batch": [{"kind": k, "ctx": c} for k, c in ASK_CASES[:4]]})])
         self.assertEqual(batch["asks"], [self._oracle(k, c) for k, c in ASK_CASES[:4]])
+
+    def test_review_ask_carries_untracked_files_and_severity_ladder(self):
+        ask = self._oracle("review", {**ASK_CASES[2][1], "untracked": ["src/new.py"]})
+        self.assertIn("untracked files, which `git diff` does not show", ask)
+        self.assertIn("- src/new.py", ask)
+        self.assertIn("high = data loss, crash, wrong result, or security compromise", ask)
 
     def test_systems_carry_the_three_lenses(self):
         d = ok(["systems"])

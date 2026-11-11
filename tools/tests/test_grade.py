@@ -68,7 +68,7 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(missing, [], f"sections missed in brief grammar: {missing}")
 
     def test_composite_text_carries_lens_sections(self):
-        composite = grade.skill_protocol_text("spec-shape")
+        composite = grade.skill_protocol_text("spec-author")
         self.assertIn("## Lens: survey", composite)
         self.assertIn("digest:", composite)
 
@@ -98,7 +98,7 @@ class RepoSmokeTests(unittest.TestCase):
 
     def test_grader_exits_clean_and_reports_every_unit(self):
         self.assertEqual(self.rc, 0)
-        for unit in ("skill:spec-intent", "skill:spec-shape",
+        for unit in ("skill:spec-intake", "skill:spec-author",
                      "skill:spec-execute", "skill:spec-code-review",
                      "skill:spec-brainstorming",
                      "agent:scout", "agent:code-review-correctness",

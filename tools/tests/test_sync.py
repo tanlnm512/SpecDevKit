@@ -39,20 +39,17 @@ LEDGER = ".spec-dev-kit-deployed"
 # not load-bearing. retired-skills.txt names a skill absent from this
 # corpus, so every run also exercises the retired sweep as a no-op.
 CMD_SKILL = "skills/spec-code-review"
-INTENT_SKILL = "skills/spec-intent"
-SHAPE_SKILL = "skills/spec-shape"
+INTENT_SKILL = "skills/spec-intake"
+SHAPE_SKILL = "skills/spec-author"
 EXECUTE_SKILL = "skills/spec-execute"
 # The exact flat-command set a fresh install must land in every command
-# root: one command per skill (spec-execute D-033) — the skill-named
-# routers plus the bare names redistributed across skills. The bijection
-# is pinned by test_commands_map_one_to_one_to_skills.
-ROUTER_COMMANDS = (
+# root: one command per skill (spec-execute D-033), each a skill-named
+# router (spec-author D-048). The bijection is pinned by
+# test_commands_map_one_to_one_to_skills.
+ALL_COMMANDS = (
     "spec-brainstorming", "spec-code-review", "spec-execute",
+    "spec-intake", "spec-author",
 )
-BARE_COMMANDS = (
-    "spec-idea", "spec-gen",
-)
-ALL_COMMANDS = ROUTER_COMMANDS + BARE_COMMANDS
 SYNC_CORPUS = (
     "tools/sync.sh",
     "tools/ownership.py",
@@ -68,39 +65,39 @@ SYNC_CORPUS = (
     f"{CMD_SKILL}/SKILL.md",
     f"{CMD_SKILL}/VERSION",
     f"{CMD_SKILL}/commands/spec-code-review.md",
+    f"{CMD_SKILL}/.claude-plugin/plugin.json",
+    f"{CMD_SKILL}/tests/run.sh",
     f"{CMD_SKILL}/scripts/gate.sh",
     f"{CMD_SKILL}/scripts/review_orchestrator.py",
     "skills/spec-code-review/agents/code-review-fixer.md",
     f"{INTENT_SKILL}/SKILL.md",
     f"{INTENT_SKILL}/VERSION",
-    f"{INTENT_SKILL}/commands/spec-idea.md",
-    f"{INTENT_SKILL}/commands/extra.txt",
-    f"{INTENT_SKILL}/agents/_shared-protocol.md",
+    f"{INTENT_SKILL}/commands/spec-intake.md",
+    f"{INTENT_SKILL}/protocol/shared-protocol.md",
     f"{INTENT_SKILL}/agents/scout.md",
     f"{SHAPE_SKILL}/SKILL.md",
     f"{SHAPE_SKILL}/VERSION",
-    f"{SHAPE_SKILL}/commands/spec-gen.md",
-    f"{SHAPE_SKILL}/commands/extra.txt",
-    f"{SHAPE_SKILL}/agents/_shared-protocol.md",
+    f"{SHAPE_SKILL}/commands/spec-author.md",
+    f"{SHAPE_SKILL}/protocol/shared-protocol.md",
     f"{SHAPE_SKILL}/agents/designer.md",
     f"{SHAPE_SKILL}/agents/reviewer.md",
     f"{EXECUTE_SKILL}/SKILL.md",
     f"{EXECUTE_SKILL}/VERSION",
     f"{EXECUTE_SKILL}/commands/spec-execute.md",
     f"{EXECUTE_SKILL}/commands/extra.txt",
-    f"{EXECUTE_SKILL}/agents/_shared-protocol.md",
+    f"{EXECUTE_SKILL}/protocol/shared-protocol.md",
     f"{EXECUTE_SKILL}/agents/builder.md",
     f"{EXECUTE_SKILL}/agents/reviewer.md",
     "agents/builder.md",
     "agents/reviewer.md",
     "agents/qa.md",
     "agents/code-review-fixer.md",
-    "skills/spec-shape/scripts/check.py",
-    "skills/spec-shape/scripts/contract.py",
-    "skills/spec-shape/scripts/freeze.py",
-    "skills/spec-shape/scripts/graph.py",
-    "skills/spec-shape/scripts/specstate.py",
-    "skills/spec-shape/scripts/telemetry.py",
+    "skills/spec-author/scripts/check.py",
+    "skills/spec-author/scripts/contract.py",
+    "skills/spec-author/scripts/freeze.py",
+    "skills/spec-author/scripts/graph.py",
+    "skills/spec-author/scripts/specstate.py",
+    "skills/spec-author/scripts/telemetry.py",
 )
 
 
@@ -150,19 +147,18 @@ class SyncShTests(SyncShBase):
         self.assertTrue(
             (self.home / ".agents" / "commands"
              / "spec-code-review.md").is_file())
-        # the skill trees and their redistributed bare names install
-        # through the same loop
+        # the skill trees and their routers install through the same loop
         self.assertTrue(
-            (self.home / ".claude" / "skills" / "spec-intent"
+            (self.home / ".claude" / "skills" / "spec-intake"
              / "SKILL.md").is_file())
         self.assertTrue(
-            (self.home / ".claude" / "skills" / "spec-shape"
+            (self.home / ".claude" / "skills" / "spec-author"
              / "SKILL.md").is_file())
         self.assertTrue(
             (self.home / ".claude" / "skills" / "spec-execute"
              / "SKILL.md").is_file())
         self.assertTrue(
-            (self.home / ".agents" / "commands" / "spec-idea.md").is_file())
+            (self.home / ".agents" / "commands" / "spec-intake.md").is_file())
         # skills-tree provenance ledger exists and is excluded from verify
         self.assertTrue(self.skill_root(LEDGER).is_file())
         # atomic replacement preserves the shipped executable bits
@@ -173,16 +169,43 @@ class SyncShTests(SyncShBase):
         # no installer scratch survives a completed apply
         self.assertEqual(list(self.home.rglob(f"{LEDGER}.tmp*")), [])
 
-    def test_bare_name_redistribution_installs_the_same_total_set(self):
-        # bare names map to their owning skills: five commands, nothing
-        # more, nothing less.
+    def test_claude_skill_copy_is_a_plain_skill_not_a_plugin(self):
+        # a manifest makes Claude Code list the copy's agents and
+        # commands a second time beside the flat roots
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        claude = self.skill_root()
+        compat = self.home / ".agents" / "skills" / "spec-code-review"
+        self.assertTrue((claude / "agents" / "code-review-fixer.md").is_file())
+        self.assertTrue(self.home.joinpath(
+            ".claude", "skills", "spec-author", "protocol",
+            "shared-protocol.md").is_file())
+        for gone in (".claude-plugin", "commands", "tests"):
+            self.assertFalse((claude / gone).exists(), gone)
+        self.assertTrue((compat / ".claude-plugin" / "plugin.json").is_file())
+        self.assertTrue((compat / "commands" / "spec-code-review.md").is_file())
+        self.assertFalse((compat / "tests").exists())
+        # an older deploy's ledgered manifest is swept, its dir with it
+        legacy = claude / ".claude-plugin" / "plugin.json"
+        legacy.parent.mkdir()
+        shutil.copy2(self.repo / CMD_SKILL / ".claude-plugin" / "plugin.json",
+                     legacy)
+        with open(claude / LEDGER, "a") as ledger:
+            ledger.write(hashlib.sha256(legacy.read_bytes()).hexdigest()
+                         + " .claude-plugin/plugin.json\n")
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse((claude / ".claude-plugin").exists())
+
+    def test_fresh_install_lands_exactly_the_command_set(self):
+        # five commands, nothing more, nothing less.
         self.assertEqual(self.run_sync().returncode, 0)
         for root in (".agents", ".claude", ".zcode"):
             installed = {p.name for p in
                          (self.home / root / "commands").glob("*.md")}
             self.assertEqual(
                 installed, {f"{base}.md" for base in ALL_COMMANDS},
-                f"~/{root}/commands vs the redistributed total set")
+                f"~/{root}/commands vs the shipped command set")
 
     def test_commands_map_one_to_one_to_skills(self):
         """One /spec-* command per skill (spec-execute D-033): the
@@ -533,7 +556,7 @@ class KiloCommandsTests(SyncShBase):
             (self.home / ".config" / "kilo" / "command" / LEDGER).is_file())
         # and the skill trees land in Kilo's native skills root
         for skill in ("spec-brainstorming", "spec-code-review",
-                      "spec-intent", "spec-shape", "spec-execute"):
+                      "spec-intake", "spec-author", "spec-execute"):
             self.assertTrue(
                 (self.home / ".config" / "kilo" / "skills" / skill
                  / "SKILL.md").is_file(), skill)

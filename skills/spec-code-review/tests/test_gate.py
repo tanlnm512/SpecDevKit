@@ -5,6 +5,7 @@ host (npm, pytest) are asserted conditionally on their presence, the
 way the gate itself degrades."""
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -114,6 +115,26 @@ class DetectionTests(GateBase):
         names = self.plan_names()
         self.assertTrue(any("pytest (uv run)" in n for n in names), names)
 
+    @unittest.skipUnless(shutil.which("npm"), "npm not on PATH")
+    def test_npm_default_stub_test_script_is_skipped(self):
+        (self.repo / "package.json").write_text(
+            '{"name": "x", "scripts": {"test": '
+            '"echo \\"Error: no test specified\\" && exit 1", "lint": "true"}}')
+        self.commit_all()
+        names = self.plan_names()
+        self.assertNotIn("npm run test", names)
+        self.assertIn("npm run lint", names)
+
+    def test_language_family_wrapped_by_make_test_is_not_run_twice(self):
+        (self.repo / "Makefile").write_text("test:\n\tpython3 -m pytest -q\n")
+        (self.repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "test_ok.py").write_text("def test_ok():\n    pass\n")
+        self.commit_all()
+        names = self.plan_names()
+        self.assertIn("make test", names)
+        self.assertFalse(any("pytest" in n or "unittest" in n for n in names), names)
+
     def test_no_markers_detect_nothing(self):
         (self.repo / "README.md").write_text("nothing here\n")
         self.commit_all()
@@ -151,6 +172,16 @@ class ExecutionTests(GateBase):
         entry = next(c for c in json.loads(r.stdout) if "make test" in c["name"])
         # make's own error exit (2 on BSD make, the recipe's code on GNU)
         self.assertNotEqual(entry["exit_code"], 0)
+
+    def test_hung_check_is_killed_and_reported_timed_out(self):
+        (self.repo / "Makefile").write_text("test:\n\tsleep 20\n")
+        self.commit_all()
+        r = subprocess.run(["bash", str(GATE), "--repo", str(self.repo)], capture_output=True,
+                           text=True, timeout=15, env={**os.environ, "GATE_CHECK_TIMEOUT": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        row = next(c for c in json.loads(r.stdout) if c["name"] == "make test")
+        self.assertEqual(row["status"], "timed_out")
+        self.assertEqual(row["source"], "repo")
 
     def test_changed_shell_files_get_bash_n(self):
         (self.repo / "ok.sh").write_text("echo fine\n")
@@ -220,7 +251,33 @@ class SecretsTests(GateBase):
         self.assertNotEqual(r.returncode, 0)
         entry = self.secret_entry(r)
         self.assertEqual(entry["exit_code"], 1)
-        self.assertIn("AKIAIOSFODNN7EXAMPLE", entry["tail"])  # spec-review:allow
+        # the report travels to agents and logs: location and pattern, never the token
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", entry["tail"])  # spec-review:allow
+        self.assertIn("config.py:2 — AWS access key id", entry["tail"])
+        self.assertEqual(entry["source"], "builtin")
+
+    def test_secret_found_whatever_the_diff_prefix_config_or_line_content(self):
+        cases = {
+            "mnemonicPrefix": (("diff.mnemonicPrefix", "true"), "x = 1\n"),
+            "noprefix": (("diff.noprefix", "true"), "x = 1\n"),
+            "+++ content line": (None, "x = 1\n++ note\n"),
+        }
+        for name, (config, before_key) in cases.items():
+            with self.subTest(name):
+                self.repo = self.tmp / name.replace(" ", "_")
+                self.repo.mkdir()
+                self.git("init", "-q")
+                self.git("config", "user.email", "gate@example.com")
+                self.git("config", "user.name", "Gate Test")
+                (self.repo / "a.py").write_text("x = 1\n")
+                self.commit_all()
+                if config:
+                    self.git("config", *config)
+                (self.repo / "a.py").write_text(
+                    before_key + "AWS_KEY = 'AKIAIOSFODNN7EXAMPLE'\n")  # spec-review:allow
+                entry = self.secret_entry(self.run_on_repo())
+                key_line = before_key.count("\n") + 1
+                self.assertIn(f"a.py:{key_line} — AWS access key id", entry["tail"])
 
     def test_allow_marker_line_is_skipped(self):
         # the gitleaks-style escape hatch: a line carrying the inline

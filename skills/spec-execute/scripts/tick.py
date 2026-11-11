@@ -227,7 +227,7 @@ def main(argv=None) -> int:
     original = task_path.read_text(encoding="utf-8")
 
     # Validate everything BEFORE writing anything: every target exists,
-    # is unticked, and no duplicate note names one task twice.
+    # is unticked with no fix round open, and no note names a task twice.
     seen: set[str] = set()
     problems: list[str] = []
     by_id = _tasks_by_id(original)
@@ -240,6 +240,10 @@ def main(argv=None) -> int:
             problems.append(f"{tid}: no such task entry")
         elif e.done or e.struck:
             problems.append(f"{tid}: already ticked or struck")
+        elif e.fix_round is not None:
+            problems.append(
+                f"{tid}: fix round {e.fix_round} is open — land it and "
+                f"rewrite the marker (fixed {e.fix_round}/5) first")
     if problems:
         for p in problems:
             print(f"  {p}", file=sys.stderr)

@@ -9,7 +9,7 @@ decision, or strike it when resolved outright.
    named-in-docs rule. Observed live in the 2026-10-27 eval pass
    (E6 transcript).
 2. ~~**Post-delivery staleness cascade**~~ (decided 2026-10-27:
-   spec-shape D-046) — a delivered docset is historical; the intent
+   spec-author D-046) — a delivered docset is historical; the intent
    gate's baseline mismatch is a SKIPPED note, never a FAIL.
 3. **Scratch-only eval corpus** — accepted limitation: the recorded
    results for e4–e6 (2026-10-27, via `tools/evals.py validate`) all

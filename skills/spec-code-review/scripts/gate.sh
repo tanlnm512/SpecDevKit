@@ -14,24 +14,31 @@
 #   --plan   print the detection plan as JSON without running anything
 #            (every check carries "exit_code": null)
 #
-# Detection — first marker wins per family, families stack:
+# Detection — first marker wins per family, families stack
+# (rows tagged "source": "repo"):
 #   Makefile targets (test, check, lint)        → make <target>
 #   package.json scripts (test, lint, typecheck)→ npm run <script>
+#                                                (npm's "no test
+#                                                specified" stub skipped)
 #   Cargo.toml                                  → cargo test
 #   go.mod                                      → go test ./...
 #   python (pyproject/setup.py/setup.cfg + tests)→ pytest (PATH, repo
 #                                                venv, uv run, python3
 #                                                -m), else unittest
 #                                                discover
-#   always, when git is available: bash -n on every *.sh the diff
-#   against --base touches (committed or working-tree).
-#   always, on the change (git diff mode only): token-pattern secret
-#   scan (a line carrying "spec-review:allow" is skipped).
+#   A language family whose runner the Makefile `test` recipe visibly
+#   invokes is skipped — make test already runs it.
+# Built-in families (rows tagged "source": "builtin"), git-gated:
+#   bash -n on every *.sh the diff against --base touches (committed,
+#   working-tree or untracked); the token-pattern secret scan of the
+#   change (diff mode only; a line carrying "spec-review:allow" is
+#   skipped; hits report path:line and pattern name, never the token).
 # A family is skipped when its tool is not on PATH — a check that
-# cannot run is never silently invented. When nothing is detected the
-# JSON array is empty and the gate is green; the skill's SKILL.md tells
-# the calling agent to ask the repo for its documented check in that
-# case, rather than reviewing with no mechanical floor.
+# cannot run is never silently invented. Built-in rows are not a
+# mechanical floor: with no repo row the caller must say no repo checks
+# were detected and ask the repo for its documented check command.
+# Every row carries "status": pass | fail | timed_out | planned; each
+# repo check is killed after GATE_CHECK_TIMEOUT seconds (default 600).
 set -uo pipefail
 
 REPO="$(pwd)"
@@ -50,42 +57,58 @@ done
 REPO="$(cd "$REPO" 2>/dev/null && pwd)" || {
   echo "gate.sh: --repo is not a directory" >&2; exit 2; }
 
-# Per-check timeout where a timeout binary exists (macOS ships none by
-# default; gtimeout from coreutils is honored).
-TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+HELPERS="$(cd "$(dirname "$0")" && pwd)/gate_helpers.py"
 CHECK_TIMEOUT="${GATE_CHECK_TIMEOUT:-600}"
 
 TALLY="$(mktemp)"
 TAILDIR="$(mktemp -d)"
-trap 'rm -rf "$TALLY" "$TAILDIR"' EXIT
+LAST_OUT="$(mktemp)"
+TIMED_OUT="$TAILDIR/timed-out"
+trap 'rm -rf "$TALLY" "$TAILDIR" "$LAST_OUT"' EXIT
 
-record() {  # <name> <exit|PLAN> — captures the last check's tail
-  local name="$1" code="$2" tf
+record() {  # <name> <exit|PLAN> <repo|builtin> — captures the last check's tail
+  local name="$1" code="$2" source="$3" tf status
   tf="$(mktemp "$TAILDIR/tail.XXXXXX")"
   tail -c 8192 "$LAST_OUT" 2>/dev/null > "$tf"
-  printf '%s\t%s\t%s\n' "$name" "$code" "${tf##*/}" >> "$TALLY"
+  if [ "$code" = PLAN ]; then status=planned
+  elif [ -e "$TIMED_OUT" ]; then status=timed_out
+  elif [ "$code" = 0 ]; then status=pass
+  else status=fail
+  fi
+  rm -f "$TIMED_OUT"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$code" "${tf##*/}" "$source" "$status" \
+    >> "$TALLY"
 }
 
-LAST_OUT="$(mktemp)"
-
-run_check() {  # <name> <cmd...> — runs in the repo, records one row
+run_check() {  # <name> <cmd...> — runs one repo check in the repo, records one row
   local name="$1"; shift
   echo "gate: running $name" >&2
   if [ "$PLAN" = 1 ]; then
-    record "$name" "PLAN"
+    record "$name" "PLAN" repo
     return 0
   fi
-  if [ -n "$TIMEOUT_BIN" ]; then
-    (cd "$REPO" && "$TIMEOUT_BIN" "$CHECK_TIMEOUT" "$@") \
-      > "$LAST_OUT" 2>&1
-  else
-    (cd "$REPO" && "$@") > "$LAST_OUT" 2>&1
+  (cd "$REPO" && python3 "$HELPERS" run "$CHECK_TIMEOUT" "$TIMED_OUT" "$@") \
+    > "$LAST_OUT" 2>&1
+  record "$name" "$?" repo
+}
+
+MAKE_TEST_RECIPE=""
+wrapped_by_make_test() {  # <family label> <ERE on the recipe>
+  if [ -n "$MAKE_TEST_RECIPE" ] \
+     && printf '%s\n' "$MAKE_TEST_RECIPE" | grep -Eq "$2"; then
+    echo "gate: skipping $1 — make test already runs it" >&2
+    return 0
   fi
-  record "$name" "$?"
+  return 1
 }
 
 # --- Makefile targets ------------------------------------------------------
 if [ -f "$REPO/Makefile" ]; then
+  if grep -Eq '^test:' "$REPO/Makefile"; then
+    MAKE_TEST_RECIPE="$(awk '/^test:/ {f = 1; print; next}
+                             f && /^\t/ {print; next}
+                             f {exit}' "$REPO/Makefile")"
+  fi
   for t in test check lint; do
     grep -Eq "^${t}:" "$REPO/Makefile" && run_check "make ${t}" make "$t"
   done
@@ -93,19 +116,24 @@ fi
 
 # --- package.json scripts --------------------------------------------------
 if [ -f "$REPO/package.json" ] && command -v npm >/dev/null 2>&1; then
-  for s in test lint typecheck; do
-    grep -Eq "\"${s}\"[[:space:]]*:" "$REPO/package.json" \
-      && run_check "npm run ${s}" npm run "$s" --silent
+  for s in $(python3 "$HELPERS" npm-scripts "$REPO/package.json"); do
+    if [ "$s" = test ] \
+       && wrapped_by_make_test "npm run test" '(npm|yarn|pnpm)([[:space:]]+run)?[[:space:]]+test'; then
+      continue
+    fi
+    run_check "npm run ${s}" npm run "$s" --silent
   done
 fi
 
 # --- Rust ------------------------------------------------------------------
-if [ -f "$REPO/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+if [ -f "$REPO/Cargo.toml" ] && command -v cargo >/dev/null 2>&1 \
+   && ! wrapped_by_make_test "cargo test" 'cargo[[:space:]]+test'; then
   run_check "cargo test" cargo test
 fi
 
 # --- Go --------------------------------------------------------------------
-if [ -f "$REPO/go.mod" ] && command -v go >/dev/null 2>&1; then
+if [ -f "$REPO/go.mod" ] && command -v go >/dev/null 2>&1 \
+   && ! wrapped_by_make_test "go test" 'go[[:space:]]+test'; then
   run_check "go test ./..." go test ./...
 fi
 
@@ -116,8 +144,9 @@ fi
 # is the last resort — it stays in the plan even when the tests import
 # pytest (a red tail beats a skipped family), but it is never chosen
 # while a real pytest exists anywhere.
-if [ -f "$REPO/pyproject.toml" ] || [ -f "$REPO/setup.py" ] \
-   || [ -f "$REPO/setup.cfg" ]; then
+if { [ -f "$REPO/pyproject.toml" ] || [ -f "$REPO/setup.py" ] \
+     || [ -f "$REPO/setup.cfg" ]; } \
+   && ! wrapped_by_make_test "the python tests" 'pytest|unittest'; then
   # compgen -G, not ls: ls with one missing glob argument exits nonzero
   # even when the other matches, silently skipping the whole family
   if compgen -G "$REPO/tests/test_*.py" >/dev/null \
@@ -169,7 +198,7 @@ if command -v git >/dev/null 2>&1 \
   if [ -n "$SH_FILES" ]; then
     if [ "$PLAN" = 1 ]; then
       record "shell syntax (bash -n, $(printf '%s\n' "$SH_FILES" \
-        | grep -c .) $SH_LABEL)" "PLAN"
+        | grep -c .) $SH_LABEL)" "PLAN" builtin
     else
       BAD=""
       n=0
@@ -185,9 +214,9 @@ $SH_FILES
 EOF
       printf 'failing: %s\n' "${BAD:-none}" > "$LAST_OUT"
       if [ -n "$BAD" ]; then
-        record "shell syntax (bash -n, ${n} $SH_LABEL)" 1
+        record "shell syntax (bash -n, ${n} $SH_LABEL)" 1 builtin
       else
-        record "shell syntax (bash -n, ${n} $SH_LABEL)" 0
+        record "shell syntax (bash -n, ${n} $SH_LABEL)" 0 builtin
       fi
     fi
   fi
@@ -201,7 +230,6 @@ fi
 # Escape hatch (gitleaks-style): a line carrying the inline marker
 # "spec-review:allow" is skipped, so tests for this very family can
 # commit fixture tokens without weakening the patterns.
-SECRET_PATTERNS='(AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|npm_[A-Za-z0-9]{36}|sk-ant-[A-Za-z0-9_-]{32,}|-----BEGIN (RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----)'
 if [ "$TREE" = 0 ] && command -v git >/dev/null 2>&1 \
    && git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   # the family runs only when there IS a change to scan — a clean tree
@@ -210,28 +238,10 @@ if [ "$TREE" = 0 ] && command -v git >/dev/null 2>&1 \
   UNTRACKED="$(git -C "$REPO" ls-files --others --exclude-standard 2>/dev/null)"
   if [ -n "$CHANGED_FILES" ] || [ -n "$UNTRACKED" ]; then
     if [ "$PLAN" = 1 ]; then
-      record "secrets (token patterns on the change)" "PLAN"
+      record "secrets (token patterns on the change)" "PLAN" builtin
     else
-      HITS="$(
-        git -C "$REPO" diff "$BASE" 2>/dev/null | grep '^+' | grep -v '^+++' \
-          | grep -E "$SECRET_PATTERNS" | grep -v 'spec-review:allow'
-        if [ -n "$UNTRACKED" ]; then
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            grep -IHn -E "$SECRET_PATTERNS" -- "$REPO/$f" 2>/dev/null || true
-          done <<EOF
-$UNTRACKED
-EOF
-        fi
-      )"
-      HITS="$(printf '%s\n' "$HITS" | grep -v 'spec-review:allow')"
-      if [ -n "$HITS" ]; then
-        printf '%s\n' "$HITS" | head -5 > "$LAST_OUT"
-        record "secrets (token patterns on the change)" 1
-      else
-        printf 'no secret-shaped tokens in the change\n' > "$LAST_OUT"
-        record "secrets (token patterns on the change)" 0
-      fi
+      python3 "$HELPERS" secrets "$REPO" "$BASE" > "$LAST_OUT" 2>&1
+      record "secrets (token patterns on the change)" "$?" builtin
     fi
   fi
 fi
@@ -244,7 +254,7 @@ out = []
 for line in pathlib.Path(tally).read_text().splitlines():
     if not line.strip():
         continue
-    name, code, tfile = line.split("\t", 2)
+    name, code, tfile, source, status = line.split("\t", 4)
     tail = ""
     p = pathlib.Path(taildir) / tfile
     if p.is_file():
@@ -252,6 +262,8 @@ for line in pathlib.Path(tally).read_text().splitlines():
     out.append({
         "name": name,
         "exit_code": None if code == "PLAN" else int(code),
+        "status": status,
+        "source": source,
         "tail": tail,
     })
 print(json.dumps(out, indent=2))

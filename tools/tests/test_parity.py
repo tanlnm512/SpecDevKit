@@ -28,7 +28,7 @@ class DiscoveryTests(unittest.TestCase):
         # discovery is keyed on graph.py shipping, never a hand list
         self.assertEqual(
             GRAPH_SKILLS,
-            ["spec-execute", "spec-intent", "spec-shape"])
+            ["spec-author", "spec-execute", "spec-intake"])
 
 
 class ArchetypeParityTests(unittest.TestCase):
@@ -37,26 +37,30 @@ class ArchetypeParityTests(unittest.TestCase):
     divergent install, this fails it in CI first."""
 
     SHIPPED = {
-        "spec-intent": {"scout.md", "_lenses.md", "_shared-protocol.md"},
-        "spec-shape": {"scout.md", "designer.md", "qa.md", "reviewer.md",
-                       "_lenses.md", "_shared-protocol.md"},
-        "spec-execute": {"builder.md", "reviewer.md",
-                         "_shared-protocol.md"},
+        "spec-intake": {"agents/scout.md", "protocol/lenses.md",
+                        "protocol/shared-protocol.md"},
+        "spec-author": {"agents/scout.md", "agents/designer.md",
+                        "agents/qa.md", "agents/reviewer.md",
+                        "protocol/lenses.md", "protocol/shared-protocol.md"},
+        "spec-execute": {"agents/builder.md", "agents/reviewer.md",
+                         "protocol/shared-protocol.md"},
     }
-    SPAN_LOCAL = {"_lenses.md"}
+    SPAN_LOCAL = {"protocol/lenses.md"}
 
     def test_each_skill_ships_only_its_span_archetypes(self):
         for skill, want in self.SHIPPED.items():
-            agents = REPO_ROOT / "skills" / skill / "agents"
-            self.assertEqual({p.name for p in agents.glob("*.md")}, want,
-                             skill)
+            root = REPO_ROOT / "skills" / skill
+            got = {str(p.relative_to(root))
+                   for d in ("agents", "protocol")
+                   for p in (root / d).glob("*.md")}
+            self.assertEqual(got, want, skill)
 
     def test_shared_briefs_identical_across_the_trio(self):
         owners: dict[str, list[Path]] = {}
         for skill, names in self.SHIPPED.items():
             for name in names - self.SPAN_LOCAL:
                 owners.setdefault(name, []).append(
-                    REPO_ROOT / "skills" / skill / "agents" / name)
+                    REPO_ROOT / "skills" / skill / name)
         for name, paths in owners.items():
             with self.subTest(brief=name):
                 digests = {hashlib.sha256(p.read_bytes()).hexdigest()
@@ -83,7 +87,7 @@ class DivergenceFixtureTests(unittest.TestCase):
         repo = tmp / "repo"
         shutil.copytree(REPO_ROOT, repo, ignore=shutil.ignore_patterns(
             ".git", ".DS_Store", "__pycache__"))
-        victim = repo / "skills" / "spec-intent" / "scripts" / "graph.py"
+        victim = repo / "skills" / "spec-intake" / "scripts" / "graph.py"
         mutated = bytearray(victim.read_bytes())
         mutated[-1] ^= 1
         victim.write_bytes(bytes(mutated))
@@ -92,7 +96,7 @@ class DivergenceFixtureTests(unittest.TestCase):
             capture_output=True, text=True, timeout=300)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("DRIFT", r.stdout)
-        self.assertIn("skills/spec-intent/scripts/graph.py", r.stdout)
+        self.assertIn("skills/spec-intake/scripts/graph.py", r.stdout)
         real = subprocess.run(
             [sys.executable, str(PARITY), "--check"],
             capture_output=True, text=True, timeout=300)

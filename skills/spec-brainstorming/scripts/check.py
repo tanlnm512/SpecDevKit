@@ -17,18 +17,17 @@ SECTIONS = (
     "Potential Risk Mitigations",
 )
 
-# Case-sensitive stems pinned to PLACEHOLDER_STEMS in tests/test_flow_contracts.py;
-# other angle brackets (e.g. a CLI's <term> argument) are legitimate.
-PLACEHOLDER_STEMS = (
-    "<Name>", "<date>", "<persona>", "<angle", "<feature", "<the ",
-    "<risk", "<why", "<mitigation", "<the one",
-)
+TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "design-spec.md"
+ANGLE_TOKEN = re.compile(r"<[^<>]+>")
+# Lowercase <name> is the legitimately kept next-step argument; every other
+# angle token comes from the template, so other brackets (a CLI's <term>) pass.
+KEPT_TOKEN = "<name>"
 
 DIRECTION_FIELDS = (
     ("Selected", re.compile(r"(?m)^- Selected:.*\S")),
     ("Rationale", re.compile(r"(?m)^- Rationale:.*\S")),
-    ("Rejected with a reason after an em dash",
-     re.compile(r"(?m)^- Rejected:.*\S.* — .*\S")),
+    ("Rejected with a reason after an em dash, or 'none — blended ...'",
+     re.compile(r"(?m)^- Rejected:\s*(?:.*\S.* — .*\S|none\b.*\bblended\b.*\S)")),
 )
 NUMBERED_FEATURE = re.compile(r"(?m)^\d+\.\s+\S")
 H2_HEADING = re.compile(r"^## (.+?)\s*$")
@@ -38,6 +37,7 @@ RISK_CELLS = ("risk name", "early warning", "mitigation or acceptance")
 OUT_OF_SCOPE_MARKER = "**Out of scope (day-one cut list)**:"
 KILL_MARKER = "**Kill criteria**:"
 ELLIPSIS_ONLY = {"…", "..."}
+ELLIPSIS_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s*(?:…|\.\.\.)\s*$")
 
 GREEN_SUMMARY = (
     "Direction, Problem Statement, User Personas, Core MVP Features, "
@@ -49,8 +49,9 @@ GREEN_SUMMARY = (
 
 JUDGMENT = (
     "JUDGMENT: criteria this check does not decide — digest-to-artifact "
-    "dealbreaker mapping (every Cynic dealbreaker from the digest appears in "
-    "the risk table; the digest is not part of the artifact); whether the "
+    "dealbreaker mapping (every Cynic `points:` line from the digest, or in "
+    "`handoff` mode every risk raised in the discussion, appears in the risk "
+    "table; the digest is not part of the artifact); whether the "
     "rationale is in the user's terms (the panel's favorite is not the "
     "direction); whether kill criteria are observable (stated so the evidence "
     "could actually be seen)"
@@ -103,16 +104,28 @@ def is_unfilled(value):
     return not stripped or stripped in ELLIPSIS_ONLY
 
 
-def placeholder_failures(lines):
+def normalize_token(token):
+    return " ".join(token.split())
+
+
+def template_placeholders():
+    text = TEMPLATE.read_text(encoding="utf-8")
+    tokens = {normalize_token(t) for t in ANGLE_TOKEN.findall(text)}
+    tokens.discard(KEPT_TOKEN)
+    return {t.lower() for t in tokens}
+
+
+def placeholder_failures(text):
+    placeholders = template_placeholders()
     failures = []
-    for number, line in enumerate(lines, 1):
-        for stem in PLACEHOLDER_STEMS:
-            start = line.find(stem)
-            if start == -1:
-                continue
-            end = line.find(">", start)
-            token = line[start:end + 1] if end != -1 else stem
-            failures.append((number, "placeholder", f"{token} (stem {stem}) survived"))
+    for match in ANGLE_TOKEN.finditer(text):
+        token = normalize_token(match.group())
+        if token != KEPT_TOKEN and token.lower() in placeholders:
+            number = text.count("\n", 0, match.start()) + 1
+            failures.append((number, "placeholder", f"{token} survived"))
+    for number, line in enumerate(text.splitlines(), 1):
+        if ELLIPSIS_ITEM.match(line):
+            failures.append((number, "placeholder", "ellipsis-only list item survived"))
     return failures
 
 
@@ -156,7 +169,7 @@ def risk_failures(section):
         has_data_row = True
         cells = [cell.strip() for cell in stripped.strip("|").split("|")]
         cells += [""] * (3 - len(cells))
-        missing = [name for name, cell in zip(RISK_CELLS, cells) if not cell]
+        missing = [name for name, cell in zip(RISK_CELLS, cells) if is_unfilled(cell)]
         if missing:
             risk = cells[0] or "unnamed"
             failures.append((number, "risk-row", f"'{risk}' missing {' and '.join(missing)}"))
@@ -198,6 +211,15 @@ def content_failures(lines):
     return failures
 
 
+def under_specs(named):
+    path = Path(named).resolve()
+    try:
+        relative = path.relative_to(Path.cwd().resolve())
+    except ValueError:
+        return False
+    return "specs" in relative.parts[:-1]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="check a written design-spec artifact against the handoff gate's mechanical criteria")
@@ -217,8 +239,9 @@ def main(argv=None):
     except OSError:
         failures = [(0, "artifact", "not readable")]
     else:
-        lines = text.splitlines()
-        failures = content_failures(lines) + placeholder_failures(lines)
+        failures = content_failures(text.splitlines()) + placeholder_failures(text)
+        if under_specs(named):
+            failures.insert(0, (0, "artifact", "under specs/ — the design spec lives at brainstorms/"))
 
     for number, criterion, detail in failures:
         print(f"FAIL {named}:{number} {criterion}: {detail}")

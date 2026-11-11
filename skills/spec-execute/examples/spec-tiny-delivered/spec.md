@@ -11,7 +11,7 @@ span at the tiny tier: every § Tasks entry ticked with its proof
 sub-line, Status done, the delivery record written. `check.py` gates
 this file on the in-file contract alone (D-037); the delivered
 docset is historical, so the baseline-vs-HEAD comparison no longer
-applies (spec-shape D-046).
+applies (spec-author D-046).
 
 ## What
 A demo calculator feature delivered as a one-file spec: the task

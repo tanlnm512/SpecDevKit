@@ -31,16 +31,17 @@ plus design fit: whether the change follows the patterns the
 surrounding code already establishes. Never pure style or formatting;
 the repo's checks own those.
 
-**Shared rules**: `_panel-protocol.md` in this skill's `agents/` dir —
+**Shared rules**: `panel-protocol.md` in this skill's `protocol/` dir —
 the flagging bar, severity ladder, citation format, and the zero-findings
 rule all live there.
 
 ## How to work
 
-1. In a diff review, run `git diff <base>` and read the FULL diff, then
-   open the changed files; in a whole-project review, read every target
-   file the ask lists. Quality calls need the surrounding context the
-   target alone hides.
+1. In a diff review, run `git diff <base>` and read the FULL diff,
+   plus every untracked file the ask lists, in full (`git diff` never
+   shows them), then open the changed files; in a whole-project
+   review, read every target file the ask lists. Quality calls need
+   the surrounding context the target alone hides.
 2. For the test side, map each behavior the target pins to the test
    that covers it — read the test files before claiming a gap, and read
    the assertions before trusting a test.

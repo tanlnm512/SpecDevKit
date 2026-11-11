@@ -4,7 +4,15 @@
 #
 # Topology — N skills (skills/<name>/) x the harness roots below:
 #   skills/<name>/            -> ~/.agents/skills/<name>/
-#                              -> ~/.claude/skills/<name>/
+#                              -> ~/.claude/skills/<name>/ (minus
+#                                 .claude-plugin/ and commands/: with
+#                                 the manifest Claude Code loads the dir
+#                                 as a plugin and lists its agents and
+#                                 commands a second time beside the flat
+#                                 roots below — the flat roots are the
+#                                 one Claude channel)
+#                              every skills-tree copy omits tests/
+#                              (dev-only; nothing at runtime reads it)
 #                              -> ~/.omp/agent/skills/<name>/
 #                                 (omp-native root, priority-100 provider
 #                                 — omp sessions load this copy)
@@ -40,10 +48,10 @@
 #                              -> ~/.omp/agent/agents/ (regenerated with
 #                                 omp frontmatter by tools/omp-defs.py —
 #                                 omp skips ~/.claude/agents and its tool
-#                                 registry is lowercase). Files named with
-#                                 a leading underscore (shared prose, e.g.
-#                                 _shared-protocol.md) are not roles and
-#                                 are skipped. zcode gets no agents/
+#                                 registry is lowercase). Every
+#                                 agents/*.md is a role; the shared prose
+#                                 briefs point at lives in protocol/ and
+#                                 rides the skills tree. zcode gets no agents/
 #                                 install step: SKILL.md § Spawn mechanics
 #                                 documents it as having no
 #                                 user-installable agent types, so it
@@ -133,9 +141,10 @@ if [ "$DRY_RUN" = 1 ] && [ "$CHECK" = 1 ]; then
   exit 2
 fi
 
+CLAUDE_SKILLS_ROOT="$HOME/.claude/skills"
 SKILLS_ROOTS=(
   "$HOME/.agents/skills"
-  "$HOME/.claude/skills"
+  "$CLAUDE_SKILLS_ROOT"
   "$HOME/.omp/agent/skills"
 )
 COMMANDS_ROOTS=(
@@ -463,9 +472,20 @@ sweep_tree() {  # <master-dir> <dest-dir> <ledger>
     for rel in "${stale[@]}"; do
       rm "$dest/$rel"
       echo "clean $dest/$rel (stale deploy)"
+      prune_empty_parents "$dest" "$rel"
     done
   fi
   return 0
+}
+
+# A directory a stale deploy leaves empty goes too, so no emptied
+# .claude-plugin/ or commands/ shell lingers in an installed skill dir.
+prune_empty_parents() {  # <dest-dir> <removed-rel>
+  local d
+  d="$(dirname "$1/$2")"
+  while [ "$d" != "$1" ] && rmdir "$d" 2>/dev/null; do
+    d="$(dirname "$d")"
+  done
 }
 
 # Rebuild a tree's ledger from what is now installed — the deployed
@@ -503,8 +523,40 @@ install_skill_tree() {  # <skill-dir> <dest-root> — refuses on foreign files
   record_tree "$dest"
 }
 
+# Install views: the tree each skills root receives of skills/<name>/,
+# staged from the master and rebuilt whenever the master may have
+# changed. agents/ and protocol/ stay in every view — graph.py and the
+# SKILL.md spawn mechanics read briefs, lenses and protocols by path
+# from the installed skill dir.
+VIEW_EXCLUDES=(tests)
+CLAUDE_VIEW_EXCLUDES=(.claude-plugin commands)
+VIEW_STAGE="$(mktemp -d)"
+
+build_views() {
+  local name dir x
+  rm -rf "$VIEW_STAGE/common" "$VIEW_STAGE/claude"
+  for name in "${SKILLS[@]}"; do
+    for dir in "$VIEW_STAGE/common/$name" "$VIEW_STAGE/claude/$name"; do
+      mkdir -p "$dir"
+      cp -Rp "$PKG_ROOT/skills/$name/." "$dir/"
+      for x in "${VIEW_EXCLUDES[@]}"; do rm -rf "${dir:?}/$x"; done
+    done
+    for x in "${CLAUDE_VIEW_EXCLUDES[@]}"; do
+      rm -rf "${VIEW_STAGE:?}/claude/$name/$x"
+    done
+  done
+}
+
+view_for() {  # <skill-name> <skills-root> -> the tree that root receives
+  if [ "$2" = "$CLAUDE_SKILLS_ROOT" ]; then
+    printf '%s' "$VIEW_STAGE/claude/$1"
+  else
+    printf '%s' "$VIEW_STAGE/common/$1"
+  fi
+}
+
 DEF_OWNERS="$(mktemp)"  # basename|owner|master-path lines (bash-3.2 safe)
-trap 'rm -rf "$preflight_stage" "$DEF_OWNERS"' EXIT
+trap 'rm -rf "$preflight_stage" "$DEF_OWNERS" "$VIEW_STAGE"' EXIT
 
 # Flat agent roots are ONE namespace, so shared archetypes must be
 # byte-identical across the skills that ship them.
@@ -533,7 +585,6 @@ defs_all_owned() {  # <skill-dir> <skill-name>
   for f in "$dir"/agents/*.md; do
     [ -e "$f" ] || continue
     base="$(basename "$f")"
-    [[ "$base" == _* ]] && continue
     def_dedup_gate "$base" "$name" "$f"; rc=$?
     [ "$rc" -eq 0 ] && any_own=1
     [ "$rc" -eq 4 ] && return 4
@@ -611,14 +662,16 @@ plan_file_dest() {  # <src-file> <dest-file> [planner args...] — same contract
   return 0
 }
 
+build_views
 for name in "${SKILLS[@]}"; do
   skill_dir="$PKG_ROOT/skills/$name"
 
   for root in "${SKILLS_ROOTS[@]}"; do
-    plan_tree_root "$skill_dir" "$root/$name"
+    plan_tree_root "$(view_for "$name" "$root")" "$root/$name"
   done
   if [ -d "$KILO_HOME" ]; then
-    plan_tree_root "$skill_dir" "$KILO_HOME/skills/$name"
+    plan_tree_root "$(view_for "$name" "$KILO_HOME/skills")" \
+      "$KILO_HOME/skills/$name"
   fi
 
   # Allowlisted command sources validated before any root is planned.
@@ -660,7 +713,6 @@ for name in "${SKILLS[@]}"; do
     for bf in "$skill_dir"/agents/*.md; do
       [ -e "$bf" ] || continue
       bb="$(basename "$bf")"
-      case "$bb" in _*) continue ;; esac
       drc=0; def_dedup_gate "$bb" "$name" "$bf" || drc=$?
       [ "$drc" -eq 0 ] && owned_list="$owned_list,$bb"
       if [ "$drc" -eq 4 ]; then PREFLIGHT_FAIL=1; fi
@@ -720,7 +772,6 @@ for name in "${SKILLS[@]}"; do
     for f in "$skill_dir"/agents/*.md; do
       [ -e "$f" ] || continue
       base="$(basename "$f")"
-      [[ "$base" == _* ]] && continue
       case ",$(cat "$preflight_stage/$name.owned" 2>/dev/null)," in
         *",$base,"*) plan_file_dest "$f" "$CLAUDE_AGENTS_ROOT/$base" ;;
       esac
@@ -782,20 +833,23 @@ if [ "$CHECK" = 0 ]; then
     echo "ERROR: kit-rules refresh failed — nothing installed"; exit 1
   }
   # Shared-core parity: regenerate the committed replica scripts/ from
-  # the master skills/spec-shape/scripts/ BEFORE any install copies
+  # the master skills/spec-author/scripts/ BEFORE any install copies
   # them out — same committed regenerate-only discipline as the
   # kit-rules refresh above. Never runs in --dry-run or --check mode.
   python3 "$PKG_ROOT/tools/parity.py" || {
     echo "ERROR: parity refresh failed — nothing installed"; exit 1
   }
+  # the refreshes above may have rewritten masters the views copied
+  build_views
   for name in "${SKILLS[@]}"; do
     skill_dir="$PKG_ROOT/skills/$name"
 
     for root in "${SKILLS_ROOTS[@]}"; do
-      install_skill_tree "$skill_dir" "$root" || fail=1
+      install_skill_tree "$(view_for "$name" "$root")" "$root" || fail=1
     done
     if [ -d "$KILO_HOME" ]; then
-      install_skill_tree "$skill_dir" "$KILO_HOME/skills" || fail=1
+      install_skill_tree "$(view_for "$name" "$KILO_HOME/skills")" \
+        "$KILO_HOME/skills" || fail=1
     else
       echo "skip  kilo skills — ~/.config/kilo absent (harness not installed)"
     fi
@@ -866,7 +920,6 @@ if [ "$CHECK" = 0 ]; then
       agents_ledger="$CLAUDE_AGENTS_ROOT/$LEDGER_NAME"
       for f in "$skill_dir"/agents/*.md; do
         base="$(basename "$f")"
-        [[ "$base" == _* ]] && continue
         case ",$(cat "$preflight_stage/$name.owned" 2>/dev/null)," in
           *",$base,"*) ;;
           *)
@@ -992,10 +1045,10 @@ for name in "${SKILLS[@]}"; do
   fi
 
   for root in "${SKILLS_ROOTS[@]}"; do
-    verify_tree "$skill_dir" "$root/$name" "$root/$name"
+    verify_tree "$(view_for "$name" "$root")" "$root/$name" "$root/$name"
     if [ -d "$KILO_HOME" ]; then
-      verify_tree "$skill_dir" "$KILO_HOME/skills/$name" \
-        "$KILO_HOME/skills/$name"
+      verify_tree "$(view_for "$name" "$KILO_HOME/skills")" \
+        "$KILO_HOME/skills/$name" "$KILO_HOME/skills/$name"
     fi
   done
 
@@ -1023,7 +1076,6 @@ for name in "${SKILLS[@]}"; do
   if [ -d "$skill_dir/agents" ]; then
     for f in "$skill_dir"/agents/*.md; do
       base="$(basename "$f")"
-      [[ "$base" == _* ]] && continue
       if cmp -s "$f" "$CLAUDE_AGENTS_ROOT/$base"; then
         echo "OK  def $base"
       else

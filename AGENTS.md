@@ -7,11 +7,14 @@ pointers; the documents it names are canonical.
 
 ## What this repo is
 
-SpecDevKit — five installable agent skills (`skills/spec-intent/`,
-`skills/spec-shape/`, `skills/spec-execute/`, `skills/spec-code-review/`,
+SpecDevKit — five installable agent skills (`skills/spec-intake/`,
+`skills/spec-author/`, `skills/spec-execute/`, `skills/spec-code-review/`,
 `skills/spec-brainstorming/`) plus their shared install/validation
-tooling (`tools/`). Python is stdlib-only (C-06); the harness-neutral
-core never grows harness-specific code (C-03).
+tooling (`tools/`). Python is stdlib-only — no third-party packages
+(C-06). The harness-neutral core — `scripts/`, agent briefs,
+`protocol/`, templates — never calls a harness API or branches on
+which harness runs it; per-harness surface (install layout, agent-def
+dialects, manifests) is generated under `tools/` (C-03).
 
 ## Commands — run before declaring work done
 
@@ -19,8 +22,8 @@ core never grows harness-specific code (C-03).
 - Tooling suite: `tools/tests/run.sh`
 - Generated-surface drift: `python3 tools/drift-check.py` (contract,
   manifests, kit-rules, parity, diagrams, examples, personas)
-- Docset contract: `python3 skills/spec-shape/scripts/check.py
-  skills/spec-shape/examples/mini-spec/specs/mini-spec`
+- Docset contract: `python3 skills/spec-author/scripts/check.py
+  skills/spec-author/examples/mini-spec/specs/mini-spec`
 - Install to machine harness roots + verify: `bash tools/sync.sh`, then
   `bash tools/sync.sh --check`
 
@@ -36,8 +39,9 @@ core never grows harness-specific code (C-03).
     `skills/spec-code-review/agents/code-review-fixer.md` ←
     `rules/engineering-rules.md` via `tools/kit-rules.py`
     (`tools/sync.sh` also refreshes them before every install)
-- **Agent briefs live in `skills/<skill>/agents/`** — root `agents/`
-  copies are generated views. Each skill ships only the archetypes its
+- **Agent briefs live in `skills/<skill>/agents/`** (roles only — the
+  lens/protocol prose they point at lives in `protocol/`, D-049) — root
+  `agents/` copies are generated views. Each skill ships only the archetypes its
   span spawns (intent: scout · shape: scout, designer, qa, reviewer ·
   execute: builder, reviewer); a brief shipped twice stays
   byte-identical (`tools/tests/test_parity.py`). The per-harness
@@ -51,7 +55,7 @@ core never grows harness-specific code (C-03).
   by several skills is duplicated on purpose and pinned by tests.
 - **Decisions are append-only ADRs** in each skill's `decisions/`
   (D-###); every divergence from a doc contract gets its own entry
-  (C-05).
+  rather than a silent edit (C-05).
 - **Do not commit or push unless the user explicitly asks.**
 
 ## Rules that bind you here

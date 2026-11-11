@@ -1,7 +1,6 @@
 # Tasks: <name>
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-**Lifecycle**: v2
 Status reflects code state per [survey.md](survey.md), not intent.
 **Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
 
@@ -34,11 +33,13 @@ Status reflects code state per [survey.md](survey.md), not intent.
   chained tasks note `(after T###)` and name the exact interface they
   consume from their upstream — symbols, signatures, file formats; serial
   runs need a reason, parallel runs need none
-- Fix rounds append `(fix <n>/5)` to the entry — the cap survives resume
-  only if the count lives here, in the status holder. From round 2 on, an
-  implementer's scratch note (what was tried, why it failed) may live at
-  `notes/T###.md` — the one file an implementer may write under specs/,
-  never read by check.py, never counted as status
+- Fix rounds: `(fix <n>/5)` on the entry is an OPEN round — the task is
+  runnable again even beside `(implemented)`; once the round lands the
+  marker becomes `(fixed <n>/5)`. The count lives here, in the status
+  holder, so the cap survives resume. Each round's failure evidence
+  (the failing command and its output), plus what the implementer
+  tried, lives at `notes/T###.md` — the one file an implementer may
+  write under specs/, never read by check.py, never counted as status
 - Every task cites FR-### or an applicable NFR-###; a task with neither is
   scope creep — fix the spec first
 - Every code task carries a `Touches:` block (repo-relative files,

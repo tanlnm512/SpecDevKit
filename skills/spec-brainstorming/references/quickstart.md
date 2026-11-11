@@ -28,21 +28,18 @@ panel briefs remain canonical.
 
 - **zcode / Claude Code**: describe the idea, or use the
   `/spec-brainstorming` router command — the stages run inline in
-  the conversation. On these two, stage 2 can also run as the
-  `spec-brainstorming` workflow (the panel wave, in the
-  background): hand it stage 1's ground — `name`, `problem`,
-  `audience`, `constraints` — and it returns the three digests;
-  stages 1, 3, 4 and 5 are always the session's (D-004).
+  the conversation. Stage 2 spawns the `brainstorm-panelist` agent
+  once per lens; stages 1, 3, 4 and 5 are always the session's.
 - **Any other agent**: the skill inline; `scripts/skill-dir.sh`
   (bash) and `scripts/check.py` (python3 — the handoff gate, run
-  before `/spec-idea` is named) are the only executables it needs.
+  before `/spec-intake` is named) are the only executables it needs.
 
 ## Reading the artifact
 
 `brainstorms/<name>.md` is pre-spec by design: the Direction
 section records what was chosen and why (and what lost); Problem /
 Personas / MVP / Risks carry the panel's surviving material. It
-never holds requirements — those are `/spec-idea`'s to shape with you.
+never holds requirements — those are `/spec-intake`'s to shape with you.
 When it says a risk is "accepted", that acceptance is as binding
 as anything pre-spec is; revisit it only with new evidence, and
 the kill criteria are literal: observed evidence stops the
@@ -50,7 +47,7 @@ project.
 
 ## After the handoff
 
-Run `/spec-idea <name>` (spec-intent) with the design spec as intent
+Run `/spec-intake <name>` with the design spec as intent
 input. The brainstorm doc stays where it is — provenance for the
 direction the spec develops. Nothing under `specs/` is ever
 touched by this skill.

@@ -66,11 +66,11 @@ class RealCorpusTests(unittest.TestCase):
         selectors = {c.selector for c in self.cases}
         self.assertIn("spec-code-review/e2", selectors)
         self.assertIn("spec-brainstorming/b5", selectors)
-        self.assertIn("spec-intent/i1", selectors)
+        self.assertIn("spec-intake/i1", selectors)
         # skill-prefixed selectors name each case's home skill
-        self.assertIn("spec-shape/e1", selectors)
-        self.assertIn("spec-shape/e7", selectors)
-        self.assertIn("spec-shape/e8", selectors)
+        self.assertIn("spec-author/e1", selectors)
+        self.assertIn("spec-author/e7", selectors)
+        self.assertIn("spec-author/e8", selectors)
         self.assertIn("spec-execute/e4", selectors)
         self.assertIn("spec-execute/e6", selectors)
 

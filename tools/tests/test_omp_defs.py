@@ -28,7 +28,7 @@ def staged_archetypes() -> Path:
     atexit.register(shutil.rmtree, root, ignore_errors=True)
     agents = root / "agents"
     agents.mkdir()
-    for skill in ("spec-intent", "spec-shape", "spec-execute"):
+    for skill in ("spec-intake", "spec-author", "spec-execute"):
         for f in (REPO_ROOT / "skills" / skill / "agents").glob("*.md"):
             shutil.copyfile(f, agents / f.name)
     return root
@@ -48,8 +48,6 @@ FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 # truth is the shipped file, never a hand-duplicated table.
 _ROLE_FIELDS = {}
 for _f in sorted((SKILL / "agents").glob("*.md")):
-    if _f.name.startswith("_"):
-        continue
     _name, _desc, _fields, _body = omp_defs.parse(_f)
     _ROLE_FIELDS[_name] = _fields
 
@@ -309,8 +307,7 @@ class GenerationEndToEndTests(unittest.TestCase):
             out = Path(td)
             omp_defs.main(["--skill-dir", str(SKILL), "--out", str(out)])
             produced = sorted(p.name for p in out.glob("*.md"))
-            source = sorted(p.name for p in (SKILL / "agents").glob("*.md")
-                             if not p.name.startswith("_"))
+            source = sorted(p.name for p in (SKILL / "agents").glob("*.md"))
             self.assertEqual(produced, source)
 
     def test_second_skill_needs_no_new_code(self):

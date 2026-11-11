@@ -13,7 +13,10 @@ kit-shaped ones. The cases pin:
     landed shape, and no authoring payload is ever emitted;
   - a hand-authored docset with the same contract shapes gets identical
     refusal and gate outcomes;
-  - the lifecycle command surface and its bare-name claims.
+  - the lifecycle command surface and its bare-name claims;
+  - the wave is file-disjoint, an orphaned claim is named, an open fix
+    round re-opens a landed task with its evidence, and a tiny-tier
+    Status flip without the freeze stays refused.
 
 Fixtures are mutated copies of examples/mini-spec (never the original)
 plus the repo it cites, and a from-scratch hand-authored docset. Every
@@ -21,7 +24,10 @@ CLI run gets its own telemetry dir so assertions read only that run's
 events.
 """
 
+import contextlib
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -40,6 +46,11 @@ FIXTURE = SKILL / "examples" / "mini-spec" / "specs" / "mini-spec"
 FIXTURE_REPO = SKILL / "examples" / "mini-spec" / "repo"
 COMMANDS = SKILL / "commands"
 
+_freeze_spec = importlib.util.spec_from_file_location(
+    "freeze", SCRIPTS / "freeze.py")
+freeze = importlib.util.module_from_spec(_freeze_spec)
+_freeze_spec.loader.exec_module(freeze)
+
 # One command per skill (D-033): the router is this package's single
 # command; the lifecycle verbs ride it as arguments.
 ROUTER_COMMAND = "spec-execute.md"
@@ -47,7 +58,7 @@ CLAIMED_BARE_NAMES = ["spec-execute"]
 LIFECYCLE_VERBS = ("build", "test", "review", "ship")
 
 # Payload vocabulary the execute span may never emit: the authoring
-# nodes live in spec-shape's span, so their appearance here would mean
+# nodes live in spec-author's span, so their appearance here would mean
 # the span filter (or its gate) leaked authoring into execution.
 AUTHORING_NODES = {"intent", "survey", "plan", "tech", "qa", "tasks",
                    "design", "research"}
@@ -70,10 +81,26 @@ def copy_fixture(tmp: Path, name: str = "demo") -> Path:
     return dst
 
 
+def record_approval(spec_dir: Path) -> None:
+    """The approve gate's two records as spec-author leaves them: the
+    contract review carrying the docset fingerprint, then the freeze."""
+    approvals = spec_dir / "approvals"
+    approvals.mkdir(exist_ok=True)
+    write(approvals / "review.md",
+          "# Contract review\n\nDocset fingerprint: "
+          f"{freeze.docset_fingerprint(spec_dir)}\n\n"
+          "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = freeze.record(spec_dir, spec_dir.parent.parent)
+    assert rc == 0, "freeze.py --record refused the fixture"
+
+
 def set_status(spec_dir: Path, word: str) -> None:
     p = spec_dir / "spec.md"
     write(p, p.read_text(encoding="utf-8").replace(
         "**Status**: draft", f"**Status**: {word}"))
+    if word == "approved":
+        record_approval(spec_dir)
 
 
 def land_all_tasks(spec_dir: Path) -> None:
@@ -520,6 +547,8 @@ def hand_docset(tmp: Path, status: str = "approved") -> Path:
                        ("task.md", HAND_TASKS),
                        ("test.md", HAND_TEST)):
         write(d / name, text)
+    if status == "approved":
+        record_approval(d)
     return d
 
 
@@ -596,6 +625,192 @@ class Gate004HandAuthoredEquivalenceTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
         self.assertEqual(spawn_files(self.hand_landed), [])
+
+
+def edit_tasks(spec_dir: Path, *pairs: tuple[str, str]) -> None:
+    p = spec_dir / "task.md"
+    t = p.read_text(encoding="utf-8")
+    for old, new in pairs:
+        assert old in t, old
+        t = t.replace(old, new)
+    write(p, t)
+
+
+T1 = "- [ ] T001 [P] Implement multiply"
+T2 = "- [ ] T002 [P] Add multiply tests"
+
+TINY_SPEC = """# Spec: tiny
+
+**Status**: approved
+**Tier**: tiny
+**Effort**: standard
+**Created**: 2026-10-10
+
+## What
+A demo capability proving the one-file contract.
+
+## Why
+A one-file spec still needs an approval that is more than a word.
+
+## Requirements
+- **FR-001**: The system shall greet the named user.
+
+## Tasks
+
+- [ ] T001 add the greeting module (FR-001) [P]
+  - Touches: `src/greet.py`
+  - Accept: `python3 -c "assert True"`
+
+## Evidence
+"""
+
+
+class Gate006WaveAndFixRoundTests(unittest.TestCase):
+    """What the execute wave may spawn: tasks that share no file, never
+    a claimed task, and a landed task again once a fix round opens on
+    it — with the round's evidence in the payload."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="gate006-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+
+    def approved(self, *task_edits: tuple[str, str]) -> Path:
+        spec_dir = copy_fixture(self._tmp)
+        set_status(spec_dir, "approved")
+        edit_tasks(spec_dir, *task_edits)
+        return spec_dir
+
+    def emit(self, spec_dir: Path, *extra: str):
+        return run_graph(spec_dir, "--span", "execute", "--emit-spawns",
+                         *extra, tel=self.tel)
+
+    def test_tasks_sharing_a_file_never_share_a_wave(self):
+        spec_dir = self.approved(
+            ("tests to `repo/test_calc.py`",
+             "tests to `repo/test_calc.py` and `repo/calc.py`"))
+        r = self.emit(spec_dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(spawn_files(spec_dir), ["implementer.md"])
+        self.assertIn("deferred: T002 (shares repo/calc.py with T001)",
+                      r.stdout)
+
+    def test_a_task_naming_no_files_runs_alone(self):
+        spec_dir = hand_docset(self._tmp)
+        edit_tasks(spec_dir, ("T002 (after T001) pin", "T002 pin"))
+        r = self.emit(spec_dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(spawn_files(spec_dir), ["implementer.md"])
+        self.assertIn("deferred: T002 (T001 has no parseable Touches:",
+                      r.stdout)
+
+    def test_an_orphaned_claim_is_named_with_its_remedy(self):
+        spec_dir = self.approved(
+            (T1, T1.replace("[P]", "[P] (in-progress)")),
+            (T2, T2.replace("[P]", "[P] (implemented)")))
+        for mode in ("--emit-spawns", "--run"):
+            r = run_graph(spec_dir, "--span", "execute", mode, tel=self.tel)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("AWAITING ORCHESTRATOR: execute", r.stdout, mode)
+            self.assertIn("claimed: T001", r.stdout, mode)
+            self.assertIn("orphan", r.stdout, mode)
+            self.assertIn("clear the claim", r.stdout, mode)
+        self.assertEqual(spawn_files(spec_dir), [])
+
+    def test_an_open_fix_round_reopens_a_landed_task_with_its_evidence(self):
+        spec_dir = self.approved(
+            (T1, T1.replace("[P]", "[P] (implemented) (fix 1/5)")),
+            (T2, T2.replace("[P]", "[P] (implemented)")))
+        r = self.emit(spec_dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # the plan is not landed: the builder goes back out, the
+        # delivery reviewer does not
+        self.assertEqual(spawn_files(spec_dir), ["implementer.md"])
+        self.assertIn("evidence missing: T001 fix round 1", r.stdout)
+        payload = next((spec_dir / "spawns").glob("*/implementer.md"))
+        self.assertIn("FAILURE EVIDENCE NOT RECORDED",
+                      payload.read_text(encoding="utf-8"))
+
+        (spec_dir / "notes").mkdir()
+        evidence = "E   AssertionError: multiply(2, 3) returned 5"
+        write(spec_dir / "notes" / "T001.md",
+              f"## Fix round 1\n$ pytest -k multiply\n{evidence}\n")
+        r = self.emit(spec_dir)
+        self.assertNotIn("evidence missing", r.stdout)
+        self.assertIn(evidence, payload.read_text(encoding="utf-8"))
+
+    def test_tick_refuses_a_task_whose_fix_round_is_open(self):
+        spec_dir = self.approved(
+            (T1, T1.replace("[P]", "[P] (implemented) (fix 1/5)")))
+        before = (spec_dir / "task.md").read_bytes()
+        r = subprocess.run(
+            [sys.executable, str(SCRIPTS / "tick.py"), str(spec_dir),
+             "--note", "T001 :: pytest green"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("fix round 1 is open", r.stderr)
+        self.assertEqual((spec_dir / "task.md").read_bytes(), before)
+
+    def test_native_agents_payload_names_the_type_and_omits_the_brief(self):
+        spec_dir = self.approved((T2, T2.replace("[P]", "[P] (implemented)")))
+        brief_heading = "# Builder agent (implement lens)"
+        self.emit(spec_dir)
+        payload = next((spec_dir / "spawns").glob("*/implementer.md"))
+        embedded = payload.read_text(encoding="utf-8")
+        self.assertIn(brief_heading, embedded)
+        # a rule the brief already carries is not repeated by the protocol
+        self.assertEqual(embedded.count("Long foreground tasks\n"), 1)
+
+        r = self.emit(spec_dir, "--native-agents")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        native = payload.read_text(encoding="utf-8")
+        self.assertNotIn(brief_heading, native)
+        self.assertIn("agent type `spec-builder`", native)
+        self.assertIn("- [ ] T001 [P] Implement multiply", native)
+        self.assertIn("## Universal rules", native)
+
+    def test_the_contract_review_is_not_emittable_from_this_package(self):
+        spec_dir = self.approved()
+        r = run_graph(spec_dir, "--emit-spawns", "--repair", "approve",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("/spec-author", r.stderr)
+        self.assertEqual(spawn_files(spec_dir), [])
+
+    def test_a_tiny_spec_needs_the_freeze_not_just_the_status_word(self):
+        spec_dir = self._tmp / "specs" / "tiny"
+        spec_dir.mkdir(parents=True)
+        write(spec_dir / "spec.md", TINY_SPEC)
+        r = self.emit(spec_dir)
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
+        self.assertIn("approve", refusal_gates(r.stdout))
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(freeze.record(spec_dir, self._tmp), 0)
+        r = self.emit(spec_dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        payload = next((spec_dir / "spawns").glob("*/implementer.md"))
+        self.assertIn("- [ ] T001 add the greeting module",
+                      payload.read_text(encoding="utf-8"))
+
+        # the in-file status markers move freely; the contract does not
+        p = spec_dir / "spec.md"
+        write(p, p.read_text(encoding="utf-8").replace(
+            "- [ ] T001 add", "- [ ] T001 (in-progress) add"))
+        self.assertEqual(run_check(spec_dir), 0)
+        write(p, p.read_text(encoding="utf-8").replace(
+            "- [ ] T001 (in-progress) add the greeting module (FR-001) [P]",
+            "- [x] T001 add the greeting module (FR-001) [P] (fixed 1/5)\n"
+            "  - done 2026-10-11 \u2014 greeting test green"))
+        self.assertEqual(run_check(spec_dir), 0)
+        frozen = p.read_text(encoding="utf-8")
+        write(p, frozen.replace(
+            "\n## Evidence",
+            "- [ ] T002 add a farewell (FR-001) [P]\n"
+            "  - Touches: `src/bye.py`\n\n## Evidence"))
+        self.assertEqual(run_check(spec_dir), 1)
+        write(p, frozen.replace("greet the named user", "greet everyone"))
+        self.assertEqual(run_check(spec_dir), 1)
 
 
 class Gate005LifecycleCommandSurfaceTests(unittest.TestCase):

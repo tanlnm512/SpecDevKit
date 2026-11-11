@@ -10,8 +10,19 @@
   },
   "plugins": [
     {
+      "name": "spec-author",
+      "description": "Gated spec authoring for a spec that is not yet approved \u2014 an intent.md or spec.md exists.",
+      "author": {
+        "name": "Stanley",
+        "email": "minhtan512@gmail.com"
+      },
+      "source": "./skills/spec-author",
+      "license": "MIT",
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-author"
+    },
+    {
       "name": "spec-brainstorming",
-      "description": "Five-stage idea co-design and pressure-testing before any spec or code exists \u2014 the pre-spec front door of the suite.",
+      "description": "Five-stage idea co-design and pressure-testing \u2014 the pre-spec front door of the suite, for when WHETHER to build it or WHICH version is still open.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
@@ -22,7 +33,7 @@
     },
     {
       "name": "spec-code-review",
-      "description": "Portable three-stage code review for any git repository \u2014 a change, a pull request, a branch, or the whole project: the repo's own checks as the mechanical gate, a preflight scout, specialist lenses (correctness, security, quality & tests) with independent confirmation of every kept finding, and an optional verified fix loop.",
+      "description": "Gated code review for any git repository \u2014 a diff, a pull request, a branch, or the whole project.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
@@ -33,7 +44,7 @@
     },
     {
       "name": "spec-execute",
-      "description": "Approved-spec execution \u2014 the suite's back half.",
+      "description": "Builds an approved spec \u2014 the suite's back half.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
@@ -43,26 +54,15 @@
       "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-execute"
     },
     {
-      "name": "spec-intent",
-      "description": "Intake front door of the spec-driven suite \u2014 turns a raw idea (or a spec-brainstorming handoff) into one validated artifact, specs/<name>/intent.md.",
+      "name": "spec-intake",
+      "description": "Requirements intake for a settled direction \u2014 turns a raw idea (or a spec-brainstorming handoff) into one validated specs/<name>/intent.md: scouts the repo, grills the open questions until none remain, gates the result, stops.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
       },
-      "source": "./skills/spec-intent",
+      "source": "./skills/spec-intake",
       "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-intent"
-    },
-    {
-      "name": "spec-shape",
-      "description": "Gated-intake spec authoring \u2014 the suite's middle phase.",
-      "author": {
-        "name": "Stanley",
-        "email": "minhtan512@gmail.com"
-      },
-      "source": "./skills/spec-shape",
-      "license": "MIT",
-      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-shape"
+      "homepage": "https://github.com/tanlnm512/SpecDevKit/tree/main/skills/spec-intake"
     }
   ]
 }

@@ -16,13 +16,16 @@ run):
   implementation speed / best-when), socratic refinement (single
   questions, soft cap five) to a selected or blended direction,
   then the handoff — `brainstorms/<name>.md` written from the
-  pinned template, with `/spec-idea <name>` named as the next step.
-- `handoff [name]` → compile-only: the exploring already happened
-  in this conversation; jump to the handoff stage and write the
-  design spec from what was discussed. If
+  pinned template, with `/spec-intake <name>` named as the next step.
+- `handoff [name]` → compile-only, the one defined exception to
+  the stage order: the exploring already happened in this
+  conversation; no panel runs — jump to the handoff stage and write
+  the design spec from what was discussed, risks marked "(from the
+  discussion)". If
   `brainstorms/<name>.md` exists it is the prior round — the
   location rules in SKILL.md apply (ask before overwriting).
 
-The stages are rigid: always in order, none skippable, nothing
+The stages are rigid: always in order, none skippable (bar
+`handoff`, which begins at stage 5), nothing
 ever written under `specs/`. The panel never picks the direction —
 the user selects or blends.

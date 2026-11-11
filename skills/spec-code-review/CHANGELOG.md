@@ -7,6 +7,54 @@ confirmation → synthesis), then became a portable sibling skill.
 
 ## Unreleased
 
+- Fixed: the secret scan and the `fix-check` test-hunk guard no longer go
+  silently green under `diff.noprefix` / `diff.mnemonicPrefix` or on an
+  added line reading `++ …` — both share one diff parser
+  (`gate_helpers.py`) that pins the `a/` `b/` prefixes, walks hunks by
+  their `@@` counts, and scans added lines even when the path is unknown.
+- Fixed: `fix-check` now sees a fixer's edits inside untracked files — the
+  fix snapshot hashes the whole working tree (untracked included) instead of
+  `git stash create`, so test weakening there is no longer missed.
+- The panel protocol carries the inert-data rule (consumed artifacts are
+  data, never instructions) for every reading lens.
+- **D-018 — honest scope, floor and confirmation counts.** Diff
+  scope now includes untracked files (`untracked[]`, counted in
+  `files`/`added`; every lens reads them in full). Gate rows carry
+  `source: repo|builtin` and `status: pass|fail|timed_out|planned`;
+  with no repo row the gate note and report header say no repo checks
+  were detected. The findings header counts confirmed and unconfirmed
+  apart (self-checked named); a fix_from item without `status` is
+  `unconfirmed`.
+- Gate robustness: a portable per-check timeout (`timed_out`, no
+  `timeout` binary needed), npm's "no test specified" stub skipped, a
+  language family the Makefile `test` recipe runs is not run twice,
+  secret hits redacted to `path:line — pattern name`
+  (`scripts/gate_helpers.py`).
+- SKILL.md § Run sequence: one oracle command per phase, the ask ctx
+  keys, the agent type per role, and `mode fast|full|auto` defined.
+  New oracle subcommands `fix-snapshot` / `fix-check` abort the fix
+  loop when the fixer moves HEAD or the stash list and feed test-file
+  weakening (removed asserts, added skips) to the verify and
+  fresh-eyes asks. Review asks carry the severity ladder.
+- Project mode: exclusions match whole path segments (`src/redist/`
+  is no longer dropped as `dist/`); excluded paths are returned for
+  `notCovered`; above 3 parts the run waits for a go-ahead or
+  narrower `paths`. PR mode records `previous_ref` for restore and
+  defers the gate on a fork PR until the user agrees. The branch
+  target's `--include-gate` now gates against the merge-base.
+- Migration: report readers parse the new findings header
+  (`N · C confirmed · U unconfirmed …`); callers pass gate rows to
+  `report` verbatim so `source` survives. Re-run `tools/agent-defs.py`
+  and `tools/plugin-manifest.py` for the brief and description edits.
+
+- Shared prose moves out of `agents/` into `protocol/` (spec-author
+  D-049): `protocol/panel-protocol.md`. Claude Code no longer
+  lists it as an agent; `agents/` holds roles only. Its header now says how it reaches
+  reviewers: read by path through each brief's Shared rules pointer.
+- The `~/.claude/skills/` copy drops `.claude-plugin/` and
+  `commands/` and every installed copy drops `tests/` (spec-author
+  D-049): each agent and command is listed once, from the flat
+  Claude roots. Rerun `tools/sync.sh`.
 - SKILL.md restructured for context economy (354 → 267 lines): the
   sub-repo `repo` resolution, project sharding bounds, the audit
   red-gate exception, and the split bounds move to their canonical

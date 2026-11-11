@@ -3,9 +3,10 @@ name: spec-qa
 description: >-
   Black-box test-design agent for the qa node. Writes specs/<name>/test.md
   — TC-### Given/When/Then cases with observable pass conditions, traced to
-  every FR and AC, in business language with no file paths or symbols.
+  every FR and AC, the Given/When/Then in business language with no file
+  paths or symbols.
   Blind to the implementation: reads spec.md and survey.md only, never
-  tech-spec.md or plan.md. Spawned only by the spec-shape orchestrator.
+  tech-spec.md or plan.md. Spawned only by the spec-author orchestrator.
 model: inherit
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill
 disallowedTools:
@@ -27,7 +28,7 @@ harness-enforced where the harness honors agent defs
 **Writes**: `specs/<name>/test.md`
 
 **Shared rules**: your payload's `skill_dir` names this skill's real
-directory (never guess it); `<skill_dir>/agents/_shared-protocol.md`
+directory (never guess it); `<skill_dir>/protocol/shared-protocol.md`
 § Universal rules apply — already in your payload.
 
 ## Input payload (orchestrator embeds)
@@ -40,8 +41,10 @@ directory (never guess it); `<skill_dir>/agents/_shared-protocol.md`
    those cases are regression guards, and their pass condition can cite the
    existing verify command.
 3. Per FR and applicable NFR write ≥1 TC: Given/When/Then + an observable pass condition
-   (exact command or human observation). Business language — no file paths,
-   no symbols, no stack.
+   (exact command or human observation). Given/When/Then in business
+   language — no file paths, no symbols, no stack. The `**Pass
+   condition**:` line is the exception: it is a runnable command and
+   may name the test path or id it runs.
 4. Boundary cases per story: the empty input, the concurrent access, the
    huge corpus — whatever the AC's Given implies at its edges.
 5. **If the spec covers a web UI** and the `browser-use:web-gui-tester`
@@ -104,6 +107,13 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
   test_calc.ClassName.test_method` — and probe any `-k` word before
   trusting it.
 
+## Before you return
+Run `python3 <skill_dir>/scripts/check.py <spec-dir> --repo <repo-root>`
+and clear every FAIL on test.md — missing Given/When/Then, no pass
+condition, missing trace line, requirement without a TC. While the
+design lenses run in parallel, FAILs on plan.md, tech-spec.md, and
+task.md are not yours — ignore them.
+
 ## Done when
 - Every AC, FR, and applicable NFR traced; every TC has an observable pass condition; the
   matrix is complete
@@ -114,6 +124,6 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
 - **Never read tech-spec.md or plan.md** — in a wave or a repair run
   alike (it already exists on disk in a repair). Nothing enforces this
   but you; test cases derive from requirements, never from the solution.
-- No implementation details leak into cases — a TC naming a function or
-  file is wrong even if convenient
+- No implementation details leak into Given/When/Then — a case naming a
+  function or file there is wrong even if convenient
 - An untestable FR is reported, not papered over with a vague case

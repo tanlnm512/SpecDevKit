@@ -8,7 +8,8 @@ SKILLS = Path(__file__).resolve().parents[2] / "skills"
 ROOT_AGENTS = SKILLS.parent / "agents"
 
 RETIRED = re.compile(
-    r"spec-to-prod|`/spec`|/spec <|/spec-shape(?![.\w])|/spec-plan")
+    r"spec-to-prod|`/spec`|/spec <|/spec-plan|/spec-idea|/spec-gen"
+    r"|spec-intent|spec-shape")
 PATH_REF = re.compile(
     r"`((?:scripts|references|templates|agents|gates|contracts)/"
     r"[A-Za-z0-9_./-]+\.(?:py|sh|md|json|txt))`")

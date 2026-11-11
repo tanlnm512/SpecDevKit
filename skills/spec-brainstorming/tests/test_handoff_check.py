@@ -13,6 +13,7 @@ from pathlib import Path
 SKILL = Path(__file__).resolve().parents[1]
 CHECKER = SKILL / "scripts" / "check.py"
 FIXTURE = SKILL / "examples" / "decision-tracker" / "decision-tracker.md"
+TEMPLATE = SKILL / "templates" / "design-spec.md"
 
 PROBLEM_STATEMENT_BLOCK = (
     "## Problem Statement\n"
@@ -102,15 +103,64 @@ class HandoffCheckTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("section-order", result.stdout)
 
-    def test_placeholder_failure_names_stem_and_line(self):
+    def test_placeholder_failure_names_token_and_line(self):
         selected = "- Selected: <angle or blend>"
         text = BASE_ARTIFACT.replace("- Selected: Minimalist core", selected)
         line_number = text.splitlines().index(selected) + 1
         result, _ = run_text(text)
         self.assertEqual(result.returncode, 1, result.stdout)
-        hits = [line for line in result.stdout.splitlines() if "<angle" in line]
+        hits = [line for line in result.stdout.splitlines() if "<angle or blend>" in line]
         self.assertTrue(hits, result.stdout)
         self.assertTrue(any(str(line_number) in line for line in hits), hits)
+
+    def test_every_template_token_fails_in_any_case_except_the_kept_name(self):
+        tokens = {" ".join(t.split())
+                  for t in re.findall(r"<[^<>]+>", TEMPLATE.read_text(encoding="utf-8"))}
+        self.assertIn("<name>", tokens)
+        for token in sorted(tokens - {"<name>"}):
+            for variant in {token, token.lower(), token.upper()} - {"<name>"}:
+                with self.subTest(token=variant):
+                    text = BASE_ARTIFACT.replace(
+                        "- Rationale: fastest path to observable value",
+                        f"- Rationale: {variant}")
+                    result, _ = run_text(text)
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn("placeholder", result.stdout)
+        result, _ = run_text(BASE_ARTIFACT + "\nNext: `/spec-intake <name>` or `decide why <term>`\n")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_ellipsis_only_items_and_cells_fail(self):
+        cases = (
+            ("feature", "1. Status snapshot — serves the on-call triager. "
+             "One command prints current state.\n",
+             "1. Status snapshot — serves the on-call triager. "
+             "One command prints current state.\n2. …\n", "placeholder"),
+            ("risk row", RISK_ROW, RISK_ROW + "| … | … | … |\n", "risk-row"),
+        )
+        for name, old, new, criterion in cases:
+            with self.subTest(name):
+                result, _ = run_text(BASE_ARTIFACT.replace(old, new))
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(criterion, result.stdout)
+
+    def test_blended_direction_may_reject_nothing(self):
+        rejected = "- Rejected: Visionary platform — displaces tools the team already trusts"
+        for line in ("- Rejected: none — blended all three angles",
+                     "- Rejected: none, blended: Visionary hook on a Minimalist core"):
+            with self.subTest(line):
+                result, _ = run_text(BASE_ARTIFACT.replace(rejected, line))
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_artifact_under_specs_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "specs" / "demo" / "design.md"
+            target.parent.mkdir(parents=True)
+            target.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(CHECKER), "specs/demo/design.md"],
+                capture_output=True, text=True, cwd=tmp)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("specs/", result.stdout)
 
     def test_criterion_failures_are_named_on_failing_artifacts(self):
         cases = (

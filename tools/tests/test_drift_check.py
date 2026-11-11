@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DRIFT_CHECK = REPO_ROOT / "tools" / "drift-check.py"
-MODEL = REPO_ROOT / "skills" / "spec-shape" / "diagrams" / "spec-workflow.mmd"
+MODEL = REPO_ROOT / "skills" / "spec-author" / "diagrams" / "spec-workflow.mmd"
 
 _spec = importlib.util.spec_from_file_location("drift_check", DRIFT_CHECK)
 drift_check = importlib.util.module_from_spec(_spec)
@@ -102,7 +102,7 @@ class DriftTests(unittest.TestCase):
 
     def test_model_drift_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
-        victim = repo / "skills" / "spec-shape" / "diagrams" / "spec-workflow.mmd"
+        victim = repo / "skills" / "spec-author" / "diagrams" / "spec-workflow.mmd"
         original = victim.read_text()
         victim.write_text(original.replace("tick-commit<br/>", "commit-tick<br/>"))
         r = self.run_drift_check(repo)
@@ -114,7 +114,7 @@ class DriftTests(unittest.TestCase):
 
     def test_stale_render_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
-        victim = repo / "skills" / "spec-shape" / "diagrams" / "spec-workflow-overview.html"
+        victim = repo / "skills" / "spec-author" / "diagrams" / "spec-workflow-overview.html"
         original = victim.read_text()
         victim.unlink()
         r = self.run_drift_check(repo)
@@ -125,7 +125,7 @@ class DriftTests(unittest.TestCase):
 
     def test_example_drift_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
-        victim = repo / "skills" / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec" / "plan.md"
+        victim = repo / "skills" / "spec-author" / "examples" / "mini-spec" / "specs" / "mini-spec" / "plan.md"
         original = victim.read_text()
         victim.write_text("")
         r = self.run_drift_check(repo)
@@ -162,14 +162,14 @@ class DriftTests(unittest.TestCase):
         # scripts/contract.py is the node table's single source; graph.py
         # imports it and SKILL.md's block is generated from it
         repo = self.clean_copy()
-        victim = repo / "skills" / "spec-shape" / "SKILL.md"
+        victim = repo / "skills" / "spec-author" / "SKILL.md"
         victim.write_text(
             victim.read_text().replace("| `spec` | entry |",
                                        "| `spec` | HAND-EDIT |", 1))
         r = self.run_drift_check(repo)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("contract", r.stdout)
-        mod = repo / "skills" / "spec-shape" / "scripts" / "contract.py"
+        mod = repo / "skills" / "spec-author" / "scripts" / "contract.py"
         gen = run_py(mod, "--render", "skill-table")
         self.assertEqual(gen.returncode, 0, gen.stdout + gen.stderr)
         text = victim.read_text()

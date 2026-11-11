@@ -19,7 +19,8 @@ zero matches), directory/glob-aware parallel-file overlap between [P] tasks, TC 
 shape, spec-status ↔ task/INDEX consistency, EARS-shaped FRs (every FR
 line says 'shall'), constitution presence, context-baseline presence, and
 stage gating (progress requires Status ≥ approved; NEEDS CLARIFICATION
-resolved before tasks exist), lifecycle-v2 approval-freeze presence, and
+resolved before tasks exist), approval-freeze presence and integrity
+for every approved-or-later spec (tiny tier included), and
 git existence/ancestry for recorded lifecycle SHAs. Test quality itself
 stays a human/LLM check.
 --fix-burndown repairs the burndown table from the actual task entries
@@ -33,11 +34,14 @@ digest, so a bad survey fails here instead of flowing into tech/plan/qa.
 specs/<name>/intent.md (the scout+grill front end's output, an optional
 input like research.md): unfilled/empty artifact, surviving template
 placeholders, open NEEDS CLARIFICATION markers (the grilling vocabulary),
-and baseline-vs-HEAD staleness — intent.md reuses survey.md's
-`**Baseline**:` header shape, so the same staleness diagnosis reads it
-unchanged. In the full check (no flag) intent.md is an optional input:
+an empty required section (Problem, Audience, Constraints, FR seeds) or
+no FR seed, a baseline sha the repo cannot resolve, and baseline
+staleness — code changed between the baseline and HEAD; commits that
+touch only the specs tree never stale it. In the full check (no flag) intent.md is an optional input:
 absent → not checked; present → these same intent checks run and can
-fail red.
+fail red — except a baseline sha the repo cannot resolve, which only
+--intent-only fails (the full check notes it SKIPPED: a squash, rebase,
+or shallow clone must not strand an in-flight docset).
 --constitution runs only the repo-level specs/CONSTITUTION.md presence/fill
 check and exits — a scriptable form of the constitution-presence gate,
 usable standalone (no spec dir contract files needed) as a pre-flight or CI
@@ -83,6 +87,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     TaskEntry,
     defined_ids,
     delivery_state,
+    diff_paths,
     lifecycle_shas,
     next_ids,
     paths_overlap,
@@ -423,18 +428,54 @@ def _delivery_recorded(*doc_texts: str) -> bool:
     return any(delivery_state(t)[0] == "delivered" for t in doc_texts)
 
 
-def intent_failures(intent: str, repo_root: Path,
-                    delivered: bool = False) -> tuple[list[str], list[str]]:
+INTENT_SECTIONS = ("Problem", "Audience", "Constraints", "FR seeds")
+FR_SEED = re.compile(r"^-\s+\*\*FR-\d{3}\*\*", re.M)
+
+
+def _section_bodies(text: str) -> dict[str, str]:
+    """Lower-cased `## heading` → its body, HTML comments removed."""
+    clean = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    parts = re.split(r"^##\s+(.+?)\s*$", clean, flags=re.M)
+    return {name.lower(): body.strip()
+            for name, body in zip(parts[1::2], parts[2::2])}
+
+
+def _code_changed_since(repo: Path, sha: str, specs_root: Path | None) -> bool:
+    """Whether a path outside the specs tree changed between sha and HEAD.
+    Committing the specs tree itself (intent.md, the docset) moves HEAD
+    without moving the code the baseline was probed against. A diff git
+    cannot compute reads as changed — never a silent all-clear."""
+    paths = diff_paths(repo, sha, "HEAD")
+    if paths is None:
+        return True
+    prefix = None
+    if specs_root is not None:
+        try:
+            rel = specs_root.resolve().relative_to(repo.resolve()).as_posix()
+        except ValueError:
+            rel = "."
+        if rel != ".":
+            prefix = rel + "/"
+    return any(not (prefix and path.startswith(prefix)) for path in paths)
+
+
+def intent_failures(intent: str, repo_root: Path, delivered: bool = False,
+                    specs_root: Path | None = None,
+                    gate: bool = False) -> tuple[list[str], list[str]]:
     """(failures, notes) for the intent artifact's refusal families:
     unfilled/empty artifact, surviving template placeholders, open NEEDS
     CLARIFICATION markers (the grilling vocabulary — the same marker scan
-    spec.md uses), and baseline-vs-HEAD staleness — intent.md carries
-    survey.md's `**Baseline**:` header shape, so the same staleness
-    diagnosis reads it unchanged. `delivered` exempts the staleness
-    comparison: once the docset records its delivery commit, HEAD has
-    moved by design and a stale baseline is history, not drift. Shared
-    by --intent-only and the full check's optional-input path — one
-    discipline, never a second checker."""
+    spec.md uses), an empty required section or no FR seed, a baseline
+    sha the repo cannot resolve, and baseline staleness — code outside
+    `specs_root` changed between the baseline and HEAD. `delivered`
+    exempts the baseline comparison: once the docset records its
+    delivery commit, HEAD has moved by design and a stale baseline is
+    history, not drift. Shared by --intent-only (`gate`) and the full
+    check's optional-input path — one discipline, never a second
+    checker. Only the gate fails an unresolvable baseline: a squash,
+    rebase, or shallow clone loses the commit under an in-flight docset
+    whose intake already passed, so the full check reports it SKIPPED,
+    as it does the survey's."""
     if not intent.strip():
         return ["intent.md is unfilled or empty"], []
     fails: list[str] = []
@@ -449,6 +490,15 @@ def intent_failures(intent: str, repo_root: Path,
     n = len(re.findall(r"\[NEEDS CLARIFICATION", intent))
     if n:
         fails.append(f"intent.md: {n} NEEDS CLARIFICATION marker(s) still open")
+    bodies = _section_bodies(intent)
+    for name in INTENT_SECTIONS:
+        if not bodies.get(name.lower()):
+            fails.append(f"intent.md: section `## {name}` is missing or empty")
+    seeds = bodies.get("fr seeds")
+    if seeds and not FR_SEED.search(seeds):
+        fails.append(
+            "intent.md: `## FR seeds` holds no `- **FR-###**:` seed"
+        )
     bl = survey_baseline(intent)
     if bl is None:
         if re.search(r"Baseline\*\*[^\n]*<[^>\n]*>", intent):
@@ -463,31 +513,42 @@ def intent_failures(intent: str, repo_root: Path,
             )
         else:
             fails.append("intent.md has no baseline header")
-    else:
-        sha = bl[1]
-        repo_hit, head, saw_git_dir = _baseline_head_probe(repo_root, sha)
-        if repo_hit is None and not saw_git_dir:
-            # A baseline that cannot be compared is visible as skipped, never fatal.
-            notes.append("intent staleness: SKIPPED (not a git repo)")
-        elif repo_hit is None:
-            notes.append(
-                "intent staleness: SKIPPED — no candidate repo contains "
-                "the baseline commit"
+        return fails, notes
+    sha = bl[1]
+    repo_hit, head, saw_git_dir = _baseline_head_probe(repo_root, sha)
+    if repo_hit is None and not saw_git_dir:
+        # A baseline that cannot be compared is visible as skipped, never fatal.
+        notes.append("intent staleness: SKIPPED (not a git repo)")
+    elif delivered:
+        notes.append(
+            "intent staleness: SKIPPED — delivery recorded; "
+            "the docset is historical"
+        )
+    elif repo_hit is None and gate:
+        fails.append(
+            f"intent.md baseline {sha} is not a commit in this repo — "
+            "record the HEAD the scout probed"
+        )
+    elif repo_hit is None:
+        notes.append(
+            "intent staleness: SKIPPED — no candidate repo contains the "
+            "baseline commit"
+        )
+    elif head and head != sha.lower() and not (
+        head.startswith(sha.lower()) or sha.lower().startswith(head)
+    ):
+        if _code_changed_since(repo_hit, sha, specs_root):
+            where = f" (repo: {repo_hit.name})" if repo_hit != repo_root else ""
+            fails.append(
+                f"intent.md baseline {sha}, HEAD {head}{where}: code "
+                "changed since the baseline — re-scout before trusting "
+                "the artifact"
             )
-        elif head and head != sha.lower() and not (
-            head.startswith(sha.lower()) or sha.lower().startswith(head)
-        ):
-            if delivered:
-                notes.append(
-                    "intent staleness: SKIPPED — delivery recorded; "
-                    "the docset is historical"
-                )
-            else:
-                where = f" (repo: {repo_hit.name})" if repo_hit != repo_root else ""
-                fails.append(
-                    f"intent.md baseline {sha}, HEAD {head}{where} — "
-                    "re-scout before trusting the artifact"
-                )
+        else:
+            notes.append(
+                f"intent staleness: fresh — only the specs tree changed "
+                f"since baseline {sha} (HEAD {head})"
+            )
     return fails, notes
 
 
@@ -506,7 +567,8 @@ def intent_only_check(spec_dir: Path, repo_root: Path) -> int:
         (spec_dir / f).read_text(encoding="utf-8", errors="replace")
         for f in ("task.md", "spec.md") if (spec_dir / f).exists()
     ))
-    fails, notes = intent_failures(intent, repo_root, delivered)
+    fails, notes = intent_failures(intent, repo_root, delivered,
+                                   spec_dir.parent, gate=True)
     print(f"intent-only check: {p}")
     for n_ in notes:
         print(f"  {n_}")
@@ -768,15 +830,30 @@ def lifecycle_integrity_problems(task: str, repo: Path) -> list[str]:
     return problems
 
 
-def tiny_check(spec_dir: Path) -> int:
+def approval_failures(spec_dir: Path, repo_root: Path,
+                      status: str | None) -> list[str]:
+    """An approved-or-later Status must be backed by the approval
+    freeze, intact — at every tier."""
+    if status not in ("approved", "active", "done"):
+        return []
+    if not (spec_dir / "approvals" / "approval.md").exists():
+        return [f"evidence: Status {status} but no approvals/approval.md "
+                "freeze — never approved: set Status back to draft; "
+                "approved before the freeze existed: re-approve once — "
+                f"{freeze.approval_steps(spec_dir)}"]
+    return [f"evidence: {problem}"
+            for problem in freeze.verify(spec_dir, repo_root)]
+
+
+def tiny_check(spec_dir: Path, repo_root: Path) -> int:
     """The ONE-FILE contract gate: spec.md carries the task list
     in § Tasks; no other docset file exists or is required. Checks the
     in-file contract only — placeholders, open clarify markers, task
     grammar (IDs, FR citations, unique, Accept lines on code tasks),
-    tick proof notes — then reports like the full checker. The gates
-    that need the seven-file surface (traceability to TCs, burndown
-    table, freeze) do not exist at this tier by design; approval and
-    the human proof pass still bind."""
+    tick proof notes, the approval freeze — then reports like the full
+    checker. The gates that need the seven-file surface (traceability
+    to TCs, burndown table) do not exist at this tier by design; the
+    human proof pass still binds."""
     import specstate
     fails: list[str] = []
     warns: list[str] = []
@@ -821,6 +898,8 @@ def tiny_check(spec_dir: Path) -> int:
 
     if not re.search(r"^\*\*Status\*\*", clean, re.M):
         fails.append("spec.md has no Status header")
+    fails += approval_failures(spec_dir, repo_root,
+                               specstate.spec_status(clean))
 
     print(f"check: {spec_dir} (tier: tiny — one-file contract)")
     print(f"  {'PASS' if not fails else 'FAIL'} ({len(fails)} fail, "
@@ -870,7 +949,7 @@ def main(argv: list[str] | None = None) -> int:
         from specstate import spec_tier
         if spec_tier(spec_raw.read_text(encoding="utf-8",
                                         errors="replace")) == "tiny":
-            return tiny_check(spec_dir)
+            return tiny_check(spec_dir, repo_root)
 
     fails: list[str] = []
     warns: list[str] = []
@@ -909,14 +988,14 @@ def main(argv: list[str] | None = None) -> int:
     # 1a. intent.md — optional input beside survey.md/research.md, but
     # with FAIL teeth: absent → not checked, no warn (specs shaped without
     # a scout pass must stay green); present → the --intent-only refusal
-    # families run here too.
+    # families run here too, less the unresolvable-baseline one.
     intent_path = spec_dir / "intent.md"
     if intent_path.exists():
         intent_text = INVISIBLE.sub(
             "", intent_path.read_text(encoding="utf-8", errors="replace"))
         delivered = _delivery_recorded(texts["task.md"], texts["spec.md"])
         intent_fails_, intent_notes = intent_failures(
-            intent_text, repo_root, delivered)
+            intent_text, repo_root, delivered, spec_dir.parent)
         notes.extend(intent_notes)
         fails.extend(intent_fails_)
 
@@ -1171,16 +1250,7 @@ def main(argv: list[str] | None = None) -> int:
     status = spec_status(spec)
     for problem in lifecycle_integrity_problems(task, repo_root):
         fails.append(f"evidence: {problem}")
-    lifecycle_v2 = bool(re.search(r"\*\*Lifecycle\*\*:\s*v2\b", task, re.I))
-    if lifecycle_v2 and status in ("approved", "active", "done"):
-        if not (spec_dir / "approvals" / "approval.md").exists():
-            fails.append(
-                "evidence: lifecycle-v2 approved spec has no approvals/approval.md "
-                "freeze — run freeze.py --record only after user sign-off"
-            )
-        else:
-            for problem in freeze.verify(spec_dir, repo_root):
-                fails.append(f"evidence: {problem}")
+    fails += approval_failures(spec_dir, repo_root, status)
     if status == "draft" and (done or in_progress):
         fails.append(
             f"gate: implementation progress ({done} ticked, {in_progress} in-progress) "
@@ -1325,11 +1395,18 @@ def main(argv: list[str] | None = None) -> int:
         if repo_hit is not None and head and head != sha.lower() and not (
             head.startswith(sha.lower()) or sha.lower().startswith(head)
         ):
-            where = f" (repo: {repo_hit.name})" if repo_hit != repo_root else ""
-            warns.append(
-                f"survey baseline {sha}, HEAD {head}{where} — "
-                "re-survey before trusting statuses"
-            )
+            if _code_changed_since(repo_hit, sha, spec_dir.parent):
+                where = (f" (repo: {repo_hit.name})"
+                         if repo_hit != repo_root else "")
+                warns.append(
+                    f"survey baseline {sha}, HEAD {head}{where} — "
+                    "re-survey before trusting statuses"
+                )
+            else:
+                notes.append(
+                    "staleness: fresh — only the specs tree changed since "
+                    f"baseline {sha} (HEAD {head})"
+                )
 
     # 9. survey.md evidence reality: every `file:symbol:line` citation must
     # name a real file and a real def/class in it. FAIL when the symbol

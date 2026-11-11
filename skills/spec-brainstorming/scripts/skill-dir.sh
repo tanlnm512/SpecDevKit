@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
-# Print the active spec-brainstorming skill directory — the first existing
-# root in SKILL.md's spawn-payload priority order (project before home;
-# omp-native roots first, mirroring omp's provider precedence).
-# Callers run this once instead of checking each candidate path by hand;
-# its output is the skill_dir a spawn payload would otherwise carry.
+# Print the skill directory this script belongs to: its own location first,
+# then ${CLAUDE_PLUGIN_ROOT}, then a scan of harness roots (project before
+# home) only when neither holds a SKILL.md — a scan can land on another
+# harness's copy, so it is the last resort.
 set -euo pipefail
 
-for root in .omp .claude .zcode .agents .kilo; do
-  if [ -d "$root/skills/spec-brainstorming" ]; then
+is_skill_root() { [ -f "$1/SKILL.md" ]; }
+
+own="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if is_skill_root "$own"; then
+  echo "$own"
+  exit 0
+fi
+
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  for candidate in "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_ROOT/skills/spec-brainstorming"; do
+    if is_skill_root "$candidate"; then
+      cd "$candidate" && pwd
+      exit 0
+    fi
+  done
+fi
+
+for root in .omp .claude .zcode .agents .kilo \
+            "$HOME/.omp/agent" "$HOME/.claude" "$HOME/.zcode" "$HOME/.agents" "$HOME/.config/kilo" \
+            .agents/plugins/spec-dev-kit "$HOME/.gemini/config/plugins/spec-dev-kit"; do
+  if is_skill_root "$root/skills/spec-brainstorming"; then
     cd "$root/skills/spec-brainstorming" && pwd
     exit 0
   fi
 done
-for root in "$HOME/.omp/agent" "$HOME/.claude" "$HOME/.zcode" "$HOME/.agents" "$HOME/.config/kilo"; do
-  if [ -d "$root/skills/spec-brainstorming" ]; then
-    cd "$root/skills/spec-brainstorming" && pwd
-    exit 0
-  fi
-done
-# Antigravity (agy) sessions: the live copy is inside the agy plugin
-# install (workspace .agents/plugins/ or ~/.gemini/config/plugins/).
-for root in .agents/plugins/spec-dev-kit "$HOME/.gemini/config/plugins/spec-dev-kit"; do
-  if [ -d "$root/skills/spec-brainstorming" ]; then
-    cd "$root/skills/spec-brainstorming" && pwd
-    exit 0
-  fi
-done
-echo "ERROR: no spec-brainstorming skill dir (checked ./.omp, ./.claude, ./.zcode, ./.agents, ./.kilo, then the same order under \$HOME with ~/.omp/agent for .omp and ~/.config/kilo, then the agy plugin roots)" >&2
+echo "ERROR: no spec-brainstorming skill dir (checked the script's own dir, \$CLAUDE_PLUGIN_ROOT, then ./.omp ./.claude ./.zcode ./.agents ./.kilo, the same under \$HOME, and the agy plugin roots)" >&2
 exit 1

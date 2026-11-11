@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""Approval freeze and lifecycle-evidence verification.
+
+The approve gate is human, but its *inputs* must not be mutable after the
+user signs them. freeze.py records a content manifest for the approved
+intent/evidence documents and audit.py/check.py verify that manifest before
+execution and delivery:
+
+  spec.md     canonical hash (the volatile Status line is removed; at
+              tiny tier also § Evidence, the delivery record, and the
+              status markers inside § Tasks — the task list itself is
+              frozen)
+  plan.md     exact hash
+  survey.md   exact hash
+  test.md     exact hash
+  tech-spec.md prefix hash/length (only appended decisions may drift)
+
+task.md is deliberately not frozen: it is the lifecycle's status holder.
+Its contract-shape protections are traceability checks and the task-body
+scope gate.
+
+Tiny tier freezes its one file the same way: spec.md is the only entry.
+There § Tasks is hashed with its status tokens normalized away
+(checkbox state, the (in-progress)/(implemented)/(fix n/5)/(fixed n/5)
+markers, `done <date> — <proof>` sub-lines, a `Delivered:` record), so
+status progress stays legal while an added, edited, or struck task or
+requirement breaks the freeze.
+
+At full tier --record also demands the contract review's record,
+approvals/review.md: the reviewer's findings digest and every ruling,
+persisted by the orchestrator (the reviewer itself writes nothing), and
+carrying the docset fingerprint the review payload named. A docset
+repaired after its review has a new fingerprint, so the freeze refuses
+until it is re-reviewed.
+
+Usage:
+  freeze.py <spec-dir> --record [--repo <path>]
+  freeze.py <spec-dir> --record --force [--repo <path>]   # fresh approval only
+  freeze.py <spec-dir> --verify [--repo <path>]
+  freeze.py -h | --help
+
+--record is run only after explicit user approval. It writes
+specs/<name>/approvals/approval.md atomically. --verify writes nothing.
+"""
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import specstate
+
+FROZEN_FILES = ("spec.md", "plan.md", "survey.md", "test.md", "tech-spec.md")
+TINY_EVIDENCE_HEADING = "## Evidence"
+TASK_STATUS_LINE = re.compile(
+    r"^\s*(?:-\s*)?(?:done \d{4}-\d{2}-\d{2} \u2014|\*{0,2}Delivered\*{0,2}\s*:)")
+TASK_STATUS_MARKER = re.compile(
+    r"\s*\((?:in-progress|implemented|fix(?:ed)?\s+\d+/\d+)\)")
+TICKED_BOX = re.compile(r"^(\s*)- \[x\]")
+ENTRY = re.compile(
+    r"^-\s+`([^`]+)`:\s+(exact|prefix)\s+"
+    r"sha256:([0-9a-f]{64})\s+length:(\d+)\s*$",
+    re.M,
+)
+APPROVED_AT = re.compile(
+    r"\*\*Approved-at\*\*:\s+`?([0-9a-f]{7,40}|-)`?", re.I
+)
+
+
+def _task_line_less_status(line: str) -> str | None:
+    """A § Tasks line with its status tokens removed; None when nothing
+    but status remains."""
+    if TASK_STATUS_LINE.match(line):
+        return None
+    bare = TASK_STATUS_MARKER.sub("", TICKED_BOX.sub(r"\1- [ ]", line))
+    if bare != line and not bare.strip():
+        return None
+    return bare
+
+
+def _tasks_less_status(lines: list[str]) -> list[str]:
+    kept = [bare for bare in map(_task_line_less_status, lines)
+            if bare is not None]
+    # a tick or a delivery record may leave blank lines at the tail
+    while kept and not kept[-1].strip():
+        kept.pop()
+    if kept:
+        kept[-1] = kept[-1].rstrip("\r\n") + "\n"
+    return kept
+
+
+def _canonical_spec(text: str) -> bytes:
+    """Spec bytes less what the lifecycle rewrites: the Status line, and
+    at tiny tier § Evidence and the status tokens inside § Tasks — the
+    task list is contract, its progress markers are not."""
+    tiny = specstate.spec_tier(text) == "tiny"
+    kept: list[str] = []
+    tasks: list[str] = []
+    section = ""
+    for line in text.splitlines(keepends=True):
+        if line.startswith("## "):
+            kept += _tasks_less_status(tasks)
+            tasks = []
+            section = line.strip() if tiny else ""
+        if section == TINY_EVIDENCE_HEADING or specstate.STATUS_LINE.match(line):
+            continue
+        (tasks if section == specstate.TASKS_HEADING else kept).append(line)
+    return "".join(kept + _tasks_less_status(tasks)).encode("utf-8")
+
+
+def manifest_values(spec_dir: Path) -> dict[str, tuple[str, str, int]]:
+    """Content manifest for the freezeable docs: kind, sha256, byte length."""
+    out: dict[str, tuple[str, str, int]] = {}
+    for name in FROZEN_FILES:
+        path = spec_dir / name
+        if not path.exists():
+            continue
+        raw = path.read_bytes()
+        if name == "spec.md":
+            raw = _canonical_spec(path.read_text(encoding="utf-8"))
+        out[name] = ("prefix" if name == "tech-spec.md" else "exact",
+                     hashlib.sha256(raw).hexdigest(), len(raw))
+    return out
+
+
+def docset_fingerprint(spec_dir: Path) -> str:
+    """Short hash over the reviewable docset: the frozen manifest plus
+    task.md, which the contract review reads though the freeze leaves it
+    free to carry status."""
+    h = hashlib.sha256()
+    for name, (_kind, digest, _length) in sorted(
+            manifest_values(spec_dir).items()):
+        h.update(f"{name}:{digest}\n".encode())
+    task = spec_dir / "task.md"
+    if task.exists():
+        h.update(b"task.md:" + hashlib.sha256(task.read_bytes()).digest())
+    return h.hexdigest()[:12]
+
+
+REVIEW_EMIT = ("spec-author's `graph.py <spec-dir> --emit-spawns --repair "
+               "approve` (writes spawns/wave-<N>/reviewer-contract.md)")
+
+
+def _is_tiny(spec_dir: Path) -> bool:
+    spec = spec_dir / "spec.md"
+    return spec.exists() and specstate.spec_tier(
+        spec.read_text(encoding="utf-8", errors="replace")) == "tiny"
+
+
+def approval_steps(spec_dir: Path) -> str:
+    """What records an approval — a first one, or the one re-approval
+    of a docset approved before the freeze existed. Tiny tier has no
+    contract-review record."""
+    record = ("on the user's explicit yes run `freeze.py <spec-dir> "
+              "--record`")
+    if _is_tiny(spec_dir):
+        return record
+    return (f"emit the contract review with {REVIEW_EMIT}, spawn the "
+            "reviewer on it, write its findings digest, every ruling, and "
+            "the payload's `Docset fingerprint` line to "
+            f"approvals/review.md, then {record}")
+
+
+def review_problem(spec_dir: Path) -> str | None:
+    """Why approvals/review.md cannot back a freeze of the current
+    docset, or None when it can (tiny tier has no contract review)."""
+    if _is_tiny(spec_dir):
+        return None
+    review = spec_dir / "approvals" / "review.md"
+    try:
+        text = review.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    if not text.strip():
+        return (f"contract review not recorded — emit it with {REVIEW_EMIT}, "
+                "spawn the reviewer on that payload, then persist its "
+                "findings digest, every ruling, and the payload's `Docset "
+                f"fingerprint` line to {review}")
+    fingerprint = docset_fingerprint(spec_dir)
+    if fingerprint not in text:
+        return (f"{review} reviews a different docset (current "
+                f"fingerprint {fingerprint} not found) — the docset "
+                f"changed after its review: re-emit with {REVIEW_EMIT}, "
+                "re-review, and record the new digest and fingerprint")
+    return None
+
+
+def render(spec_dir: Path, approved_at: str) -> str:
+    vals = manifest_values(spec_dir)
+    lines = [
+        "# Approval freeze",
+        "",
+        f"**Approved-at**: `{approved_at}`",
+        "**Algorithm**: sha256 over UTF-8 bytes",
+        "",
+        "Recorded only after explicit user approval. `spec.md` is hashed without",
+        "its volatile Status line (at tiny tier also without § Evidence and the",
+        "status markers inside § Tasks; the task list itself is frozen).",
+        "`tech-spec.md` is verified as an immutable prefix so implementation",
+        "may append D-### decisions. `task.md` is not frozen because it is the",
+        "status holder.",
+        "",
+        "## Frozen contract",
+    ]
+    for name in FROZEN_FILES:
+        if name not in vals:
+            continue
+        kind, digest, length = vals[name]
+        lines.append(
+            f"- `{name}`: {kind} sha256:{digest} length:{length}"
+        )
+    lines += [
+        "",
+        "Any other change to these files requires a fresh user approval and a",
+        "new freeze record.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def record(spec_dir: Path, repo: Path, force: bool = False) -> int:
+    if any("NEEDS CLARIFICATION" in (spec_dir / f).read_text(
+            encoding="utf-8", errors="replace")
+           for f in FROZEN_FILES if (spec_dir / f).exists()):
+        print("FAIL: unresolved NEEDS CLARIFICATION marker — do not freeze", file=sys.stderr)
+        return 1
+    problem = review_problem(spec_dir)
+    if problem:
+        print(f"FAIL: {problem}", file=sys.stderr)
+        return 1
+    git_ok = specstate.git_available(repo)
+    sha = specstate.head_sha(repo) if git_ok else "-"
+    text = render(spec_dir, sha or "-")
+    out = spec_dir / "approvals" / "approval.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists() and not force:
+        print(
+            f"FAIL: {out} already exists — a replacement requires a fresh "
+            "user approval and --force",
+            file=sys.stderr,
+        )
+        return 1
+    fd, tmp = tempfile.mkstemp(prefix=".approval-", dir=str(out.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, out)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    print(f"recorded {out} (approved-at {sha or '-'})")
+    return 0
+
+
+def _commit_exists(repo: Path, sha: str) -> bool:
+    if not specstate.git_available(repo):
+        return False
+    try:
+        exists = subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "-e", f"{sha}^{{commit}}"],
+            capture_output=True, text=True, timeout=10,
+        ).returncode == 0
+        ancestor = subprocess.run(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor",
+             sha, "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        ).returncode == 0
+        return exists and ancestor
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def verify(spec_dir: Path, repo: Path) -> list[str]:
+    """Return human-readable integrity problems; empty means green."""
+    path = spec_dir / "approvals" / "approval.md"
+    if not path.exists():
+        return [f"approval freeze missing: {path.relative_to(spec_dir)}"]
+    text = path.read_text(encoding="utf-8", errors="replace")
+    problems: list[str] = []
+    am = APPROVED_AT.search(text)
+    if not am:
+        problems.append("approval freeze: missing Approved-at")
+    else:
+        approved_at = am.group(1)
+        if approved_at != "-" and not _commit_exists(repo, approved_at):
+            problems.append(
+                f"approval freeze: Approved-at commit {approved_at!r} not found "
+                "or not an ancestor of HEAD"
+            )
+    recorded: dict[str, tuple[str, str, int]] = {}
+    for name, kind, digest, length in ENTRY.findall(text):
+        if name in recorded:
+            problems.append(f"approval freeze: duplicate entry for {name}")
+        recorded[name] = (kind, digest, int(length))
+    current = manifest_values(spec_dir)
+    for name in FROZEN_FILES:
+        if name not in recorded and name not in current:
+            continue
+        if name not in recorded:
+            problems.append(f"approval freeze: {name} was present but not recorded")
+            continue
+        if name not in current:
+            problems.append(f"approval freeze: frozen {name} is now missing")
+            continue
+        old, new = recorded[name], current[name]
+        if old[0] != new[0]:
+            problems.append(f"approval freeze: {name} verification kind changed")
+            continue
+        if name == "tech-spec.md":
+            raw = (spec_dir / name).read_bytes()[: old[2]]
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest != old[1] or len(raw) != old[2]:
+                problems.append(
+                    f"approval freeze: {name} approved prefix changed — re-approve"
+                )
+        else:
+            if old != new:
+                problems.append(f"approval freeze: {name} changed after approval")
+    return problems
+
+
+def parse_args(argv: list[str]) -> tuple[Path, Path, str, bool] | None:
+    spec_dir = repo = None
+    mode = ""
+    force = False
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("--record", "--verify"):
+            mode = arg
+        elif arg == "--force":
+            force = True
+        elif arg == "--repo":
+            i += 1
+            if i >= len(argv):
+                return None
+            repo = argv[i]
+        elif not spec_dir and not arg.startswith("-"):
+            spec_dir = arg
+        else:
+            return None
+        i += 1
+    if not spec_dir or mode not in ("--record", "--verify"):
+        return None
+    return (Path(spec_dir), Path(repo) if repo else Path(spec_dir).parent.parent,
+            mode, force)
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__)
+        return 0
+    parsed = parse_args(argv)
+    if parsed is None:
+        print(__doc__, file=sys.stderr)
+        return 2
+    spec_dir, repo, mode, force = parsed
+    if not spec_dir.is_dir():
+        print(f"FAIL: {spec_dir} is not a directory", file=sys.stderr)
+        return 1
+    if mode == "--record":
+        return record(spec_dir, repo, force)
+    problems = verify(spec_dir, repo)
+    for problem in problems:
+        print(f"FAIL: {problem}")
+    print(f"freeze: {'PASS' if not problems else 'FAIL'} ({len(problems)} problem(s))")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -24,7 +24,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL = REPO_ROOT / "skills" / "spec-shape"
+SKILL = REPO_ROOT / "skills" / "spec-author"
 SCAFFOLD = SKILL / "scripts" / "scaffold.sh"
 CHECK = SKILL / "scripts" / "check.py"
 FREEZE = SKILL / "scripts" / "freeze.py"
@@ -37,6 +37,10 @@ _spec = importlib.util.spec_from_file_location(
     "specstate", SKILL / "scripts" / "specstate.py")
 specstate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(specstate)
+
+_freeze_spec = importlib.util.spec_from_file_location("freeze", FREEZE)
+freeze = importlib.util.module_from_spec(_freeze_spec)
+_freeze_spec.loader.exec_module(freeze)
 
 
 def run_py(script: Path, *argv, cwd: Path | None = None,
@@ -214,7 +218,7 @@ lists the test module as its only consumer.
 ## References
 - [survey.md](survey.md) — module baseline and evidence.
 - The lifecycle contract: this repo consumes the spec suite's
-  templates verbatim via scaffold.sh (mastered at spec-shape).
+  templates verbatim via scaffold.sh (mastered at spec-author).
 
 ## Decisions
 ### D-001: One pure function, no parser
@@ -371,6 +375,12 @@ def build_docset() -> tuple[Path, Path]:
         (repo / "specs" / "INDEX.md").write_text(INDEX_MD, encoding="utf-8")
         (repo / "calc.py").write_text(CALC_PY, encoding="utf-8")
         (repo / "test_calc.py").write_text(TEST_CALC_PY, encoding="utf-8")
+        (spec_dir / "approvals").mkdir()
+        (spec_dir / "approvals" / "review.md").write_text(
+            "# Contract review\n\nDocset fingerprint: "
+            f"{freeze.docset_fingerprint(spec_dir)}\n\n"
+            "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
+            encoding="utf-8")
         r = run_py(FREEZE, str(spec_dir), "--record", cwd=repo)
         if r.returncode != 0:
             raise AssertionError(f"freeze.py failed: {r.stdout}{r.stderr}")

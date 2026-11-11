@@ -5,8 +5,8 @@ Shared, skill-agnostic tool (same contract as omp-defs.py): every role
 under skills/<name>/agents/*.md carrying Claude-style frontmatter gets a
 target-dialect twin, derived by parsing that frontmatter. No per-skill
 or per-role table lives here. Derived, regenerate-only artifacts — never
-hand-edited. Underscore-prefixed files (e.g. _shared-protocol.md) are
-shared prose, not roles: skipped.
+hand-edited. Shared prose a role brief points at lives in the skill's
+protocol/ dir, never agents/ — every agents/*.md is a role.
 
 Targets:
 
@@ -15,7 +15,7 @@ Targets:
   mode: subagent, permission map derived from the source `tools:` list
   (read/edit/bash/glob/grep/webfetch/websearch allow iff the source
   lists a matching Claude tool; task always deny — "no agent spawns
-  another" from _shared-protocol). model omitted
+  another" from protocol/shared-protocol.md). model omitted
   (inherit): opencode wants provider-prefixed model IDs the source
   briefs don't carry. Skills reach opencode through the
   ~/.agents/skills compatibility root it already scans — only defs need
@@ -41,7 +41,7 @@ Targets:
   list (read/edit/bash/glob/grep/webfetch/websearch/skill allow iff
   the source lists a matching Claude tool — Write and Edit both map to
   edit; task always deny — "no agent spawns another" from
-  _shared-protocol, made mechanical). model omitted: Kilo wants
+  protocol/shared-protocol.md, made mechanical). model omitted: Kilo wants
   provider-prefixed model IDs the source briefs don't carry, so the
   agent inherits the session default. Skills reach Kilo through the
   ~/.agents/skills compatibility root it scans natively — only defs need
@@ -71,13 +71,13 @@ destination ledger.
 
 Run by tools/sync.sh; standalone:
 
-    tools/agent-defs.py --target opencode --skill-dir skills/spec-shape \
+    tools/agent-defs.py --target opencode --skill-dir skills/spec-author \
         --out ~/.config/opencode/agents
-    tools/agent-defs.py --target droid    --skill-dir skills/spec-shape \
+    tools/agent-defs.py --target droid    --skill-dir skills/spec-author \
         --out ~/.factory/droids
-    tools/agent-defs.py --target kilo     --skill-dir skills/spec-shape \
+    tools/agent-defs.py --target kilo     --skill-dir skills/spec-author \
         --out ~/.config/kilo/agent
-    tools/agent-defs.py --target agy      --skill-dir skills/spec-shape \
+    tools/agent-defs.py --target agy      --skill-dir skills/spec-author \
         --out agents
 """
 import re
@@ -231,8 +231,7 @@ def main(argv=None):
 
     src = Path(skill) / "agents"
     roles = sorted(p for p in src.glob("*.md")
-                   if not p.name.startswith("_")
-                   and (only is None or p.name in only))
+                   if only is None or p.name in only)
     if not roles:
         sys.exit(f"{src}: no role files (after --only filter, if any)")
 

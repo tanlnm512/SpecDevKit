@@ -48,14 +48,28 @@ Modes:
   --emit-spawns  write one self-contained spawn payload per frontier
                  agent node to specs/<name>/spawns/wave-<N>/<role>.md (or
                  --wave-dir): frontmatter-stripped brief body byte-verbatim +
-                 `_shared-protocol.md` verbatim (the reviewer is the exempt
-                 role) + the input payload filled from doc state (spec dir,
+                 `protocol/shared-protocol.md` verbatim (the reviewer is the
+                 exempt role) + the input payload filled from doc state (spec dir,
                  requirement list, task entry verbatim + TC acceptance commands,
                  research questions) + the resolved skill_dir. spawns/ is
                  derived and regenerate-only: safe to delete, never read by
-                 check.py, never status. --repair NODE additionally emits
-                 one agent node's payload even when it is not in the
-                 frontier — the single-agent repair-run instrument; the
+                 check.py, never status. Execute emits one wave: the
+                 runnable tasks in task-id order whose files are disjoint
+                 (a task naming no files runs alone); every other runnable
+                 task prints `deferred: T### (<why>)` and waits for the
+                 next emit, and a claimed task is flagged as a possible
+                 orphan. A fix-round payload carries notes/T###.md, the
+                 round's failure evidence, verbatim. --native-agents is
+                 for a harness that registers this package's agents: the
+                 payload names its agent type and omits the brief body
+                 that type already carries (the default stays
+                 self-contained). --repair NODE emits ONLY that
+                 agent node's payload, in or out of the frontier — the
+                 single-agent repair-run instrument (`research` emits
+                 the researcher alone, `approve` the contract review
+                 for a re-approval — the authoring package's alone); it
+                 is refused when this package ships no brief or lens for
+                 the node. The
                  surveyor's repair payload carries a DELTA RE-SURVEY block
                  (files changed since the survey's stale baseline) so a
                  converge re-survey merges instead of rebuilding. At effort
@@ -67,15 +81,23 @@ Modes:
                  while delivery is pending (execute done,
                  delivery not yet recorded), the reviewer-diff.md payload
                  (implementation-diff mode) is prepared the same way the
-                 undetermined gate's researcher payload is.
+                 undetermined gate's researcher payload is, with the
+                 final diff written beside it as reviewer-diff.patch
+                 (the reviewer holds no shell).
   --run          the auto-trigger loop: compute the frontier; pause
-                 `AWAITING HUMAN: <node>` at every judgment node (clarify,
-                 an undetermined research-gate, approve, tick-commit —
-                 human gates are never auto-satisfied and this loop mutates
-                 no doc state of its own); run the mechanical verify node
+                 `AWAITING HUMAN: <node>` at every human gate (clarify,
+                 approve, tick-commit) and `AWAITING ORCHESTRATOR:
+                 research-gate` at the orchestrator's own judgment, or
+                 `AWAITING ORCHESTRATOR: execute` when no task can be
+                 spawned (claimed, blocked, or at the fix cap — each
+                 named with what it needs) —
+                 gates are never auto-satisfied and this loop mutates
+                 no doc state of its own; run the mechanical verify node
                  (check.py) directly; emit payloads for the ready agent
                  wave; invoke --runner per payload (default `print`: echo
-                 the invocation) — a runner that exits nonzero or raises
+                 the invocation, then stop after the one emitted wave —
+                 the orchestrator spawns it and re-runs) — a runner that
+                 exits nonzero or raises
                  stops the loop with a role/node diagnostic and exit 3, so
                   no later wave starts; recompute and repeat until a gate,
                   workflow completion, --max-waves, or a wave that changed
@@ -84,7 +106,9 @@ Modes:
                  frontier — `intent` (the scout node; spec/clarify
                  mechanics unchanged), `shape` (intent + the authoring wave
                  survey/plan/tech/qa/tasks + verify + the approve display;
-                 a drained shape span stops at the approve handoff),
+                 a drained shape span stops at the approve handoff; a
+                 shape span with no spec to author prints AWAITING and
+                 routes to intake; one held on blocked nodes exits 1),
                  `execute` (execute + tick-commit + archive mechanics),
                  `full` (default — bare-invocation semantics, byte-identical
                  for existing dirs). A span is a frontier filter only: node
@@ -106,11 +130,13 @@ research-gate, tick-commit) are never auto-satisfied by this script.
 
 Usage: graph.py <spec-dir> [--repo <path>] [--state-json] [--mermaid]
                 [--explain <node>] [--wave-dir <dir>] [--launch-check]
-                [--emit-spawns] [--repair <node>]
+                [--emit-spawns] [--repair <node>] [--native-agents]
                 [--run [--runner '<template>'] [--dry-run] [--max-waves N]]
                 [--span intent|shape|execute|full]
-Exit:  0 = report produced (any workflow state) · 1 = unreadable spec-dir ·
-       2 = usage error (unknown flag, unknown --explain node, missing args)
+Exit:  0 = report produced (any workflow state) · 1 = unreadable spec-dir,
+       or a phase span stopped red/held (verify RED, blocked nodes) ·
+       2 = usage error (unknown flag, unknown --explain node, missing
+       args, a --repair node this package cannot emit)
        · 3 = --run stopped: a runner exited nonzero or raised
        · 4 = span entry refused (the blocking gate and its reason printed)
 """
@@ -141,6 +167,7 @@ from check import (  # noqa: E402
     PLACEHOLDER,
     QUOTE_SPAN,
 )
+import freeze  # noqa: E402
 import specstate  # noqa: E402
 
 # The workflow graph's nodes, in canonical (dependency) order. Names must
@@ -157,6 +184,10 @@ DOC_FILES = ["spec.md", "intent.md", "survey.md", "research.md",
 # Fix-round cap: `(fix n/5)` — the cap lives in the task.md annotation, so a
 # task at cap is surfaced for adjudication, never auto-retried past it.
 FIX_CAP = 5
+
+# Payload cap for a fix round's evidence note: the newest round is
+# appended last, so the tail is what the builder needs.
+FIX_NOTE_LINE_CAP = 200
 
 # Payload cap for the DELTA RE-SURVEY file list: a mass refactor's delta
 # is the whole repo — the payload says so instead of listing thousands of
@@ -213,7 +244,7 @@ DONE, READY, BLOCKED, UNDETERMINED, SKIPPED = (
 # payload builder still knows its protocol exemption.
 AGENT_BRIEFS = {
     # node -> (role, archetype brief, lens); five archetypes,
-    # lens specializations ride the payload from agents/_lenses.md
+    # lens specializations ride the payload from protocol/lenses.md
     "intent": ("surveyor", "scout.md", "intent"),
     "survey": ("surveyor", "scout.md", "survey"),
     "plan": ("planner", "designer.md", "plan"),
@@ -222,6 +253,29 @@ AGENT_BRIEFS = {
     "tasks": ("task-breaker", "designer.md", "tasks"),
     "execute": ("implementer", "builder.md", "build"),
 }
+
+# The research node never reaches the frontier (its gate is a judgment),
+# so its payload wiring lives beside the frontier nodes' only for --repair
+# and the undetermined-gate emit.
+RESEARCH_BRIEF = ("researcher", "scout.md", "research")
+
+# --repair's single-node instruments. Execute is never repaired: its
+# payloads are per task. `approve` re-emits the contract review when a
+# corrected spec is re-approved and approve is no longer the frontier.
+REPAIR_BRIEFS = {
+    **{n: v for n, v in AGENT_BRIEFS.items() if n != "execute"},
+    "research": RESEARCH_BRIEF,
+    "approve": ("reviewer", "reviewer.md", None),
+}
+
+# The contract review belongs to the package that authors docsets: a
+# package without the designer brief may hold the reviewer for its own
+# span (the implementation diff) and still must not review for approval.
+AUTHORING_BRIEF = "designer.md"
+
+# Archetypes whose brief is the whole contract; every other brief needs
+# its lens section from this package's protocol/lenses.md.
+LENSLESS_BRIEFS = frozenset({"qa.md", "builder.md", "reviewer.md"})
 
 # This script IS the running skill's — its own root is the resolved skill_dir
 # every payload carries (never guessed, never hardcoded in a brief).
@@ -258,9 +312,11 @@ SPAN_AGENT_NODES = {
     "execute": frozenset({"execute", "tick-commit"}),
 }
 
-# What a drained span hands off to — the approve gate is shape's named
-# handoff; intent hands to shape, shape to execute.
-SPAN_HANDOFF = {"intent": "shape", "shape": "execute"}
+# What a drained span hands off to, and the command that continues it —
+# the approve gate is shape's named handoff; intent hands to shape,
+# shape to execute.
+SPAN_HANDOFF = {"intent": ("shape", "/spec-author"),
+                "shape": ("execute", "/spec-execute")}
 
 
 def span_allows(span: str, node: str) -> bool:
@@ -362,10 +418,12 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
     it is `- [ ]`, unimplemented, its `(after T###)` deps are all
     implemented, ticked, or struck, and it is not at the fix-round cap. An
     `(implemented)` entry has landed: it reads `implemented`, never
-    runnable, and counts toward execute's completion. At-cap tasks are
-    surfaced for adjudication, never
-    runnable; file overlaps between runnable tasks are noted for wave
-    scheduling (the orchestrator picks the disjoint wave)."""
+    runnable, and counts toward execute's completion — unless an open
+    `(fix n/5)` sits beside it, which makes the task runnable again.
+    At-cap tasks are surfaced for adjudication, never runnable. Runnable
+    tasks whose files overlap each other's, or a claimed task's, cannot
+    share a wave: `deferred` names why a runnable task waits for the
+    next one (schedule_wave)."""
     by_id = {e.id: e for e in entries if e.id}
     # A struck entry's own id is unparseable (`- [ ] ~~T004~~ …` has no
     # leading T-id), so index the T-id its block names: a struck dep counts
@@ -388,7 +446,11 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
                 "landed unticked — the plan-wide tick follows the "
                 "pre-tick proof pass")
         elif e.claimed:
-            state, why = "claimed", "marked (in-progress) — an implementer holds it"
+            state, why = "claimed", (
+                "marked (in-progress) — a builder holds it; with no "
+                "builder running (a killed session) it is an orphan: "
+                "re-run its acceptance commands and mark it "
+                "(implemented), or clear the claim to re-run it")
         elif e.id is None:
             state, why = "blocked", "entry line has no T-### id — fix the entry"
         else:
@@ -407,13 +469,15 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
                 state, why = "at-fix-cap", (
                     f"fix cap reached ({e.fix_round}/{FIX_CAP}) — adjudicate "
                     "before another round (plan-suspect → re-brief tech)")
+            elif e.fix_round is not None:
+                state, why = "runnable", (
+                    f"fix round {e.fix_round}/{FIX_CAP} open — re-run with "
+                    "the failure evidence")
             else:
                 state, why = "runnable", "deps satisfied — ready for an implementer"
         out.append({"id": e.id, "state": state, "reason": why,
-                    "files": files, "note": None})
+                    "files": files, "note": None, "deferred": None})
 
-    # Wave-scheduling surface: runnable tasks naming the same files are noted
-    # so the orchestrator keeps each wave's files disjoint ([P] discipline).
     runnable = [t for t in out if t["state"] == "runnable"]
     for t in runnable:
         mates = sorted({o["id"] for o in runnable if o is not t and any(
@@ -422,8 +486,64 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
         )})
         if mates:
             t["note"] = (f"shares files with {', '.join(mates)} — "
-                         "schedule in separate waves")
+                         "they take separate waves")
+        elif not t["files"]:
+            t["note"] = "no parseable Touches: — runs alone"
+    schedule_wave(runnable, [t for t in out if t["state"] == "claimed"])
     return out
+
+
+def _wave_conflict(task: dict, wave: list[dict]) -> str | None:
+    """Why `task` cannot join the wave, or None. A task naming no files
+    could touch anything, so it conflicts with every wave-mate."""
+    for mate in wave:
+        who = (mate["id"] or "—") + (
+            " (in-progress)" if mate["state"] == "claimed" else "")
+        if not mate["files"]:
+            return f"{who} has no parseable Touches: and runs alone"
+        if not task["files"]:
+            return "no parseable Touches: — runs alone"
+        for theirs in mate["files"]:
+            for ours in task["files"]:
+                if specstate.paths_overlap(theirs, ours):
+                    shared = max(theirs, ours, key=len)
+                    return f"shares {shared} with {who}"
+    return None
+
+
+def schedule_wave(runnable: list[dict], in_flight: list[dict]) -> None:
+    """Pick the wave: runnable tasks in task-id order, each admitted only
+    when file-disjoint from every task already in and from every claimed
+    task still holding its files; the rest carry `deferred` and wait for
+    the next wave."""
+    wave: list[dict] = list(in_flight)
+    for task in sorted(runnable, key=lambda t: t["id"]):
+        task["deferred"] = _wave_conflict(task, wave)
+        if task["deferred"] is None:
+            wave.append(task)
+
+
+def task_line(t: dict) -> str:
+    """One per-task report line: id, state, reason, and the wave note."""
+    note = (f"deferred: {t['deferred']}" if t.get("deferred")
+            else t.get("note"))
+    return (f"{t['id'] or '—':<6} {t['state']:<11} {t['reason']}"
+            + (f"  [{note}]" if note else ""))
+
+
+def execute_holds(state: dict, every: bool = False) -> list[str]:
+    """Lines naming what this wave leaves behind and what the
+    orchestrator owes each: deferred runnables and claimed tasks
+    always; with `every`, the blocked and at-cap tasks too."""
+    lines: list[str] = []
+    for t in state["nodes"]["execute"].get("tasks") or ():
+        if t.get("deferred"):
+            lines.append(f"   deferred: {t['id']} ({t['deferred']})")
+        elif t["state"] == "claimed" or (
+                every and t["state"] in ("blocked", "at-fix-cap")):
+            lines.append(f"   {t['state']}: {t['id'] or '—'} — "
+                         f"{t['reason']}")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +720,19 @@ def _specs_rel_prefix(repo: Path, spec_dir: Path) -> str | None:
     return rel + "/"
 
 
+def code_delta(repo: Path, spec_dir: Path, base_sha: str,
+               head: str) -> tuple[list[str] | None, list[str] | None]:
+    """(every path, the paths outside the specs tree) changed between
+    the baseline and HEAD — (None, None) when git cannot say. Only the
+    second list can move a code citation."""
+    raw = specstate.diff_paths(repo, base_sha, head)
+    if raw is None:
+        return None, None
+    specs_prefix = _specs_rel_prefix(repo, spec_dir)
+    return raw, [p for p in raw
+                 if not (specs_prefix and p.startswith(specs_prefix))]
+
+
 def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
                         spec_dir: Path) -> list[str]:
     """The DELTA RE-SURVEY block for a stale survey baseline (the
@@ -618,14 +751,11 @@ def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
     head = specstate.head_sha(repo)
     if not head or base[1] == head:
         return []
-    raw = specstate.diff_paths(repo, base[1], head)
+    raw, paths = code_delta(repo, spec_dir, base[1], head)
     if raw is None:
         return [f"- delta: unavailable (git diff {base[1]}..{head} "
                 "failed) — re-survey in full and merge into the "
                 "existing survey.md yourself"]
-    specs_prefix = _specs_rel_prefix(repo, spec_dir)
-    paths = [p for p in raw
-             if not (specs_prefix and p.startswith(specs_prefix))]
     if not paths:
         return [f"- DELTA RE-SURVEY: baseline {base[1]} != HEAD {head} "
                 "but no code files changed "
@@ -656,7 +786,8 @@ def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
 
 
 def input_payload_for(node: str, spec_dir: Path, repo: Path,
-                      entry: specstate.TaskEntry | None) -> str:
+                      entry: specstate.TaskEntry | None,
+                      diff_file: Path | None = None) -> str:
     """The filled input payload (SKILL.md § Spawn mechanics step 3): the
     doc-state facts each brief's `Input payload` section asks the
     orchestrator to embed — verbatim where the brief says verbatim. Every
@@ -668,6 +799,30 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     if not fr_lines:
         fr_lines = ["   (no FR/NFR-### entries in spec.md)"]
     constitution = spec_dir.parent / "CONSTITUTION.md"
+
+    if node == "intent":
+        intent_path = spec_dir / "intent.md"
+        problem = spec_section(read_doc(intent_path) or "", "Problem")
+        idea = re.sub(r"<!--.*?-->", "", problem or "", flags=re.S).strip()
+        lines = [
+            f"- spec_dir: {spec_dir}",
+            f"- repo root: {repo}",
+            f"- intent.md: {intent_path} — the session's file: record "
+            "your facts and candidate gaps in it, never rewrite its "
+            "Problem, Audience, or FR seeds",
+        ]
+        if idea and not is_unfilled(idea):
+            lines += ["- The idea (intent.md § Problem, verbatim):",
+                      _indent(idea)]
+        else:
+            lines += ["- The idea: NOT RECORDED — intent.md § Problem is "
+                      "still the template. Probe nothing; return `digest: "
+                      "intent blocked — no idea in § Problem` so the "
+                      "session writes the user's ask there first."]
+        brainstorm = repo / "brainstorms" / f"{spec_dir.name}.md"
+        if brainstorm.exists():
+            lines.append(f"- Brainstorm handoff: {brainstorm}")
+        return "\n".join(lines)
 
     if node == "survey":
         survey_text = read_doc(spec_dir / "survey.md")
@@ -740,14 +895,18 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             + " · CONSTITUTION: "
             + (str(constitution) if constitution.exists()
                else "not present — report its absence in your digest"),
-            "- Acceptance commands (always for code tasks — run them while "
-            "implementing; the pre-tick proof pass re-runs them):",
         ]
-        lines += [_indent(c) for c in acceptance_for(entry.block, test_text)]
+        if specstate.spec_tier(spec_text) == "tiny":
+            lines.append("- Acceptance commands: the entry's `Accept:` "
+                         "line(s) above — tiny tier has no test.md")
+        else:
+            lines.append(
+                "- Acceptance commands (always for code tasks — run them "
+                "while implementing; the pre-tick proof pass re-runs them):")
+            lines += [_indent(c)
+                      for c in acceptance_for(entry.block, test_text)]
         if entry.fix_round:
-            note = spec_dir / "notes" / f"{entry.id or 'T???'}.md"
-            lines += [f"- Fix round {entry.fix_round}: prior scratch note: "
-                      f"{note if note.exists() else '(none written yet)'}"]
+            lines += fix_evidence_lines(spec_dir, entry)
     elif node == "design":
         lines = [
             f"- spec_dir: {spec_dir} (read spec.md, survey.md, and "
@@ -771,18 +930,35 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             f"- spec_dir: {spec_dir}",
             "- Mode: contract — the pre-approve review of the docset "
             "(findings only, edit nothing)",
-            "- Read spec.md, plan.md, tech-spec.md, task.md, test.md, and "
-            "survey.md under the spec dir, plus specs/CONSTITUTION.md under "
-            "the spec dir's parent; survey.md is the evidence baseline",
         ]
+        if specstate.spec_tier(spec_text) == "tiny":
+            lines.append(
+                "- Tier: tiny — the one-file contract. Read spec.md only "
+                "(its § Tasks holds the task list; each task's Accept "
+                "line is its evidence) plus specs/CONSTITUTION.md under "
+                "the spec dir's parent. No plan.md, tech-spec.md, "
+                "task.md, test.md, or survey.md exists at this tier — "
+                "their absence is never a finding")
+        else:
+            lines += [
+                "- Read spec.md, plan.md, tech-spec.md, task.md, test.md, "
+                "and survey.md under the spec dir, plus "
+                "specs/CONSTITUTION.md under the spec dir's parent; "
+                "survey.md is the evidence baseline",
+                f"- Docset fingerprint: {freeze.docset_fingerprint(spec_dir)}"
+                " — the orchestrator records it with your findings in "
+                "approvals/review.md; the freeze refuses a review of any "
+                "other docset",
+            ]
     elif node == "tick-commit":
         # The reviewer's diff anchor: the approval freeze's Approved-at
         # commit — a real SHA read from approvals/approval.md, never raw
-        # marker text, because it is interpolated into a git command the
-        # reviewer runs (`HEAD~2;id`-shaped text must not survive). No
-        # approval SHA (a non-git freeze's dash — or no freeze at all)
-        # leaves no diff base: anchor the review on every task's
-        # intended-files union instead, never raw HEAD.
+        # marker text, because it is interpolated into a git command
+        # (`HEAD~2;id`-shaped text must not survive). No approval SHA (a
+        # non-git freeze's dash — or no freeze at all) leaves no diff
+        # base: anchor the review on every task's intended-files union
+        # instead, never raw HEAD. The reviewer holds no Bash, so the
+        # diff reaches it as a file the emit wrote.
         base = specstate.approval_sha(spec_dir)
         base_line = (
             f"- Base: the approval-freeze anchor `{base}`" if base else
@@ -794,19 +970,24 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             "review (findings only, edit nothing)",
             base_line,
         ]
-        if base:
-            lines += [
-                "- The complete final diff (run both, read everything):",
-                f"   git -C {repo} diff {base}      # tracked changes since base",
-                f"   git -C {repo} status --porcelain   # untracked files — read in full",
-            ]
+        if base and diff_file:
+            lines.append(
+                f"- The complete final diff: {diff_file} — `git diff "
+                f"{base}` (tracked changes since base), written beside "
+                "this payload. Its header lists the untracked files the "
+                "diff omits: Read each of those in full")
+        elif base:
+            lines.append(
+                f"- The final diff: unavailable (`git diff {base}` could "
+                f"not be written from {repo}) — say so in your digest "
+                "and anchor the review on every task's intended-files "
+                "union instead")
         lines += [
             "- Plan-side truth: read task.md, tech-spec.md, test.md, "
             "survey.md, and specs/CONSTITUTION.md under the spec dir's "
             "parent",
             "- Review for semantic/security/rollback issues and wording "
-            "drift; resolve BLOCKs, own or rule every WARN/NIT in the "
-            "digest",
+            "drift",
         ]
     else:
         lines = [f"- spec_dir: {spec_dir}"]
@@ -815,12 +996,45 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     return "\n".join(lines)
 
 
+def status_holder_text(spec_dir: Path) -> str:
+    """The task list's text: task.md, or spec.md § Tasks at tiny tier."""
+    spec_text = read_doc(spec_dir / "spec.md") or ""
+    if specstate.spec_tier(spec_text) == "tiny":
+        return specstate.tiny_task_text(spec_text) or ""
+    return read_doc(spec_dir / "task.md") or ""
+
+
+def fix_note_path(spec_dir: Path, entry: specstate.TaskEntry) -> Path:
+    return spec_dir / "notes" / f"{entry.id}.md"
+
+
+def fix_evidence_lines(spec_dir: Path,
+                       entry: specstate.TaskEntry) -> list[str]:
+    """The fix round's evidence, verbatim from notes/T###.md — the
+    orchestrator records each round's failing command and output there,
+    so a fresh builder gets what a continued one would remember."""
+    note = fix_note_path(spec_dir, entry)
+    head = f"- Fix round {entry.fix_round}/{FIX_CAP}"
+    kept = (read_raw(note) or "").rstrip().splitlines()
+    if not kept:
+        return [f"{head}: FAILURE EVIDENCE NOT RECORDED — {note} is "
+                "absent or empty. Do not implement from this payload: "
+                "return `blocked: no failure evidence` so the "
+                "orchestrator records the failing command and its "
+                "output there and re-emits"]
+    cut = len(kept) - FIX_NOTE_LINE_CAP
+    scope = (f"the last {FIX_NOTE_LINE_CAP} of {len(kept)} lines — Read "
+             "the file for the rest" if cut > 0 else "verbatim")
+    return [f"{head} — failure evidence and prior attempts ({note}, "
+            f"{scope}):",
+            _indent("\n".join(kept[-FIX_NOTE_LINE_CAP:]))]
+
+
 def frontier_payloads(state: dict, spec_dir: Path,
-                      repo: Path, merge: bool = True,
-                      span: str = "full") -> list[dict]:
+                      repo: Path, span: str = "full") -> list[dict]:
     """One record per payload this wave writes: one per frontier agent node,
-    one per runnable task for execute (named implementer-T###.md when there
-    are several, implementer.md when one), plus — while the research-gate is
+    one per task in execute's file-disjoint wave (named implementer-T###.md
+    when there are several, implementer.md when one), plus — while the research-gate is
     undetermined — the researcher payload, and — while delivery is pending
     (execute done, delivery not yet recorded) — the implementation-diff
     reviewer payload (the instruments of a `run` decision and of the
@@ -831,14 +1045,11 @@ def frontier_payloads(state: dict, spec_dir: Path,
     task.md; qa stays its own implementation-blind spawn in the same
     wave, so test.md always comes from qa alone. Docset, check.py, and
     the gates are unchanged.
-    `merge=False` (the --repair path) keeps every payload single-role —
-    a repair run must never re-author the whole docset.
     `span` filters the emitted payloads to the phase's nodes —
     a filter on payloads only, never on node states."""
     items: list[dict] = []
     merge_design = (
-        merge
-        and state.get("effort") == "standard"
+        state.get("effort") == "standard"
         and all(x in state["frontier"] for x in ("plan", "tech", "qa")))
     for node in state["frontier"]:
         if node not in AGENT_BRIEFS:
@@ -849,10 +1060,10 @@ def frontier_payloads(state: dict, spec_dir: Path,
             continue
         role, brief, lens = AGENT_BRIEFS[node]
         if node == "execute":
-            entries = specstate.task_entries(
-                read_doc(spec_dir / "task.md") or "")
+            entries = specstate.task_entries(status_holder_text(spec_dir))
             runnables = [t for t in state["nodes"]["execute"].get("tasks", [])
-                         if t["state"] == "runnable" and t["id"]]
+                         if t["state"] == "runnable" and t["id"]
+                         and not t["deferred"]]
             multi = len(runnables) > 1
             for t in runnables:
                 entry = next((e for e in entries if e.id == t["id"]), None)
@@ -877,14 +1088,11 @@ def frontier_payloads(state: dict, spec_dir: Path,
         })
     if (state["nodes"]["research-gate"]["state"] == UNDETERMINED
             and span_allows(span, "research")):
-        items.append({"node": "research", "role": "researcher",
-                      "brief": "scout.md", "lens": "research",
-                      "filename": "researcher.md", "entry": None})
+        items.append(repair_item("research"))
     if (state["nodes"]["approve"]["state"] == READY
-            and span_allows(span, "approve")):
-        items.append({"node": "approve", "role": "reviewer",
-                      "brief": "reviewer.md",
-                      "filename": "reviewer-contract.md", "entry": None})
+            and span_allows(span, "approve")
+            and repair_refusal("approve") is None):
+        items.append(repair_item("approve"))
     if (state["nodes"]["execute"]["state"] == DONE
             and state["nodes"]["tick-commit"]["state"] != DONE
             and span_allows(span, "tick-commit")):
@@ -894,10 +1102,86 @@ def frontier_payloads(state: dict, spec_dir: Path,
     return items
 
 
+def repair_item(node: str) -> dict:
+    """The single-role payload record for one repairable node — never
+    the merged designer: a repair must not re-author the whole docset."""
+    role, brief, lens = REPAIR_BRIEFS[node]
+    filename = "reviewer-contract.md" if node == "approve" else f"{role}.md"
+    return {"node": node, "role": role, "brief": brief, "lens": lens,
+            "filename": filename, "entry": None}
+
+
+def repair_refusal(node: str) -> str | None:
+    """Why this package cannot emit the node's payload, or None. Each
+    skill ships only its own span's briefs and lens sections, so a node
+    owned by a sibling skill has nothing to carry here."""
+    _role, brief, lens = REPAIR_BRIEFS[node]
+    if read_raw(SKILL_DIR / "agents" / brief) is None:
+        missing = f"agents/{brief}"
+    elif (node == "approve"
+          and read_raw(SKILL_DIR / "agents" / AUTHORING_BRIEF) is None):
+        missing = (f"agents/{AUTHORING_BRIEF} (the contract review is "
+                   "the authoring package's)")
+    elif brief not in LENSLESS_BRIEFS and lens_section(lens) is None:
+        missing = f"the {lens} lens (protocol/lenses.md)"
+    else:
+        return None
+    owner = "/spec-intake" if node == "intent" else "/spec-author"
+    return (f"--repair {node}: this package ({SKILL_NAME}) does not ship "
+            f"{missing} — run the repair from {owner}")
+
+
+def agent_type(item: dict) -> str | None:
+    """The harness agent type the payload's brief registers as — its
+    frontmatter `name:` — so the spawner need not map roles to types."""
+    brief = item.get("brief") or (item.get("briefs") or [None])[0]
+    raw = read_raw(SKILL_DIR / "agents" / brief) if brief else None
+    front = FRONTMATTER.match(raw or "")
+    name = re.search(r"^name:\s*(\S+)", front.group(0), re.M) if front else None
+    return name.group(1) if name else None
+
+
+def write_review_diff(spec_dir: Path, repo: Path, target: Path) -> Path | None:
+    """Write the implementation review's diff beside its payload: `git
+    diff <approval base>` under a header naming the untracked files git
+    leaves out of it. None when there is no base or git cannot answer."""
+    base = specstate.approval_sha(spec_dir)
+    if not base:
+        return None
+    try:
+        diff = subprocess.run(
+            ["git", "-C", str(repo), "diff", base],
+            capture_output=True, text=True, timeout=120)
+        others = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "--others",
+             "--exclude-standard"],
+            capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if diff.returncode != 0 or others.returncode != 0:
+        return None
+    derived = [target.resolve(), (spec_dir / "spawns").resolve()]
+    untracked = [
+        rel for rel in others.stdout.splitlines()
+        if rel.strip() and not any(
+            root == (repo / rel).resolve() or root in (repo / rel).resolve().parents
+            for root in derived)]
+    header = [f"# Final diff for the implementation review — base {base}",
+              "# Untracked files (absent from the diff below — Read each "
+              "in full):"]
+    header += [f"#   {rel}" for rel in untracked] or ["#   (none)"]
+    header.append(f"# ---- git diff {base} ----")
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / "reviewer-diff.patch"
+    path.write_text("\n".join(header) + "\n" + diff.stdout,
+                    encoding="utf-8")
+    return path
+
+
 def lens_section(lens: str) -> str | None:
-    """The `## Lens: <name>` section from agents/_lenses.md, verbatim:
+    """The `## Lens: <name>` section from protocol/lenses.md, verbatim:
     the archetype's specialization riding the payload."""
-    raw = read_raw(SKILL_DIR / "agents" / "_lenses.md")
+    raw = read_raw(SKILL_DIR / "protocol" / "lenses.md")
     if raw is None:
         return None
     marker = f"## Lens: {lens}"
@@ -908,14 +1192,37 @@ def lens_section(lens: str) -> str | None:
     return raw[start:end if end >= 0 else len(raw)].rstrip() + "\n"
 
 
-def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | None:
+def protocol_for(brief_body: str) -> tuple[str | None, list[str]]:
+    """(shared-protocol.md for this brief, the section titles left out):
+    a `## ` protocol section whose title the brief already carries as a
+    heading is dropped, so no rule reaches one agent twice."""
+    raw = read_raw(SKILL_DIR / "protocol" / "shared-protocol.md")
+    if raw is None:
+        return None, []
+    carried = set(re.findall(r"^#{2,4}\s+(.+?)\s*$", brief_body, re.M))
+    kept: list[str] = []
+    dropped: list[str] = []
+    for section in re.split(r"^(?=## )", raw, flags=re.M):
+        title = section[3:].split("\n", 1)[0].strip()
+        if section.startswith("## ") and title in carried:
+            dropped.append(title)
+        else:
+            kept.append(section)
+    return "".join(kept), dropped
+
+
+def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int,
+                  native: bool = False) -> str | None:
     """One self-contained spawn payload: header (spec_dir / repo /
     skill_dir) + filled input payload + the frontmatter-stripped brief body
-    byte-verbatim + the carried lens sections from `_lenses.md` +
-    `_shared-protocol.md` verbatim — except the reviewer, the one exempt
-    role (its brief states it needs no shared protocol). A merged-design
+    byte-verbatim + the carried lens sections from `protocol/lenses.md` +
+    `protocol/shared-protocol.md` — except the reviewer, the one
+    exempt role (its brief states it needs no shared protocol). A merged-design
     item carries the designer archetype once with its three lens
-    sections in authoring order and the protocol once."""
+    sections in authoring order and the protocol once. `native` is for a
+    harness that registers this package's agents: the brief is already
+    that agent type's system prompt, so the payload names the type and
+    carries the inputs, lenses, and protocol only."""
     if item.get("briefs") is not None:
         bodies = []
         for bf in item["briefs"]:
@@ -934,7 +1241,15 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
         brief_title = (f"## Brief — agents/{item['brief']} "
                        "(body; frontmatter stripped)")
         brief_body = strip_frontmatter(brief_raw)
-    protocol = read_raw(SKILL_DIR / "agents" / "_shared-protocol.md")
+    protocol, omitted = protocol_for(brief_body)
+    registered = agent_type(item) if native else None
+    if registered:
+        brief_title = "## Brief — not embedded"
+        brief_body = (
+            f"Spawn this payload as agent type `{registered}`: that "
+            "registered agent's definition is the brief. On a harness "
+            "without it, re-emit without --native-agents for the "
+            "self-contained form.\n")
     parts = [
         f"# Spawn payload — {item['role']} · node {item['node']} · "
         f"wave {wave}",
@@ -949,7 +1264,8 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
         "",
         "## Input payload (filled from doc state)",
         "",
-        input_payload_for(item["node"], spec_dir, repo, item["entry"]),
+        input_payload_for(item["node"], spec_dir, repo, item["entry"],
+                          item.get("diff_file")),
         "",
         brief_title,
         "",
@@ -962,14 +1278,16 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
         # (test_graph pins the set).
         if section is not None:
             parts += ["",
-                      f"## Carried lens — {lens} (from agents/_lenses.md, "
+                      f"## Carried lens — {lens} (from protocol/lenses.md, "
                       "verbatim)",
                       "",
                       section]
     if protocol is not None and item["role"] != "reviewer":
+        scope = ("verbatim" if not omitted else
+                 "verbatim, less what your brief already carries: § "
+                 + ", § ".join(omitted))
         parts += ["",
-                  "## Shared protocol — agents/_shared-protocol.md "
-                  "(verbatim)",
+                  f"## Shared protocol — protocol/shared-protocol.md ({scope})",
                   "",
                   protocol]
     return "\n".join(parts)
@@ -978,29 +1296,27 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int) -> str | No
 def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
                         wave_dir: Path | None,
                         repair: str | None = None,
-                        span: str = "full") -> list[tuple[Path, str, str]]:
+                        span: str = "full",
+                        native: bool = False) -> list[tuple[Path, str, str]]:
     """Write the wave's payloads; returns (path, role, node) per file.
-    `repair` names one agent node to emit even when it is not in the
-    frontier (--emit-spawns --repair NODE, the single-agent repair-run
-    instrument — e.g. a stale-survey converge re-survey, whose payload
-    carries the DELTA RE-SURVEY block); already-frontier nodes are not
-    duplicated. A repair run never emits the merged designer payload
-    `span` rides
-    through to frontier_payloads; the repair item itself is the
-    orchestrator's explicit instrument, so it bypasses the span filter."""
+    `repair` names one agent node and emits that node's payload ALONE,
+    whether or not it is in the frontier (--emit-spawns --repair NODE,
+    the single-agent repair-run instrument — e.g. a stale-survey
+    converge re-survey, whose payload carries the DELTA RE-SURVEY
+    block). `span` rides through to frontier_payloads; the repair item
+    is the orchestrator's explicit instrument, so it bypasses the span
+    filter."""
     wave = wave_number(state)
     target = Path(wave_dir) if wave_dir else (
         spec_dir / "spawns" / f"wave-{wave}")
     written: list[tuple[Path, str, str]] = []
-    items = frontier_payloads(state, spec_dir, repo, merge=not repair,
-                              span=span)
-    if repair and repair not in {i["node"] for i in items}:
-        role, brief, lens = AGENT_BRIEFS[repair]
-        items.append({"node": repair, "role": role, "brief": brief,
-                      "lens": lens,
-                      "filename": f"{role}.md", "entry": None})
+    items = ([repair_item(repair)] if repair else
+             frontier_payloads(state, spec_dir, repo, span=span))
     for item in items:
-        text = build_payload(item, spec_dir, repo, wave)
+        if item["node"] == "tick-commit":
+            item = {**item,
+                    "diff_file": write_review_diff(spec_dir, repo, target)}
+        text = build_payload(item, spec_dir, repo, wave, native)
         if text is None:
             # build_payload's None does not say which of a merged item's
             # briefs was unreadable (its brief field is None) — re-resolve
@@ -1016,8 +1332,20 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
         path = target / item["filename"]
         path.write_text(text, encoding="utf-8")
         written.append((path, item["role"], item["node"]))
+        agent = agent_type(item)
         print(f"   payload: {path} (role: {item['role']}, "
-              f"node: {item['node']})")
+              f"node: {item['node']})"
+              + (f" — agent type {agent}" if agent else ""))
+        entry = item.get("entry")
+        if (entry is not None and entry.fix_round
+                and not fix_note_path(spec_dir, entry).exists()):
+            print(f"   evidence missing: {entry.id} fix round "
+                  f"{entry.fix_round} — record the failing command and "
+                  f"its output in {fix_note_path(spec_dir, entry)}, then "
+                  "re-emit before spawning")
+    if not repair and span_allows(span, "execute"):
+        for line in execute_holds(state):
+            print(line)
     return written
 
 
@@ -1031,31 +1359,24 @@ def substitute(template: str, prompt_file: Path, role: str,
             .replace("{skill_dir}", str(skill_dir)))
 
 
-def find_pause(state: dict, wave_dir: str | None = None,
-               span: str = "full") -> tuple[str, str] | None:
+def find_pause(state: dict) -> tuple[str, str] | None:
     """The first judgment node --run must stop at, as (node, what is needed).
-    The human gates (clarify, an undetermined research-gate, approve,
-    tick-commit) are never auto-satisfied. Order is the canonical node
-    order; at most one applies per state. The researcher-payload pointer
-    is named only under a span that would actually prepare it — a span
-    never decides research, so it resolves the gate out-of-band."""
+    The human gates (clarify, approve, tick-commit) and the
+    orchestrator's research-gate are never auto-satisfied. Order is the
+    canonical node order; at most one applies per state."""
     n = state["nodes"]
     if n["clarify"]["state"] == READY:
         return "clarify", n["clarify"]["reason"]
     if n["research-gate"]["state"] == UNDETERMINED:
-        reason = n["research-gate"]["reason"]
-        if span_allows(span, "research"):
-            target = (Path(wave_dir) if wave_dir
-                      else Path(state["spec_dir"]) / "spawns"
-                      / f"wave-{wave_number(state)}")
-            reason += (" — if the decision is run, the prepared "
-                       "researcher payload is: "
-                       f"{target / 'researcher.md'}")
-        return "research-gate", reason
+        return "research-gate", (
+            n["research-gate"]["reason"]
+            + " — run: `--emit-spawns --repair research` writes the "
+            "researcher payload alone")
     if n["approve"]["state"] == READY:
         return "approve", (n["approve"]["reason"]
-                           + " — after the explicit yes, run "
-                           "`freeze.py <spec-dir> --record`")
+                           + " — "
+                           + freeze.approval_steps(Path(state["spec_dir"]))
+                           + ", then set spec.md Status: approved")
     if (n["execute"]["state"] == DONE
             and n["tick-commit"]["state"] != DONE):
         commit_note = ("make implementation commit C1, then delivery-record "
@@ -1063,9 +1384,11 @@ def find_pause(state: dict, wave_dir: str | None = None,
                        else "commit SKIPPED (not a git repo)")
         return "tick-commit", ("prove and tick: run `audit.py proofs "
                                "<spec-dir> --run` + regression so every "
-                               "tick's proof note is fresh evidence, then "
-                               "tick every task `- [x]` with its proof "
-                               "note, recompute the burndown "
+                               "tick's proof note is fresh evidence, run "
+                               "the review instruments, and present the "
+                               "delivery summary; only on the user's "
+                               "explicit yes tick every task `- [x]` with "
+                               "its proof note, recompute the burndown "
                                "(`check.py --fix-burndown`), " + commit_note
                                + ", then set spec.md Status: done and "
                                "repoint INDEX.md (git delivery: record "
@@ -1139,9 +1462,11 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
     pause = find_pause(state)
     if pause is not None:
         gate, need = pause
+        how = ("your judgment, made inline" if gate == "research-gate"
+               else "answer the gate inline with the user")
         return {**advisory, "weight": "gate", "gate": gate,
-                "reason": need + " — answer the gate inline with the user; "
-                "a workflow launch cannot work past a human gate"}
+                "reason": f"{need} — {how}; a workflow launch cannot "
+                          "work past a gate"}
     if not advisory["frontier_agents"]:
         if n["archive"]["state"] == READY:
             weight, reason = ("complete", "archive-ready — run "
@@ -1158,6 +1483,11 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
         return {**advisory, "weight": weight, "reason": reason}
     payloads = frontier_payloads(state, spec_dir, repo)
     advisory["payloads"] = len(payloads)
+    if not payloads:
+        return {**advisory, "weight": "held",
+                "reason": "execute is ready but no task can be spawned — "
+                          "settle the claimed, blocked, or at-cap tasks "
+                          "inline first (--explain execute)"}
     if len(payloads) == 1 and payloads[0]["node"] == "design":
         # the merged designer is one payload but not a
         # light node: three briefs + protocol authoring plan, tech-spec,
@@ -1181,10 +1511,66 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
                       "span, launch a dynamic workflow"}
 
 
+def span_stop(state: dict, span: str, waves_done: int) -> int:
+    """Why a phase span with nothing runnable stopped, and its exit. The
+    handoff line is reserved for a span whose own gate is behind it
+    (intent green; approve done) — a span that merely has nothing to run
+    names what it is waiting on instead: a red intent names its own
+    gate, never the spec draft behind it."""
+    n = state["nodes"]
+    name = Path(state["spec_dir"]).name
+    frontier = ", ".join(state["frontier"]) or "empty"
+    # a legacy docset (spec done, no intent.md) leaves intake nothing to do
+    drained = {"intent": (n["intent"]["state"] == DONE
+                          or (n["intent"]["state"] == SKIPPED
+                              and n["spec"]["state"] == DONE)),
+               "shape": n["approve"]["state"] == DONE}.get(span)
+    rc = 0
+    if drained:
+        phase, command = SPAN_HANDOFF[span]
+        print(f"span drained — {phase} handoff: continue with "
+              f"`{command} {name}` (frontier: {frontier})")
+    elif span == "intent" and n["intent"]["state"] == BLOCKED:
+        print(f"AWAITING: intent: {n['intent']['reason']} (open markers: "
+              "re-ask the user; stale baseline: `--emit-spawns --repair "
+              "intent`) — spec.md waits on a green intent")
+    elif n["spec"]["state"] == READY:
+        print(f"AWAITING: {n['spec']['reason']}")
+    elif span == "shape" and n["spec"]["state"] == BLOCKED:
+        route = ("" if n["intent"]["state"] == DONE
+                 else f" — route to `/spec-intake {name}`")
+        print(f"AWAITING: {n['spec']['reason']}{route}")
+    elif span == "shape" and n["intent"]["state"] == READY:
+        print("AWAITING: intent.md is still the unfilled template "
+              f"— fill and gate it with `/spec-intake {name}`")
+    elif span == "intent" and n["intent"]["state"] == SKIPPED:
+        print("AWAITING: no intent.md — copy templates/intent.md to "
+              f"{Path(state['spec_dir']) / 'intent.md'} and record the "
+              "idea in § Problem, then re-run")
+    elif (span == "shape"
+          and n["verify"].get("check_rc") not in (0, None)):
+        print(f"verify RED — check.py exits {n['verify']['check_rc']}; "
+              "fix the FAILs above, then re-run")
+        rc = 1
+    elif span == "execute":
+        print(f"span drained: no {span}-span agent node is runnable "
+              f"(frontier: {frontier})")
+    else:
+        print(f"span held — no {span}-span agent node is runnable; the "
+              "blocked nodes:")
+        for node in NODES:
+            if n[node]["state"] == BLOCKED:
+                print(f"  {node}: {n[node]['reason']}")
+        rc = 1
+    _record(SKILL_NAME, "run_end", waves=waves_done, complete=False,
+            span=span)
+    return rc
+
+
 def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
              dry_run: bool, max_waves: int | None,
              wave_dir: str | None = None,
-             span: str = "full") -> int:
+             span: str = "full", native: bool = False) -> int:
     """The auto-trigger loop (architecture §4.5): pause at every judgment
     node, run the mechanical verify directly, emit payloads for the ready
     agent wave, invoke the runner per payload — the first runner that exits
@@ -1198,24 +1584,25 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
     `span` bounds the wave to the phase's frontier nodes: gates
     still pause (the intent span never decides research, so its
     gate is not the intent phase's to answer), a drained shape span stops
-    at the approve handoff, and a span with nothing left to run stops as
-    drained instead of held."""
+    at the approve handoff, and a span with nothing left to run stops
+    through span_stop. The print runner executes nothing, so it stops
+    after one emitted wave."""
     waves_done = 0
     while True:
         state = compute_state(spec_dir, repo_override)
         log_verify(state, repo_override)
-        pause = find_pause(state, wave_dir, span)
+        pause = find_pause(state)
         if pause and not (span == "intent" and pause[0] == "research-gate"):
             gate, need = pause
             if span == "shape" and gate == "approve":
-                print(f"span drained — approve handoff: {need} — before "
-                      "presenting it, run `--emit-spawns --span shape` and spawn the "
-                      "reviewer-contract.md payload — continue "
-                      "with `/spec-execute <name>` once approved")
+                print(f"span drained — approve handoff: {need} — "
+                      f"continue with `/spec-execute {Path(spec_dir).name}` "
+                      "once approved")
                 _record(SKILL_NAME, "gate_pause", node=gate,
                         wave=waves_done + 1)
                 return 0
-            print(f"AWAITING HUMAN: {gate}: {need}")
+            owner = "ORCHESTRATOR" if gate == "research-gate" else "HUMAN"
+            print(f"AWAITING {owner}: {gate}: {need}")
             _record(SKILL_NAME, "gate_pause", node=gate,
                     wave=waves_done + 1)
             return 0
@@ -1230,40 +1617,20 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
                 _record(SKILL_NAME, "run_end", waves=waves_done,
                         complete=True)
                 return 0
-            if n["spec"]["state"] == READY:
-                print(f"AWAITING: {n['spec']['reason']}")
-                _record(SKILL_NAME, "run_end", waves=waves_done,
-                        complete=False, span=span)
-                return 0
-            if span == "shape" and n["intent"]["state"] == READY:
-                print("AWAITING: intent.md is still the unfilled template "
-                      "— fill and gate it with `/spec-idea <name>`")
-                _record(SKILL_NAME, "run_end", waves=waves_done,
-                        complete=False, span=span)
-                return 0
-            verify_rc = n["verify"].get("check_rc")
-            if span == "shape" and verify_rc not in (0, None):
-                print(f"verify RED — check.py exits {verify_rc}; fix the "
-                      "FAILs above, then re-run")
-                _record(SKILL_NAME, "run_end", waves=waves_done,
-                        complete=False, span=span)
-                return 1
-            handoff = SPAN_HANDOFF.get(span)
-            head = (f"span drained — {handoff} handoff: " if handoff
-                    else "span drained: ")
-            print(f"{head}no {span}-span agent node is runnable "
-                  f"(frontier: {', '.join(frontier) or 'empty'})")
-            _record(SKILL_NAME, "run_end", waves=waves_done, complete=False,
-                    span=span)
+            return span_stop(state, span, waves_done)
+        repo = resolved_repo(Path(spec_dir), repo_override)
+        if runnable == ["execute"] and not frontier_payloads(
+                state, Path(spec_dir), repo, span=span):
+            print_execute_held(state)
+            _record(SKILL_NAME, "gate_pause", node="execute",
+                    wave=waves_done + 1)
             return 0
         wave = wave_number(state)
         print(f"== wave {wave} — frontier: "
               f"{', '.join(frontier if span == 'full' else runnable)}")
-        written = write_wave_payloads(state, Path(spec_dir),
-                                      resolved_repo(Path(spec_dir),
-                                                    repo_override),
+        written = write_wave_payloads(state, Path(spec_dir), repo,
                                       Path(wave_dir) if wave_dir else None,
-                                      span=span)
+                                      span=span, native=native)
         _record(SKILL_NAME, "wave", wave=wave,
                 roles=sorted(frontier if span == "full" else runnable),
                 payloads=len(written))
@@ -1293,50 +1660,60 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
                       "wave starts")
                 return RUNNER_FAILED_EXIT
         waves_done += 1
-        new_state = compute_state(spec_dir, repo_override)
+        if runner == PRINT_RUNNER and written:
+            how = ("as the agent type beside each role" if native else
+                   "agent type beside each role — these embed the brief: "
+                   "add --native-agents before spawning as that type")
+            print("wave emitted — spawn these payloads in one message "
+                  f"({how}), then re-run")
         if max_waves is not None and waves_done >= max_waves:
             print(f"stopping: --max-waves {max_waves} bound reached "
                   f"({waves_done} wave(s) run)")
             return 0
-        if new_state == state:
-            print("no doc-state change after the wave — stopping (the "
-                  "runner echoed without executing; run with --runner, or "
-                  "act on the frontier, then re-run)")
+        # the print runner executes nothing, so a second pass would only
+        # re-emit the same wave
+        if runner == PRINT_RUNNER:
             return 0
+        if compute_state(spec_dir, repo_override) == state:
+            print("no doc-state change after the wave — stopping (the "
+                  "runner changed nothing; act on the frontier, then "
+                  "re-run)")
+            return 0
+
+
+def print_execute_held(state: dict) -> None:
+    """Execute is ready and no task can be spawned: the orchestrator owes
+    each held task a move before any wave exists (a resumed session's
+    orphaned claims land here)."""
+    print("AWAITING ORCHESTRATOR: execute: no task is runnable — resolve "
+          "the held tasks, then re-run:")
+    for line in execute_holds(state, every=True):
+        print(line)
 
 
 def emit_spawns(spec_dir: Path, repo_override: str | None,
                 wave_dir: str | None, repair: str | None = None,
-                span: str = "full") -> int:
+                span: str = "full", native: bool = False) -> int:
     """--emit-spawns: write this wave's payloads and list them. With
-    --repair NODE, the named agent node's payload is emitted even when
-    done/not in the frontier (single-agent repair run — always single-role
-    payloads, never the merged designer). `span` bounds the
-    emitted payloads to the phase's frontier nodes."""
+    --repair NODE, exactly that node's payload is emitted, in or out of
+    the frontier (single-agent repair run — a single-role payload, never
+    the merged designer). `span` bounds the emitted payloads to the
+    phase's frontier nodes."""
     state = compute_state(spec_dir, repo_override)
-    items = frontier_payloads(state, spec_dir,
-                              resolved_repo(spec_dir, repo_override),
-                              merge=not repair, span=span)
-    if not items and not repair:
-        if span != "full":
-            print(f"no {span}-span agent payloads to emit — the frontier "
-                  f"holds no {span}-span node (frontier: "
-                  f"{', '.join(state['frontier']) or 'empty'})")
-        else:
-            print("no agent payloads to emit — the frontier holds no agent "
-                  f"node (frontier: {', '.join(state['frontier']) or 'empty'})")
+    repo = resolved_repo(spec_dir, repo_override)
+    if not repair and not frontier_payloads(state, spec_dir, repo, span=span):
+        if "execute" in state["frontier"] and span_allows(span, "execute"):
+            print_execute_held(state)
+            return 0
+        scope = "" if span == "full" else f"{span}-span "
+        print(f"no {scope}agent payloads to emit — the frontier holds no "
+              f"{scope}agent node (frontier: "
+              f"{', '.join(state['frontier']) or 'empty'})")
         return 0
-    target = Path(wave_dir) if wave_dir else None
-    written = write_wave_payloads(state, spec_dir,
-                                  resolved_repo(spec_dir, repo_override),
-                                  target, repair, span=span)
-    if repair:
-        note = (f" (repair: {repair} emitted for a single-agent run — "
-                "not a frontier node)"
-                if repair not in {i["node"] for i in items} else
-                f" (repair: {repair} already in the frontier)")
-    else:
-        note = ""
+    written = write_wave_payloads(state, spec_dir, repo,
+                                  Path(wave_dir) if wave_dir else None,
+                                  repair, span=span, native=native)
+    note = f" (repair: {repair} — single-node emit)" if repair else ""
     print(f"emitted {len(written)} payload(s) for wave "
           f"{wave_number(state)}{note} — spawns/ is derived: delete "
           "freely, check.py never reads it")
@@ -1371,12 +1748,46 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
 
     nodes: dict[str, dict] = {}
 
+    # -- intent (optional evidence node) -----------------------------------
+    # Absent intent.md reads SKIPPED: docsets without it keep the existing
+    # graph (no new blockers, survey readiness unchanged); present-but-red
+    # is the ungated artifact the shape span gate refuses; present-and-green
+    # reads DONE. Computed first: a missing spec.md is drafted only from a
+    # green intent.
+    if docs["intent.md"] is None:
+        intent_node = {"state": SKIPPED, "reason":
+                       "no intent.md — legacy path: the "
+                       "docset contract is unchanged, shape and "
+                       "execute accept this dir as-is"}
+    elif not filled["intent.md"]:
+        intent_node = {"state": READY, "reason":
+                       "intent.md is still the unfilled template — the "
+                       "scout rewrites it from the grilling "
+                       f"(residue: {unfilled_hits(docs['intent.md']) or 'none'})"}
+    else:
+        irc = run_check(spec_dir, repo_override, ["--intent-only"])
+        if irc == 0:
+            intent_node = {"state": DONE, "reason":
+                           "intent.md filled and `check.py "
+                           "--intent-only` exits 0"}
+        elif irc is None:
+            intent_node = {"state": BLOCKED, "reason":
+                           "check.py could not run — intent unverified"}
+        else:
+            intent_node = {"state": BLOCKED, "reason":
+                           f"check.py --intent-only exits {irc} — fix "
+                           "the intent artifact it names"}
+
     # -- spec (entry) ------------------------------------------------------
     if spec_text is None or not spec_text.strip():
-        if docs["intent.md"] is not None and filled["intent.md"]:
+        if intent_node["state"] == DONE:
             nodes["spec"] = {"state": READY, "reason":
                              "spec.md missing — draft it from intent.md "
                              "(templates/spec.md), then re-run"}
+        elif intent_node["state"] == BLOCKED:
+            nodes["spec"] = {"state": BLOCKED, "reason":
+                             "spec.md missing — waiting on: intent (no "
+                             "spec is drafted from a red intent.md)"}
         else:
             nodes["spec"] = {"state": BLOCKED, "reason":
                              "spec.md missing or empty — author the spec "
@@ -1439,34 +1850,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                              "content yet"}
     research_done = nodes["research"]["state"] == DONE
 
-    # -- intent (optional evidence node) -----------------------------------
-    # Absent intent.md reads SKIPPED: docsets without it keep the existing
-    # graph (no new blockers, survey readiness unchanged); present-but-red
-    # is the ungated artifact the shape span gate refuses; present-and-green
-    # reads DONE.
-    if docs["intent.md"] is None:
-        nodes["intent"] = {"state": SKIPPED, "reason":
-                           "no intent.md — legacy path: the "
-                           "docset contract is unchanged, shape and "
-                           "execute accept this dir as-is"}
-    elif not filled["intent.md"]:
-        nodes["intent"] = {"state": READY, "reason":
-                           "intent.md is still the unfilled template — the "
-                           "scout rewrites it from the grilling "
-                           f"(residue: {unfilled_hits(docs['intent.md']) or 'none'})"}
-    else:
-        irc = run_check(spec_dir, repo_override, ["--intent-only"])
-        if irc == 0:
-            nodes["intent"] = {"state": DONE, "reason":
-                               "intent.md filled and `check.py "
-                               "--intent-only` exits 0"}
-        elif irc is None:
-            nodes["intent"] = {"state": BLOCKED, "reason":
-                               "check.py could not run — intent unverified"}
-        else:
-            nodes["intent"] = {"state": BLOCKED, "reason":
-                               f"check.py --intent-only exits {irc} — fix "
-                               "the intent artifact it names"}
+    nodes["intent"] = intent_node
     intent_settled = nodes["intent"]["state"] in (DONE, SKIPPED)
 
     # -- survey ------------------------------------------------------------
@@ -1566,16 +1950,27 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     verify_done = nodes["verify"]["state"] == DONE
 
     # -- approve (HUMAN) ---------------------------------------------------
-    if not verify_done:
+    # A Status word alone is not an approval: the freeze is the gate's
+    # record, so a hand-flipped Status never opens execute.
+    unfrozen = (status in APPROVED_AND_LATER
+                and not (spec_dir / "approvals" / "approval.md").exists())
+    if unfrozen:
+        nodes["approve"] = {"state": BLOCKED, "reason":
+                            f"Status: {status} without the approval freeze "
+                            "(approvals/approval.md) — never approved: set "
+                            "Status back to draft; approved before the "
+                            "freeze existed: re-approve once — "
+                            + freeze.approval_steps(spec_dir)}
+    elif not verify_done:
         nodes["approve"] = {"state": BLOCKED,
                             "reason": "waiting on: verify"}
     elif status in APPROVED_AND_LATER:
         nodes["approve"] = {"state": DONE, "reason": f"Status: {status}"}
     else:
         nodes["approve"] = {"state": READY, "reason":
-                            "HUMAN GATE — review the docset with the user, "
-                            f"then set spec.md Status: approved (currently: "
-                            f"{status or 'no Status line'})"}
+                            "HUMAN GATE — present the reviewed docset; "
+                            "approval is the user's explicit yes (Status "
+                            f"currently: {status or 'no Status line'})"}
     approve_done = nodes["approve"]["state"] == DONE
 
     # -- execute (per-task frontier) ---------------------------------------
@@ -1639,11 +2034,13 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
             nodes["tick-commit"] = {"state": READY, "reason":
                                     "HUMAN GATE — every task landed: prove "
                                     "green (audit.py proofs --run + "
-                                    "regression), tick every task `- [x]` "
+                                    "regression), review, and present the "
+                                    "delivery summary; on the user's "
+                                    "explicit yes tick every task `- [x]` "
                                     "with its proof note "
                                     f"({len(ticks.unticked)} unticked: "
-                                    f"{', '.join(ticks.unticked)}), then "
-                                    "recompute the burndown"}
+                                    f"{', '.join(ticks.unticked)}), "
+                                    "recompute the burndown, and commit"}
         elif ticks.noteless:
             nodes["tick-commit"] = {"state": READY, "reason":
                                     "tick evidence incomplete — ticked "
@@ -1705,6 +2102,9 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
             converge = "no survey baseline recorded — nothing to converge yet"
         elif head and base[1] == head:
             converge = f"fresh — survey baseline {base[1]} == HEAD {head}"
+        elif head and code_delta(repo, spec_dir, base[1], head)[1] == []:
+            converge = (f"fresh — only the specs tree changed since survey "
+                        f"baseline {base[1]} (HEAD {head})")
         else:
             converge = (f"stale — survey baseline {base[1]} != HEAD {head} — "
                         "re-run the survey delta-scoped (--emit-spawns "
@@ -1759,9 +2159,7 @@ def render_report(s: dict) -> str:
         n = s["nodes"][name]
         out.append(f"  {name:<14} {n['state']:<18} {n['reason']}")
         for t in n.get("tasks") or ():
-            note = f"  [{t['note']}]" if t.get("note") else ""
-            out.append(f"      {t['id'] or '—':<6} {t['state']:<11} "
-                       f"{t['reason']}{note}")
+            out.append(f"      {task_line(t)}")
     out.append("")
     out.append("frontier (run the wave together, then recompute):")
     if s["frontier"]:
@@ -1816,10 +2214,7 @@ def render_explain(s: dict, node: str) -> str:
     lines = [f"{node}: {n['state']} — {n['reason']}",
              f"  ready when: {READY_WHEN[node]}",
              f"  done when: {DONE_WHEN[node]}"]
-    for t in n.get("tasks") or ():
-        note = f"  [{t['note']}]" if t.get("note") else ""
-        lines.append(f"  {t['id'] or '—':<6} {t['state']:<11} "
-                     f"{t['reason']}{note}")
+    lines += [f"  {task_line(t)}" for t in n.get("tasks") or ()]
     return "\n".join(lines)
 
 
@@ -1831,7 +2226,8 @@ def main(argv: list[str] | None = None) -> int:
                     "state alone (see the module docstring for the node "
                     "model).",
         epilog="exit codes: 0 report produced (any state) · 1 unreadable "
-               "spec-dir · 2 usage error · 3 --run runner failure (later "
+               "spec-dir, or a phase span stopped red/held · 2 usage error "
+               "· 3 --run runner failure (later "
                "waves stopped) · 4 span entry refused (blocking gate "
                "printed)")
     p.add_argument("spec_dir", help="path to specs/<name>")
@@ -1856,17 +2252,28 @@ def main(argv: list[str] | None = None) -> int:
                         "agent node under <spec-dir>/spawns/wave-<N>/"
                         "<role>.md (derived artifact; safe to delete)")
     p.add_argument("--repair", metavar="NODE",
-                   help="with --emit-spawns: also emit this agent node's "
-                        "payload when it is not in the frontier — the "
+                   help="with --emit-spawns: emit ONLY this agent node's "
+                        "payload, in or out of the frontier — the "
                         "single-agent repair-run instrument (a stale-"
                         "survey converge re-survey: --repair survey "
-                        "emits a DELTA-scoped surveyor payload)")
+                        "emits a DELTA-scoped surveyor payload; --repair "
+                        "research emits the researcher alone; --repair "
+                        "approve re-emits the contract review); refused "
+                        "when this package ships no brief or lens for "
+                        "the node")
+    p.add_argument("--native-agents", action="store_true",
+                   help="with --emit-spawns or --run: the harness registers "
+                        "this package's agents, so each payload names its "
+                        "agent type and omits the brief body that type "
+                        "already carries (default: self-contained payloads "
+                        "for a harness without registered agents)")
     p.add_argument("--wave-dir", metavar="DIR",
                    help="with --emit-spawns or --run: write this wave's "
                         "payloads into DIR instead of "
                         "<spec-dir>/spawns/wave-<N>/")
     p.add_argument("--run", action="store_true",
-                   help="auto-trigger loop: AWAITING HUMAN pauses at "
+                   help="auto-trigger loop: AWAITING HUMAN (or AWAITING "
+                        "ORCHESTRATOR at the research gate) pauses at "
                         "judgment nodes, verify runs check.py directly, "
                         "agent waves go to --runner (default: print), "
                         "recompute, repeat")
@@ -1906,15 +2313,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.repair and not args.emit_spawns:
         p.error("--repair requires --emit-spawns (repair is a "
                 "single-agent emit, never part of --run)")
-    if args.repair is not None and (
-            args.repair not in AGENT_BRIEFS or args.repair == "execute"):
-        p.error(f"--repair: {args.repair!r} is not a repairable agent "
-                "node — valid: "
-                + ", ".join(n for n in AGENT_BRIEFS if n != "execute"))
+    if args.repair is not None:
+        if args.repair not in REPAIR_BRIEFS:
+            p.error(f"--repair: {args.repair!r} is not a repairable agent "
+                    "node — valid: " + ", ".join(REPAIR_BRIEFS))
+        refusal = repair_refusal(args.repair)
+        if refusal:
+            p.error(refusal)
     if args.max_waves is not None and args.max_waves < 1:
         p.error("--max-waves must be >= 1")
     if args.wave_dir and not (args.emit_spawns or args.run):
         p.error("--wave-dir requires --emit-spawns or --run")
+    if args.native_agents and not (args.emit_spawns or args.run):
+        p.error("--native-agents requires --emit-spawns or --run")
     if args.span is not None and not (args.emit_spawns or args.run):
         p.error("--span requires --emit-spawns or --run (a span bounds "
                 "the executor modes; the report modes are spanless)")
@@ -1942,11 +2353,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.emit_spawns:
         return emit_spawns(spec_dir, args.repo, args.wave_dir, args.repair,
-                           span)
+                           span, args.native_agents)
     if args.run:
         return run_loop(spec_dir, args.repo, args.runner or PRINT_RUNNER,
                         args.dry_run, args.max_waves, args.wave_dir,
-                        span=span)
+                        span=span, native=args.native_agents)
 
     state = compute_state(spec_dir, args.repo)
 

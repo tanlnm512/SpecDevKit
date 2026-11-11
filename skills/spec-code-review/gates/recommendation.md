@@ -10,12 +10,15 @@ observer-checkable — an onlooker with the report can verify each one.
 |---|---|
 | Gate red (any detected check failed) — fresh review | Review stops; failing checks are the findings; reviewers are not spent |
 | Gate red — fix_from run | Deliberately continues: clearing the checks is the fixer's job — failing checks enter the tracked findings, and every report surface must render the red state (the authoritative last gate run) |
-| Gate detected nothing | NOT a pass: the repo's documented check command (README/CI) runs instead; if none exists, the report must say so |
+| Gate detected no repo check (built-in rows alone) | NOT a pass: the repo's documented check command (README/CI) runs instead; if none exists, the report says "no repo checks detected" |
+| Pr mode, fork PR | The gate waits for the user's go-ahead — it would run the PR author's code |
+| Project target over 3 parts | Waits for a go-ahead or narrower `paths` before any reviewer spawns |
 | Target resolves to an empty diff / no matching files | "Nothing to review" with the resolved scope |
 | Pr mode, working tree dirty | Refusal — uncommitted work would be misattributed to the PR (checkout or not) |
 | Pr mode, gh view/checkout/merge-base fails | Refusal with the failing step |
 | fix_from payload unusable | Refusal: unreadable file / neither valid JSON nor a parseable report findings section / no actionable items |
 | Fix rounds exhausted with findings unresolved | Loop ends; state is reported per finding |
+| Fixer moved HEAD or changed the stash list (`fix-check`) | Loop aborts; the report names it, recommendation `human` |
 
 ## Recommendation criteria (fix-loop runs only)
 

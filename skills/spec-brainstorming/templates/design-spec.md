@@ -2,7 +2,7 @@
 
 > Handoff artifact of a spec-brainstorming run. Pre-spec by
 > design: it records the chosen direction and the reasoning, not
-> requirements. The next step is `/spec-idea <name>` with this doc as
+> requirements. The next step is `/spec-intake <name>` with this doc as
 > intent input; requirements shaping happens there, with the user.
 
 **Status**: handoff-ready · **Date**: <date> ·
@@ -17,6 +17,9 @@ rejected with the reason it lost.
 - Selected: <angle or blend>
 - Rationale: <why this, in the user's terms>
 - Rejected: <angle> — <the one-line reason it lost>
+
+When the user blended all three angles and nothing lost, write
+`Rejected: none — blended` plus what each angle contributed.
 
 ## Problem Statement
 
@@ -50,18 +53,21 @@ for the core value belongs in Out of scope, not here.
 2. …
 
 **Out of scope (day-one cut list)**: <the tempting features this
-direction explicitly refuses on day one, each with its reason.
+direction explicitly refuses on day one, each with its reason>
 
 ## Potential Risk Mitigations
 
-The Cynic's dealbreakers carried forward, each mapped to a
-mitigation or an explicit acceptance — never dropped silently.
+The Cynic's dealbreakers (each `points:` line of its digest)
+carried forward, each mapped to a mitigation or an explicit
+acceptance — never dropped silently. A run with no Cynic digest
+(compile-only `handoff`) carries the risks raised in the
+discussion instead, each marked "(from the discussion)".
 Kill criteria live here: the observable evidence that should stop
 the project.
 
 | Risk (from the panel) | Early warning | Mitigation or acceptance |
 |---|---|---|
-| <the fatal assumption / blocker / hidden cost> | <the tripwire signal> | <mitigation, or "accepted: <why>"> |
+| <the fatal assumption / blocker / hidden cost> | <the tripwire signal> | <mitigation, or "accepted" plus the reason> |
 | … | … | … |
 
 **Kill criteria**: <the evidence, stated so it could actually be
@@ -69,5 +75,5 @@ observed, that should stop this project.>
 
 ---
 
-*Next step: `/spec-idea <name>` — treat this doc as intent input. The
+*Next step: `/spec-intake <name>` — treat this doc as intent input. The
 commit is the user's.*

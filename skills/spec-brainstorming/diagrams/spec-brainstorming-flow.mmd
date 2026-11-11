@@ -10,7 +10,7 @@ flowchart TD
         C["The Cynic<br/>fatal assumptions · blockers · hidden costs · kill criterion"]
         M["The Minimalist<br/>core value · cut list · fastest proof · scope guard"]
     end
-    S2["payload: skill_dir + restatement<br/>+ brief + protocol — spawns are fresh"] --> V & C & M
+    S2["payload: restatement + one lens section<br/>+ protocol + evidence pack — spawns are fresh"] --> V & C & M
     V & C & M --> DIG["digests only<br/>angle · pitch · points · watch"]
 
     DIG --> S3["Stage 3 — trade-off matrix<br/>pros · cons · implementation speed · best when — no recommendation"]
@@ -22,4 +22,4 @@ flowchart TD
     S5 --> COLL{brainstorms/<name>.md<br/>already exists?}
     COLL -- yes --> ASK["ONE question: overwrite or version the name<br/>never a silent clobber"] --> WRITE
     COLL -- no --> WRITE["write from templates/design-spec.md<br/>direction · problem · personas · MVP · risks"]
-    WRITE --> NEXT(["/spec-idea <name> — the doc is intent input<br/>nothing was ever written under specs/"])
+    WRITE --> NEXT(["/spec-intake <name> — the doc is intent input<br/>nothing was ever written under specs/"])

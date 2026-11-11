@@ -1,7 +1,7 @@
 {
   "name": "spec-execute",
   "version": "0.1.0",
-  "description": "Approved-spec execution \u2014 the suite's back half.",
+  "description": "Builds an approved spec \u2014 the suite's back half.",
   "author": {
     "name": "Stanley",
     "email": "minhtan512@gmail.com"

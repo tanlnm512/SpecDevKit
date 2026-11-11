@@ -15,18 +15,27 @@ Usage:
                                 [--base REF] [--pr SPEC] [--repo DIR]
                                 [--paths TERMS] [--include-gate]
   review_orchestrator.py gate    [--repo DIR] [--base REF] [--tree]
+  review_orchestrator.py fix-snapshot [--repo DIR]
+  review_orchestrator.py fix-check --head SHA --stash-count N --tree SHA [--repo DIR]
   review_orchestrator.py shard   --files-json LIST [--budget N] [--max-files N]
   review_orchestrator.py id-next --prefix P --used N
   review_orchestrator.py findings-parse (--file PATH | --text STR)
   review_orchestrator.py report  --kind review|fix --data @FILE|STR
+  review_orchestrator.py systems
+  review_orchestrator.py ask     --kind KIND --ctx @FILE|JSON   (ctx {"batch": [...]} renders a wave)
 """
 
 import argparse
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+from gate_helpers import diff_changes, git_diff
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 GATE_SH = SKILL_DIR / "scripts" / "gate.sh"
@@ -37,6 +46,8 @@ SUGGEST_SPLIT_LINES = 1000
 SUGGEST_SPLIT_FILES = 20
 SHARD_TARGET_BYTES = 240000
 SHARD_MAX_FILES = 32
+PROJECT_CONFIRM_PARTS = 3
+EXCLUDED_LISTED_MAX = 50
 SEV_RANK = {"high": 0, "medium": 1, "low": 2}
 
 CODE_EXTENSIONS = [
@@ -57,10 +68,12 @@ EXCLUDED_BASENAMES = [
     "poetry.lock", "Pipfile.lock", "uv.lock", "go.sum", "composer.lock",
     "Gemfile.lock",
 ]
-EXCLUDED_SEGMENTS = [
-    "vendor/", "third_party/", "external/", "node_modules/", "dist/",
-    "__snapshots__/", ".venv/", "venv/",
-]
+EXCLUDED_DIRS = {
+    "vendor", "third_party", "external", "node_modules", "dist",
+    "__snapshots__", ".venv", "venv",
+}
+SEVERITY_LADDER = ("Severity: high = data loss, crash, wrong result, or security compromise; "
+                   "medium = a real defect the author should fix; low = minor.")
 
 
 def out(ok, **payload):
@@ -88,7 +101,7 @@ def is_excluded_source(path):
         return True
     if base.endswith((".d.ts", ".min.js", ".min.css", ".pb.go")) or base.endswith("_pb2.py"):
         return True
-    return any(seg in path for seg in EXCLUDED_SEGMENTS)
+    return any(seg in EXCLUDED_DIRS for seg in path.split("/")[:-1])
 
 
 def is_source_file(path):
@@ -114,6 +127,14 @@ def resolve_repo(repo_arg):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def text_line_count(path):
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return 0
+    return 0 if b"\0" in data[:8192] else len(data.splitlines())
+
+
 def diff_scope(base, repo):
     porcelain = git_out(["status", "--porcelain"], repo) or ""
     numstat = git_out(["diff", "--numstat", base], repo) or ""
@@ -127,7 +148,13 @@ def diff_scope(base, repo):
             added += int(cols[0])
         except ValueError:
             pass
-    return {"clean": porcelain.strip() == "", "files": files, "added": added}
+    # `git diff` never shows untracked files, yet they are part of the change.
+    listed = git_out(["ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--", ":/"], repo) or ""
+    untracked = [f for f in listed.split("\0") if f and f not in files]
+    root = Path(repo) if repo else Path(git_out(["rev-parse", "--show-toplevel"], repo).strip())
+    added += sum(text_line_count(root / f) for f in untracked)
+    return {"clean": porcelain.strip() == "", "files": files + untracked,
+            "untracked": untracked, "added": added}
 
 
 def detect_base_branch(explicit, repo):
@@ -147,7 +174,8 @@ def detect_base_branch(explicit, repo):
 def pr_meta(pr_spec, repo):
     r = subprocess.run(
         ["gh", "pr", "view", pr_spec, "--json",
-         "number,title,author,baseRefName,baseRefOid,headRefName,headRefOid,state,url,body"],
+         "number,title,author,baseRefName,baseRefOid,headRefName,headRefOid,state,url,body,"
+         "isCrossRepository"],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
@@ -170,6 +198,7 @@ def pr_meta(pr_spec, repo):
         "baseRefOid": j.get("baseRefOid") if isinstance(j.get("baseRefOid"), str) else "",
         "headRefName": j.get("headRefName") if isinstance(j.get("headRefName"), str) else "",
         "headRefOid": j["headRefOid"],
+        "fork": j.get("isCrossRepository") is True,
         "body": body[:1200] + "..." if len(body) > 1200 else body,
     }
 
@@ -202,10 +231,12 @@ def project_files(paths_arg, repo):
         except OSError:
             sizes[f] = 0
     terms = [t for t in re.split(r"[\s,]+", paths_arg or "") if t]
-    candidates = [p for p in all_files
-                  if is_source_file(p) and not is_excluded_source(p) and matches_path_filter(p, terms)]
+    in_scope = [p for p in all_files if is_source_file(p) and matches_path_filter(p, terms)]
+    candidates = [p for p in in_scope if not is_excluded_source(p)]
+    excluded = [p for p in in_scope if is_excluded_source(p)]
     ordered = sorted(candidates, key=lambda p: (-(sizes.get(p, 0)), p))
-    return {"files": ordered, "sizes": sizes, "candidates": len(candidates)}
+    return {"files": ordered, "sizes": sizes, "candidates": len(candidates),
+            "excluded": excluded[:EXCLUDED_LISTED_MAX], "excluded_count": len(excluded)}
 
 
 def shard_files(files, sizes, budget=SHARD_TARGET_BYTES, max_files=SHARD_MAX_FILES):
@@ -248,19 +279,44 @@ def gate_rows(repo, base, tree):
         return [{"name": "gate.sh (spec-code-review)", "exit_code": 1,
                  "tail": "gate.sh produced no JSON report"}]
     return [{"name": g.get("name", ""), "exit_code": g.get("exit_code", 0),
+             "status": g.get("status", ""), "source": g.get("source", "repo"),
              "tail": g.get("tail", "")} for g in parsed]
 
 
-def gate_note(rows):
-    if not rows:
-        return ("No repo checks were detected by the gate — this review has no "
-                "mechanical floor; the report must say so under notCovered")
-    failed = [g["name"] for g in rows if g["exit_code"] != 0]
+def is_repo_row(row):
+    return row.get("source", "repo") == "repo"
+
+
+def failed_label(row):
+    return row["name"] + (" (timed out)" if row.get("status") == "timed_out" else "")
+
+
+def gate_summary(rows):
+    repo_rows = [g for g in rows if is_repo_row(g)]
+    builtin = [g for g in rows if not is_repo_row(g)]
+    return {"rows": rows, "green": all(g["exit_code"] == 0 for g in rows),
+            "repo_checks": len(repo_rows), "note": gate_note(repo_rows, builtin)}
+
+
+def gate_note(repo_rows, builtin):
+    # Built-in rows (bash -n, secret scan) are hygiene, never the floor.
+    failed_builtin = [failed_label(g) for g in builtin if g["exit_code"] != 0]
+    builtin_part = ""
+    if failed_builtin:
+        builtin_part = ("; the built-in checks did NOT all pass — failing: "
+                        + "; ".join(failed_builtin) + " (each failure is recorded as a gate finding)")
+    elif builtin:
+        builtin_part = "; the built-in checks (" + "; ".join(g["name"] for g in builtin) + ") passed"
+    if not repo_rows:
+        return ("No repo checks were detected by the gate — this review has no mechanical floor "
+                "(no tests, build or lint of the repo's own ran); the report must say so under "
+                "notCovered" + builtin_part)
+    failed = [failed_label(g) for g in repo_rows if g["exit_code"] != 0]
     if not failed:
         return ("The repo's own checks the gate detected ("
-                + "; ".join(g["name"] for g in rows) + ") all passed")
+                + "; ".join(g["name"] for g in repo_rows) + ") all passed" + builtin_part)
     return ("The repo's own checks the gate detected did NOT all pass — failing: "
-            + "; ".join(failed) + " (each failure is recorded as a gate finding)")
+            + "; ".join(failed) + " (each failure is recorded as a gate finding)" + builtin_part)
 
 
 def stage_err(stage, **extra):
@@ -304,11 +360,13 @@ def cmd_scope(a):
             if dirty:
                 return stage_err("pr-dirty", head_matches=False, head=head.strip())
             prev = head.strip()
+            prev_ref = (git_out(["symbolic-ref", "-q", "--short", "HEAD"], repo_abs) or "").strip()
             co = subprocess.run(["gh", "pr", "checkout", a.pr], capture_output=True, text=True)
             head = git_out(["rev-parse", "HEAD"], repo_abs) or ""
             if co.returncode != 0 or head.strip() != meta["headRefOid"]:
                 return stage_err("pr-checkout")
             result["previous_head"] = prev
+            result["previous_ref"] = prev_ref or prev
         elif dirty:
             return stage_err("pr-dirty", head_matches=True, head=head.strip())
         mb = merge_base_with_count(meta["baseRefOid"], repo_abs)
@@ -324,7 +382,10 @@ def cmd_scope(a):
         parts = shard_files(pf["files"], pf["sizes"])
         result.update({"mode": "project", "files": pf["files"], "sizes": pf["sizes"],
                        "candidates": pf["candidates"], "parts": parts,
-                       "part_labels": [part_label(p) for p in parts]})
+                       "part_labels": [part_label(p) for p in parts],
+                       "excluded": pf["excluded"], "excluded_count": pf["excluded_count"],
+                       "reviewer_spawns": len(parts) * len(LENSES),
+                       "confirm_before_spawn": len(parts) > PROJECT_CONFIRM_PARTS})
     else:
         return stage_err("target-unknown", target=a.target)
     result["suggest_split"] = bool(
@@ -334,18 +395,90 @@ def cmd_scope(a):
     result["fast_mode_default"] = bool(
         result.get("added", 0) <= FAST_MAX_LINES and len(result.get("files", [])) <= FAST_MAX_FILES
     )
-    if a.include_gate:
-        rows = gate_rows(repo_abs, result.get("base") or "HEAD", a.target == "project")
-        result["gate"] = {"rows": rows, "green": all(g["exit_code"] == 0 for g in rows),
-                          "note": gate_note(rows)}
+    gate_base = result.get("merge_base") or result.get("base") or "HEAD"
+    if a.include_gate and result.get("pr", {}).get("fork"):
+        # The gate executes the checked-out code; a fork's code needs the user's go-ahead.
+        result["gate_deferred"] = ("fork PR: the gate would run the PR author's code — confirm with "
+                                   f"the user, then run `gate --base {gate_base}`")
+    elif a.include_gate:
+        result["gate"] = gate_summary(gate_rows(repo_abs, gate_base, a.target == "project"))
     return out(True, **result)
 
 
 def cmd_gate(a):
     repo_abs = resolve_repo(a.repo)
-    rows = gate_rows(repo_abs, a.base or "HEAD", a.tree)
-    return out(True, rows=rows, green=all(g["exit_code"] == 0 for g in rows),
-               note=gate_note(rows))
+    return out(True, **gate_summary(gate_rows(repo_abs, a.base or "HEAD", a.tree)))
+
+
+TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec|specs)/|(^|/)test_[^/]*$|_test\.[^/]+$|"
+                       r"\.(test|spec)\.[^/]+$|Tests?\.[^/.]+$")
+REMOVED_ASSERT = re.compile(r"\bassert|\bexpect\(|\.should\b|\bt\.(Error|Fatal)|\brequire\.")
+ADDED_SKIP = re.compile(r"\bskip(If|Unless)?\b|\.skip\(|\bxfail\b|\bx(it|describe|test)\(|@Disabled|"
+                        r"@Ignore|\bt\.Skip|#\[ignore\]|\.only\(")
+
+
+def stash_count(repo):
+    return len((git_out(["stash", "list"], repo) or "").splitlines())
+
+
+def working_tree_sha(repo):
+    """Tree of the whole working tree, untracked files included, built in a scratch index so the
+    real index and the stash list stay untouched (`stash create` omits untracked files)."""
+    index_path = (git_out(["rev-parse", "--git-path", "index"], repo) or "").strip()
+    if index_path and repo:
+        index_path = os.path.join(str(repo), index_path)
+    with tempfile.TemporaryDirectory(prefix="fix-snapshot-") as scratch:
+        scratch_index = os.path.join(scratch, "index")
+        if index_path and os.path.exists(index_path):
+            shutil.copyfile(index_path, scratch_index)
+        env = {**os.environ, "GIT_INDEX_FILE": scratch_index}
+        base = ["git"] + (["-C", str(repo)] if repo else [])
+        if subprocess.run(base + ["add", "-A"], env=env, capture_output=True).returncode:
+            return None
+        r = subprocess.run(base + ["write-tree"], env=env, capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def cmd_fix_snapshot(a):
+    repo_abs = resolve_repo(a.repo)
+    head = (git_out(["rev-parse", "HEAD"], repo_abs) or "").strip()
+    if not head:
+        return out(False, error="cannot resolve HEAD")
+    tree = working_tree_sha(repo_abs)
+    if not tree:
+        return out(False, error="cannot snapshot the working tree")
+    return out(True, head=head, stash_count=stash_count(repo_abs), tree=tree)
+
+
+def test_weakening(diff_text):
+    hunks = {}
+    for path, sign, _, text in diff_changes(diff_text):
+        if not TEST_PATH.search(path):
+            continue
+        hunk = hunks.setdefault(path, {"path": path, "removed_asserts": [], "added_skips": []})
+        if sign == "-" and REMOVED_ASSERT.search(text):
+            hunk["removed_asserts"].append(text.strip())
+        elif sign == "+" and ADDED_SKIP.search(text):
+            hunk["added_skips"].append(text.strip())
+    return [h for h in hunks.values() if h["removed_asserts"] or h["added_skips"]]
+
+
+def cmd_fix_check(a):
+    repo_abs = resolve_repo(a.repo)
+    head = (git_out(["rev-parse", "HEAD"], repo_abs) or "").strip()
+    stashes = stash_count(repo_abs)
+    if head != a.head:
+        return stage_err("fixer-moved-head", expected=a.head, head=head,
+                         error="HEAD moved during the fix round — the fixer committed, reset or "
+                               "switched branches; abort the loop and report it")
+    if stashes != a.stash_count:
+        return stage_err("fixer-touched-stash", expected=a.stash_count, stash_count=stashes,
+                         error="the stash list changed during the fix round; abort the loop and report it")
+    now = working_tree_sha(repo_abs)
+    if not now:
+        return out(False, error="cannot snapshot the working tree")
+    diff = git_diff(repo_abs, a.tree, now)
+    return out(True, head=head, stash_count=stashes, test_hunks=test_weakening(diff))
 
 
 def cmd_shard(a):
@@ -364,8 +497,11 @@ def cmd_id_next(a):
     return out(True, id=f"{a.prefix}-{a.used + 1}", next_used=a.used + 1)
 
 
-FINDING_HEAD = re.compile(r"^### \[([^\s·]+) · (LOW|MEDIUM|HIGH) · (verified|unconfirmed) · ([^\]]+?)\] (.*)$")
-FINDING_HEAD_LEGACY = re.compile(r"^### \[(LOW|MEDIUM|HIGH) · (verified|unconfirmed) · ([^\]]+?)\] (.*)$")
+SELF_CHECKED = " (self-checked)"
+FINDING_HEAD = re.compile(r"^### \[([^\s·]+) · (LOW|MEDIUM|HIGH) · (verified|unconfirmed)(?: \(self-checked\))?"
+                          r" · ([^\]]+?)\] (.*)$")
+FINDING_HEAD_LEGACY = re.compile(r"^### \[(LOW|MEDIUM|HIGH) · (verified|unconfirmed)(?: \(self-checked\))?"
+                                 r" · ([^\]]+?)\] (.*)$")
 FIX_SUFFIX = re.compile(r"^(.*?) · fix: (fixed|unfixed|worse|pending)$")
 
 
@@ -423,7 +559,7 @@ def normalize_findings(items):
                 "lens": it.get("lens") if isinstance(it.get("lens"), str) and it.get("lens") else "general",
                 "impact": it.get("impact") if isinstance(it.get("impact"), str) else "",
                 "confirmation": {
-                    "status": "unconfirmed" if it.get("status") == "unconfirmed" else "verified",
+                    "status": "verified" if it.get("status") == "verified" else "unconfirmed",
                     "note": "carried from the previous review's report",
                 },
             },
@@ -464,13 +600,24 @@ def findings_md(items):
     lines = []
     for f in items:
         fix = "" if f.get("fixStatus") == "pending" else " · fix: " + f.get("fixStatus", "")
-        lines.append(f"### [{f['id']} · {f['severity'].upper()} · {f['status']} · {f['lens']}{fix}] {f['what']}")
+        status = f["status"] + (SELF_CHECKED if f.get("selfChecked") else "")
+        lines.append(f"### [{f['id']} · {f['severity'].upper()} · {status} · {f['lens']}{fix}] {f['what']}")
         lines.append(f"- where: `{f['where']}`")
         lines.append(f"- evidence: {f['evidence']}")
         if f.get("impact"):
             lines.append(f"- impact: {f['impact']}")
         lines.append("")
     return lines
+
+
+def reported_finding(t):
+    f, conf = t["finding"], t["finding"]["confirmation"]
+    self_checked = bool(conf.get("self_checked"))
+    # A self-check is never independent confirmation, whatever status it claims.
+    status = "unconfirmed" if self_checked or conf.get("status") != "verified" else "verified"
+    return {"id": f["id"], "where": f["where"], "what": f["what"], "evidence": f["evidence"],
+            "status": status, "selfChecked": self_checked, "severity": f["severity"],
+            "lens": f["lens"], "impact": f.get("impact", ""), "fixStatus": t["fix"]}
 
 
 def cmd_report(a):
@@ -483,19 +630,20 @@ def cmd_report(a):
     gate = d.get("gate_rows", [])
     gate_green = d.get("gate_green", False)
     assessment = d.get("assessment", {})
-    reported = [{
-        "id": t["finding"]["id"], "where": t["finding"]["where"], "what": t["finding"]["what"],
-        "evidence": t["finding"]["evidence"], "status": t["finding"]["confirmation"]["status"],
-        "severity": t["finding"]["severity"], "lens": t["finding"]["lens"],
-        "impact": t["finding"].get("impact", ""), "fixStatus": t["fix"],
-    } for t in tracked]
-    n_high = sum(1 for t in tracked if t["finding"]["severity"] == "high")
-    n_fixed = sum(1 for t in tracked if t["fix"] == "fixed")
+    reported = [reported_finding(t) for t in tracked]
+    n_high = sum(1 for f in reported if f["severity"] == "high")
+    n_fixed = sum(1 for f in reported if f["fixStatus"] == "fixed")
+    n_confirmed = sum(1 for f in reported if f["status"] == "verified")
+    n_self = sum(1 for f in reported if f["selfChecked"])
+    unconfirmed = f"{len(reported) - n_confirmed} unconfirmed" + (f" ({n_self} self-checked)" if n_self else "")
     rounds = d.get("rounds_used", 0)
+    repo_rows = [g for g in gate if is_repo_row(g)]
     lines = [d.get("title", "Code review report"), "", d.get("mode_line", ""), ""]
     lines += [assessment.get("verdict", ""), "",
-              f"## Mechanical gate ({len(gate)} detected check{'' if len(gate) == 1 else 's'}) — "
-              + ("nothing detected in this repo — no mechanical floor" if not gate
+              f"## Mechanical gate ({len(repo_rows)} repo check{'' if len(repo_rows) == 1 else 's'}"
+              f" · {len(gate) - len(repo_rows)} built-in) — "
+              + ("no repo checks detected — no mechanical floor"
+                 + ("" if gate_green else "; built-in checks RED") if not repo_rows
                  else "green after the final fix round" if gate_green and rounds
                  else "all passed" if gate_green
                  else "RED after the final fix round" if rounds else "RED"), ""]
@@ -504,8 +652,10 @@ def cmd_report(a):
         if code == 0:
             lines.append(f"- pass — {g['name']}")
         else:
-            lines += [f"- **FAIL** — {g['name']}", "", "  ```", f"  {g['tail']}", "  ```"]
-    lines += ["", f"## Findings ({len(tracked)} confirmed · {n_high} high · {n_fixed} fixed)", ""]
+            verdict = "TIMED OUT" if g.get("status") == "timed_out" else "FAIL"
+            lines += [f"- **{verdict}** — {g['name']}", "", "  ```", f"  {g['tail']}", "  ```"]
+    lines += ["", f"## Findings ({len(reported)} · {n_confirmed} confirmed · {unconfirmed} · "
+                  f"{n_high} high · {n_fixed} fixed)", ""]
     lines += findings_md(reported) if tracked else ["None — the reviewers reported nothing that met the bar.", ""]
     if rounds:
         lines += ["## What the fixer did", ""] + (
@@ -522,7 +672,7 @@ def cmd_report(a):
         from pathlib import Path as _Path
         _sys.path.insert(0, str(_Path(__file__).resolve().parent))
         from telemetry import record
-        record("spec-code-review", "review_report", kind=kind,
+        record("spec-code-review", "review_report", kind=a.kind,
                conclusion=d.get("conclusion", ""),
                findings=len(reported),
                unconfirmed=sum(1 for f in reported
@@ -559,6 +709,13 @@ def main(argv=None):
     r.add_argument("--kind", required=True, choices=["review", "fix"])
     r.add_argument("--data", required=True)
     r.set_defaults(fn=cmd_report)
+    fs = sub.add_parser("fix-snapshot")
+    fs.add_argument("--repo")
+    fs.set_defaults(fn=cmd_fix_snapshot)
+    fc = sub.add_parser("fix-check")
+    fc.add_argument("--repo"), fc.add_argument("--head", required=True)
+    fc.add_argument("--stash-count", type=int, required=True), fc.add_argument("--tree", required=True)
+    fc.set_defaults(fn=cmd_fix_check)
     sy = sub.add_parser("systems")
     sy.set_defaults(fn=cmd_systems)
     ak = sub.add_parser("ask")
@@ -679,6 +836,28 @@ def _intent_block(ctx):
             "intentional behavior change, not a finding — but stated intent never waives a demonstrable defect.\n")
 
 
+def _untracked_block(ctx):
+    files = ctx.get("untracked") or []
+    if not files:
+        return ""
+    return ("The change also adds these untracked files, which `git diff` does not show — read each one in "
+            "full as new code introduced by this change:\n" + "\n".join(f"- {_repo_path(ctx, f)}" for f in files) + "\n")
+
+
+def _gate_sentence(ctx):
+    return f"The mechanical gate ran before you started: {ctx['gate_line']}."
+
+
+def _test_hunks_block(ctx, verdict):
+    hunks = ctx.get("test_hunks") or []
+    if not hunks:
+        return ""
+    return ("The author's edits in this round touched test files — removed assertion lines and added skip "
+            "markers, per file:\n" + jdump(hunks)
+            + "\nCheck each one: a fix that deletes, loosens or skips a test to make a finding go away is not a "
+            f"fix — {verdict}.\n")
+
+
 def _scout_block(ctx):
     m = ctx.get("scout_map")
     if not m:
@@ -696,7 +875,8 @@ def _scout_ask(ctx):
     listed = files[:40]
     target = (f"A whole-project review is about to start. Its target is the repo's tracked source files — the "
               f"{len(files)} files the panel will read, and the modules they live in.\n" if ctx["project"]
-              else f"A change review is about to start. The change (`git diff {ctx['base']}`) touches these files:\n")
+              else f"A change review is about to start. The change (`git diff {ctx['base']}` plus any untracked "
+              "new files) touches these files:\n")
     more = (f"\n- ... and {len(files) - len(listed)} more — map the modules across all of them"
             if len(files) > len(listed) else "")
     return (target + _repo_block(ctx)
@@ -723,18 +903,19 @@ def _review_ask(ctx):
     return ("Review the change " + scope + " in this repository.\n" + _scout_block(ctx)
             + f"1. Run `git diff {ctx['base']}` and read the FULL diff — do not stop at the first issue. Open the changed "
             "files for context wherever the diff alone is ambiguous; check call sites when a defect depends on them.\n"
-            "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n"
+            + _untracked_block(ctx)
+            + "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n"
             f"3. Report only findings from your lens: {ld['focus']}\n" + _intent_block(ctx)
             + "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, "
             "what data is at risk). Omit it only for minor, low-severity items.\n"
             "A finding must be: discrete and actionable; introduced by this change; demonstrable from the code (quote the "
             "deciding lines in evidence); something the author would reasonably fix. Exclude: speculative might-fail "
             "concerns, pre-existing problems the change does not worsen, style/formatting (the repo's checks own those), "
-            "and intentional behavior changes.\n"
+            "and intentional behavior changes.\n" + SEVERITY_LADDER + "\n"
             "Cite every finding as path:line on the new side of the diff. An empty findings list is the expected answer "
             "for a clean diff — never invent one to seem busy.\n"
-            "Do not edit any file. " + ctx["gate_line"] + " before you started, so do not re-run the "
-            "test suites; spend your turn on what only a reader can see.")
+            "Do not edit any file. " + _gate_sentence(ctx) + " Do not re-run the test suites; spend your turn on "
+            "what only a reader can see.")
 
 
 def _review_ask_project(ctx):
@@ -754,11 +935,11 @@ def _review_ask_project(ctx):
             "A finding must be: discrete and actionable; present in the code as it stands; demonstrable from the code "
             "(quote the deciding lines in evidence); something the author would reasonably fix. Exclude: speculative "
             "might-fail concerns, style/formatting (the repo's checks own those), and deliberate design choices the "
-            "team has clearly signed off on.\n"
+            "team has clearly signed off on.\n" + SEVERITY_LADDER + "\n"
             "Cite every finding as path:line in the current tree. An empty findings list is the expected answer "
             "for clean code — never invent one to seem busy.\n"
-            "Do not edit any file. " + ctx["gate_line"] + " before you started, so do not re-run the "
-            "test suites; spend your turn on what only a reader can see.")
+            "Do not edit any file. " + _gate_sentence(ctx) + " Do not re-run the test suites; spend your turn on "
+            "what only a reader can see.")
 
 
 def _triage_ask(ctx):
@@ -767,8 +948,8 @@ def _triage_ask(ctx):
             + "You are the triage editor. For each finding, keep it or drop it. Keep = it meets the bar — real, "
             "introduced by this change, actionable, worth the author's attention. Drop = a duplicate of another finding "
             "in this same list, a style nit, speculation, or a pre-existing issue. Never drop something "
-            "merely because it is inconvenient, and never keep what the repo's own checks already decide (they all "
-            "passed). Give every dropped item a one-line reason.")
+            "merely because it is inconvenient, and never keep what the repo's own checks already decide. Give every "
+            "dropped item a one-line reason.")
 
 
 def _triage_ask_project(ctx):
@@ -777,7 +958,7 @@ def _triage_ask_project(ctx):
             + "\nYou are the triage editor. For each finding, keep it or drop it. Keep = it meets the bar — real, "
             "present in the code as it stands, actionable, worth the author's attention. Drop = a duplicate of a finding "
             "you have already kept from another lens, a style nit, or speculation. Never drop something merely because "
-            "it is inconvenient, and never keep what the repo's own checks already decide (they all passed). Give every "
+            "it is inconvenient, and never keep what the repo's own checks already decide. Give every "
             "dropped item a one-line reason.")
 
 
@@ -796,7 +977,8 @@ def _confirm_ask(ctx):
             + f"\nVerify it from the code alone. Read the file at that location; confirm the cited lines exist and the claim "
             "holds; confirm this change introduced it (`git diff " + ctx["base"] + " -- <path>` covers those lines). Check a "
             "call site if the claim depends on one. Do not edit anything, and do not re-run the repo's test suites.\n"
-            "If the claim holds and the change introduced it, answer verified. If you cannot reproduce it, or it predates "
+            + _untracked_block(ctx)
+            + "If the claim holds and the change introduced it, answer verified. If you cannot reproduce it, or it predates "
             "the change, answer unconfirmed and say what you saw instead.")
 
 
@@ -813,9 +995,9 @@ def _confirm_ask_project(ctx):
 def _final_ask(ctx):
     return ("Every kept non-gate finding has now been through independent confirmation:\n"
             + jdump(ctx["summary"])
-            + f"\n{ctx['gate_line']} before review started. Produce the final assessment of this change. Run `git diff {ctx['base']}"
-            "` yourself wherever you need to judge it, and read the test files before claiming a test gap.\n"
-            + _intent_block(ctx) + _scout_block(ctx)
+            + "\n" + _gate_sentence(ctx) + " Produce the final assessment of this change. Run `git diff "
+            + ctx["base"] + "` yourself wherever you need to judge it, and read the test files before claiming a test "
+            "gap.\n" + _untracked_block(ctx) + _intent_block(ctx) + _scout_block(ctx)
             + "risk: low | medium | high — what merging this change as-is would risk. testGaps: behaviors this change "
             "alters that no test covers (empty if none). residualRisks: what remains unverified after the checks and "
             "the review. verdict: two or three sentences — should this merge, and what must the author fix first.")
@@ -826,7 +1008,7 @@ def _final_ask_project(ctx):
     head = ", ".join(_repo_path(ctx, f) for f in files[:10]) + (", ..." if len(files) > 10 else "")
     return ("Every kept non-gate finding has now been through independent confirmation:\n"
             + jdump(ctx["summary"])
-            + f"\n{ctx['gate_line']} before review started. Produce the final assessment of the project's code. Read the "
+            + "\n" + _gate_sentence(ctx) + " Produce the final assessment of the project's code. Read the "
             "target files yourself wherever you need to judge them (" + head
             + "), and read the test files before claiming a test gap.\n"
             + _repo_block(ctx) + _scout_block(ctx)
@@ -873,25 +1055,27 @@ def _verify_ask(ctx):
             + "\nAuthor's notes: " + (ctx.get("notes") or "(none)")
             + "\nVerify in the CURRENT working tree: read the location and its immediate callers or contract; confirm "
             "the described defect is gone and the fix is minimal and sound.\n"
-            "Answer fixed only if the defect itself is resolved — cosmetic proximity is not a fix. Answer unfixed if "
+            + _test_hunks_block(ctx, "answer worse and name the weakened test")
+            + "Answer fixed only if the defect itself is resolved — cosmetic proximity is not a fix. Answer unfixed if "
             "it still stands. Answer worse if the fix introduced a new problem (say what, in note). Do not edit anything.")
 
 
 def _fix_review_ask(ctx):
     ra = ctx.get("repo_abs")
-    diff_cmd = (f"git -C '{ra}'.replace(/'/g, \"'\\\\''\") diff {ctx['base']} -- <path>" if False else
-                (f"git -C " + "'" + ra.replace("'", "'\\''") + "' diff " + ctx["base"] + " -- <path>" if ra
-                 else f"git diff {ctx['base']} -- <path>"))
+    git_c = "git -C '" + ra.replace("'", "'\\''") + "' " if ra else "git "
+    diff_cmd = git_c + "diff " + ctx["base"] + " -- <path>"
     gate_state = "all passed" if ctx.get("gate_green") else "are currently failing"
     return ("The author fixed review findings by changing:\n"
             + "\n".join(f"- {p}" for p in ctx["paths"])
             + "\n" + _repo_block(ctx)
             + "Read the cumulative diff for exactly these paths (`" + diff_cmd + "`, one per path) and "
-            "the current file contents where context matters. Judge the fix code as a fresh reviewer on a new change: "
+            "the current file contents where context matters; a path that diff shows nothing for is an untracked "
+            "new file — read it in full. Judge the fix code as a fresh reviewer on a new change: "
             "report only NEW defects these fixes introduce — the same bar as the panel (real, introduced by these "
             "fixes, demonstrable from the code, the author would fix). Do not re-report the original findings; "
             "separate verifiers own those.\n"
-            "An empty findings list is the expected answer for clean fixes. Do not edit anything; the repo's own "
+            + _test_hunks_block(ctx, "report it as a high-severity finding naming the weakened test")
+            + "An empty findings list is the expected answer for clean fixes. Do not edit anything; the repo's own "
             "checks " + gate_state + " after the fixes.")
 
 

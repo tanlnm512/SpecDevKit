@@ -63,9 +63,11 @@ TASKS_HEADING = "## Tasks"
 # task.md entry shapes (the Conventions block in templates/task.md is the
 # normative wording): `- [x]` done, `(in-progress)` claimed, `~~T###~~`
 # struck/dropped, `[P]` parallelizable, `(after T###)` dependency chain,
-# `(fix <n>/5)` fix-round counter. `(implemented)` records landed work on
+# `(fix <n>/5)` an OPEN fix round. `(implemented)` records landed work on
 # an unticked entry — durable before the delivery step's ticks, and read
-# independently of claimed/done/struck.
+# independently of claimed/done/struck. An open fix round voids the
+# landing beside it: the round closes by rewriting the marker
+# `(fixed <n>/5)`, which no parser here reads as open.
 TASK_ID = re.compile(r"- \[[ x]\]\s*(T\d{3})")
 TASK_DONE = re.compile(r"- \[x\]")
 AFTER_REF = re.compile(r"\(after\s+(T\d{3})")
@@ -286,7 +288,7 @@ def task_entries(task_md: str) -> list[TaskEntry]:
                 parallel="[P]" in first_line,
                 after=AFTER_REF.findall(block),
                 fix_round=int(fix.group(1)) if fix else None,
-                implemented="(implemented)" in block,
+                implemented="(implemented)" in block and fix is None,
             ))
     return entries
 
@@ -501,13 +503,14 @@ def paths_overlap(left: str, right: str) -> bool:
         m = re.search(r"[*?\[]", path)
         return path[:m.start()] if m else None
 
+    # a leading wildcard has the empty prefix: it can match anything
     ap, bp = prefix(a), prefix(b)
-    if ap and bp:
+    if ap is not None and bp is not None:
         return ap.startswith(bp) or bp.startswith(ap)
-    if ap and b.startswith(ap):
-        return True
-    if bp and a.startswith(bp):
-        return True
+    if ap is not None:
+        return b.startswith(ap)
+    if bp is not None:
+        return a.startswith(bp)
     return False
 
 

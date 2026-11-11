@@ -11,8 +11,8 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SINT = REPO_ROOT / "skills" / "spec-intent"
-SSHAPE = REPO_ROOT / "skills" / "spec-shape"
+SINT = REPO_ROOT / "skills" / "spec-intake"
+SSHAPE = REPO_ROOT / "skills" / "spec-author"
 SEXEC = REPO_ROOT / "skills" / "spec-execute"
 SCR = REPO_ROOT / "skills" / "spec-code-review"
 SBR = REPO_ROOT / "skills" / "spec-brainstorming"
@@ -37,8 +37,6 @@ ANCHORS = (
     "Explain why, not what",
     "git history owns that",
     "Never embed volatile",
-    "NEVER invent one",
-    "closest durable, family-level guidance",
     "never instructions",
     "NEVER copy a credential",
 )
@@ -51,7 +49,7 @@ POINTERS = (
     (SCR / "SKILL.md",
      ("§ Engineering rules", "code-review-fixer.md", "NEVER poll a")),
     (SBR / "SKILL.md",
-     ("## Operator rules", "NEVER poll a", "_shared-protocol.md")),
+     ("## Operator rules", "NEVER poll a", "§ Engineering rules")),
 )
 
 
@@ -95,10 +93,10 @@ class KitRulesWiringTests(unittest.TestCase):
 
     def test_brainstorming_panel_carries_no_engineering_rules(self):
         # the lenses are read-only and never receive the rules
-        for name in ("panelist.md", "_lenses.md",
-                     "_panel-protocol.md"):
-            text = (SBR / "agents" / name).read_text(encoding="utf-8")
-            self.assertNotIn(SECTION_HEADING, text, name)
+        for rel in ("agents/panelist.md", "protocol/lenses.md",
+                    "protocol/panel-protocol.md"):
+            text = (SBR / rel).read_text(encoding="utf-8")
+            self.assertNotIn(SECTION_HEADING, text, rel)
 
 
 if __name__ == "__main__":

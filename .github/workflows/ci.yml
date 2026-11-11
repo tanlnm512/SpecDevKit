@@ -28,9 +28,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Intent skill suite
-        run: skills/spec-intent/tests/run.sh
+        run: skills/spec-intake/tests/run.sh
       - name: Shape skill suite
-        run: skills/spec-shape/tests/run.sh
+        run: skills/spec-author/tests/run.sh
       - name: Execute skill suite
         run: skills/spec-execute/tests/run.sh
       - name: Review skill suite

@@ -56,7 +56,7 @@ Mechanical — all three must exit 0:
 
 ```bash
 bash tools/tests/run.sh                   # version triple (VERSION · SKILL.md · plugin.json) + changelog alignment
-python3 skills/spec-shape/scripts/contract.py --render skill-table >/dev/null  # node table source renders
+python3 skills/spec-author/scripts/contract.py --render skill-table >/dev/null  # node table source renders
 python3 tools/plugin-manifest.py --check  # generated manifests match their sources
 ```
 
@@ -64,7 +64,7 @@ python3 tools/plugin-manifest.py --check  # generated manifests match their sour
 
 ```bash
 for s in skills/*/; do bash "$s/tests/run.sh"; done               # every skill's own suite
-python3 skills/spec-shape/scripts/check.py skills/spec-shape/examples/mini-spec/specs/mini-spec   # docset fixture green
+python3 skills/spec-author/scripts/check.py skills/spec-author/examples/mini-spec/specs/mini-spec   # docset fixture green
 python3 tools/tests/test_release.py                                                  # end-to-end lifecycle fixture + release gate
 ```
 

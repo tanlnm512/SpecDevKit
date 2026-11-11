@@ -38,7 +38,7 @@ proofs — each TC's Pass condition in test.md is classified auto (a
          into the tick evidence. --run executes commands embedded in
          test.md — opt-in for the same reason you'd read a command
          before pasting it into a shell.
-dod    — the Definition-of-Done scorecard (gates/dod.md): runs
+dod    — the Definition-of-Done scorecard (ten gates, all must pass): runs
          check.py, live TC proofs, and the scope/hygiene counts in one
          pass; mechanical gates print PASS/FAIL, judgment gates print
          MANUAL for the orchestrator to satisfy. Like proofs --run, dod
@@ -904,7 +904,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
          "every D-### surfaced in the delivery summary"),
         (10, "SIGN-OFF", "MANUAL", "explicit yes on the summary"),
     ]
-    print(f"dod: {spec_dir} — gate table in gates/dod.md"
+    print(f"dod: {spec_dir} — ten gates, all must pass"
           + (" (dry run)" if dry else ""))
     for num, name, st, detail in gates:
         print(f"  {num:>2} {name:<13} {st:<7} {detail}")

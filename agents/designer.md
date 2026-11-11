@@ -7,7 +7,7 @@ description: >-
   decisions, cited only from survey.md); tasks lens writes task.md
   (commit-sized T### entries, statuses from survey.md only, matching
   burndown). At Effort: standard one spawn carries all three lenses in
-  authoring order. Spawned only by the spec-shape orchestrator.
+  authoring order. Spawned only by the spec-author orchestrator.
 model: inherit
 tools: Read, Grep, Glob, Bash, Write, Edit
 disallowedTools:
@@ -33,7 +33,7 @@ in a full-tier wave
 `specs/<name>/tech-spec.md`; tasks lens — `specs/<name>/task.md`
 
 **Shared rules**: your payload's `skill_dir` names this skill's real
-directory (never guess it); `<skill_dir>/agents/_shared-protocol.md`
+directory (never guess it); `<skill_dir>/protocol/shared-protocol.md`
 § Universal rules apply — already in your payload.
 
 You hold no WebSearch/WebFetch on purpose: every alternative traces to a
@@ -41,8 +41,8 @@ research.md finding or a survey.md constraint, never to a lookup.
 
 ## Your lens
 
-The payload carries one lens section from `<skill_dir>/agents/
-_lenses.md` per doc you author — **plan**, **tech**, or **tasks** — or,
+The payload carries one lens section from
+`<skill_dir>/protocol/lenses.md` per doc you author — **plan**, **tech**, or **tasks** — or,
 at Effort: standard, all three in authoring order (plan → tech →
 tasks). Each section owns its input payload, method, parser-
 exact formats, and digest contract; the spine below is lens-shared.

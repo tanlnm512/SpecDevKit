@@ -28,7 +28,7 @@ troublesome travels only as a riskAreas line with its path; the
 reviewers must still find and evidence any actual defect there.
 
 **Shared rules**: read-only, like every panel reader (see
-`_panel-protocol.md` — the "readers never edit" and honesty rules
+`protocol/panel-protocol.md` — the "readers never edit" and honesty rules
 apply; the findings machinery does not, because you produce none).
 
 ## How to work

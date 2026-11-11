@@ -2,7 +2,7 @@
 """Shared-core parity — one master, committed replica views.
 
 The parity closure lives ONCE in the master directory
-skills/spec-shape/scripts/ and is enumerated by import scan, never a
+skills/spec-author/scripts/ and is enumerated by import scan, never a
 hand list: the seeds are graph.py, check.py, contract.py,
 specstate.py, telemetry.py and freeze.py, and any local sibling
 module those files import — transitively, to fixpoint — joins the
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 PKG_ROOT = Path(__file__).resolve().parent.parent
-MASTER = PKG_ROOT / "skills" / "spec-shape" / "scripts"
+MASTER = PKG_ROOT / "skills" / "spec-author" / "scripts"
 SEEDS = ("graph.py", "check.py", "contract.py", "specstate.py",
          "telemetry.py", "freeze.py")
 
@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="parity.py",
         description="Replicate the shared-core closure from "
-                    "skills/spec-shape/scripts/ into every other "
+                    "skills/spec-author/scripts/ into every other "
                     "graph.py-shipping skill's scripts/, or --check the "
                     "replicas against the master.")
     p.add_argument("--check", action="store_true",
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                     rc = 1
                 elif replica.read_bytes() != master_bytes:
                     print(f"DRIFT {rel} — differs from master "
-                          f"skills/spec-shape/scripts/{name}; rerun "
+                          f"skills/spec-author/scripts/{name}; rerun "
                           "tools/parity.py")
                     rc = 1
         if not rc:

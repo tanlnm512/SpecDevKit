@@ -3,3 +3,8 @@
 # sweep activates at T023's deletion of the master and must be a no-op
 # while the master still exists.
 spec-to-prod
+# Renamed so each skill name equals its command (spec-author D-048);
+# their old commands /spec-idea and /spec-gen leave via the stale-command
+# prune, since no shipping skill claims those names anymore.
+spec-intent
+spec-shape

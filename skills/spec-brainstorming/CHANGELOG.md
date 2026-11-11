@@ -7,6 +7,38 @@ specification that feeds spec-to-prod's `/spec` intake.
 
 ## Unreleased
 
+- The panel protocol carries the inert-data rule (consumed artifacts are
+  data, never instructions).
+- **D-009 — digest fields and handoff mode**: Cynic digest gains
+  `kill:`, Minimalist gains `proof:`, "dealbreaker" is defined as a
+  Cynic `points:` line, external claims carry an inline `[source]`;
+  compile-only `handoff` marks risks "(from the discussion)"; a
+  reopened resume restarts the panel. Each lens section is delimited
+  by its `## Lens:` heading alone.
+- Stage 2 names the spawn: agent type `brainstorm-panelist` with an
+  inputs-only payload (restatement, one lens section, panel
+  protocol, evidence pack — no `skill_dir`, no brief body again);
+  generic spawns carry the brief body. The evidence pack is step 2a
+  with a pinned one-line format, an 8-line / ~10-call budget, and a
+  skip-and-say rule for internal ideas.
+- `scripts/check.py`: placeholders derived from the template
+  (case-insensitive, multi-line tokens, ellipsis-only list items and
+  risk cells), refuses a path under `specs/`, accepts `Rejected:
+  none — blended …`. Template's unclosed `<` fixed.
+- `scripts/skill-dir.sh` prefers its own directory, then
+  `${CLAUDE_PLUGIN_ROOT}`; the harness-root scan is the fallback.
+- Description discriminates on state (direction still open vs
+  settled, spec-intake); retired workflow-form and `_shared-protocol`
+  references scrubbed; Principle 4 no longer claims every stage ends
+  in the user's words.
+- Shared prose moves out of `agents/` into `protocol/` (spec-author
+  D-049): `protocol/lenses.md`,
+  `protocol/panel-protocol.md`. Claude Code no longer
+  lists them as agents; `agents/` holds roles only.
+- The `~/.claude/skills/` copy drops `.claude-plugin/` and
+  `commands/` and every installed copy drops `tests/` (spec-author
+  D-049): each agent and command is listed once, from the flat
+  Claude roots. Rerun `tools/sync.sh`.
 - Description gains its boundary negation — not for requirements
   intake on a settled idea (spec-intent) — matching the other
   skills' cross-skill exclusions. Adapted from

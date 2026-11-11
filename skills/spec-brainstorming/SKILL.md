@@ -1,17 +1,19 @@
 ---
 name: spec-brainstorming
 description: >-
-  Five-stage idea co-design and pressure-testing before any spec or
-  code exists — the pre-spec front door of the suite. One clarifying
-  question, a fresh three-lens panel (Visionary, Cynic, Minimalist), a
-  trade-off matrix, socratic refinement until the user picks or blends
-  a direction, then a durable design specification at
-  brainstorms/<name>.md, ready to feed /spec-idea. Use when the user
-  says "brainstorm", "I have an idea", "help me explore / validate /
-  pressure-test this idea or feature", "help me decide what to build",
-  "before we spec this" — any pre-spec ideation ask, even when the
-  word "brainstorm" is absent. Not for requirements intake on a
-  settled idea (spec-intent).
+  Five-stage idea co-design and pressure-testing — the pre-spec front
+  door of the suite, for when WHETHER to build it or WHICH version is
+  still open. One clarifying question, a fresh three-lens panel
+  (Visionary, Cynic, Minimalist), a trade-off matrix, socratic
+  refinement until the user picks or blends a direction, then a
+  durable design specification at brainstorms/<name>.md, ready to
+  feed /spec-intake. Use when the user says "brainstorm", "I have an
+  idea", "help me explore / validate / pressure-test this idea or
+  feature", "help me decide what to build", "before we spec this" —
+  any ask where the direction is undecided, even without the word
+  "brainstorm". Not for a settled direction that needs its
+  requirements pinned down ("clarify this idea", "/spec-intake
+  <name>" — that is spec-intake).
 metadata:
   owner: platform-core
   version: "0.1.0"
@@ -23,11 +25,13 @@ Take a raw idea from "I have an idea" to a durable design
 specification the user owns. Three independent lenses argue where
 the idea could go, why it might die, and what the smallest honest
 version is; the user — never the panel — picks the direction; the
-run ends with `brainstorms/<name>.md` on disk and `/spec-idea <name>`
+run ends with `brainstorms/<name>.md` on disk and `/spec-intake <name>`
 named as the next step.
 
 The five stages are rigid: they always run in order, none is
-skippable, and each one's shape is pinned below. The rigidity is
+skippable (the compile-only `handoff` entry, under Continuity, is
+the one defined exception: it begins at stage 5), and each one's
+shape is pinned below. The rigidity is
 the product — a brainstorm that improvises its structure collapses
 into a chat. The canonical statement of the run — stage shapes,
 the stage-2 payload, the digest grammar, the artifact rules — is
@@ -36,14 +40,15 @@ the stage-2 payload, the digest grammar, the artifact rules — is
 
 ## When to use
 
-The user brings an idea that has no spec yet: "I have an idea
-for…", "brainstorm this", "help me explore / validate /
-pressure-test this idea or feature", "what should we actually
-build here", "help me decide the approach", "before we spec this".
-Also the compile-only continuation: "write up the design spec for
-what we just discussed" (`handoff`, see Continuity). Once a spec
-dir exists the idea has graduated — requirements shaping belongs
-to spec-intent's `/spec-idea` intake, not here.
+The user brings an idea whose direction is still open — whether to
+build it, or which version: "I have an idea for…", "brainstorm
+this", "help me explore / validate / pressure-test this idea or
+feature", "what should we actually build here", "help me decide the
+approach", "before we spec this". Also the compile-only
+continuation: "write up the design spec for what we just
+discussed" (`handoff`, see Continuity). Once the direction is
+settled the idea has graduated — requirements intake belongs to
+`/spec-intake`, not here.
 
 ## Principles
 
@@ -66,9 +71,9 @@ the change is wrong — not the rule.
    output. A single context playing three roles anchors its cynic
    pass with its visionary framing.
 4. **The user selects or blends.** The panel never picks a winner
-   and the trade-off matrix carries no recommendation. Every stage
-   ends in the user's words, and the design spec records the
-   user's chosen direction — not the panel's favorite.
+   and the trade-off matrix carries no recommendation. The
+   direction is whatever the user confirms at the end of stage 4,
+   and the design spec records it — not the panel's favorite.
 5. **A weak idea is told it's weak.** The Cynic's job is real
    criticism, not theater. If the strongest honest reading is
    "don't build this", the handoff says exactly that, with the
@@ -78,8 +83,8 @@ the change is wrong — not the rule.
    ends with the design spec on disk, pinned to the template's
    shape — never a summary left scrolling away in the transcript.
 7. **Nothing is written under `specs/`.** This skill writes only
-   `brainstorms/<name>.md`. Scaffolding a spec dir is `/spec-idea`'s
-   move — writing here first would block it and skew spec-shape's
+   `brainstorms/<name>.md`. Scaffolding a spec dir is `/spec-intake`'s
+   move — writing here first would block it and skew spec-author's
    constitution gate.
 
 ## The five stages
@@ -103,10 +108,20 @@ to change it" — never as a separate question.
 
 ### Stage 2 — the perspective panel
 
-Spawn the three lenses in one message, in parallel — one archetype,
-three lens payloads: every spawn carries
-`agents/panelist.md` plus exactly one lens section from
-`agents/_lenses.md`:
+**2a — gather the evidence pack.** Before any lens spawns, collect
+the external grounding: prior art and competing tools on GitHub
+(stars, activity, maintenance signals) plus 2–4 authoritative web
+sources. Format: one finding per line, at most 8 lines,
+`<finding> — <url> (accessed <YYYY-MM-DD>)`; budget about ten
+searches or fetches. A neutral researcher subagent gathers it where
+the harness can spawn one, the session itself otherwise — never a
+lens seat. For an internal or confidential idea, skip the web
+research and say so in the pack ("no external search run —
+internal idea"). A failed gather is named as such; the lenses then
+treat every external claim as an assumption.
+
+**2b — spawn the three lenses** in one message, in parallel, one
+spawn per lens:
 
 - **visionary** — the generous reading: what this becomes if it
   works, what compounds, who falls in love with it.
@@ -116,18 +131,15 @@ three lens payloads: every spawn carries
 - **minimalist** — the smallest honest cut: the one core value,
   the thinnest delivery, what NOT to build on day one.
 
-Before the lenses spawn, gather the external evidence pack: prior
-art and competing tools on GitHub (stars, activity, maintenance
-signals) plus 2–4 authoritative web sources, each finding with its
-URL and access date. A neutral researcher subagent gathers it where
-the harness can spawn one, the session itself otherwise — never a
-lens seat. A failed gather is named as such; the lenses then treat
-every external claim as an assumption.
-
-Each spawn carries the payload below and returns only its digest.
-Present the three angles distinctly labeled — `### The Visionary`, `### The Cynic`,
-`### The Minimalist` — faithful to the digests, with at most a
-sentence of framing each. No synthesis yet.
+Spawn agent type `brainstorm-panelist` where the harness registers
+it; the payload then carries inputs only (see Spawn mechanics), not
+the brief body again. On a harness without registered agents, use a
+generic spawn whose payload also carries the brief body
+(`agents/panelist.md`, frontmatter stripped). Each spawn returns
+only its digest. Present the three angles distinctly labeled —
+`### The Visionary`, `### The Cynic`, `### The Minimalist` —
+faithful to the digests, with at most a sentence of framing each.
+No synthesis yet.
 
 ### Stage 3 — the trade-off matrix
 
@@ -166,7 +178,8 @@ Write the design specification to `brainstorms/<name>.md` from
 `templates/design-spec.md` (the template pins the shape):
 
 - **Direction** — the chosen angle or blend, the rationale in the
-  user's words, and what was rejected with why.
+  user's words, and what was rejected with why (`Rejected: none —
+  blended …` when the user blended all three).
 - **Problem Statement** — what hurts, for whom, the current
   workaround, the cost of the status quo.
 - **User Personas** — one to three, each a situation, not a job
@@ -174,9 +187,12 @@ Write the design specification to `brainstorms/<name>.md` from
 - **Core MVP Features** — the minimal numbered set that delivers
   the core value, each one line naming the persona it serves,
   plus an explicit out-of-scope list.
-- **Potential Risk Mitigations** — the Cynic's dealbreakers
-  mapped to mitigations or explicit acceptance, each with an
-  early-warning signal; kill criteria belong here.
+- **Potential Risk Mitigations** — the Cynic's dealbreakers (each
+  `points:` line of its digest) mapped to mitigations or explicit
+  acceptance, each with an early-warning signal (the `watch:`
+  tripwire where it fits); the Cynic's `kill:` line seeds the kill
+  criteria, and the Minimalist's `proof:` line, when its cut is
+  chosen, becomes the first-week check.
 
 Location rules: the default is `brainstorms/<name>.md` at the
 repository root; a user-named path wins. If the file already
@@ -186,71 +202,85 @@ exists, read it — if it is a prior round of the same idea, ask
 where one exists — the two outcomes are its choices. An
 unanswered ask stops the run: never clobber silently, never
 default to either outcome. Every criterion in
-`gates/handoff.md` must hold before `/spec-idea` is named.
+`gates/handoff.md` must hold before `/spec-intake` is named.
 
-Before naming `/spec-idea`, run the mechanical gate on the exact
+Before naming `/spec-intake`, run the mechanical gate on the exact
 artifact path:
 
 ```sh
 python3 <skill_dir>/scripts/check.py ARTIFACT
 ```
 
-`ARTIFACT` is the default or user-named path exactly as chosen. On
-exit 1, fix each named failure and rerun until exit 0. The checker is
-mechanical: judge yourself the Cynic-dealbreaker mapping, whether the
-rationale is genuinely the user's, and whether the kill evidence is
-observable.
+`ARTIFACT` is the default or user-named path exactly as chosen; a
+path under `specs/` is refused. `<skill_dir>` is the directory this
+SKILL.md loaded from; `scripts/skill-dir.sh` prints it when the
+harness does not say. On exit 1, fix each named failure and rerun
+until exit 0. The checker is
+mechanical: judge yourself the dealbreaker mapping (every Cynic
+`points:` line, or in `handoff` mode every risk raised in the
+discussion), whether the rationale is genuinely the user's, and
+whether the kill evidence is observable.
 
 The run's final message names the artifact path and the next
-step: `/spec-idea <name>`, with this doc as intent input for the spec
+step: `/spec-intake <name>`, with this doc as intent input for the spec
 intake. The commit is the user's, always.
 
 ## Spawn mechanics (the payload contract)
 
-Stage 2 is the session's own wave, one form on every harness; the
+Stage 2b is the session's own wave, one form on every harness; the
 contract `contracts/run.md` pins is canonical. Every spawn is fresh —
-no conversation context carries over — and self-contained:
+no conversation context carries over — and self-contained. The
+payload carries inputs only:
 
-1. `skill_dir: <resolved absolute path>` — resolve with
-   `scripts/skill-dir.sh`, never hardcoded.
-2. The problem restatement: the idea, the audience, the
-   constraints, in the user's own words where possible.
-3. The panelist brief body (frontmatter stripped) byte-verbatim, the
-   spawn's one lens section from `agents/_lenses.md` verbatim, then
-   `agents/_panel-protocol.md` verbatim.
-4. The evidence pack.
-5. Return contract: the agent writes nothing and returns only its
-   digest — `angle:`, `pitch:`, `points:` (2–3 lines), `watch:`
-   — decisions come from digest fields, never from prose.
+1. The problem restatement: the idea, the audience, the
+   constraints, in the user's own words where possible — plus a
+   repo area only when a lens should read one.
+2. ONE lens section from `protocol/lenses.md`, byte-verbatim: from
+   its `## Lens: <name>` heading to the next `## Lens:` heading or
+   the end of the file.
+3. `protocol/panel-protocol.md`, byte-verbatim.
+4. The evidence pack from 2a.
+
+Where the harness registers `brainstorm-panelist`, that agent type
+is the spawn and its brief is already loaded. Without registered
+agents, the generic spawn's payload leads with the `agents/panelist.md`
+body (frontmatter stripped, byte-verbatim). The digest comes back
+in the grammar `contracts/run.md` pins, and decisions come from
+digest fields, never from prose.
 
 Stages 1, 3, 4 and 5 are ALWAYS the session's: a spawned job has no
-user-turn primitive, and a stop is not a question. A brief that fails
-to load degrades to its inline mission line, logged — never a skipped
-lens.
+user-turn primitive, and a stop is not a question. A lens section or
+brief that fails to load degrades to its inline mission line,
+logged — never a skipped lens.
 
 ## Operator rules
 
 The panel writes no code and runs no commands — its only deliverables
 are digests and the stage-5 artifact — so the kit-wide engineering
-rules (the spec suite's builder brief § Engineering rules,
-mirrored in the code-review fixer brief; `_shared-protocol.md` holds
-the universal no-poll rule) bind downstream, when
-the chosen direction becomes a spec and then code. One rule binds
-here, for the session running this skill: a long foreground call may
-be auto-backgrounded by the harness; NEVER poll a backgrounded job
+rules (the spec suite's builder brief § Engineering rules, mirrored
+in the code-review fixer brief) bind downstream, when the chosen
+direction becomes a spec and then code. One rule binds here, for the
+session running this skill: a long foreground call may be
+auto-backgrounded by the harness; NEVER poll a backgrounded job
 (`sleep`, `ps`, `pgrep`, `top`) — do other work or end your reply;
 you will be woken with its output.
 
 ## Continuity
 
 The state of a run is the conversation plus, from stage 5, the
-artifact. Two entry points beyond the default full run:
+artifact. Panel digests live only in the conversation — they are not
+persisted. Two entry points beyond the default full run:
 
 - **`handoff [name]`** — compile-only. The exploring already
-  happened in conversation; jump to stage 5 and write the design
-  spec from what was discussed. If `brainstorms/<name>.md`
-  exists, read it first: it is the prior round, and the location
-  rules above apply.
+  happened in conversation; no panel runs, so jump to stage 5 and
+  write the design spec from what was discussed. With no Cynic
+  digest to map, the risk table carries the risks and objections
+  raised in the discussion, each marked "(from the discussion)";
+  the kill criteria state the stop condition the discussion
+  reached, marked the same way. If `brainstorms/<name>.md` exists, read it
+  first: it is the prior round, and the location rules above apply.
 - **Resuming a dead session** — restate from the artifact: read
-  `brainstorms/<name>.md`, confirm the direction in one question,
-  and continue at whichever stage the open ground names.
+  `brainstorms/<name>.md` and confirm the direction in one
+  question. If the direction stands, edit the artifact and re-run the
+  gate. If it is reopened, the old digests are gone: restart at
+  stage 2 from the artifact's problem statement, and rerun the panel.

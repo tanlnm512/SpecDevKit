@@ -20,7 +20,8 @@ from pathlib import Path
 # graph.py's vocabulary verbatim (it imports them below).
 NODE_TABLE = [
     ("spec", "entry",
-     "always (entry node)",
+     "always (entry node); a missing spec.md is drafted only from a "
+     "green intent.md",
      "spec.md exists, non-empty, no open NEEDS CLARIFICATION markers"),
     ("clarify", "loop",
      "open NEEDS CLARIFICATION markers exist in spec.md",
@@ -55,12 +56,15 @@ NODE_TABLE = [
      "`check.py <spec-dir>` exits 0"),
     ("approve", "human",
      "verify done (HUMAN gate)",
-     "spec.md Status: approved (or later)"),
+     "spec.md Status: approved (or later) AND the approval freeze "
+     "recorded (`approvals/approval.md`, at every tier)"),
     ("execute", "mechanical",
      "approved",
-     "every task entry implemented, ticked [x], or struck ~~"),
+     "every task entry implemented (no fix round open), ticked [x], or "
+     "struck ~~"),
     ("tick-commit", "human",
-     "execute done (HUMAN gate: the tick, then the delivery)",
+     "execute done (HUMAN gate: the delivery summary, the user's yes, "
+     "then the tick and the delivery)",
      "durable task-tick evidence (every task ticked/struck, every tick "
      "with its proof note) plus the delivery record — `Delivered: commit "
      "@ <sha>` in task.md, or the explicit non-git skip"),

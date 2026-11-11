@@ -6,7 +6,10 @@ user signs them. freeze.py records a content manifest for the approved
 intent/evidence documents and audit.py/check.py verify that manifest before
 execution and delivery:
 
-  spec.md     canonical hash (the volatile Status line is removed)
+  spec.md     canonical hash (the volatile Status line is removed; at
+              tiny tier also § Evidence, the delivery record, and the
+              status markers inside § Tasks — the task list itself is
+              frozen)
   plan.md     exact hash
   survey.md   exact hash
   test.md     exact hash
@@ -15,6 +18,20 @@ execution and delivery:
 task.md is deliberately not frozen: it is the lifecycle's status holder.
 Its contract-shape protections are traceability checks and the task-body
 scope gate.
+
+Tiny tier freezes its one file the same way: spec.md is the only entry.
+There § Tasks is hashed with its status tokens normalized away
+(checkbox state, the (in-progress)/(implemented)/(fix n/5)/(fixed n/5)
+markers, `done <date> — <proof>` sub-lines, a `Delivered:` record), so
+status progress stays legal while an added, edited, or struck task or
+requirement breaks the freeze.
+
+At full tier --record also demands the contract review's record,
+approvals/review.md: the reviewer's findings digest and every ruling,
+persisted by the orchestrator (the reviewer itself writes nothing), and
+carrying the docset fingerprint the review payload named. A docset
+repaired after its review has a new fingerprint, so the freeze refuses
+until it is re-reviewed.
 
 Usage:
   freeze.py <spec-dir> --record [--repo <path>]
@@ -39,6 +56,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import specstate
 
 FROZEN_FILES = ("spec.md", "plan.md", "survey.md", "test.md", "tech-spec.md")
+TINY_EVIDENCE_HEADING = "## Evidence"
+TASK_STATUS_LINE = re.compile(
+    r"^\s*(?:-\s*)?(?:done \d{4}-\d{2}-\d{2} \u2014|\*{0,2}Delivered\*{0,2}\s*:)")
+TASK_STATUS_MARKER = re.compile(
+    r"\s*\((?:in-progress|implemented|fix(?:ed)?\s+\d+/\d+)\)")
+TICKED_BOX = re.compile(r"^(\s*)- \[x\]")
 ENTRY = re.compile(
     r"^-\s+`([^`]+)`:\s+(exact|prefix)\s+"
     r"sha256:([0-9a-f]{64})\s+length:(\d+)\s*$",
@@ -49,13 +72,45 @@ APPROVED_AT = re.compile(
 )
 
 
+def _task_line_less_status(line: str) -> str | None:
+    """A § Tasks line with its status tokens removed; None when nothing
+    but status remains."""
+    if TASK_STATUS_LINE.match(line):
+        return None
+    bare = TASK_STATUS_MARKER.sub("", TICKED_BOX.sub(r"\1- [ ]", line))
+    if bare != line and not bare.strip():
+        return None
+    return bare
+
+
+def _tasks_less_status(lines: list[str]) -> list[str]:
+    kept = [bare for bare in map(_task_line_less_status, lines)
+            if bare is not None]
+    # a tick or a delivery record may leave blank lines at the tail
+    while kept and not kept[-1].strip():
+        kept.pop()
+    if kept:
+        kept[-1] = kept[-1].rstrip("\r\n") + "\n"
+    return kept
+
+
 def _canonical_spec(text: str) -> bytes:
-    """Spec bytes with only the lifecycle Status line removed."""
-    return b"".join(
-        line.encode("utf-8")
-        for line in text.splitlines(keepends=True)
-        if not specstate.STATUS_LINE.match(line)
-    )
+    """Spec bytes less what the lifecycle rewrites: the Status line, and
+    at tiny tier § Evidence and the status tokens inside § Tasks — the
+    task list is contract, its progress markers are not."""
+    tiny = specstate.spec_tier(text) == "tiny"
+    kept: list[str] = []
+    tasks: list[str] = []
+    section = ""
+    for line in text.splitlines(keepends=True):
+        if line.startswith("## "):
+            kept += _tasks_less_status(tasks)
+            tasks = []
+            section = line.strip() if tiny else ""
+        if section == TINY_EVIDENCE_HEADING or specstate.STATUS_LINE.match(line):
+            continue
+        (tasks if section == specstate.TASKS_HEADING else kept).append(line)
+    return "".join(kept + _tasks_less_status(tasks)).encode("utf-8")
 
 
 def manifest_values(spec_dir: Path) -> dict[str, tuple[str, str, int]]:
@@ -73,6 +128,68 @@ def manifest_values(spec_dir: Path) -> dict[str, tuple[str, str, int]]:
     return out
 
 
+def docset_fingerprint(spec_dir: Path) -> str:
+    """Short hash over the reviewable docset: the frozen manifest plus
+    task.md, which the contract review reads though the freeze leaves it
+    free to carry status."""
+    h = hashlib.sha256()
+    for name, (_kind, digest, _length) in sorted(
+            manifest_values(spec_dir).items()):
+        h.update(f"{name}:{digest}\n".encode())
+    task = spec_dir / "task.md"
+    if task.exists():
+        h.update(b"task.md:" + hashlib.sha256(task.read_bytes()).digest())
+    return h.hexdigest()[:12]
+
+
+REVIEW_EMIT = ("spec-author's `graph.py <spec-dir> --emit-spawns --repair "
+               "approve` (writes spawns/wave-<N>/reviewer-contract.md)")
+
+
+def _is_tiny(spec_dir: Path) -> bool:
+    spec = spec_dir / "spec.md"
+    return spec.exists() and specstate.spec_tier(
+        spec.read_text(encoding="utf-8", errors="replace")) == "tiny"
+
+
+def approval_steps(spec_dir: Path) -> str:
+    """What records an approval — a first one, or the one re-approval
+    of a docset approved before the freeze existed. Tiny tier has no
+    contract-review record."""
+    record = ("on the user's explicit yes run `freeze.py <spec-dir> "
+              "--record`")
+    if _is_tiny(spec_dir):
+        return record
+    return (f"emit the contract review with {REVIEW_EMIT}, spawn the "
+            "reviewer on it, write its findings digest, every ruling, and "
+            "the payload's `Docset fingerprint` line to "
+            f"approvals/review.md, then {record}")
+
+
+def review_problem(spec_dir: Path) -> str | None:
+    """Why approvals/review.md cannot back a freeze of the current
+    docset, or None when it can (tiny tier has no contract review)."""
+    if _is_tiny(spec_dir):
+        return None
+    review = spec_dir / "approvals" / "review.md"
+    try:
+        text = review.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    if not text.strip():
+        return (f"contract review not recorded — emit it with {REVIEW_EMIT}, "
+                "spawn the reviewer on that payload, then persist its "
+                "findings digest, every ruling, and the payload's `Docset "
+                f"fingerprint` line to {review}")
+    fingerprint = docset_fingerprint(spec_dir)
+    if fingerprint not in text:
+        return (f"{review} reviews a different docset (current "
+                f"fingerprint {fingerprint} not found) — the docset "
+                f"changed after its review: re-emit with {REVIEW_EMIT}, "
+                "re-review, and record the new digest and fingerprint")
+    return None
+
+
 def render(spec_dir: Path, approved_at: str) -> str:
     vals = manifest_values(spec_dir)
     lines = [
@@ -82,9 +199,11 @@ def render(spec_dir: Path, approved_at: str) -> str:
         "**Algorithm**: sha256 over UTF-8 bytes",
         "",
         "Recorded only after explicit user approval. `spec.md` is hashed without",
-        "its volatile Status line. `tech-spec.md` is verified as an immutable",
-        "prefix so implementation may append D-### decisions. `task.md` is not",
-        "frozen because it is the status holder.",
+        "its volatile Status line (at tiny tier also without § Evidence and the",
+        "status markers inside § Tasks; the task list itself is frozen).",
+        "`tech-spec.md` is verified as an immutable prefix so implementation",
+        "may append D-### decisions. `task.md` is not frozen because it is the",
+        "status holder.",
         "",
         "## Frozen contract",
     ]
@@ -109,6 +228,10 @@ def record(spec_dir: Path, repo: Path, force: bool = False) -> int:
             encoding="utf-8", errors="replace")
            for f in FROZEN_FILES if (spec_dir / f).exists()):
         print("FAIL: unresolved NEEDS CLARIFICATION marker — do not freeze", file=sys.stderr)
+        return 1
+    problem = review_problem(spec_dir)
+    if problem:
+        print(f"FAIL: {problem}", file=sys.stderr)
         return 1
     git_ok = specstate.git_available(repo)
     sha = specstate.head_sha(repo) if git_ok else "-"

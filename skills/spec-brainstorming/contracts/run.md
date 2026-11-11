@@ -2,46 +2,56 @@
 
 The canonical statement of what a spec-brainstorming run IS.
 SKILL.md summarizes; this file arbitrates. The agent-facing subset
-(the lens rules) lives in `agents/_panel-protocol.md`;
+(the lens rules) lives in `protocol/panel-protocol.md`;
 `gates/handoff.md` arbitrates the run's ending.
 
-## The five stages (rigid: in order, none skippable)
+## The five stages (rigid: in order, none skippable — `handoff` enters at stage 5)
 
 | Stage | Shape | Ends when |
 |---|---|---|
 | 1 — context discovery | restate the ask (1–2 sentences) + exactly ONE question; no lists, options, or forms; the kebab-case name stated in passing | the user answers (one follow-up max, then proceed naming assumptions) |
-| 2 — perspective multiplication | three lens agents spawned fresh, in parallel, from one payload; angles presented distinctly labeled, no synthesis between them | all three digests are presented |
+| 2 — perspective multiplication | evidence pack gathered, then three lens agents spawned fresh, in parallel, from one payload shape; angles presented distinctly labeled, no synthesis between them | all three digests are presented |
 | 3 — trade-off matrix | one table — Angle / Pros / Cons / Implementation speed / Best when — carrying no recommendation | the table is presented; the next move is the user's |
 | 4 — socratic refinement | single questions, strictly one per turn, each shaped by the previous answer; soft cap five, then a summary asking confirmation | the user confirms the selection or blend |
-| 5 — handoff | `brainstorms/<name>.md` written from `templates/design-spec.md`; an existing file is read first and its collision resolved by ONE question | the artifact is on disk, the mechanical check exits 0 after any fix-and-rerun, the judgment criteria hold, and the final message names `/spec-idea <name>` |
+| 5 — handoff | `brainstorms/<name>.md` written from `templates/design-spec.md`; an existing file is read first and its collision resolved by ONE question | the artifact is on disk, the mechanical check exits 0 after any fix-and-rerun, the judgment criteria hold, and the final message names `/spec-intake <name>` |
 
-The panel never picks the direction. Every stage ends in the
-user's words, and the artifact records the user's chosen
-direction — not the panel's favorite (Principle 4).
+The panel never picks the direction. The direction is what the
+user confirms at the end of stage 4, and the artifact records it —
+not the panel's favorite (Principle 4). The compile-only `handoff`
+entry skips stages 1–4: no panel runs, so no digests exist.
 
 ## The stage-2 payload contract (every spawn, self-contained)
 
-Spawns are fresh — no conversation context carries over:
+Spawns are fresh — no conversation context carries over. The
+agent type is `brainstorm-panelist` where the harness registers it;
+the payload carries inputs only, never the brief body again. On a
+harness without registered agents, a generic spawn leads with the
+`agents/panelist.md` body (frontmatter stripped, byte-verbatim),
+then the same inputs.
 
-1. `skill_dir: <resolved absolute path>` — resolve once with
-   `scripts/skill-dir.sh`, never hardcoded.
-2. The problem restatement: the idea, the audience, the
-   constraints, in the user's own words where possible.
-3. The panelist archetype body (frontmatter stripped)
-   byte-verbatim, the spawn's ONE lens section from
-   `agents/_lenses.md` byte-verbatim, then
-   `agents/_panel-protocol.md` verbatim.
-4. The evidence pack: external grounding gathered before the
-   spawns — GitHub signals (prior art, competing tools, stars and
-   activity, maintenance state) and authoritative web sources,
-   each finding with its URL and access date. The session
-   gathers it before spawning — a neutral researcher subagent
-   where the harness can spawn one, itself otherwise. A failed
-   gather is logged and the payload says so — the lenses then
-   treat every external claim as an assumption and never invent a
-   source.
-5. The return contract below — decisions come from digest
-   fields, never from prose.
+1. The problem restatement: the idea, the audience, the
+   constraints, in the user's own words where possible. A repo area
+   is named only when a lens should read it.
+2. The spawn's ONE lens section from `protocol/lenses.md`,
+   byte-verbatim — from its `## Lens: <name>` heading to the next
+   `## Lens:` heading or the end of the file (headings inside a
+   section are `###`).
+3. `protocol/panel-protocol.md`, byte-verbatim.
+4. The evidence pack, gathered BEFORE the spawns (step 2a): GitHub
+   signals (prior art, competing tools, stars and activity,
+   maintenance state) and 2–4 authoritative web sources. Format:
+   one finding per line, at most 8 lines,
+   `<finding> — <url> (accessed <YYYY-MM-DD>)`; budget about ten
+   searches or fetches. The session gathers it — a neutral
+   researcher subagent where the harness can spawn one, itself
+   otherwise, never a lens seat. For an internal or confidential
+   idea the web research is skipped and the pack says so. A failed
+   gather is logged and the payload says so — the lenses then treat
+   every external claim as an assumption and never invent a source.
+
+`skill_dir` is not in the payload: lenses read no skill files, and
+the session resolves its own `<skill_dir>` (the directory SKILL.md
+loaded from, or `scripts/skill-dir.sh`) for `scripts/check.py`.
 
 ## The digest grammar (every lens, pinned)
 
@@ -49,21 +59,31 @@ Spawns are fresh — no conversation context carries over:
     pitch:  one sentence — the idea through this lens
     points: 2–3 lines, each the sharpest argument from the brief's rubric
     watch:  one line — this lens's falsifiable condition / tripwire / creep signal
+    kill:   Cynic only — one line, the observable evidence that should stop the project
+    proof:  Minimalist only — one line, the cheapest test of the core value and the signal to watch
 
-One line per field, no prose around them. A lens that cannot
-satisfy its brief says so in `watch:` rather than working around
-it.
+One line per field, except `points:` (2–3 lines); no prose around
+the fields. A load-bearing external claim ends its line with an
+inline `[source]` — URL plus access date, or `file:line`. A lens
+that cannot satisfy its brief says so in `watch:` rather than
+working around it.
+
+Stage 5 reads the digests through named fields: a **dealbreaker**
+is a line of the Cynic's `points:`; its `watch:` supplies a risk's
+early warning where one fits; its `kill:` seeds the kill criteria;
+the Minimalist's `proof:` is the first-week check when its cut is
+chosen.
 
 ## The artifact rules
 
 - Default `brainstorms/<name>.md` at the repository root; a
   user-named path wins.
 - Nothing is ever written under `specs/` (D-003) — scaffolding is
-  `/spec-idea`'s move.
+  `/spec-intake`'s move; the checker refuses a path under `specs/`.
 - An existing file is read first: a prior round of the same idea
   triggers ONE question — overwrite, or version the name
   (`<name>-v2`); never a silent clobber.
-- Before `/spec-idea` is named, run this on the exact artifact path:
+- Before `/spec-intake` is named, run this on the exact artifact path:
 
   ```sh
   python3 <skill_dir>/scripts/check.py ARTIFACT
@@ -76,13 +96,15 @@ it.
   `gates/handoff.md` arbitrates readiness.
 
 The checker decides only artifact-observable criteria: sections,
-placeholders, Direction fields, the feature and out-of-scope
-lists, risk-row cells, kill-criteria presence, path handling,
-located reporting, and exit status. Mapping every panel-digest
-Cynic dealbreaker into the artifact — digest-to-artifact
-dealbreaker mapping — remains judgment because the digest is not
-part of the artifact; a green check never claims that mapping
-was proved.
+placeholders (derived from `templates/design-spec.md`), Direction
+fields, the feature and out-of-scope lists, risk-row cells,
+kill-criteria presence, path handling, located reporting, and exit
+status. Mapping every Cynic dealbreaker into the artifact —
+digest-to-artifact dealbreaker mapping — remains judgment because
+the digest is not part of the artifact; a green check never claims
+that mapping was proved. In `handoff` mode there is no digest: the
+same judgment applies to the risks raised in the discussion, each
+marked "(from the discussion)".
 
 ## The panel wave (one form, every harness)
 
@@ -96,10 +118,10 @@ D-004's dialect split):
   lens seat — the pack is shared input, the digests stay
   independent); a failed gather degrades to "no external
   evidence", logged — never an error, never a skipped lens.
-- The three briefs and `_panel-protocol.md` load from the
+- The lens sections and `protocol/panel-protocol.md` load from the
   skill dir — one source of truth for the lenses — and spawn
   in parallel, each digest returned verbatim.
-- A brief that fails to load degrades to its inline
+- A lens section or brief that fails to load degrades to its inline
   mission line, logged — never an error, never a skipped lens.
 - Stages 1, 3, 4 and 5 are ALWAYS the session's: spawned jobs
   have no user-turn primitive, and the matrix, refinement and

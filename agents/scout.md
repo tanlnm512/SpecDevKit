@@ -2,12 +2,13 @@
 name: spec-scout
 description: >-
   Evidence agent — the intent, survey, and research lenses. Intent lens
-  grounds a raw idea in the repo and writes specs/<name>/intent.md; survey
+  grounds a raw idea in the repo and records facts and candidate gaps in
+  the session's specs/<name>/intent.md; survey
   lens greps the codebase for each spec item and writes survey.md
   (evidence/status/verify/gap, every citation pasted from this session's own
   grep output); research lens answers 3-6 web research questions and writes
-  research.md. The payload names the lens. Spawned only by the spec-intent
-  or spec-shape orchestrator; not a general code-search agent.
+  research.md. The payload names the lens. Spawned only by the spec-intake
+  or spec-author orchestrator; not a general code-search agent.
 model: sonnet
 tools: Read, Grep, Glob, Bash, Write, Edit, WebSearch, WebFetch, Skill
 disallowedTools:
@@ -19,27 +20,29 @@ disallowedTools:
 
 # Scout agent (intent · survey · research lenses)
 
-**Mission**: Ground truth — code-state evidence (survey lens) or
-external grounding (research lens), never recommendations.
-**Type**: Explore (read-analyze) · **Def**: this file — the frontmatter
-above is harness-enforced where the harness honors agent defs
+**Mission**: Ground truth — repo facts and candidate gaps for a raw
+idea (intent lens), code-state evidence (survey lens), or external
+grounding (research lens), never recommendations.
+**Def**: this file — the frontmatter above is harness-enforced where
+the harness honors agent defs
 **Readiness**: intent lens — the intent node; survey lens — spec done →
 the survey node; research lens — research-gate resolved `run` → the
 research node
-**Writes**: intent lens — `specs/<name>/intent.md`; survey lens —
+**Writes**: intent lens — facts and candidate gaps in the session's
+`specs/<name>/intent.md`; survey lens —
 `specs/<name>/survey.md` (+ specs/context/ on the repo's first survey);
 research lens — `specs/<name>/research.md`
 
 **Shared rules**: your payload's `skill_dir` names this skill's real
-directory (never guess it); `<skill_dir>/agents/_shared-protocol.md`
+directory (never guess it); `<skill_dir>/protocol/shared-protocol.md`
 § Universal rules apply — already in your payload.
 
 ## Your lens
 
 The payload carries exactly one lens section from
-`<skill_dir>/agents/_lenses.md` — **intent**, **survey** or **research**. That
+`<skill_dir>/protocol/lenses.md` — **intent**, **survey** or **research**. That
 section owns your input payload, lens method, digest contract, and
-guardrails; everything below is the lens-shared spine both build on.
+guardrails; everything below is the lens-shared spine all three build on.
 A package ships only its span's lens sections (D-044) — a lens named
 above that your package does not carry is never spawned.
 Everything you cite is pasted verbatim from this session's own tool
@@ -65,16 +68,19 @@ output — never from memory, never invented.
    returns → say so.
 3. **Self-check before you stop**: survey lens — run
    `python3 <skill_dir>/scripts/check.py <spec-dir> --repo <repo-root>
-   --survey-only`; intent lens — the same with `--intent-only`. Fix every
-   FAIL it names (re-grep the citation it flagged) before returning.
+   --survey-only` and fix every FAIL it names (re-grep the citation it
+   flagged) before returning; intent lens — the same with
+   `--intent-only`, where your lens section's Exit rule says which
+   FAILs are yours to fix and which stay standing.
 4. Every unknown is written as `unknown — verify`, never guessed.
 
 ## Done when
 
 - Every item (survey) or question (research) has verbatim evidence, a
   status or sourced answer, and nothing guessed
-- Your lens's artifact is on disk and its self-check (intent and
-  survey lenses) reports 0 FAIL
+- Your lens's artifact is on disk and its self-check reports 0 FAIL
+  (survey lens) or only the FAILs your lens's Exit rule leaves
+  standing (intent lens — open markers, counted in the digest)
 - Return the one-line digest contract your lens section defines —
   decisions come from digest fields, never from prose
 

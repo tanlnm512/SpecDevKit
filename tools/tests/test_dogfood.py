@@ -39,9 +39,9 @@ class BrainstormDogfoodTests(unittest.TestCase):
 
 class SpecDogfoodTests(unittest.TestCase):
     def test_every_live_specset_passes_check_py(self):
-        # the docset checker lives in spec-shape, with its fixture beside it
-        checker = SKILLS / "spec-shape" / "scripts" / "check.py"
-        dirs = [SKILLS / "spec-shape" / "examples" / "mini-spec" / "specs" / "mini-spec"]
+        # the docset checker lives in spec-author, with its fixture beside it
+        checker = SKILLS / "spec-author" / "scripts" / "check.py"
+        dirs = [SKILLS / "spec-author" / "examples" / "mini-spec" / "specs" / "mini-spec"]
         dirs += [
             p.parent
             for p in sorted((ROOT / "specs").glob("*/spec.md"))
@@ -53,7 +53,7 @@ class SpecDogfoodTests(unittest.TestCase):
                 r = run([sys.executable, str(checker), str(d)])
                 self.assertEqual(
                     r.returncode, 0,
-                    f"{d} fails spec-shape's own docset checker:\n"
+                    f"{d} fails spec-author's own docset checker:\n"
                     f"{r.stdout}\n{r.stderr}",
                 )
 
