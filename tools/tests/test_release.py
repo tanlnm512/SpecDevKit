@@ -92,6 +92,7 @@ if __name__ == "__main__":
 SPEC_MD = f'''# Spec: {SPEC_NAME}
 
 **Status**: done
+**Type**: feature
 **Created**: {TODAY}
 **Branch**: `feature/{SPEC_NAME}`
 
@@ -125,6 +126,12 @@ need no repeated-addition workaround.
   return their integer product.
 - **FR-002**: IF either operand is zero, the system shall return 0 without
   special-casing at call sites.
+
+## Quality attributes
+- **NFR-001**: Security, Privacy, Performance, Reliability, Observability,
+  Accessibility — not applicable: a pure in-process integer function with
+  no input boundary, stored data, I/O, failure mode, signal, or interface
+  beyond its two operands.
 
 ## Scope
 **In**: the multiply operation, its tests, and the lifecycle records that
@@ -172,6 +179,10 @@ their proof is green.
 One end-of-plan commit on `feature/{SPEC_NAME}`; in a repository without
 git the Delivered record takes the `-` skip form. (ADR-001, tick-commit
 node.)
+
+### Rollout
+none — the function ships whole with the delivery commit, nothing calls
+it yet, and reverting that commit is the rollback.
 '''
 
 TECH_SPEC_MD = f'''# Tech Spec: {SPEC_NAME}
@@ -201,6 +212,12 @@ Stage 0.
 ## Impact analysis
 The module gains one function; no existing caller changes — the survey
 lists the test module as its only consumer.
+
+## Interfaces & data
+- **Interfaces**: one new public function, multiply, taking the same two
+  integer operands as add and subtract; existing signatures are unchanged.
+- **Data and migrations**: none — the module stores nothing.
+- **Compatibility**: additive; no existing caller changes.
 
 ## Code guide
 ### Arithmetic module
@@ -346,7 +363,7 @@ generated files have each broken releases before these articles existed.
 '''
 
 INDEX_MD = (f"# Specs index\n"
-            f"- [{SPEC_NAME}]({SPEC_NAME}/spec.md) — done (created {TODAY})\n")
+            f"- [{SPEC_NAME}]({SPEC_NAME}/spec.md) — done · feature · full\n")
 
 
 def build_docset() -> tuple[Path, Path]:

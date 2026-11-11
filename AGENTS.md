@@ -27,7 +27,6 @@ dialects, manifests) is generated under `tools/` (C-03).
   skills/spec-design/examples/mini-spec/specs/mini-spec`
 - Install to machine harness roots + verify: `bash tools/sync.sh`, then
   `bash tools/sync.sh --check`
-- How tests are written here, and what is still untested: `TESTING.md`
 
 ## House rules
 

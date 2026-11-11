@@ -165,7 +165,7 @@ class DeliveryPassTests(unittest.TestCase):
         spec = self.tiny_spec("tiny-demo")
         index = self.root / "specs" / "INDEX.md"
         index.write_text("# Specs index\n- [tiny-demo](tiny-demo/spec.md) "
-                         "— draft (created 2026-09-08)\n", encoding="utf-8")
+                         "— done · feature · tiny\n", encoding="utf-8")
         spec_md = spec / "spec.md"
         delivered = spec_md.read_text(encoding="utf-8")
         spec_md.write_text(delivered.replace("Delivered: commit @ -", ""),
