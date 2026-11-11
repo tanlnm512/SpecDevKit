@@ -374,12 +374,21 @@ def git(repo: Path, *args, stdin: str | None = None, check: bool = True):
     return r
 
 
-def git_dir() -> str:
-    return str(Path(shutil.which("git")).resolve().parent)
+_BIN: str | None = None
+
+
+def _git_bindir() -> str:
+    """A private bin dir exposing only git: gh can sit beside git on some
+    runners, so gh-absence needs a PATH holding nothing else."""
+    global _BIN
+    if _BIN is None:
+        _BIN = tempfile.mkdtemp(prefix="rel-bin-")
+        (Path(_BIN) / "git").symlink_to(Path(shutil.which("git")).resolve())
+    return _BIN
 
 
 def env_no_gh() -> dict:
-    return {**os.environ, "PATH": git_dir()}
+    return {**os.environ, "PATH": _git_bindir()}
 
 
 @contextmanager
@@ -388,8 +397,9 @@ def gh_stub(stdout: str):
     gh = Path(bindir) / "gh"
     gh.write_text(f"#!/bin/sh\necho '{stdout}'\n")
     gh.chmod(0o755)
+    (Path(bindir) / "git").symlink_to(Path(shutil.which("git")).resolve())
     try:
-        yield {**os.environ, "PATH": f"{bindir}:{git_dir()}"}
+        yield {**os.environ, "PATH": bindir}
     finally:
         shutil.rmtree(bindir, ignore_errors=True)
 
