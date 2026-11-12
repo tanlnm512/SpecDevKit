@@ -130,6 +130,17 @@ class SyncShBase(unittest.TestCase):
             env=dict(os.environ, HOME=str(self.home)),
             capture_output=True, text=True, timeout=300)
 
+    def sync_ok(self, *argv):
+        """run_sync, asserting exit 0 with the run's output in the failure:
+        a bare rc assert discards exactly what a flake diagnosis needs."""
+        r = self.run_sync(*argv)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def sync_refused(self, r):
+        """The refusal half of the same bargain: a nonzero rc whose
+        reason is on record."""
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def skill_root(self, *parts):
         return self.home.joinpath(
             ".claude", "skills", "spec-review", *parts)
@@ -209,7 +220,7 @@ class SyncShTests(SyncShBase):
 
     def test_fresh_install_lands_exactly_the_command_set(self):
         # seven commands, nothing more, nothing less.
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         for root in (".agents", ".claude", ".zcode"):
             installed = {p.name for p in
                          (self.home / root / "commands").glob("*.md")}
@@ -238,7 +249,7 @@ class SyncShTests(SyncShBase):
         self.assertEqual(len(skills), 7, skills)
         self.assertEqual(sorted(owners), skills,
                          "command→skill ownership is not one-to-one")
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         for root in (".agents", ".claude", ".zcode"):
             installed = sorted(
                 p.stem for p in (self.home / root / "commands")
@@ -250,7 +261,7 @@ class SyncShTests(SyncShBase):
         # scratch in the destination's own directory; a leftover from a
         # killed run sits in the namespace every classifier excludes, so
         # it can never wedge the next sync as a "foreign file".
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         scratch = self.skill_root(f"{LEDGER}.tmp-SKILL.md.tmp")
         scratch.write_text("partial bytes from a killed run\n")
         deep = self.skill_root("scripts", f"{LEDGER}.tmp-graph.py.tmp")
@@ -261,7 +272,7 @@ class SyncShTests(SyncShBase):
         self.assertIn("partial bytes", scratch.read_text())  # inert, not adopted
 
     def test_command_update_replaces_content_and_ledger_atomically(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         root = self.home / ".agents" / "commands"
         dest = root / "spec-review.md"
         master = (self.repo / CMD_SKILL
@@ -279,16 +290,16 @@ class SyncShTests(SyncShBase):
              " spec-review"])
 
     def test_foreign_file_in_skills_tree_is_refused_and_kept(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         foreign = self.skill_root("scripts", "zzz-foreign.py")
         foreign.write_text("# not ours\n")
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("REFUSE", r.stdout)
         self.assertTrue(foreign.is_file())  # never clobbered
 
     def test_same_path_owned_update_is_applied(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         master = (self.repo / CMD_SKILL
                   / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
@@ -300,13 +311,13 @@ class SyncShTests(SyncShBase):
 
     def test_foreign_file_blocks_stale_removal_in_same_tree(self):
         # a foreign file anywhere in the tree defers every removal too
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         (self.repo / CMD_SKILL / "scripts" / "gate.sh").unlink()
         skill_tree = (self.home / ".agents" / "skills" / "spec-review")
         foreign = skill_tree / "scripts" / "review_orchestrator.py"
         foreign.write_text(foreign.read_text() + "# hand-edited\n")
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("REFUSE", r.stdout)
         # stale-own gate.sh survives: nothing is removed from a tree
         # that holds a foreign file
@@ -314,7 +325,7 @@ class SyncShTests(SyncShBase):
         self.assertIn("hand-edited", foreign.read_text())
 
     def test_stale_own_file_is_cleaned_via_ledger(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         dest = (self.home / ".agents" / "skills" / "spec-review"
                 / "scripts" / "gate.sh")
         self.assertTrue(dest.is_file())
@@ -327,11 +338,11 @@ class SyncShTests(SyncShBase):
         self.assertFalse(dest.exists())
 
     def test_foreign_def_in_claude_agents_root_is_refused(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         dest = self.home / ".claude" / "agents" / "review-fixer.md"
         dest.write_text("---\nname: review-fixer\n---\nhand-edited\n")
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("REFUSE", r.stdout)
         self.assertIn("hand-edited", dest.read_text())
 
@@ -345,7 +356,7 @@ class SyncShTests(SyncShBase):
     def test_version_drift_fails_the_sync(self):
         (self.repo / CMD_SKILL / "VERSION").write_text("9.9.9\n")
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("DRIFT", r.stdout)
 
     def test_oversized_description_fails_the_sync(self):
@@ -355,7 +366,7 @@ class SyncShTests(SyncShBase):
         sk.write_text(sk.read_text().replace(
             "\nmetadata:", "\n  " + "x" * 1100 + "\nmetadata:", 1))
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("1024", r.stdout)
 
     def test_late_skills_root_collision_writes_nothing_anywhere(self):
@@ -363,7 +374,7 @@ class SyncShTests(SyncShBase):
         # skills root must not half-update the earlier roots: the
         # preflight plans all roots first, so the whole HOME — content
         # and ledgers — stays byte-identical and the run exits nonzero.
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
         late = (self.home / ".omp" / "agent" / "skills" / "spec-review"
@@ -371,7 +382,7 @@ class SyncShTests(SyncShBase):
         late.write_text(late.read_text() + "# hand-edited\n")
         before = self.home_snapshot()
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("REFUSE", r.stdout)
         self.assertIn("PREFLIGHT FAILED", r.stdout)
         self.assertIn("hand-edited", late.read_text())
@@ -384,7 +395,7 @@ class SyncShTests(SyncShBase):
         # Same zero-write contract through the omp defs root, whose
         # per-skill manifest is that plan's ledger: a hand-edited def
         # there refuses before any other destination is touched.
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
         late = (self.home / ".omp" / "agent" / "agents"
@@ -392,7 +403,7 @@ class SyncShTests(SyncShBase):
         late.write_text(late.read_text() + "\nhand-edited\n")
         before = self.home_snapshot()
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("REFUSE", r.stdout)
         self.assertIn("PREFLIGHT FAILED", r.stdout)
         self.assertIn("hand-edited", late.read_text())
@@ -407,7 +418,7 @@ class SyncShTests(SyncShBase):
                    / "spec-review.md")
         foreign.write_text("# a hand-written note, not the wrapper\n")
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("REFUSE", r.stdout)
         self.assertIn("PREFLIGHT FAILED", r.stdout)
         self.assertIn("hand-written note", foreign.read_text())
@@ -447,7 +458,7 @@ class SyncShTests(SyncShBase):
         self.assertEqual(list(self.home.rglob("*")), [])
         # once installed, the same plan reports unchanged and nothing
         # else — plan-level idempotence, still zero writes
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         before = self.home_snapshot()
         r2 = self.run_sync("--dry-run")
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
@@ -455,7 +466,7 @@ class SyncShTests(SyncShBase):
         self.assertEqual(self.home_snapshot(), before)
 
     def test_dry_run_reports_update_delete_refuse_and_writes_nothing(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
         (self.repo / CMD_SKILL / "scripts"
@@ -464,7 +475,7 @@ class SyncShTests(SyncShBase):
         foreign.write_text("# not ours\n")
         before = self.home_snapshot()
         r = self.run_sync("--dry-run")
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         kinds = self.plan_kinds(r.stdout)
         self.assertIn("update", kinds)
         self.assertIn("delete", kinds)
@@ -482,11 +493,11 @@ class SyncShTests(SyncShBase):
         # nothing installed yet: every destination is MISSING, and the
         # check creates none of them
         r = self.run_sync("--check")
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("MISSING", r.stdout)
         self.assertEqual(list(self.home.rglob("*")), [])
         # installed and current: clean, twice, zero writes
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         before = self.home_snapshot()
         for _ in range(2):
             ok = self.run_sync("--check")
@@ -497,7 +508,7 @@ class SyncShTests(SyncShBase):
         master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
         r2 = self.run_sync("--check")
-        self.assertNotEqual(r2.returncode, 0)
+        self.sync_refused(r2)
         self.assertIn("DRIFT", r2.stdout)
         self.assertNotIn("touched by master",
                          self.skill_root("scripts", "gate.sh").read_text())
@@ -508,7 +519,7 @@ class SyncShTests(SyncShBase):
         dest.write_text(edited)
         after_edit = self.home_snapshot()
         r3 = self.run_sync("--check")
-        self.assertNotEqual(r3.returncode, 0)
+        self.sync_refused(r3)
         self.assertIn("REFUSE", r3.stdout)
         self.assertEqual(dest.read_text(), edited)
         self.assertEqual(self.home_snapshot(), after_edit)
@@ -607,7 +618,7 @@ class StaleCommandPruneTests(SyncShBase):
 
     def test_renamed_brief_def_is_pruned_and_foreign_survives(self):
         agents = self.repo / INTENT_SKILL / "agents"
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         old = self.home / ".claude" / "agents" / "analyst.md"
         self.assertTrue(old.is_file())
 
@@ -634,7 +645,7 @@ class KitRulesSyncTests(SyncShBase):
             heading, heading + "stale hand-edit\n", 1))
 
     def test_sync_refreshes_a_stale_carrier_and_installs_fresh(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         carrier = (self.repo / "skills" / "spec-review" / "agents"
                    / "review-fixer.md")
         self.hand_edit(carrier)
@@ -648,13 +659,13 @@ class KitRulesSyncTests(SyncShBase):
         self.assertNotIn("stale hand-edit", installed)
 
     def test_check_reports_stale_carrier_as_drift_and_writes_nothing(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        self.sync_ok()
         carrier = (self.repo / "skills" / "spec-review" / "agents"
                    / "review-fixer.md")
         self.hand_edit(carrier)
         before = self.home_snapshot()
         r = self.run_sync("--check")
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("DRIFT", r.stdout)
         self.assertIn("stale hand-edit", carrier.read_text())
         self.assertEqual(self.home_snapshot(), before)
@@ -710,7 +721,7 @@ class RetiredSkillSweepTests(SyncShBase):
         foreign = tree / "notes.md"
         foreign.write_text("# someone else's file\n")
         r = self.run_sync()
-        self.assertNotEqual(r.returncode, 0)
+        self.sync_refused(r)
         self.assertIn("REFUSE", r.stdout)
         # exactly the provenance-backed files went, nothing else
         for rel in deploy:
@@ -751,7 +762,12 @@ if __name__ == "__main__":
             tasks.append((cls_name, method))
 
     started = time.monotonic()
-    workers = min(len(tasks), os.cpu_count() or 1)
+    # The default is one worker per case, bounded by the cores. The
+    # override exists for flake diagnosis: a higher value floods the
+    # machine past its core count to stress the spawn storm; a lower
+    # one serializes while bisecting a failure.
+    workers = int(os.environ.get("SYNC_TEST_WORKERS", "0")) \
+        or min(len(tasks), os.cpu_count() or 1)
     results = None
     if workers > 1:
         try:

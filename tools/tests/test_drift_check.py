@@ -78,6 +78,13 @@ class DriftTests(unittest.TestCase):
     def run_drift_check(self, repo: Path) -> subprocess.CompletedProcess:
         return run_py(repo / "tools" / "drift-check.py")
 
+    def drift_ok(self, repo: Path):
+        """run_drift_check, asserting exit 0 with the run's output in the
+        failure: a bare rc assert discards exactly what a flake
+        diagnosis needs."""
+        r = self.run_drift_check(repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_clean_copy_passes_with_all_sections(self):
         r = self.run_drift_check(self.clean_copy())
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -93,12 +100,12 @@ class DriftTests(unittest.TestCase):
         victim.write_text(victim.read_text().replace(
             '"spec-dev-kit"', '"hand-edited-catalog"'))
         r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("manifests", r.stdout)
         self.assertIn("tools/plugin-manifest.py", r.stdout)
         r = run_py(repo / "tools" / "plugin-manifest.py")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+        self.drift_ok(repo)
 
     def test_model_drift_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
@@ -106,11 +113,11 @@ class DriftTests(unittest.TestCase):
         original = victim.read_text()
         victim.write_text(original.replace("tick-commit<br/>", "commit-tick<br/>"))
         r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("diagrams", r.stdout)
         self.assertIn("scripts/graph.py", r.stdout)
         victim.write_text(original)
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+        self.drift_ok(repo)
 
     def test_stale_render_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
@@ -118,10 +125,10 @@ class DriftTests(unittest.TestCase):
         original = victim.read_text()
         victim.unlink()
         r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("no HTML render of the model exists", r.stdout)
         victim.write_text(original)
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+        self.drift_ok(repo)
 
     def test_example_drift_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
@@ -129,11 +136,11 @@ class DriftTests(unittest.TestCase):
         original = victim.read_text()
         victim.write_text("")
         r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("examples", r.stdout)
         self.assertIn("scripts/check.py", r.stdout)
         victim.write_text(original)
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+        self.drift_ok(repo)
 
     def test_persona_drift_fails_and_restoration_repairs(self):
         repo = self.clean_copy()
@@ -141,22 +148,22 @@ class DriftTests(unittest.TestCase):
         original = victim.read_text()
         victim.write_text(original.replace("developer", "HAND-EDIT", 1))
         r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("personas", r.stdout)
         self.assertIn("tools/sync.sh", r.stdout)
         victim.write_text(original)
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+        self.drift_ok(repo)
 
     def test_stale_persona_fails_and_deletion_repairs(self):
         repo = self.clean_copy()
         victim = repo / "agents" / "retired-persona.md"
         victim.write_text("---\ndescription: gone\n---\n")
         r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("personas", r.stdout)
         self.assertIn("retired-persona.md", r.stdout)
         victim.unlink()
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+        self.drift_ok(repo)
 
     def test_contract_drift_fails_and_regeneration_repairs(self):
         # scripts/contract.py is the node table's single source; graph.py
@@ -167,7 +174,7 @@ class DriftTests(unittest.TestCase):
             victim.read_text().replace("| `spec` | entry |",
                                        "| `spec` | HAND-EDIT |", 1))
         r = self.run_drift_check(repo)
-        self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("contract", r.stdout)
         mod = repo / "skills" / "spec-design" / "scripts" / "contract.py"
         gen = run_py(mod, "--render", "skill-table")
@@ -180,7 +187,7 @@ class DriftTests(unittest.TestCase):
         victim.write_text(
             text[:start] + gen.stdout.strip("\n")
             + text[end + len(m.END):])
-        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+        self.drift_ok(repo)
 
 
 if __name__ == "__main__":
