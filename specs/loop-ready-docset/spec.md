@@ -1,6 +1,6 @@
 # Spec: loop-ready-docset
 
-**Status**: approved
+**Status**: done
 **Type**: feature
 **Effort**: large
 **Created**: 2026-11-11

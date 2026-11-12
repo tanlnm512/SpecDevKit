@@ -3,7 +3,7 @@
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 Status reflects code state per [survey.md](survey.md), not intent.
 Every task below is new work against the survey baseline (0.1.0 @ 98fa893d4018592624c23f8fcf0b7e3855fe3989) — no task carries prior implementation evidence, so all are open.
-**Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
+**Delivered**: commit @ 4be7f87
 - Docs impact: skills/spec-design/SKILL.md, skills/spec-build/SKILL.md, skills/spec-design/agents/analyst.md, skills/spec-design/agents/architect.md, agents/analyst.md, agents/architect.md
 - Rollback: FR-001/002 (round sub-lines) — git revert of the delivery commit; sub-lines are inert to the pre-change parser
 - Rollback: FR-003 (retro at ship) — git revert restores archive-time-only writes; retro.md is additive with no mechanical reader
