@@ -1,13 +1,16 @@
 # SpecDevKit
 
-Spec-driven development as a skill suite: an orchestrator (your main
-session) plus archetype agents (analyst · architect · tester · developer ·
-auditor, plus integrator and release-manager for the outward phases;
-lens payloads riding the spawn) drive the frontier loop of
-`graph.py` and produce a grounded, execution-ready doc set per feature
-under `specs/<name>/` — ONE file by default (`Tier: tiny`, D-037) or
-the full seven-file docset (`spec.md`, `plan.md`, `task.md` (the
-status holder), `tech-spec.md`, `test.md`, with `survey.md` and
+Spec-driven development as a skill suite: seven installable agent
+skills that carry a software idea through the whole lifecycle on any
+supported coding agent — from "should we build this?" to a
+pressure-tested spec, a built and proven implementation, a merged PR,
+and a tagged release. You drive with seven slash commands; behind each
+one the agent spawns archetype agents (analyst · architect · tester ·
+developer · auditor, plus integrator and release-manager for the
+outward phases) that produce a grounded, execution-ready doc set per
+feature under `specs/<name>/` — ONE file by default (`Tier: tiny`,
+D-037) or the full seven-file docset (`spec.md`, `plan.md`, `task.md`
+(the status holder), `tech-spec.md`, `test.md`, with `survey.md` and
 `research.md` as evidence) — with FR/NFR → task → test traceability, an
 approval freeze, durable tick/delivery evidence, and an
 implementation-diff review. Every artifact is mechanically verified by
@@ -16,41 +19,61 @@ implementation-diff review. Every artifact is mechanically verified by
 
 This repo — published on GitHub as **SpecDevKit**
 (`tanlnm512/SpecDevKit`) — is a **skillset**, not a single-skill package:
-every skill lives at `skills/<name>/`, and one shared, harness-neutral install
-pipeline (`tools/sync.sh`) installs every skill it finds there to every
-supported coding-agent harness in one pass. The spec pipeline ships as
-THREE phase skills: `spec-define` (pre-spec intake — probe the repo,
-grill the user, produce a validated `intent.md`), `spec-design` (gated
-authoring — the docset waves through verify, stopping at the human
-approve gate; the shared-core master and the workflow graph's node
-table live here), and `spec-build` (post-approve developer waves,
-the delivery pass, the implement/test/audit/ship verbs). Beside
-them: `spec-review` — the portable three-stage code review (the
-repo's own detected checks as a mechanical gate, then a preflight
-scout that maps the codebase and modules, then specialist lenses with
-triage and independent confirmation of every finding, then synthesis,
-plus an optional author-fix loop ending in a merge recommendation) —
-and `spec-discover` — the pre-spec front door (one clarifying
-question, a spawned three-lens panel of Visionary / Cynic /
-Minimalist, a trade-off matrix, socratic refinement, then a durable
-idea brief at `brainstorms/<name>.md` that feeds `/spec-define` as
-intent input). Two outward phases close the lifecycle: `spec-ship`
-(push, PR drafted from the spec's records, CI, review comments,
-re-pointing the delivery record after a squash-merge) and
-`spec-release` (collect delivered specs since the last tag, version,
-changelog + notes, cut, post-release checklist) — every outward action
-waits for the user's yes. § Adding a skill to this repo below is the
-contract any further one follows.
+every skill lives at `skills/<name>/`, and one shared, harness-neutral
+install pipeline (`tools/sync.sh`) installs every skill it finds there
+to every supported coding-agent harness in one pass. § Adding a skill
+to this repo below is the contract any further one follows.
 
 The single organizing rule: **the doc state under `specs/<name>/` is the
 only state.** Every node's readiness is derived from it; no session log
 or step ledger is consulted.
 
-New-user entry point: the lifecycle start — `/spec-discover`
-(optional, for an idea still to pressure-test) or `/spec-define`, then
-`/spec-design`, then `/spec-build`, then `/spec-ship` and
-`/spec-release`; `/spec-review` fits any time. The authoring playbook and the
-workflow graph's node table live in `skills/spec-design/SKILL.md`.
+## The seven skills — one command each
+
+| Phase | Command | What it does |
+|---|---|---|
+| discover | `/spec-discover` *(optional)* | five-stage idea pressure-test — one clarifying question, a three-lens panel (Visionary / Cynic / Minimalist), a trade-off matrix, socratic refinement → an idea brief at `brainstorms/<name>.md` |
+| define | `/spec-define <name>` | requirements intake — probes the repo, grills the user until the question frontier is empty, lands a validated `intent.md` (a bug takes the bugfix deltas) |
+| design | `/spec-design <spec>` | gated authoring — drafts spec.md from the intent, then survey → plan ∥ tech ∥ qa → tasks → verify, stopping at the human approve gate |
+| build | `/spec-build <spec>` | implementation — developer waves over the open tasks, then the ONE delivery pass: proofs + regression, review instruments, ticks with proof notes, the two commits |
+| review | `/spec-review` | portable three-stage code review — a diff, a PR, a branch, or the whole repo: the repo's own checks as a mechanical gate, specialist lenses with independent confirmation, synthesis + merge recommendation; any time, no spec required |
+| ship | `/spec-ship <spec>` | integration — push, a PR drafted from the spec's records, CI read, review comments → fix-round evidence, re-pointing the delivery record after a squash-merge; never force-pushes or merges |
+| release | `/spec-release [version]` | release — collects delivered specs since the last tag, proposes the version bump, writes changelog + notes from recorded facts, cuts (commit + tag) and publishes on a second yes, runs the post-release checklist; never deploys |
+
+Every outward action (push, PR, tag, publish) waits for your explicit
+yes to the exact plan the skill printed first. Deploy stays with
+humans/CI — the kit never deploys.
+
+## Quick start
+
+Install one of the two ways (details in § Install as a plugin / §
+Install (manual, vendored copy)):
+
+```shell
+# Claude Code — plugin marketplace, no checkout needed
+/plugin marketplace add tanlnm512/SpecDevKit
+/plugin install spec-define@spec-dev-kit    # repeat per skill you want
+
+# or — one checkout, every skill, every harness on this machine
+git clone https://github.com/tanlnm512/SpecDevKit && cd SpecDevKit
+bash tools/sync.sh
+```
+
+Then walk one feature through (each command reads the doc state, so
+you can stop after any step and resume later):
+
+```text
+/spec-discover payment-retries    # optional — pressure-test the idea first
+/spec-define payment-retries      # grills you → specs/payment-retries/intent.md
+/spec-design payment-retries      # authoring waves → approve gate → you approve, freeze
+/spec-build payment-retries       # developer waves → delivery pass → done, one verified commit
+/spec-review                      # anytime — review the change it produced
+/spec-ship payment-retries        # push + PR, CI, review comments
+/spec-release                     # collect, version, changelog, tag, publish
+```
+
+The authoring playbook and the workflow graph's node table live in
+`skills/spec-design/SKILL.md`.
 
 ## How the workflow works
 
@@ -334,21 +357,20 @@ that copies out:
 
 Two invocation surfaces:
 
-### Lifecycle commands (DEFINE → SHIP)
+### Lifecycle commands (discover → release)
 
 ```text
-  DEFINE          PLAN           BUILD          VERIFY         REVIEW          SHIP
- ┌──────┐      ┌──────┐      ┌──────┐      ┌──────┐      ┌──────┐      ┌──────┐
- │ Idea │ ───▶ │ Spec │ ───▶ │ Code │ ───▶ │ Test │ ───▶ │  QA  │ ───▶ │  Go  │
- │Refine│      │  PRD │      │ Impl │      │Debug │      │ Gate │      │ Live │
- └──────┘      └──────┘      └──────┘      └──────┘      └──────┘      └──────┘
-  /spec-define   /spec-design     /spec-build implement · test · audit · ship
+  DISCOVER        DEFINE          DESIGN          BUILD           SHIP            RELEASE
+ ┌───────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
+ │ idea,     │──▶│ intent   │──▶│ approved │──▶│ built +  │──▶│ merged   │──▶│ tagged + │
+ │ pressure- │   │ validated│   │ docset   │   │ delivered│   │ PR       │   │ published│
+ │ tested    │   │          │   │          │   │          │   │          │   │          │
+ └───────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘
+ /spec-discover  /spec-define   /spec-design   /spec-build     /spec-ship      /spec-release
+  (optional)          └─────────────── /spec-review — any git repo, any time ───────────┘
 ```
 
-Then `/spec-ship <name>` (push, PR, CI, review comments), then
-`/spec-release` (version, changelog, tag); `/spec-review` runs any time.
-
-`/spec-discover` is the optional stage BEFORE this lifecycle:
+`/spec-discover` is the optional stage BEFORE the rest:
 five rigid stages — one clarifying question, a parallel three-lens
 panel (Visionary / Cynic / Minimalist), a trade-off matrix, socratic
 refinement — ending in an idea brief at
