@@ -122,9 +122,9 @@ def break_task_entry(spec_dir: Path) -> None:
     FAIL that never touches the survey evidence."""
     p = spec_dir / "task.md"
     t = p.read_text(encoding="utf-8")
-    t = re.sub(r"^(\|\s*1\s*\|\s*)2(\s*\|\s*)0(\s*\|)$",
+    t = re.sub(r"^(\|\s*1\s*\|\s*)2(\s*\|\s*)0(\s*\|.*)$",
                r"\g<1>5\g<2>0\g<3>", t, flags=re.M)
-    t = re.sub(r"^(\|\s*\*\*Σ\*\*\s*\|\s*)2(\s*\|\s*)0(\s*\|)$",
+    t = re.sub(r"^(\|\s*\*\*Σ\*\*\s*\|\s*)2(\s*\|\s*)0(\s*\|.*)$",
                r"\g<1>5\g<2>0\g<3>", t, flags=re.M)
     write(p, t)
 
@@ -505,10 +505,10 @@ HAND_TASKS = """# Tasks: handbuilt
 Status reflects code state, not intent.
 
 ## Burndown
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 2     | 0    |
-| **Σ** | 2     | 0    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 2     | 0    |          |
+| **Σ** | 2     | 0    |          |
 
 ## Phase 1: shout lands (FR-001, FR-002)
 - [ ] T001 implement the shout helper in the module (FR-001)

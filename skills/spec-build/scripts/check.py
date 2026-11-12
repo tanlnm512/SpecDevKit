@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Mechanical Phase-C checks for a spec folder under specs/<name>/.
 
-Verifies what a script can: file presence (5 contract files + survey.md/
-research.md as optional inputs; intent.md a third optional input,
+Verifies what a script can: file presence (5 contract files + survey.md
+as an optional input; intent.md a second optional input,
 checked only when present), ID traceability graph (FR/NFR/AC/US/TC/D;
 FR, applicable NFR, and AC test coverage enforced, US stays WARN),
 task-dependency and coverage-matrix consistency (including cross-phase
 `(after T###)` chains and FR→milestone coverage in plan.md), D-###
 structural completeness, burndown arithmetic (incl. the Σ total row),
-checkbox hygiene, NEEDS CLARIFICATION markers, unfilled template
+fix-round note shape (sub-line/marker pairing, the round cap, a closed
+round's resolution and proof), checkbox hygiene, NEEDS CLARIFICATION
+markers, unfilled template
 placeholders, vague plan phrases (TBD, "handle edge cases"…),
 citation-path reality (heuristic, any known source extension — not just
 .py), survey-baseline staleness, survey.md evidence reality (every
@@ -21,7 +23,10 @@ line says 'shall'), constitution presence, context-baseline presence, and
 stage gating (progress requires Status ≥ approved; NEEDS CLARIFICATION
 resolved before tasks exist), approval-freeze presence and integrity
 for every approved-or-later spec (tiny tier included), and
-git existence/ancestry for recorded lifecycle SHAs. Test quality itself
+git existence/ancestry for recorded lifecycle SHAs; the migration
+detector (FR-011) names a migratable docset's pre-change grammar
+elements, warns once (writing .grammar-v1-warned beside its docs) and
+fails them by name from check.py's next cycle there. Test quality itself
 stays a human/LLM check.
 SDLC coverage, scaled by tier: the `**Type**` header's vocabulary
 (feature | bugfix | hotfix | refactor | upgrade; absent reads feature) at
@@ -45,7 +50,7 @@ meant to be run right after writing survey.md and before returning its
 digest, so a bad survey fails here instead of flowing into tech/plan/qa.
 --intent-only runs just the intent artifact's own refusal families against
 specs/<name>/intent.md (the analyst+grill front end's output, an optional
-input like research.md): unfilled/empty artifact, surviving template
+input like survey.md): unfilled/empty artifact, surviving template
 placeholders, open NEEDS CLARIFICATION markers (the grilling vocabulary),
 an empty required section (Problem, Audience, Constraints, FR seeds) or
 no FR seed, a baseline sha the repo cannot resolve, and baseline
@@ -82,6 +87,7 @@ Exit:  0 = pass (warnings allowed) · 1 = at least one FAIL · 2 = usage error
 """
 from __future__ import annotations
 
+import datetime
 import re
 import subprocess
 import sys
@@ -101,7 +107,9 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     HTML_COMMENT,
     PLACEHOLDER,
     PRESERVING_TYPES,
+    QUESTIONS_SECTION,
     QUOTE_SPAN,
+    RESEARCH_SKIP_MARKER,
     TYPE_LINE,
     TaskEntry,
     WORK_TYPES,
@@ -110,6 +118,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     delivery_state,
     diff_paths,
     doc_tree_prefixes,
+    hotfix_target,
     lifecycle_shas,
     next_ids,
     paths_overlap,
@@ -118,6 +127,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     spec_tier,
     spec_type,
     survey_baseline,
+    research_state,
     task_touches,
     task_entries,
     tiny_task_text,
@@ -141,7 +151,7 @@ PRESERVES_LINE = re.compile(r"^\s*-\s+\*\*Preserves\*\*:\s*\S", re.M)
 APPROVED_STATUSES = ("approved", "active", "done")
 IN_FLIGHT_STATUSES = ("approved", "active")
 # Stage-1 inputs: created by scaffold.sh, optional (WARN not FAIL) here.
-INPUT_FILES = ["survey.md", "research.md"]
+INPUT_FILES = ["survey.md"]
 ALL_FILES = CONTRACT_FILES + INPUT_FILES
 
 # Zero-width/invisible/bidi-control characters. A zero-width space inserted between an ID's digits and its closing
@@ -175,11 +185,16 @@ VAGUE = re.compile(
     re.I,
 )
 
-# A burndown table row (label + two integers), anchored to the whole line —
-# used by burndown_rewrite (it must not touch a 4-column row).
-BD_ROW = re.compile(r"^\|([^|]+)\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*$")
+# A burndown table row (label + two integers + the Verified cell), anchored
+# to the whole line — used by burndown_rewrite, which rewrites only the two
+# number cells and carries the Verified cell byte-identical.
+BD_ROW = re.compile(r"^\|([^|]+)\|\s*(\d+)\s*\|\s*(\d+)\s*\|([^|]*)\|\s*$")
 # Same, unanchored — used by burndown_sums' scan (tolerates a trailing 4th column).
 BD_ROW_SCAN = re.compile(r"^\|([^|]+)\|\s*(\d+)\s*\|\s*(\d+)\s*\|", re.M)
+
+# The Verified cell is delivery-pass evidence written by the orchestrator
+# (D-004), never recomputed from task state — these are its only values.
+VERIFIED_VERDICTS = ("", "pass")
 
 # Burndown label classification. A label is the Σ/total row, an attributable
 # data row ("1", "P1", "Phase 1", "Sprint 1" all attribute to phase 1), or
@@ -766,6 +781,22 @@ def burndown_sums(task: str) -> tuple[int, int, tuple[int, int] | None] | None:
     return (sum(a for a, _ in data_rows), sum(b for _, b in data_rows), sum_row)
 
 
+def verified_cell_problems(task: str) -> list[str]:
+    """Verified-column shape gate: every data/Σ row's third cell is empty or
+    exactly `pass` — anything else is prose masquerading as the verdict."""
+    problems: list[str] = []
+    for line in task.split("\n"):
+        m = BD_ROW.match(line)
+        if not m:
+            continue
+        cell = m.group(4).strip()
+        if cell not in VERIFIED_VERDICTS:
+            problems.append(
+                f"burndown: Verified cell on `{m.group(1).strip()}` row is "
+                f"`{cell}` — must be empty or `pass`")
+    return problems
+
+
 def burndown_rewrite(task: str, ph_total: dict[int, int],
                      ph_done: dict[int, int]) -> tuple[str, list[str]]:
     """Pure rewrite of the burndown table from the given phase counts:
@@ -773,16 +804,17 @@ def burndown_rewrite(task: str, ph_total: dict[int, int],
     the prospective table before replacing the original file.
 
     Row labels, header, and separator lines are left byte-identical; only the
-    two number cells of attributable data rows and the Σ row change. Rows we
-    cannot attribute to a "## Phase N" section are left alone and excluded
-    from the recomputed Σ.
+    two number cells of attributable data rows and the Σ row change. Each
+    row's Verified cell is carried byte-identical — the verdict is delivery
+    evidence, never recomputed (FR-004). Rows we cannot attribute to a
+    "## Phase N" section are left alone and excluded from the recomputed Σ.
     """
     lines = task.split("\n")
     new_lines = list(lines)
     msgs: list[str] = []
 
     # pass 1: data rows attributable to a parsed phase section
-    fixes: list[tuple[int, str, int, int, int, int]] = []  # ln, label, old..
+    fixes: list[tuple[int, str, str, int, int, int, int]] = []  # ln, label, verified, old..
     for ln, line in enumerate(lines):
         m = BD_ROW.match(line)
         if not m:
@@ -791,20 +823,20 @@ def burndown_rewrite(task: str, ph_total: dict[int, int],
         if kind != "data" or n is None or n not in ph_total:
             continue
         label = m.group(1).strip()
-        fixes.append((ln, label, int(m.group(2)), int(m.group(3)),
+        fixes.append((ln, label, m.group(4), int(m.group(2)), int(m.group(3)),
                       ph_total[n], ph_done.get(n, 0)))
 
-    for ln, label, a, b, na, nb in fixes:
+    for ln, label, verified, a, b, na, nb in fixes:
         if a != na:
             msgs.append(f"fixed: {label} Total {a}→{na}")
         if b != nb:
             msgs.append(f"fixed: {label} Done {b}→{nb}")
         if (a, b) != (na, nb):
-            new_lines[ln] = f"| {label} | {na} | {nb} |"
+            new_lines[ln] = f"| {label} | {na} | {nb} |{verified}|"
 
     # pass 2: the Σ row (matched by content, however bolded)
-    sum_total = sum(f[4] for f in fixes)
-    sum_done = sum(f[5] for f in fixes)
+    sum_total = sum(f[5] for f in fixes)
+    sum_done = sum(f[6] for f in fixes)
     for ln, line in enumerate(lines):
         m = BD_ROW.match(line)
         if not m:
@@ -817,7 +849,7 @@ def burndown_rewrite(task: str, ph_total: dict[int, int],
         if b != sum_done:
             msgs.append(f"fixed: Σ Done {b}→{sum_done}")
         if (a, b) != (sum_total, sum_done):
-            new_lines[ln] = f"|{m.group(1)}| {sum_total} | {sum_done} |"
+            new_lines[ln] = f"|{m.group(1)}| {sum_total} | {sum_done} |{m.group(4)}|"
         break
 
     return "\n".join(new_lines), msgs
@@ -889,12 +921,134 @@ def lifecycle_integrity_problems(task: str, repo: Path) -> list[str]:
     return problems
 
 
+# Fix-round cap: the task.md annotation's denominator and graph.py's
+# FIX_CAP — check.py cannot import graph (graph imports check). The closed
+# marker has no specstate reader (the parser keeps rounds from the note
+# sub-lines alone), so the pairing gate scans for it here.
+FIX_ROUND_CAP = 5
+FIX_MARKER_CLOSED = re.compile(r"\(fixed\s+(\d+)/\d+\)")
+
+
+def fix_round_problems(entries: list[TaskEntry]) -> list[str]:
+    """Fix-round shape gate: note sub-lines pair with the entry's
+    `(fix n/5)`/`(fixed n/5)` markers, no round above the cap, at most the
+    cap's rounds per entry, and a closed round carries resolution and
+    proof. Shape only — a task at the cap stays the engine's adjudication
+    call (graph.py's frontier), never re-judged here; entries whose
+    evidence predates the sub-line grammar (marker only, no sub-lines)
+    stay silent, since flagging old-grammar docs is the migration
+    detector's job."""
+    problems: list[str] = []
+    for e in entries:
+        label = e.id or "task"
+        if e.fix_round is not None and e.fix_round > FIX_ROUND_CAP:
+            problems.append(
+                f"fix rounds: {label} marker (fix {e.fix_round}/"
+                f"{FIX_ROUND_CAP}) — round {e.fix_round} is above the cap "
+                f"({FIX_ROUND_CAP})")
+        if not e.rounds:
+            continue
+        if len(e.rounds) > FIX_ROUND_CAP:
+            problems.append(
+                f"fix rounds: {label} carries {len(e.rounds)} rounds — "
+                f"the cap is {FIX_ROUND_CAP}")
+        closed_markers = {int(n) for n in FIX_MARKER_CLOSED.findall(e.block)}
+        open_ns = {r.n for r in e.rounds if not r.closed}
+        closed_ns = {r.n for r in e.rounds if r.closed}
+        for r in e.rounds:
+            if r.n > FIX_ROUND_CAP:
+                problems.append(
+                    f"fix rounds: {label} round {r.n} is above the cap "
+                    f"({FIX_ROUND_CAP})")
+            if r.closed and not (r.resolution and r.proof):
+                problems.append(
+                    f"fix rounds: {label} closed round {r.n} lacks a "
+                    "resolution or proof")
+            if r.closed and not r.digest:
+                problems.append(
+                    f"fix rounds: {label} closed round {r.n} lacks its "
+                    "open `fix <n> — <digest>` line")
+        if e.fix_round is None and not open_ns and not closed_markers:
+            problems.append(
+                f"fix rounds: {label} round sub-lines but no (fix n/5) or "
+                "(fixed n/5) marker on the entry")
+            continue
+        if e.fix_round is not None:
+            if e.fix_round in closed_ns:
+                problems.append(
+                    f"fix rounds: {label} round {e.fix_round} reads closed "
+                    "but its marker is still open — rewrite it to "
+                    f"(fixed {e.fix_round}/{FIX_ROUND_CAP})")
+            elif e.fix_round not in open_ns:
+                problems.append(
+                    f"fix rounds: {label} marker (fix {e.fix_round}/"
+                    f"{FIX_ROUND_CAP}) pairs with no `fix {e.fix_round}` "
+                    "sub-line")
+            for n in sorted(open_ns - {e.fix_round}):
+                problems.append(
+                    f"fix rounds: {label} `fix {n}` sub-line pairs with no "
+                    f"(fix {n}/{FIX_ROUND_CAP}) marker")
+        elif open_ns:
+            problems.append(
+                f"fix rounds: {label} `fix {min(open_ns)}` sub-line with no "
+                "open (fix n/5) marker — reopening a round writes the "
+                "marker back")
+        for n in sorted(closed_markers - closed_ns):
+            problems.append(
+                f"fix rounds: {label} marker (fixed {n}/{FIX_ROUND_CAP}) "
+                f"pairs with no `fixed {n}` sub-line")
+    return problems
+
+
 def type_problems(text: str, doc: str) -> list[str]:
     word = spec_type(text)
     if word in WORK_TYPES:
         return []
     return [f"type: {doc} says `**Type**: {word}` — the work types are "
             + " | ".join(WORK_TYPES)]
+
+
+def _tag_reachable(repo: Path, tag: str) -> bool:
+    ref = f"refs/tags/{tag}^{{commit}}"
+    return _git_probe(repo, "rev-parse", "--verify", "--quiet", ref) \
+        and _git_probe(repo, "merge-base", "--is-ancestor", ref, "HEAD")
+
+
+def _named_spec_exists(spec_dir: Path, name: str) -> bool:
+    try:
+        return any(index.spec_name(p) == name
+                   for p in index.all_spec_dirs(index.specs_root(spec_dir)))
+    except OSError:
+        return False
+
+
+def hotfix_target_problems(spec_dir: Path, spec_text: str,
+                           repo_root: Path) -> list[str]:
+    """The hotfix lineage gate (FR-005, FR-006): the headers belong on a
+    `**Type**: hotfix` spec alone, a hotfix declares at least one target,
+    and each declared target resolves — the tag as a commit reachable
+    from HEAD, the name as a live or archived spec under specs/. Git
+    absent is no exemption: the target fails as unresolvable."""
+    target = hotfix_target(spec_text)
+    word = spec_type(spec_text)
+    if word != "hotfix":
+        if not target.tag and not target.spec:
+            return []
+        return [f"hotfix: `**Hotfix for**`/`**Fixes spec**` are the hotfix "
+                f"lineage headers — a `**Type**: {word}` spec carries "
+                "neither"]
+    if not target.tag and not target.spec:
+        return ["hotfix: no lineage target — a `**Type**: hotfix` spec "
+                "declares `**Hotfix for**: <tag>` and/or "
+                "`**Fixes spec**: <name>`"]
+    problems: list[str] = []
+    if target.tag and not _tag_reachable(repo_root, target.tag):
+        problems.append(f"hotfix: `**Hotfix for**: {target.tag}` — tag not "
+                        "found or not reachable from HEAD in this repo")
+    if target.spec and not _named_spec_exists(spec_dir, target.spec):
+        problems.append(f"hotfix: `**Fixes spec**: {target.spec}` — no live "
+                        "or archived spec of that name under specs/")
+    return problems
 
 
 def heading_body(text: str, heading: str) -> str | None:
@@ -1050,6 +1204,118 @@ def approval_failures(spec_dir: Path, repo_root: Path,
             for problem in freeze.verify(spec_dir, repo_root)]
 
 
+# FR-011 migration detector (D-010): the five pre-change grammar elements
+# the per-spec-dir ramp warns once about, then fails by name. Scoped to
+# MIGRATABLE_STATUS docsets outside specs/archive/ — the same refusals
+# migrate.py upgrade inherits, so every docset that can see the WARN can
+# also be converted by it.
+MIGRATABLE_STATUS = ("draft", "approved", "active")
+WARN_MARKER = ".grammar-v1-warned"
+MIGRATE_HINT = "run `migrate.py <spec-dir> upgrade`"
+FROZEN_CONTRACT_HEADING = re.compile(r"^## Frozen contract[ \t]*$", re.M)
+FREEZE_HEADING = re.compile(r"^## Freeze[ \t]*$", re.M)
+# audit.py's delivery-block shapes (runtime-only, outside the parity
+# closure — mirrored here for the block-presence test only).
+DELIVERED_FIELD = re.compile(r"^[ \t]*\*{0,2}Delivered\*{0,2}[ \t]*:.*$", re.M)
+RECORD_LINE = re.compile(
+    r"^[ \t]*\*{0,2}(?:Released|Post-release check)\*{0,2}[ \t]*:")
+FACT_BULLET = re.compile(r"^[ \t]*-[ \t]")
+
+
+def under_archive(spec_dir: Path) -> bool:
+    parts = spec_dir.resolve().parts
+    return ("specs", "archive") in zip(parts, parts[1:])
+
+
+def has_delivery_block(holder: str) -> bool:
+    """True when at least one fact bullet sits under the Delivered field
+    (audit.py's delivery_block shape: record lines are skipped first)."""
+    m = DELIVERED_FIELD.search(holder)
+    if m is None:
+        return False
+    rest = holder[m.end():].splitlines()
+    i = 0
+    while i < len(rest) and (not rest[i].strip() or RECORD_LINE.match(rest[i])):
+        i += 1
+    return bool(i < len(rest) and FACT_BULLET.match(rest[i]))
+
+
+def grammar_elements(spec_dir: Path, tier: str, holder: str,
+                     task: str | None, tech: str | None) -> list[str]:
+    """The pre-change grammar elements this docset still carries, in the
+    pinned order (D-010's five-element list). A research.md carrying the
+    canonical skip line is the folded record's legacy form — inert like
+    any leftover beside a migrated docset; so is a review.md beside an
+    already-folded approval record."""
+    elements: list[str] = []
+    research = _read(spec_dir / "research.md") if tier == "full" else ""
+    questions = bool(tech and QUESTIONS_SECTION.search(tech))
+    legacy_skip = bool(research) and any(
+        line.strip() == RESEARCH_SKIP_MARKER for line in research.splitlines())
+    if tier == "full" and research and not questions and not legacy_skip:
+        elements.append("research.md present")
+    approval = _read(spec_dir / "approvals" / "approval.md")
+    old_record = (spec_dir / "approvals" / "review.md").exists() or bool(
+        approval and FROZEN_CONTRACT_HEADING.search(approval))
+    if old_record and not (approval and FREEZE_HEADING.search(approval)):
+        elements.append(
+            "the unfolded approval record (approvals/review.md sidecar "
+            "or a `## Frozen contract` manifest)")
+    if (spec_dir / "notes" / "delivery.md").exists() \
+            and not has_delivery_block(holder):
+        elements.append("notes/delivery.md present with no delivery block "
+                        "in the status holder")
+    if tier == "full" and task:
+        for line in task.splitlines():
+            if not line.lstrip().startswith("|"):
+                continue
+            cells = [c.strip().lower()
+                     for c in line.strip().strip("|").split("|")]
+            if (cells[0] == "phase" and "total" in cells
+                    and "done" in cells and "verified" not in cells):
+                elements.append("a two-column burndown header in task.md")
+                break
+    if tier == "full" and tech and not questions and not legacy_skip:
+        elements.append("full-tier tech-spec.md without the "
+                        "`## Questions & options` section")
+    return elements
+
+
+def migration_findings(spec_dir: Path, spec_text: str, task_text: str | None,
+                       tech_text: str | None, fails: list[str],
+                       warns: list[str]) -> None:
+    """The first cycle on a migratable docset warns with the detected
+    element list and writes the per-spec-dir marker; from the next cycle
+    the same elements fail by name. Detection gates on the elements,
+    never the marker — a stale marker over green grammar is inert."""
+    status = spec_status(spec_text)
+    if status not in MIGRATABLE_STATUS or under_archive(spec_dir):
+        return
+    tier = spec_tier(spec_text)
+    holder = spec_text if tier == "tiny" else (task_text or "")
+    elements = grammar_elements(spec_dir, tier, holder,
+                                task_text if tier == "full" else None,
+                                tech_text if tier == "full" else None)
+    if not elements:
+        return
+    marker = spec_dir / WARN_MARKER
+    if marker.exists():
+        fails.extend(f"migration: {e} — pre-change grammar; {MIGRATE_HINT}"
+                     for e in elements)
+        return
+    warns.append("migration: pre-change grammar — " + "; ".join(elements)
+                 + f" — {MIGRATE_HINT} (warned once; these fail from "
+                 "check.py's next run on this spec dir)")
+    stamp = datetime.date.today().isoformat()
+    body = "\n".join([f"{stamp} — pre-change grammar detected",
+                      *(f"- {e}" for e in elements)]) + "\n"
+    try:
+        marker.write_text(body, encoding="utf-8")
+    except OSError as exc:
+        warns.append(f"migration: could not write {WARN_MARKER}: {exc} — "
+                     "the warn repeats until the marker lands")
+
+
 def tiny_check(spec_dir: Path, repo_root: Path) -> int:
     """The ONE-FILE contract gate: spec.md carries the task list
     in § Tasks; no other docset file exists or is required. Checks the
@@ -1100,6 +1366,7 @@ def tiny_check(spec_dir: Path, repo_root: Path) -> int:
         for fr in frs:
             if fr not in wrapped:
                 fails.append(f"{fr} defined but no task cites it")
+        fails.extend(fix_round_problems(entries))
         work_type = spec_type(clean)
         if work_type in PRESERVING_TYPES and not any(
                 "Accept:" in e.block for e in entries):
@@ -1112,11 +1379,13 @@ def tiny_check(spec_dir: Path, repo_root: Path) -> int:
     if not re.search(r"^\*\*Status\*\*", clean, re.M):
         fails.append("spec.md has no Status header")
     fails += type_problems(clean, "spec.md")
+    fails += hotfix_target_problems(spec_dir, clean, repo_root)
     cross_fails, cross_warns = cross_spec_findings(spec_dir, clean)
     fails += cross_fails
     warns += cross_warns + index_warnings(spec_dir)
     fails += approval_failures(spec_dir, repo_root,
                                specstate.spec_status(clean))
+    migration_findings(spec_dir, clean, None, None, fails, warns)
 
     print(f"check: {spec_dir} (tier: tiny — one-file contract)")
     print(f"  {'PASS' if not fails else 'FAIL'} ({len(fails)} fail, "
@@ -1172,8 +1441,8 @@ def main(argv: list[str] | None = None) -> int:
     notes: list[str] = []  # informational lines — visible, never warn/fail
     texts = {}
 
-    # 1. contract files exist and are non-trivial; survey.md/research.md are
-    # optional inputs (WARN not FAIL)
+    # 1. contract files exist and are non-trivial; survey.md is an
+    # optional input (WARN not FAIL)
     for f in ALL_FILES:
         p = spec_dir / f
         t = p.read_text(encoding="utf-8") if p.exists() else ""
@@ -1182,16 +1451,23 @@ def main(argv: list[str] | None = None) -> int:
         if not t:
             if f in CONTRACT_FILES:
                 fails.append(f"missing/empty: {f}")
-            elif f == "research.md":
-                warns.append(
-                    "missing: research.md (input — if the researcher was "
-                    'deliberately gated off, create it reading "not applicable '
-                    '— no open questions at Stage 0" to record the skip)'
-                )
             else:
                 warns.append("missing/empty: survey.md (input, optional)")
         elif f in CONTRACT_FILES and len(t) < 200:
             warns.append(f"suspiciously short (<200 chars): {f}")
+
+    # 1a. the research gate's artifact: `## Questions & options` in
+    # tech-spec.md (full tier). Unresolved sections warn the way the old
+    # missing-input warn did; a pre-migration research.md still resolves
+    # the gate through specstate's legacy fallback until migration.
+    if spec_tier(texts["spec.md"]) == "full" and research_state(
+            spec_dir) not in ("skip", "done"):
+        warns.append(
+            "no resolved `## Questions & options` section in tech-spec.md "
+            "(the research gate) — run the researcher, or record the skip "
+            'form: `not applicable — no open questions at Stage 0` under '
+            "### Questions and a `None — <why>` line under "
+            "### Options summary")
 
     spec, task, test, tech = (
         texts["spec.md"], texts["task.md"], texts["test.md"], texts["tech-spec.md"]
@@ -1201,7 +1477,7 @@ def main(argv: list[str] | None = None) -> int:
         print_next_ids(texts)
         return 0
 
-    # 1a. intent.md — optional input beside survey.md/research.md, but
+    # 1b. intent.md — optional input beside survey.md, but
     # with FAIL teeth: absent → not checked, no warn (specs shaped without
     # an analyst pass must stay green); present → the --intent-only refusal
     # families run here too, less the baseline pair (notes off the gate).
@@ -1215,7 +1491,7 @@ def main(argv: list[str] | None = None) -> int:
         notes.extend(intent_notes)
         fails.extend(intent_fails_)
 
-    # 1b. repo-level baselines, checked once against the repo root (both
+    # 1c. repo-level baselines, checked once against the repo root (both
     # are cross-spec, not members of any one spec folder): the shared
     # constitution — scaffold.sh creates it on the repo's first scaffold —
     # and the surveyor's context baseline. WARN-only: process inputs, not
@@ -1480,6 +1756,7 @@ def main(argv: list[str] | None = None) -> int:
     if spec_type(spec) == "hotfix":
         warns.append("type: hotfix is the tiny-tier bugfix — a full-tier "
                      "docset is a `**Type**: bugfix`")
+    fails += hotfix_target_problems(spec_dir, spec, repo_root)
     by_approval(coverage_shape_problems(texts, nfr_defs, tc_blocks),
                 status, fails, warns)
     cross_fails, cross_warns = cross_spec_findings(spec_dir, spec)
@@ -1488,6 +1765,8 @@ def main(argv: list[str] | None = None) -> int:
     for problem in lifecycle_integrity_problems(task, repo_root):
         fails.append(f"evidence: {problem}")
     fails += approval_failures(spec_dir, repo_root, status)
+    fails.extend(fix_round_problems(entries))
+    migration_findings(spec_dir, spec, task, tech, fails, warns)
     if status == "draft" and (done or in_progress):
         fails.append(
             f"gate: implementation progress ({done} ticked, {in_progress} in-progress) "
@@ -1516,6 +1795,7 @@ def main(argv: list[str] | None = None) -> int:
     # 3. burndown arithmetic vs actual entries, via the shared burndown_sums
     # scan (burndown_rewrite repairs from the same phase_counts — validation
     # and repair must never disagree on what counts as a data row vs the Σ row).
+    fails.extend(verified_cell_problems(task))
     sums = burndown_sums(task)
     if sums is not None:
         bd_total, bd_done, sum_row = sums

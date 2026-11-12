@@ -49,7 +49,10 @@ exactly one file: `specs/<name>/intent.md`, copied from this skill's
 `templates/intent.md`, with the idea written into § Problem in the
 user's words — the analyst's payload carries that section — and the
 `**Type**` header set from the ask (feature | bugfix | hotfix |
-refactor | upgrade; spec.md inherits it). Never
+refactor | upgrade; spec.md inherits it); on a hotfix ask it seeds the
+lineage headers beside it too, every target the ask names —
+`**Hotfix for**: <tag>` and/or `**Fixes spec**: <name>` — so spec.md
+inherits the target with the type. Never
 spec-design's scaffold — it writes the whole docset skeleton, and
 every one of those files is spec-design's to author. If
 `specs/<name>/intent.md` already exists, read it: a prior round is

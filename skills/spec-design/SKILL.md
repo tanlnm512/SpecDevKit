@@ -33,8 +33,8 @@ prints any node's ready/done conditions and why it sits where it sits.
 |------|------|------------|-----------|
 | `spec` | entry | always (entry node); a missing spec.md is drafted only from a green intent.md | spec.md exists, non-empty, no open NEEDS CLARIFICATION markers |
 | `clarify` | loop | open NEEDS CLARIFICATION markers exist in a filled spec.md (an unfilled template's example markers are not questions) | markers resolved (removed/answered in spec.md) |
-| `research-gate` | gate | spec.md done | research.md exists (real content → ran, or the skip marker → skipped) |
-| `research` | agent | the research gate is resolved `run` | research.md exists, non-marker, non-empty |
+| `research-gate` | gate | spec.md done — *SKIPPED at Tier: tiny* | the research record is resolved — tech-spec.md `## Questions & options` holds real content (→ ran) or the skip marker (→ skipped); a pre-migration research.md reads the same until migration — *not required at Tier: tiny* |
+| `research` | agent | the research gate is resolved `run` — *SKIPPED at Tier: tiny* | the research record holds real, non-marker content (the tech-spec section; a pre-migration docset: research.md) — *not required at Tier: tiny* |
 | `intent` | agent | intent.md present and unfilled, or `check.py --intent-only` fails (absent → SKIPPED: legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 — or, once spec.md is filled, fails on its baseline alone (lost or stale: an intake-time gate) |
 | `survey` | agent | spec.md done — *SKIPPED at Tier: tiny* | survey.md filled AND `check.py <spec-dir> --survey-only` exits 0 — *not required at Tier: tiny* |
 | `plan` | agent | spec + survey done — *SKIPPED at Tier: tiny* | plan.md exists, non-empty, filled — *not required at Tier: tiny* |
@@ -44,7 +44,7 @@ prints any node's ready/done conditions and why it sits where it sits.
 | `verify` | mechanical | plan, tech, qa, tasks, survey all done | `check.py <spec-dir>` exits 0 |
 | `approve` | human | verify done (HUMAN gate) | spec.md Status: approved (or later) AND the approval freeze recorded (`approvals/approval.md`, at every tier) |
 | `execute` | mechanical | approved | every task entry implemented (no fix round open), ticked [x], or struck ~~ |
-| `tick-commit` | human | execute done (HUMAN gate: the delivery summary, the user's yes, then the tick and the delivery) | durable task-tick evidence (every task ticked/struck, every tick with its proof note) plus the delivery record — `Delivered: commit @ <sha>` in task.md, or the explicit non-git skip |
+| `tick-commit` | human | execute done (HUMAN gate: the delivery summary, the user's yes, then the tick and the delivery) | durable task-tick evidence (every task ticked/struck, every tick with its proof note) plus the delivery record — `Delivered: commit @ <sha>` (or the explicit non-git skip) in task.md with the three delivery-block lines under it: `Docs impact`, `Rollback`, `Behavior preserved` |
 | `archive` | terminal | tick-commit done AND spec Status: done | dir moved to specs/archive/<date>-<name>/, INDEX repointed |
 <!-- END generated: node-table -->
 
@@ -96,8 +96,9 @@ intent.md") and the run stops there. One path, three steps:
    --into-existing <name>` copies that tier's skeleton without
    touching intent.md, registers the spec in `specs/INDEX.md`, and
    creates `specs/CONSTITUTION.md` on the repo's first spec. At full
-   tier it leaves research.md absent, so the research gate below is
-   judged, never pre-skipped. Never hand-copy a template instead: that
+   tier it strips the skip form from tech-spec.md `## Questions &
+   options`, so the research gate below is judged, never pre-skipped.
+   Never hand-copy a template instead: that
    skips the INDEX and the constitution.
 3. **Fill spec.md inline** — FRs/ACs/NFRs from the grilled
    requirements (all six quality families triaged, from the intent's
@@ -169,8 +170,9 @@ header comment has the rules; absent reads feature):
   growing a tiny spec later is `migrate.py grow`. Tiny is approved
   and frozen like full: `freeze.py --record` writes
   `approvals/approval.md` and is required before execute — a bare
-  `Status: approved` fails `check.py`. Only the contract review's
-  `approvals/review.md` is waived at tiny. The freeze covers § Tasks:
+  `Status: approved` fails `check.py`. Only the record's
+  `## Contract review` section is waived at tiny (`--record` without
+  `--review`). The freeze covers § Tasks:
   status markers move freely, but an added, edited, or struck task
   or requirement is a re-approval (`--record --force`).
 - **`Effort: standard`** (the template default) — one merged architect
@@ -195,19 +197,22 @@ the one the engine reads — confirm it when drafting spec.md.
 
 ### The research gate (your judgment, never tooling)
 
-The gate stays `undetermined` until research.md resolves it; the run
-pauses `AWAITING ORCHESTRATOR: research-gate` — yours to decide, not
-the user's. Derive 3–6 questions from the spec's open technical
-choices and write them into spec.md. ≥1 real question → **run**:
-write research.md from `templates/research.md` (replacing the skip
-marker where one shipped), then `graph.py <spec-dir> --emit-spawns
+The gate stays `undetermined` until tech-spec.md `## Questions &
+options` resolves it; the run pauses `AWAITING ORCHESTRATOR:
+research-gate` — yours to decide, not the user's. Derive 3–6 questions
+from the spec's open technical choices and write them under the
+section's `### Questions`. ≥1 real question → **run**: replace the
+skip form with those questions, then `graph.py <spec-dir> --emit-spawns
 --repair research` writes `researcher.md` alone — analyst brief +
-research lens, spawned out-of-band (the shape span never spawns it).
-Zero → **skip**: research.md is the one line `not applicable — no
-open questions at Stage 0`. A draft from an intent has no research.md
-yet, so write that line; a scaffold without `--into-existing`, and
-every tiny one, already ships it. Manufacturing questions to justify
-a spawn is the failure mode this gate prevents.
+research lens, spawned out-of-band (the shape span never spawns it);
+the researcher's findings land back in the same section, under
+`### Options summary` for the open choices. Zero → **skip**: the
+section keeps its shipped form — `not applicable — no open questions
+at Stage 0` under `### Questions` and a `None — <why>` line under
+`### Options summary`. A draft from an intent ships the section open
+(the scaffold strips the skip form), so write that form in; a scaffold
+without `--into-existing` already ships it. Manufacturing questions to
+justify a spawn is the failure mode this gate prevents.
 
 ## Spawn mechanics
 
@@ -275,10 +280,11 @@ With verify green:
    re-review: re-emit and re-spawn, the docset fingerprint changed),
    or put it to the user, who rules it. You never rule a BLOCK away
    yourself.
-3. **Record** — the auditor writes nothing, so you write
-   `approvals/review.md`, in this order: the payload's `Docset
-   fingerprint: <hash>` line; the auditor's digest verbatim, first
-   line `digest: BLOCK <n> · WARN <n> · NIT <n> · worst …`, then its
+3. **Record** — the auditor writes nothing, and the approve record
+   keeps one writer, freeze.py: save the review payload it will fold
+   in, in this order: the emitted payload's `Docset fingerprint:
+   <hash>` line; the auditor's digest verbatim, first line
+   `digest: BLOCK <n> · WARN <n> · NIT <n> · worst …`, then its
    findings; then one line per BLOCK that digest counts —
    `ruling: <finding #> — repaired`, or `ruling: <finding #> —` the
    user's ruling in their words. A re-review appends its fingerprint
@@ -286,13 +292,16 @@ With verify green:
 4. **Present** the digest — review findings and rulings, approach,
    phase/task counts, burndown, check.py WARN lines, every D-### so
    far — and wait.
-5. **On the explicit yes** — `scripts/freeze.py <spec-dir> --record`.
-   When anyone beyond the session user signs off, ask who approves
-   and add `--by "<name>"` per approver: each becomes an
-   `**Approved-by**` line in the record. The freeze
-   refuses a full-tier docset whose review.md lacks the current
-   fingerprint, the digest line, or a ruling line per BLOCK — a
-   fingerprint alone is not a review. Only on exit 0 set spec.md
+5. **On the explicit yes** — `scripts/freeze.py <spec-dir> --record
+   --review <review payload>`. When anyone beyond the session user
+   signs off, ask who approves and add `--by "<name>"` per approver:
+   each becomes an `**Approved-by**` line in the record. The freeze
+   validates the payload and writes the whole approve record — the
+   `## Contract review` section and the `## Freeze` manifest — into
+   `approvals/approval.md`; a full-tier record whose review section
+   is missing or invalid — no current fingerprint, no digest line,
+   or a BLOCK without its ruling line — is refused; a fingerprint
+   alone is not a review. Only on exit 0 set spec.md
    `Status: approved`, then refresh its INDEX line (`scripts/index.py
    <spec-dir>`). Re-approving a corrected spec is the same five
    steps with `--record --force`.
@@ -300,18 +309,20 @@ With verify green:
 A non-answer ends the turn — never adopt approval or progress the
 status yourself. A `Status: approved` with no freeze is not an
 approval: `check.py` fails it and `/spec-build` refuses it. At
-`Tier: tiny` the auditor reads the one-file contract and no
-review.md is demanded. Next step: `/spec-build <name>`. No
+`Tier: tiny` the auditor reads the one-file contract and the record
+carries no review section. Next step: `/spec-build <name>`. No
 implementer is ever spawned from here.
 
 ## Templates and scaffolding
 
 `scripts/scaffold.sh [--tier tiny|full] [--into-existing] <name>`
 writes the skeleton from `templates/` (default `tiny`: spec.md with
-§ Tasks, research.md skip marker, constitution; `full`: spec, plan,
-tech-spec, task, test, survey too). `--into-existing` fills an intake
-dir without overwriting anything and, at full tier, leaves
-research.md absent for the research gate. Growing a tiny spec to full:
+§ Tasks, constitution; `full`: spec, plan, tech-spec, task, test,
+survey too — tech-spec ships the research gate's `## Questions &
+options` pre-filled with the skip form). `--into-existing` fills an
+intake dir without overwriting anything and, at full tier, strips that
+skip form so the section stays open for the research gate. Growing a
+tiny spec to full:
 spec-build's `scripts/migrate.py grow <spec-dir>`. intent.md's
 template belongs to spec-define.
 

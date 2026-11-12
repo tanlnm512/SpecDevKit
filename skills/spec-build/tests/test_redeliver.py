@@ -119,6 +119,12 @@ class RedeliverTests(unittest.TestCase):
         self.assertIn("Usage: tick.py <spec-dir> --note", shown.stdout)
         self.assertIn("--redeliver <new-sha>", shown.stdout)
 
+        migrate_help = run_script("migrate.py", "-h")
+        self.assertEqual(migrate_help.returncode, 0)
+        self.assertIn("migrate.py <spec-dir> upgrade [--apply]",
+                      migrate_help.stdout)
+        self.assertIn("--apply", migrate_help.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

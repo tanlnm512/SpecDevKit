@@ -29,10 +29,13 @@ NODE_TABLE = [
      "markers resolved (removed/answered in spec.md)"),
     ("research-gate", "gate",
      "spec.md done",
-     "research.md exists (real content → ran, or the skip marker → skipped)"),
+     "the research record is resolved — tech-spec.md `## Questions & "
+     "options` holds real content (→ ran) or the skip marker (→ skipped); "
+     "a pre-migration research.md reads the same until migration"),
     ("research", "agent",
      "the research gate is resolved `run`",
-     "research.md exists, non-marker, non-empty"),
+     "the research record holds real, non-marker content (the tech-spec "
+     "section; a pre-migration docset: research.md)"),
     ("intent", "agent",
      "intent.md present and unfilled, or `check.py --intent-only` fails "
      "(absent → SKIPPED: legacy path)",
@@ -70,15 +73,18 @@ NODE_TABLE = [
      "then the tick and the delivery)",
      "durable task-tick evidence (every task ticked/struck, every tick "
      "with its proof note) plus the delivery record — `Delivered: commit "
-     "@ <sha>` in task.md, or the explicit non-git skip"),
+     "@ <sha>` (or the explicit non-git skip) in task.md with the three "
+     "delivery-block lines under it: `Docs impact`, `Rollback`, "
+     "`Behavior preserved`"),
     ("archive", "terminal",
      "tick-commit done AND spec Status: done",
      "dir moved to specs/archive/<date>-<name>/, INDEX repointed"),
 ]
 
 # Nodes `**Tier**: tiny` SKIPPEDs — the one-file contract has no
-# authoring docs to wait on.
-TINY_SKIPPED = ("survey", "plan", "tech", "qa", "tasks")
+# authoring docs to wait on and no research artifact to judge.
+TINY_SKIPPED = ("survey", "plan", "tech", "qa", "tasks",
+                "research-gate", "research")
 
 READY_WHEN = {n: r for n, _, r, _ in NODE_TABLE}
 DONE_WHEN = {n: d for n, _, _, d in NODE_TABLE}

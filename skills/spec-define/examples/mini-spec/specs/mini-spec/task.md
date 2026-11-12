@@ -4,10 +4,10 @@
 Status reflects code state per [survey.md](survey.md), not intent.
 
 ## Burndown
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 2     | 0    |
-| **Σ** | 2     | 0    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 2     | 0 |          |
+| **Σ** | 2     | 0 |          |
 
 ## Phase 1: Multiply lands (FR-001)
 <!-- Checkpoint: pytest green with the two multiply tests included -->

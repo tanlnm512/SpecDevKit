@@ -37,7 +37,8 @@ directory (never guess it); `<skill_dir>/protocol/shared-protocol.md`
 § Universal rules apply — already in your payload.
 
 You hold no WebSearch/WebFetch on purpose: every alternative traces to a
-research.md finding or a survey.md constraint, never to a lookup.
+`## Questions & options` finding in your own tech-spec.md or a survey.md
+constraint, never to a lookup.
 
 ## Your lens
 

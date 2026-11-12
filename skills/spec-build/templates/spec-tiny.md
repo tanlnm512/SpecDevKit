@@ -13,10 +13,14 @@
                                 — IDs are never renumbered. -->
 **Type**: feature          <!-- feature | bugfix | hotfix | refactor | upgrade;
                                 absent reads feature. hotfix is the bugfix of
-                                this tier: its regression test fails first.
-                                refactor | upgrade: a task's `Accept:` command,
-                                green before the change, proves behavior is
-                                preserved. -->
+                                this tier: its regression test fails first; it
+                                alone may carry the lineage headers —
+                                uncommented header lines beside this one,
+                                either or both: `**Hotfix for**: <tag>` /
+                                `**Fixes spec**: <name>`; check.py fails them
+                                on any other type. refactor | upgrade: a task's
+                                `Accept:` command, green before the change,
+                                proves behavior is preserved. -->
 **Effort**: standard       <!-- standard | large — agent-count scaling only;
                                 the Tier line above owns the contract shape. -->
 **Created**: YYYY-MM-DD

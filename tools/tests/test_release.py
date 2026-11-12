@@ -253,11 +253,11 @@ Status reflects code state per [survey.md](survey.md), not intent.
 **Delivered**: commit @ - — the fixture repo keeps no git; the skip form records it
 
 ## Burndown
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 2     | 2    |
-| 2     | 1     | 1    |
-| **Σ** | 3     | 3    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 2     | 2    | pass     |
+| 2     | 1     | 1    | pass     |
+| **Σ** | 3     | 3    | pass     |
 
 ## Phase 1: Multiply lands (FR-001)
 <!-- Checkpoint: python3 test_calc.py exits 0 -->
@@ -448,7 +448,7 @@ class DeliveredLifecycleTests(unittest.TestCase):
 
     def test_research_and_survey_records_parse(self):
         self.assertEqual(
-            specstate.research_state(self.spec_dir / "research.md"), "skip")
+            specstate.research_state(self.spec_dir), "skip")
         self.assertEqual(
             specstate.survey_baseline(self.read("survey.md")),
             ("v1", BASELINE_SHA))

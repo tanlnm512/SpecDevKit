@@ -824,6 +824,22 @@ class NotesTests(unittest.TestCase):
         self.assertIn("Delivered specs in v0.1.0", r.stdout)
         self.assertIn("tiny-rel — delivered @", r.stdout)
 
+    def test_hotfix_groups_under_its_declared_lineage(self):
+        def specs(sha):
+            out = delivered_specs("tiny-rel", tiny=True, sha=sha)
+            out["crash-fix"] = {"spec.md": tiny_spec("crash-fix", sha).replace(
+                "**Tier**: tiny",
+                "**Tier**: tiny\n**Type**: hotfix"
+                "\n**Hotfix for**: v1.2.2\n**Fixes spec**: tiny-rel")}
+            return out
+        repo, _ = make_repo(specs, tag="v1.2.2")
+        r = rel(repo, "notes", "1.2.3", "--write")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        text = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("(crash-fix) — patches v1.2.2 — fixes tiny-rel", text)
+        r = rel(repo, "notes", "1.2.3", "--check")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
 
 class PreflightTests(unittest.TestCase):
     def green(self, specs=None) -> tuple[Path, str]:

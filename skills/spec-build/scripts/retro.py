@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""retro.py — the archive's retrospective and decisions roll-up.
+"""retro.py — the retrospective and decisions roll-up.
 
 Writes <spec-dir>/retro.md, assembled only from the spec's own records:
-task states and (fixed n/5) markers, notes/T###.md fix-round headings,
-the D-### decisions (those past the approval freeze's tech-spec prefix
-are deviations), the delivery note, the spec's specs/BACKLOG.md lines,
-and the local telemetry counts for the spec. Then appends each D-###
+task states and fix rounds — (fixed n/5) markers, notes/T###.md
+fix-round headings, and the task entries' fix/fixed sub-lines — the
+D-### decisions (those past the approval freeze's tech-spec prefix
+are deviations), the delivery facts — the status holder's delivery
+block, with notes/delivery.md as the fallback for specs that predate
+the block — the spec's specs/BACKLOG.md lines, and the local telemetry
+counts for the spec. Then appends each D-###
 title to specs/context/decisions.md, so the decisions outlive the
-archived spec. Both writes are idempotent; nothing is committed.
+archived spec. The delivery pass writes the retro at ship; an existing
+retro.md is reused, never rewritten — nothing is committed.
 
 Usage: retro.py <spec-dir> <spec-name> [<repo-root>]
-Exit:  0 = written · 1 = unreadable spec dir or a failed write · 2 = usage.
+Exit:  0 = written or an existing retro reused · 1 = unreadable spec dir or a failed write · 2 = usage.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import audit  # noqa: E402
 import specstate  # noqa: E402
 import telemetry  # noqa: E402
 
@@ -46,7 +51,7 @@ def decisions(spec_dir: Path) -> list[tuple[str, str, bool]]:
             for d in DECISION.finditer(text)]
 
 
-def task_rows(spec_dir: Path) -> list[tuple[str, str, int]]:
+def task_rows(spec_dir: Path) -> list[tuple[str, str, int, tuple[specstate.FixRound, ...]]]:
     spec_md = _read(spec_dir / "spec.md")
     source = (specstate.tiny_task_text(spec_md) or "" if specstate.spec_tier(spec_md) == "tiny"
               else _read(spec_dir / "task.md"))
@@ -55,8 +60,8 @@ def task_rows(spec_dir: Path) -> list[tuple[str, str, int]]:
         state = "struck" if e.struck else "ticked" if e.done else "open"
         fixed = FIXED.search(e.first_line)
         logged = len(FIX_ROUND_HEADING.findall(_read(spec_dir / "notes" / f"{e.id}.md")))
-        rounds = max(int(fixed.group(1)) if fixed else 0, logged)
-        rows.append((e.id or e.first_line.strip(), state, rounds))
+        rounds = max(int(fixed.group(1)) if fixed else 0, logged, len(e.rounds))
+        rows.append((e.id or e.first_line.strip(), state, rounds, e.rounds))
     return rows
 
 
@@ -85,15 +90,19 @@ def retro(spec_dir: Path, name: str, root: Path) -> str:
                if line.startswith(f"- {name} — ")]
     decided = decisions(spec_dir)
     rows = task_rows(spec_dir)
-    note = _read(spec_dir / "notes" / "delivery.md").strip()
+    facts, _ = audit.delivery_block(spec_dir)
+    note = facts.strip() or _read(spec_dir / "notes" / "delivery.md").strip()
     record = specstate.delivery_state(_read(spec_dir / (
         "spec.md" if specstate.spec_tier(_read(spec_dir / "spec.md")) == "tiny" else "task.md")))
     out = [f"# Retro: {name}", "",
-           "Assembled at archive from this spec's own records; no line is a judgement.", "",
+           "Assembled from this spec's own records; no line is a judgement.", "",
            "## Tasks", "", "| Task | State | Fix rounds |", "|------|-------|------------|",
-           *(f"| {tid} | {state} | {rounds} |" for tid, state, rounds in rows),
-           "", f"Fix rounds: {sum(r[2] for r in rows)} across {len(rows)} task(s).",
-           "", "## Decisions", ""]
+           *(f"| {tid} | {state} | {rounds} |" for tid, state, rounds, _ in rows),
+           "", f"Fix rounds: {sum(r[2] for r in rows)} across {len(rows)} task(s)."]
+    out += [f"- {tid} fix {r.n} — {r.digest}"
+            + (f" — fixed: {r.resolution} — proof: {r.proof}" if r.closed else " — open")
+            for tid, _, _, rs in rows for r in rs]
+    out += ["", "## Decisions", ""]
     out += [f"- {d}: {t}" + (" (deviation, after approval)" if dev else "")
             for d, t, dev in decided] or ["None recorded."]
     out += ["", "## Delivery note", "", note or "None recorded.", "", "## Parked", ""]
@@ -125,13 +134,17 @@ def main(argv: list[str]) -> int:
     if not (spec_dir / "spec.md").is_file():
         print(f"retro: {spec_dir}/spec.md not found", file=sys.stderr)
         return 1
+    target = spec_dir / "retro.md"
+    if target.is_file():
+        print(f"retro: {target} exists — reused, not rewritten")
+        return 0
     try:
-        (spec_dir / "retro.md").write_text(retro(spec_dir, name, root), encoding="utf-8")
+        target.write_text(retro(spec_dir, name, root), encoding="utf-8")
         added = roll_up(spec_dir, name, root)
     except OSError as exc:
         print(f"retro: write failed: {exc}", file=sys.stderr)
         return 1
-    print(f"retro: wrote {spec_dir}/retro.md; {added} decision(s) rolled up to "
+    print(f"retro: wrote {target}; {added} decision(s) rolled up to "
           "specs/context/decisions.md")
     return 0
 

@@ -2,12 +2,12 @@
 # Scaffold a spec folder from the skill's templates.
 # Usage: scaffold.sh [--tier tiny|full] [--into-existing] <kebab-case-spec-name> [target-root]
 # Default tier: tiny — the ONE-FILE contract (spec.md carries the task
-# list in § Tasks). --tier full scaffolds the 7-file docset. Both
-# register in <target-root>/specs/INDEX.md.
+# list in § Tasks). --tier full scaffolds the docset. Both register in
+# <target-root>/specs/INDEX.md.
 # --into-existing fills an intake dir (intent.md already there) without
-# overwriting any file that exists. At full tier it leaves research.md
-# absent: a docset drafted from an intent has its research gate judged,
-# never pre-skipped.
+# overwriting any file that exists. At full tier it leaves the research
+# gate open: the freshly copied tech-spec.md ships without its skip
+# form, so the gate is judged, never pre-skipped.
 set -euo pipefail
 
 tier=tiny
@@ -41,24 +41,39 @@ fi
 copy_new() { [ -e "$2" ] || cp "$1" "$2"; }
 
 mkdir -p "$target"
+fresh_tech=0
 if [ "$tier" = tiny ]; then
   copy_new "$skill_dir/templates/spec-tiny.md" "$target/spec.md"
 else
   for f in spec plan tech-spec task test survey; do
+    if [ "$f" = tech-spec ] && [ ! -e "$target/tech-spec.md" ]; then
+      fresh_tech=1
+    fi
     copy_new "$skill_dir/templates/$f.md" "$target/$f.md"
   done
 fi
-# research.md ships as the resolved skip marker, not the template: the
-# research-gate's common case (no real open questions — most bugfixes) is
-# the default, so no run ever pauses "undetermined" on a fresh scaffold.
-# The orchestrator flips it to run by replacing this file with
-# the filled template when the spec has real open questions. A full-tier
-# draft from an intent is the exception: its gate stays open to be judged
-# (tiny has no tech node to consume research, so it keeps the marker).
+# tech-spec.md's `## Questions & options` section ships as the resolved
+# skip form, not an empty one: the research-gate's common case (no real
+# open questions — most bugfixes) is the default, so no run ever pauses
+# "undetermined" on a fresh scaffold. The orchestrator flips it to run by
+# writing the real questions into the section. A full-tier draft from an
+# intent is the exception: its gate stays open to be judged, so the fresh
+# copy loses the skip lines (the judge_gate logic, applied one file
+# deeper than the retired research.md write).
 judge_gate=0
 if [ "$existing" = 1 ] && [ "$tier" = full ]; then judge_gate=1; fi
-if [ "$judge_gate" = 0 ] && [ ! -e "$target/research.md" ]; then
-  printf 'not applicable — no open questions at Stage 0\n' > "$target/research.md"
+if [ "$judge_gate" = 1 ] && [ "$fresh_tech" = 1 ]; then
+  python3 - "$target/tech-spec.md" <<'PY'
+import sys
+path = sys.argv[1]
+skip = "not applicable \u2014 no open questions at Stage 0"
+with open(path, encoding="utf-8") as fh:
+    lines = fh.readlines()
+kept = [l for l in lines
+        if l.strip() not in (skip, "None \u2014 <why>")]
+with open(path, "w", encoding="utf-8") as fh:
+    fh.writelines(kept)
+PY
 fi
 
 # Register the spec in specs/INDEX.md — index.py is the one writer of
@@ -84,8 +99,9 @@ if [ "$existing" = 1 ]; then
   echo "      1) draft spec.md from intent.md, replacing every placeholder"
   echo "         and example line"
   if [ "$judge_gate" = 1 ]; then
-    echo "         research.md is absent on purpose — the research gate is"
-    echo "         yours to judge (SKILL.md § The research gate)"
+    echo "         tech-spec.md § Questions & options ships without its"
+    echo "         skip form on purpose — the research gate is yours to"
+    echo "         judge (SKILL.md § The research gate)"
   fi
 else
   echo "      1) fill spec.md with the user (intent is human)"

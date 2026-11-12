@@ -17,21 +17,43 @@ outside the approval freeze. Migration never approves: a Status of
 approved, active, or done with no approvals/approval.md prints the
 one-time re-approval steps.
 
+`upgrade` converts a pre-change-grammar docset (the grammar check.py's
+migration detector warns about) to the current one, in place, in order:
+the burndown grows the Verified column; research.md folds into
+tech-spec.md's `## Questions & options` section; the approval record
+folds into one approval.md (`## Contract review` + `## Freeze`, manifest
+entry lines transplanted byte-identically); a notes/delivery.md record
+transplants into the status holder's delivery block; the per-spec-dir
+`.grammar-v1-warned` marker is removed last. Each retired file is
+deleted only after its content is carried over, and a second apply finds
+nothing left to convert and changes nothing. Writes touch only unfrozen
+bytes — task.md, tech-spec.md appends beyond the recorded prefix length,
+and approvals/* / notes/* — so a recorded freeze still verifies after
+the upgrade. Evidence is never fabricated: missing hotfix targets and
+fix digests stay missing for their owners to record. The upgrade runs
+dry by default; `--apply` writes.
+
 Usage: migrate.py <spec-dir> [--template <path>] [--dry-run]
+       migrate.py <spec-dir> upgrade [--apply]
+       migrate.py grow <spec-dir>
        migrate.py -h | --help        (prints this text, exit 0)
-Exit:  0 = migrated, previewed (--dry-run), or already at the template's
-       contract · 1 = validation failure (nothing written) · 2 = usage error
+Exit:  0 = migrated, previewed (the dry default), or already at the
+       target grammar · 1 = validation failure (nothing written) ·
+       2 = usage error
 """
 from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
+import audit  # noqa: E402 - the sys.path setup above runs first
+import check  # noqa: E402 - the migration detector's shapes live here
 import freeze  # noqa: E402 - the sys.path setup above runs first
 import specstate  # noqa: E402
 from tick import _durable_replace, _fsync_dir, _rollback  # noqa: E402
@@ -147,15 +169,17 @@ def grow(spec_dir: Path) -> int:
         f"# Task — {spec_dir.name}\n\n"
         f"**Watershed**: implementation commit C1\n\n"
         f"## Phase 1\n\n{blocks}\n\n"
-        f"| Phase | Total | Done |\n"
-        f"|---|---|---|\n"
-        f"| 1 | 0 | 0 |\n\n"
-        f"**Σ** 0 / 0\n"
+        f"| Phase | Total | Done | Verified |\n"
+        f"|-------|-------|------|----------|\n"
+        f"| 1     | 0     | 0    |          |\n\n"
+        f"| **Σ** | 0     | 0    |          |\n"
     )
     n_tasks = len(specstate.task_entries(
         specstate.tiny_task_text(text) or ""))
-    task_md = task_md.replace("| 1 | 0 | 0 |", f"| 1 | {n_tasks} | 0 |")
-    task_md = task_md.replace("**Σ** 0 / 0", f"**Σ** {n_tasks} / 0")
+    task_md = task_md.replace("| 1     | 0     | 0    |          |",
+                              f"| 1     | {n_tasks}     | 0    |          |")
+    task_md = task_md.replace("| **Σ** | 0     | 0    |          |",
+                              f"| **Σ** | {n_tasks}     | 0    |          |")
 
     (spec_dir / "task.md").write_text(task_md, encoding="utf-8")
     for f in ("plan", "tech-spec", "test", "survey"):
@@ -185,6 +209,366 @@ def grow(spec_dir: Path) -> int:
     return 0
 
 
+# ----------------------------------------------------------- upgrade ----
+PENDING_DELIVERED = "**Delivered**: pending — delivery evidence"
+UNFILLED_SECTION = (
+    "## Questions & options\n\n### Questions\n\n### Options summary\n")
+
+
+def _write_fold(path: Path, original: str, candidate: str) -> str | None:
+    """Durable replace plus a byte postcheck; None on success, else a
+    failure message (the original has been restored)."""
+    try:
+        _durable_replace(path, candidate)
+        if path.read_bytes() != candidate.encode("utf-8"):
+            _rollback(path, original)
+            return f"{path.name} on disk differs from the verified candidate"
+        _fsync_dir(path)
+    except OSError as exc:
+        try:
+            _rollback(path, original)
+        except OSError:
+            pass
+        return f"write/replace failed, original preserved: {exc}"
+    return None
+
+
+def _unlink(path: Path) -> str | None:
+    try:
+        path.unlink()
+    except OSError as exc:
+        return f"could not delete {path}: {exc}"
+    return None
+
+
+def _two_column_run(lines: list[str]) -> tuple[int, int] | None:
+    """(first, past-last) of the table run a two-column burndown header
+    opens — the row shape check.py's detector fails on."""
+    for i, line in enumerate(lines):
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [c.strip().lower() for c in line.strip().strip("|").split("|")]
+        if (cells and cells[0] == "phase" and "total" in cells
+                and "done" in cells and "verified" not in cells):
+            end = i + 1
+            while end < len(lines) and lines[end].lstrip().startswith("|"):
+                end += 1
+            return i, end
+    return None
+
+
+def grow_burndown(task_text: str) -> str | None:
+    """task.md with every two-column burndown table grown the Verified
+    column — recorded counts carried, never recomputed; None when the
+    tables already read the four-column grammar."""
+    lines = task_text.split("\n")
+    changed = False
+    run = _two_column_run(lines)
+    while run is not None:
+        start, end = run
+        for j in range(start, end):
+            row = lines[j].rstrip()
+            cells = row.strip().strip("|").split("|")
+            if len(cells) != 3:
+                continue
+            if j == start:
+                lines[j] = row + " Verified |"
+            elif all(c.strip() and set(c.strip()) <= set("-:")
+                     for c in cells):
+                lines[j] = row + "----------|"
+            else:
+                lines[j] = row + "          |"
+        changed = True
+        run = _two_column_run(lines)
+    return "\n".join(lines) if changed else None
+
+
+def questions_section(research_text: str | None) -> str:
+    """The `## Questions & options` section for tech-spec.md: research.md's
+    content carried over (H2 subsections demoted one level, so the
+    section parser reads them inside this section), or the unfilled
+    section when there is nothing to carry — never a fabricated skip
+    record."""
+    if research_text is None:
+        return UNFILLED_SECTION
+    carried = []
+    for line in research_text.splitlines():
+        if line.startswith("# "):
+            continue
+        carried.append("#" + line if line.startswith("## ") else line)
+    return "## Questions & options\n\n" + "\n".join(carried).strip("\n") + "\n"
+
+
+def append_section(text: str, section: str) -> str:
+    """Strictly append-only: the original bytes stay the candidate's
+    prefix, which is what a recorded tech-spec prefix hash anchors."""
+    glue = "" if text.endswith("\n") else "\n"
+    return text + glue + "\n" + section
+
+
+def folded_approval(approval_text: str,
+                    review_lines: tuple[str, ...] | None) -> str:
+    """The old-grammar record folded: the `## Frozen contract` manifest
+    becomes `## Freeze` with its entry lines byte-identical, and at full
+    tier the review sidecar's trio lands in `## Contract review` ahead of
+    it. The **Approved-at** preamble survives untouched."""
+    if review_lines is None:
+        return check.FROZEN_CONTRACT_HEADING.sub(
+            "## Freeze", approval_text, count=1)
+    m = check.FROZEN_CONTRACT_HEADING.search(approval_text)
+    return (approval_text[:m.start()]
+            + "## Contract review\n\n" + "\n".join(review_lines)
+            + "\n\n## Freeze\n\n" + approval_text[m.end():].lstrip("\n"))
+
+
+def _last_line(pattern: re.Pattern[str], text: str) -> str | None:
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return None
+    m = matches[-1]
+    start = text.rfind("\n", 0, m.start()) + 1
+    end = text.find("\n", m.end())
+    return text[start:len(text) if end < 0 else end].strip()
+
+
+def delivery_facts(note_text: str) -> list[str]:
+    """The note's delivery-fact lines in the block's canonical order; a
+    re-delivery appends, so the last line of each fact wins."""
+    facts = []
+    for pattern in (audit.DOCS_IMPACT, audit.ROLLBACK_RULING,
+                    audit.BEHAVIOR_PRESERVED):
+        line = _last_line(pattern, note_text)
+        if line is not None:
+            facts.append(line)
+    return facts
+
+
+def transplant_delivery(holder_text: str, facts: list[str]) -> str:
+    """The facts as block bullets under the **Delivered** field — inserted
+    right after the record line when one exists, else under the
+    template's pending placeholder (a pending marker is not evidence;
+    the bullets carried under it are the note's own lines)."""
+    lines = holder_text.split("\n")
+    bullets = [f"- {line}" for line in facts]
+    m = audit.DELIVERED_FIELD.search(holder_text)
+    if m is None:
+        start = body_start(lines)
+        at = start if start is not None else len(lines)
+        lines[at:at] = [PENDING_DELIVERED, "", *bullets, ""]
+        return "\n".join(lines)
+    at = holder_text[:m.start()].count("\n") + 1
+    lines[at:at] = bullets
+    return "\n".join(lines)
+
+
+def upgrade(spec_dir: Path, apply: bool) -> int:
+    """The four mechanical folds, every candidate text computed and
+    checked before the first write, applied in order, warn marker removed
+    last. Dry-run prints the plan; a refusal writes nothing."""
+    def refuse(msg: str) -> int:
+        print(f"refusing: {msg}", file=sys.stderr)
+        return 1
+
+    if not spec_dir.is_dir():
+        return refuse(f"{spec_dir} is not a directory")
+    parts = spec_dir.resolve().parts
+    if ("specs", "archive") in zip(parts, parts[1:]):
+        return refuse(f"{spec_dir} is under specs/archive/ — archived "
+                      "history is never migrated")
+    task_path = spec_dir / "task.md"
+    spec_path = spec_dir / "spec.md"
+    if not task_path.is_file():
+        return refuse(f"no task.md under {spec_dir}")
+    if not spec_path.is_file():
+        return refuse(f"no spec.md under {spec_dir} — the lifecycle state "
+                      "cannot be verified")
+    spec_text = spec_path.read_text(encoding="utf-8", errors="replace")
+    status = specstate.spec_status(spec_text)
+    if status is None:
+        return refuse("spec.md has no recognizable **Status**: line")
+    if status not in MIGRATABLE_STATUS:
+        return refuse(f"spec.md Status is {status} — only draft, approved, "
+                      "or active docsets migrate; a done plan is a record")
+
+    repo = spec_dir.resolve().parent.parent
+    tiny = specstate.spec_tier(spec_text) == "tiny"
+    task_text = task_path.read_text(encoding="utf-8")
+    plan: list[tuple[str, Callable[[], str | None]]] = []
+    notes: list[str] = []
+
+    grown = grow_burndown(task_text)
+    if grown is not None:
+        plan.append((
+            "burndown: grow the table the Verified column (task.md)",
+            lambda: _write_fold(task_path, task_text, grown)))
+
+    research_path = spec_dir / "research.md"
+    tech_path = spec_dir / "tech-spec.md"
+    if not tiny and tech_path.is_file() and research_path.is_file():
+        tech_text = tech_path.read_text(encoding="utf-8")
+        if specstate.QUESTIONS_SECTION.search(tech_text) is None:
+            research_text = research_path.read_text(encoding="utf-8")
+            candidate = append_section(tech_text,
+                                       questions_section(research_text))
+
+            def run_research(tech_text=tech_text, candidate=candidate):
+                err = _write_fold(tech_path, tech_text, candidate)
+                if err:
+                    return err
+                err = _unlink(research_path)
+                if err:
+                    return err
+                print("research: folded research.md into tech-spec.md's "
+                      "`## Questions & options`; deleted research.md")
+                return None
+
+            plan.append(("research: fold research.md into tech-spec.md's "
+                         "`## Questions & options`, delete research.md",
+                         run_research))
+    elif not tiny and tech_path.is_file() and not research_path.is_file():
+        tech_text = tech_path.read_text(encoding="utf-8")
+        if specstate.QUESTIONS_SECTION.search(tech_text) is None:
+            candidate = append_section(tech_text, questions_section(None))
+
+            def run_research(tech_text=tech_text, candidate=candidate):
+                return _write_fold(tech_path, tech_text, candidate) or print(
+                    "research: appended the `## Questions & options` "
+                    "section (unfilled — the gate's states are the "
+                    "owner's to record)")
+
+            plan.append(("research: append the `## Questions & options` "
+                         "section (unfilled — never a fabricated skip "
+                         "record)", run_research))
+
+    approval_path = spec_dir / "approvals" / "approval.md"
+    review_path = spec_dir / "approvals" / "review.md"
+    approval_text = (approval_path.read_text(encoding="utf-8")
+                     if approval_path.is_file() else None)
+    if approval_text is None and review_path.exists():
+        notes.append(
+            "approvals/review.md has no approval.md record to fold into — "
+            "kept: the freeze folds it at re-approval (`freeze.py <spec-dir>"
+            " --record --review <payload>`)")
+    elif (approval_text is not None
+          and check.FREEZE_HEADING.search(approval_text) is None):
+        if not check.FROZEN_CONTRACT_HEADING.search(approval_text):
+            return refuse(
+                "approvals/approval.md has no `## Frozen contract` manifest "
+                "to fold — re-approve on the user's yes: `freeze.py "
+                "<spec-dir> --record --force --review <payload>`")
+        review_lines: tuple[str, ...] | None = None
+        done_line = ("approval: renamed the manifest to `## Freeze` "
+                     "(tiny tier has no review section)")
+        if not tiny:
+            if not review_path.is_file():
+                return refuse(
+                    "the old-grammar approval record needs its "
+                    "approvals/review.md sidecar to fold — restore it, or "
+                    "re-approve on the user's yes: `freeze.py <spec-dir> "
+                    "--record --force --review <payload>`")
+            review_lines = freeze.fold_review(
+                review_path.read_text(encoding="utf-8"))
+            problem = freeze.review_shape_problem("\n".join(review_lines))
+            if problem:
+                return refuse(f"approvals/review.md cannot fold: {problem}")
+            done_line = ("approval: folded the review into one "
+                         "approvals/approval.md (`## Contract review` + "
+                         "`## Freeze`); deleted approvals/review.md")
+        verify_before = freeze.verify(spec_dir, repo)
+
+        def run_approval(approval_text=approval_text,
+                         review_lines=review_lines,
+                         verify_before=verify_before,
+                         done_line=done_line):
+            err = _write_fold(approval_path, approval_text,
+                              folded_approval(approval_text, review_lines))
+            if err:
+                return err
+            fresh = [p for p in freeze.verify(spec_dir, repo)
+                     if p not in verify_before]
+            if fresh:
+                _rollback(approval_path, approval_text)
+                return ("postcheck: the folded record fails freeze verify "
+                        f"— {fresh[0]}")
+            if not tiny and review_path.exists():
+                err = _unlink(review_path)
+                if err:
+                    return err
+            print(done_line)
+            return None
+
+        plan.append(("approval: fold the old-grammar record into one "
+                     "approval.md, delete approvals/review.md", run_approval))
+
+    note_path = spec_dir / "notes" / "delivery.md"
+    if note_path.is_file():
+        holder_text = task_text if not tiny else spec_text
+        if check.has_delivery_block(holder_text):
+            pass  # the block wins; the note is an inert leftover
+        elif tiny:
+            notes.append(
+                "notes/delivery.md has no block to transplant into at tiny "
+                "tier — the holder is spec.md, frozen; transplant by hand")
+        else:
+            note_text = note_path.read_text(encoding="utf-8")
+            facts = delivery_facts(note_text)
+            if not facts:
+                notes.append(
+                    "notes/delivery.md carries no recognizable "
+                    "delivery-fact lines — kept; transplant by hand")
+            else:
+                candidate = transplant_delivery(
+                    grown if grown is not None else task_text, facts)
+                if not check.has_delivery_block(candidate):
+                    return refuse("the transplanted delivery block would "
+                                  "not parse — nothing written")
+
+                def run_delivery(candidate=candidate):
+                    err = _write_fold(task_path, task_text, candidate)
+                    if err:
+                        return err
+                    err = _unlink(note_path)
+                    if err:
+                        return err
+                    print("delivery: transplanted notes/delivery.md into "
+                          "the delivery block; deleted notes/delivery.md")
+                    return None
+
+                plan.append(("delivery: transplant notes/delivery.md's "
+                             "facts into the delivery block, delete "
+                             "notes/delivery.md", run_delivery))
+
+    marker = spec_dir / check.WARN_MARKER
+    if marker.exists():
+        def run_marker():
+            err = _unlink(marker)
+            return err or print(f"removed the {check.WARN_MARKER} marker")
+
+        plan.append((f"remove the {check.WARN_MARKER} marker", run_marker))
+
+    for note in notes:
+        print(f"note: {note}")
+    if not plan:
+        print(f"already upgraded: no pre-change grammar remains under "
+              f"{spec_dir}")
+        return 0
+    for line, _ in plan:
+        print(f"  - {line}")
+    if not apply:
+        print(f"dry-run: {len(plan)} step(s) planned — nothing written "
+              "(--apply writes)")
+        return 0
+    for _, run in plan:
+        err = run()
+        if err:
+            print(err, file=sys.stderr)
+            print("upgrade aborted — the landed step(s) keep their state",
+                  file=sys.stderr)
+            return 1
+    print(f"upgraded: {len(plan)} step(s) applied")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -196,6 +580,27 @@ def main(argv: list[str] | None = None) -> int:
             print("usage: migrate.py grow <spec-dir>", file=sys.stderr)
             return 2
         return grow(Path(argv[1]))
+    if "upgrade" in argv:
+        apply = False
+        target = None
+        verb_seen = False
+        for a in argv:
+            if a == "upgrade" and not verb_seen:
+                verb_seen = True
+            elif a == "--apply":
+                apply = True
+            elif a == "--dry-run":
+                apply = False
+            elif not a.startswith("-") and target is None:
+                target = a
+            else:
+                print(f"unexpected argument: {a}", file=sys.stderr)
+                return 2
+        if not verb_seen or target is None:
+            print("usage: migrate.py <spec-dir> upgrade [--apply]",
+                  file=sys.stderr)
+            return 2
+        return upgrade(Path(target), apply)
     spec_dir_arg = None
     template_arg = None
     dry = False

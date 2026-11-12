@@ -118,9 +118,9 @@ touch task.md. One marker change per event:
 | `- [ ] T###` (pending) | its payload is spawned | add `(in-progress)` |
 | `(in-progress)` | digest `implemented` or `already-satisfied`, and your re-run of its acceptance commands is green | `(implemented)` in place of the claim |
 | `(in-progress)` | digest `blocked:why` | clear the claim; rule (D-###) and re-spawn, or route to `/spec-design` — no fix round |
-| `(in-progress)` or `(implemented)` | it came back wrong | `(fix n/5)` — in place of the claim, or beside `(implemented)` |
+| `(in-progress)` or `(implemented)` | it came back wrong | `(fix n/5)` — in place of the claim, or beside `(implemented)` — plus the round's open sub-line `fix <n> — <digest>` |
 | `(fix n/5)` | the round's payload is spawned | add `(in-progress)` |
-| `(in-progress) (fix n/5)` | landed and verified | `(implemented) (fixed n/5)` |
+| `(in-progress) (fix n/5)` | landed and verified | `(implemented) (fixed n/5)`, the round's close sub-line `fixed <n> — <resolution> — <proof>` appended |
 | `(implemented)` | delivery pass green and the user's yes | `- [x]` + proof note, by `tick.py` |
 | any open entry | dropped by ruling | `~~T###~~ dropped <date> (D-###)` |
 
@@ -130,8 +130,9 @@ not landed, and the tick-commit gate stays shut. `(fixed n/5)` keeps
 the count once the round lands.
 
 At `Tier: tiny` the task list sits inside the frozen spec.md: the
-markers above move freely, but dropping, adding, or rewording a task
-breaks the freeze — route it to `/spec-design` for re-approval.
+markers above — their round sub-lines included — move freely, but
+dropping, adding, or rewording a task breaks the freeze — route it
+to `/spec-design` for re-approval.
 
 ### Fix rounds (cap 5 per task)
 
@@ -147,17 +148,22 @@ task has come back wrong):
    failed proof: the exit code and the stdout+stderr tail). The
    payload embeds this file; an emit without it prints `evidence
    missing`.
-2. Write `(fix n/5)` on the entry, re-emit, and spawn. Continue the
-   same developer if the harness can message a finished agent;
-   otherwise a fresh spawn — the payload carries the note and the
-   evidence either way. The developer may append what it tried to the
-   same note: its one exception to "never touch specs/".
+2. Write `(fix n/5)` on the entry with its open sub-line
+   `fix <n> — <digest>`, the digest copied verbatim from the evidence
+   just appended — the line is never rewritten; the round closes by
+   appending its sibling `fixed <n> — <resolution> — <proof>`.
+   Re-emit, and spawn. Continue the same developer if the harness can
+   message a finished agent; otherwise a fresh spawn — the payload
+   carries the note and the evidence either way. The developer may
+   append what it tried to the same note: its one exception to
+   "never touch specs/".
 
 Rounds 1–3 run at the same capability tier. Round 3 failing
 suspects the plan: repair the area's tech/tasks docs through
 `/spec-design` before round 4, which goes to a fresh developer one
-tier up. Round 4 failing writes `(fix 5/5)`, the cap — the engine
-never re-spawns it. Adjudicate with the user: wrong (park with a
+tier up. Round 4 failing writes `(fix 5/5)` with its
+`fix 5 — <digest>` sub-line, the cap — the engine never re-spawns it.
+Adjudicate with the user: wrong (park with a
 D-###), isolated (defer), or load-bearing (`/spec-design` re-plans).
 
 ### Resume (a session killed mid-run)
@@ -209,54 +215,68 @@ separate gates:
    branch` and treat its confirmed findings like the auditor's.
    Resolve every BLOCK; own or rule every WARN/NIT. A frozen survey's
    drift WARNs (a citation's line moved, the baseline behind HEAD)
-   are expected once code lands — dod counts them as ruled. Write
-   the delivery note (below) before dod: gates 11–13 read it.
-4. **Delivery summary → the user's yes** — present the proof and
+   are expected once code lands — dod counts them as ruled. Draft
+   the delivery block (below) into the status holder before dod:
+   gates 11–13 read it there; C2 lands it.
+4. **Retro at ship** — proofs, regression, and DoD green: run
+   `scripts/retro.py specs/<name> <name>`. It writes
+   `specs/<name>/retro.md` — rounds rolled up per task, deviations,
+   parked items — rolls the D-### titles into
+   `specs/context/decisions.md`, and returns early when `retro.md`
+   already exists, so archive's single call (step 9) reuses this file
+   and never creates a second.
+5. **Delivery summary → the user's yes** — present the proof and
    regression results, the `deps:` lines (a new dependency is never
    silent), the review findings with each resolution or ruling,
    what will be parked, every D-###, every irreversible change, the
    docs impact, and the files changed. Tick and commit only on the user's explicit yes to this
    summary: an earlier "build it", a green scorecard, or silence is
    not one.
-5. **Tick** — every task `- [x]` with its proof note via
+6. **Tick** — every task `- [x]` with its proof note via
    `scripts/tick.py`, burndown recomputed (`check.py
    --fix-burndown`). Each WARN/NIT ruled "later", spec-review
    residual risk, and open deviation goes along as `--park '<item> ::
    <source>'` — one line in `specs/BACKLOG.md` instead of
    evaporating; tick lists the spec's parked lines.
-6. **C1 — the implementation commit**: code + tests + ticked
+7. **C1 — the implementation commit**: code + tests + ticked
    task.md together, its message scoped `(<spec-name>)` — scope
    attributes commits by it. Stage by path, never `git add -A` or `git add
    .`: the code and test files `audit.py scope` lists (each
    mentioned or ruled), plus the ticked task list.
-7. **C2 — the delivery record**: `Delivered: commit @ <C1>`,
-   `Status: done`, INDEX updated (its line says `done`), plus the
+8. **C2 — the delivery record**: `Delivered: commit @ <C1>` with — before C2 lands, set `pass` on each all-green phase's Verified cell (the delivery-pass evidence FR-004 records)
+   the three delivery-block lines under it (below), `Status: done`,
+   INDEX updated (its line says `done`), plus the
    spec dir's `notes/` (fix-round evidence the `(fixed n/5)` markers
-   stand on, the delivery note), `specs/BACKLOG.md` when parked to,
+   stand on), `specs/BACKLOG.md` when parked to,
    and `approvals/` if not yet committed — staged by path.
    Never `spawns/`: emitted payloads and the auditor's diff patch,
    regenerable and not a record. Delete it once C2 lands.
-8. **Close the run** — the final message names what comes next, and
+9. **Close the run** — the final message names what comes next, and
    does none of it: `/spec-ship <name>` takes the commit to a PR on
    the user's yes, and `/spec-release` cuts the release after the
    merge; `/spec-review
    branch` for an independent review if step 3 did not run one;
    archive on request (`scripts/archive.sh <name>` — it refuses a
-   spec without its `Delivered:` record, writes the archived dir's
-   `retro.md` from the spec's own records and rolls its D-### titles
-   into `specs/context/decisions.md` via `scripts/retro.py`, and its
-   move is one more commit, asked first like every commit).
+   spec without its `Delivered:` record, and re-invokes
+   `scripts/retro.py` on the archived dir: it returns early — the
+   ship-written `retro.md` is reused, never a second — and its move
+   is one more commit, asked first like every commit).
 
-**The delivery note** — `specs/<name>/notes/delivery.md`, one line
-per fact, each allowed to say `none — <reason>`:
+**The delivery block** — three bulleted lines in the status
+holder's delivery block, under the `**Delivered**:` field
+(`task.md`; `spec.md` § Evidence at tiny), drafted for the dod
+gates and landed by the delivery record commit C2;
+`notes/delivery.md` retires — archived history that predates the
+block keeps its note as a read fallback. Each line allowed to say
+`none — <reason>`:
 
-- `Docs impact: <files>` — the README, API docs, CHANGELOG, or
+- `- Docs impact: <files>` — the README, API docs, CHANGELOG, or
   migration notes the diff updates (each must be in the diff), or
-  `Docs impact: none — <reason>`.
-- `Rollback: <row> — <ruling>` — for each tech-spec rollback-table
+  `- Docs impact: none — <reason>`.
+- `- Rollback: <row> — <ruling>` — for each tech-spec rollback-table
   row or plan.md § Rollout item no TC proves (the row's first cell,
   or the Rollout item's bold label, names it).
-- `Behavior preserved: <TCs> green at <Approved-at> and now` — at
+- `- Behavior preserved: <TCs> green at <Approved-at> and now` — at
   `Type: refactor | upgrade`, after running the proofs against a
   worktree of the approved base (`git worktree add <tmp>
   <Approved-at>`, `audit.py proofs <spec-dir> --repo <tmp> --run`).
@@ -335,8 +355,9 @@ copied byte-identical and pinned by `tools/tests/test_parity.py`):
   spec.md § Tasks in place of task.md/test.md at `Tier: tiny`.
 - `scripts/archive.sh` — move a delivered spec (`Status: done` and
   a `Delivered:` record) to `specs/archive/<date>-<name>/`, INDEX
-  repointed and marked done, `spawns/` dropped, `retro.md` written
-  by `scripts/retro.py`; commits nothing.
+  repointed and marked done, `spawns/` dropped, the ship-written
+  `retro.md` reused (`scripts/retro.py` returns early rather than
+  write a second); commits nothing.
 - `scripts/migrate.py` — bring a v1 docset's task.md headers to
   the current contract shape (dry-run, idempotent); `grow` moves a
   tiny-tier spec up to the full docset, verbatim.
@@ -352,7 +373,7 @@ thin landing into the graph:
 | `/spec-build implement <spec> [T###]` | IMPLEMENT — the execute node: implementer waves, no ticks, no commits |
 | `/spec-build test <spec>` | VERIFY — delivery-pass steps 1–2: proofs + `audit.py regression` |
 | `/spec-build audit <spec>` | AUDIT — step 3: the review instruments |
-| `/spec-build ship <spec>` | SHIP — the whole delivery pass: re-runs steps 1–3 (no earlier `test` or `audit` green is recorded anywhere), presents the summary, and on the user's yes ticks and commits (steps 5–7) |
+| `/spec-build ship <spec>` | SHIP — the whole delivery pass: re-runs steps 1–4 (no earlier `test` or `audit` green is recorded anywhere), presents the summary, and on the user's yes ticks and commits (steps 6–8) |
 
 A first word of `implement`, `test`, `audit`, `ship`, `continue`, or
 `resume` is always the verb. A spec whose name is one of those words

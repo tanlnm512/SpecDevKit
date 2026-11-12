@@ -62,10 +62,46 @@ def spec_only(tmp: Path, name: str = "demo") -> Path:
     """A filled spec.md and nothing else."""
     d = scaffold(tmp, name)
     write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
-    for f in ("survey.md", "research.md", "plan.md", "tech-spec.md",
+    for f in ("survey.md", "plan.md", "tech-spec.md",
               "task.md", "test.md"):
         (d / f).unlink()
     return d
+
+
+REAL_QUESTIONS = ("- Q1 how to name the operation — **source**: "
+                  "https://example.com/naming · relevance: direct · "
+                  "confidence: high\n")
+
+REAL_OPTIONS = "- demo choice — candidates: a or b, one-line trade-off\n"
+
+
+def write_research(spec_dir: Path, questions: str = REAL_QUESTIONS,
+                   options: str = REAL_OPTIONS) -> None:
+    """Replace tech-spec.md's shipped skip form with real research content
+    (the gate's `run` resolution) — the section is the record's only home."""
+    p = spec_dir / "tech-spec.md"
+    t = p.read_text(encoding="utf-8")
+    t = t.replace("not applicable — no open questions at Stage 0\n",
+                  questions).replace("None — <why>\n", options)
+    write(p, t)
+
+
+def open_research_section(spec_dir: Path) -> None:
+    """Strip tech-spec.md's skip form — the full-tier draft-from-intent
+    scaffold state, whose gate reads undetermined."""
+    p = spec_dir / "tech-spec.md"
+    t = p.read_text(encoding="utf-8")
+    t = t.replace("not applicable — no open questions at Stage 0\n\n",
+                  "").replace("None — <why>\n", "")
+    write(p, t)
+
+
+SKIP_SECTION_BODY = ("## Questions & options\n\n### Questions\n"
+                     "not applicable — no open questions at Stage 0\n\n"
+                     "### Options summary\n"
+                     "None — no open choices at this stage\n")
+
+SKIP_SECTION = f"# Tech Spec: demo\n\n{SKIP_SECTION_BODY}"
 
 
 def record_approval(spec_dir: Path) -> None:
@@ -98,10 +134,10 @@ APPROVED_TASKS = """# Tasks: demo
 Status reflects code state per [survey.md](survey.md), not intent.
 
 ## Burndown
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 3     | 0    |
-| **Σ** | 3     | 0    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 3     | 0 |          |
+| **Σ** | 3     | 0 |          |
 
 ## Phase 1: land the feature (FR-001, FR-002)
 - [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)
@@ -117,8 +153,8 @@ TICKED_T1_TASKS = APPROVED_TASKS.replace(
     "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
     "- [x] T001 [P] implement multiply in `repo/calc.py` (FR-001)\n"
     "      done 2026-09-08 — python3 -m pytest repo/test_calc.py green",
-).replace("| 1     | 3     | 0    |", "| 1     | 3     | 1    |").replace(
-    "| **Σ** | 3     | 0    |", "| **Σ** | 3     | 1    |")
+).replace("| 1     | 3     | 0 |", "| 1     | 3     | 1 |").replace(
+    "| **Σ** | 3     | 0 |", "| **Σ** | 3     | 1 |")
 
 IMPLEMENTED_T1_TASKS = APPROVED_TASKS.replace(
     "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
@@ -152,8 +188,8 @@ MIXED_LANDED_TASKS = APPROVED_TASKS.replace(
     "- [ ] T003 (fix 5/5) rescue the stalled refactor (FR-002)",
     "- [ ] ~~T003~~ (fix 5/5) rescue the stalled refactor (FR-002) — "
     "dropped",
-).replace("| 1     | 3     | 0    |", "| 1     | 3     | 1    |").replace(
-    "| **Σ** | 3     | 0    |", "| **Σ** | 3     | 1    |")
+).replace("| 1     | 3     | 0 |", "| 1     | 3     | 1 |").replace(
+    "| **Σ** | 3     | 0 |", "| **Σ** | 3     | 1 |")
 
 CLAIMED_T1_TASKS = APPROVED_TASKS.replace(
     "- [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)",
@@ -167,10 +203,10 @@ STRUCK_DEP_TASKS = """# Tasks: demo
 Status reflects code state per [survey.md](survey.md), not intent.
 
 ## Burndown
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 3     | 0    |
-| **Σ** | 3     | 0    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 3     | 0 |          |
+| **Σ** | 3     | 0 |          |
 
 ## Phase 1: land the feature (FR-001, FR-002)
 - [ ] ~~T001~~ [P] implement multiply in `repo/calc.py` (FR-001) — dropped
@@ -188,10 +224,10 @@ DONE_TASKS = """# Tasks: demo
 Status reflects code state per [survey.md](survey.md), not intent.
 
 ## Burndown
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 2     | 2    |
-| **Σ** | 2     | 2    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 2     | 2 |          |
+| **Σ** | 2     | 2 |          |
 
 ## Phase 1: multiply lands (FR-001, FR-002)
 - [x] T001 [P] implement multiply in `repo/calc.py` (FR-001, FR-002)
@@ -286,22 +322,25 @@ class Graph002SurveyWaveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = Path(tempfile.mkdtemp(prefix="graph002-"))
-        cls.spec_dir = scaffold(cls._tmp)
-        write(cls.spec_dir / "spec.md",
-              (FIXTURE / "spec.md").read_text(encoding="utf-8"))
-        write(cls.spec_dir / "survey.md",
-              (FIXTURE / "survey.md").read_text(encoding="utf-8"))
-        # the scaffold ships research.md as a resolved skip marker; restore the
-        # unfilled template so `before` tests the gate:undetermined state
-        write(cls.spec_dir / "research.md",
-              (SKILL / "templates" / "research.md").read_text(
-                  encoding="utf-8"))
-        cls.before = compute(cls.spec_dir)
-        write(cls.spec_dir / "research.md",
-              "## Research: demo\n\n### Q1 how to name the operation\n"
-              "- **source**: https://example.com/naming — claim: plain names\n"
-              "  relevance: direct · confidence: high\n")
-        cls.after = compute(cls.spec_dir)
+        spec_doc = (FIXTURE / "spec.md").read_text(encoding="utf-8")
+        survey_doc = (FIXTURE / "survey.md").read_text(encoding="utf-8")
+
+        def filled(tmp, name):
+            d = scaffold(tmp, name)
+            write(d / "spec.md", spec_doc)
+            write(d / "survey.md", survey_doc)
+            return d
+
+        # the full-tier draft-from-intent shape: the scaffold strips the
+        # skip form, so the section is open and the gate undetermined
+        before_dir = filled(cls._tmp, "before")
+        open_research_section(before_dir)
+        cls.before = compute(before_dir)
+        # the fresh-scaffold shape: the shipped skip form is replaced by
+        # real questions — the `run` resolution, tech-spec still unfilled
+        after_dir = filled(cls._tmp, "after")
+        write_research(after_dir)
+        cls.after = compute(after_dir)
 
     @classmethod
     def tearDownClass(cls):
@@ -357,7 +396,8 @@ class QuotedEvidenceSurveyTests(unittest.TestCase):
 
 
 class Graph003SkipMarkerTests(unittest.TestCase):
-    """The em-dash skip marker resolves the gate as skip: research reads
+    """The em-dash skip marker — shipped pre-filled in the scaffolded
+    tech-spec's section — resolves the gate as skip: research reads
     SKIPPED (not blocked), tech goes READY."""
 
     @classmethod
@@ -368,8 +408,12 @@ class Graph003SkipMarkerTests(unittest.TestCase):
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
         write(cls.spec_dir / "survey.md",
               (FIXTURE / "survey.md").read_text(encoding="utf-8"))
-        write(cls.spec_dir / "research.md",
-              "# Research: demo\n\nnot applicable — no open questions at Stage 0\n")
+        # the shipped skip form IS the marker path: assert it byte-exact
+        self_marker = "not applicable — no open questions at Stage 0"
+        tech = (cls.spec_dir / "tech-spec.md").read_text(encoding="utf-8")
+        questions = tech.split("\n### Questions\n", 1)[1].split(
+            "\n### Options summary", 1)[0]
+        assert self_marker in questions
         cls.state = compute(cls.spec_dir)
 
     @classmethod
@@ -1352,10 +1396,7 @@ def wave2_fixture(tmp: Path, name: str = "demo") -> Path:
     d = scaffold(tmp, name)
     write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
     write(d / "survey.md", (FIXTURE / "survey.md").read_text(encoding="utf-8"))
-    write(d / "research.md",
-          "## Research: demo\n\n### Q1 how to name the operation\n"
-          "- **source**: https://example.com/naming — claim: plain names\n"
-          "  relevance: direct · confidence: high\n")
+    write_research(d)
     return d
 
 
@@ -1368,16 +1409,50 @@ def approved_fixture(tmp: Path, name: str = "demo") -> Path:
     return d
 
 
+FIX_ROUND_TASKS = """# Tasks: demo
+
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+Status reflects code state per [survey.md](survey.md), not intent.
+
+## Burndown
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 1     | 0 |          |
+| **Σ** | 1     | 0 |          |
+
+## Phase 1: land the feature (FR-001, FR-002)
+- [ ] T001 (fix 2/5) rescue the stalled refactor (FR-001, FR-002)
+  - fix 1 — E   AssertionError: multiply(2, 3) returned 5
+  - fixed 1 — clamp factors in repo/calc.py — pytest -k multiply green
+  - fix 2 — TypeError: multiply() got an unexpected keyword argument
+
+## Conventions
+- `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
+"""
+
+
+def fix_round_fixture(tmp: Path, name: str = "demo") -> Path:
+    """Approved + one task reopened at fix round 2: round 1's open and
+    closed sub-lines on the entry, its evidence in notes/T001.md."""
+    d = approved_fixture(tmp, name)
+    write(d / "task.md", FIX_ROUND_TASKS)
+    (d / "notes").mkdir()
+    write(d / "notes" / "T001.md",
+          "## Fix round 1\n$ pytest -k multiply\n"
+          "E   AssertionError: multiply(2, 3) returned 5\n")
+    return d
+
+
 TICKED_ALL_TASKS = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 Status reflects code state per [survey.md](survey.md), not intent.
 
 ## Burndown
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 3     | 3    |
-| **Σ** | 3     | 3    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 3     | 3 |          |
+| **Σ** | 3     | 3 |          |
 
 ## Phase 1: land the feature (FR-001, FR-002)
 - [x] T001 [P] implement multiply in `repo/calc.py` (FR-001)
@@ -1527,6 +1602,24 @@ class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
         after = {p.name: p.read_bytes()
                  for p in (self.spec_dir / "spawns").rglob("*.md")}
         self.assertEqual(before, after)
+        tmp = Path(tempfile.mkdtemp(prefix="exec002fix-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fix = fix_round_fixture(tmp)
+        # this skill ships no developer brief: the execute payload pins at
+        # the shared builder, byte-identical across skills via parity
+        entry = graph.specstate.task_entries(
+            (fix / "task.md").read_text(encoding="utf-8"))[0]
+        payload = graph.input_payload_for(
+            "execute", fix, fix.parent.parent, entry)
+        self.assertIn("round history (the entry's fix/fixed note lines, "
+                      "verbatim):", payload)
+        self.assertIn("- fix 1 — E   AssertionError: multiply(2, 3) "
+                      "returned 5", payload)
+        self.assertIn("- fixed 1 — clamp factors in repo/calc.py — pytest "
+                      "-k multiply green", payload)
+        self.assertIn("- fix 2 — TypeError: multiply() got an unexpected "
+                      "keyword argument", payload)
+        self.assertIn("failure evidence and prior attempts", payload)
 
     def test_task_md_never_mentions_spawns(self):
         self.assertNotIn(
@@ -1720,7 +1813,7 @@ class Exec007MaxWavesTests(unittest.TestCase):
                   "# Tech spec: demo\n\n## Approach\nA plain function in the "
                   "arithmetic module (FR-001).\n\n### D-001: plain function\n"
                   "Context: small module. Decision: plain function. "
-                  "Consequences: none.\n")
+                  "Consequences: none.\n\n" + SKIP_SECTION_BODY)
         self.seed(d, "qa",
                   "# Test cases: demo\n\n## TC-001 — multiply\n"
                   "- **Traces to**: FR-001\n"
@@ -1749,15 +1842,17 @@ class Exec007MaxWavesTests(unittest.TestCase):
                   "# Tech spec: demo\n\n## Approach\nA plain function in the "
                   "arithmetic module (FR-001).\n\n### D-001: plain function\n"
                   "Context: small module. Decision: plain function. "
-                  "Consequences: none.\n")
+                  "Consequences: none.\n\n" + SKIP_SECTION_BODY)
         self.seed(d, "qa",
                   "# Test cases: demo\n\n## TC-001 — multiply\n"
                   "- **Traces to**: FR-001\n"
                   "- **Pass condition**: `python3 -c 'print(42)'` exits 0\n")
         task_seed = (
             "# Tasks: demo\n\n"
-            "## Burndown\n| Phase | Total | Done |\n|-------|-------|"
-            "------|\n| 1     | 1     | 0    |\n| **Σ** | 1     | 0    |"
+            "## Burndown\n| Phase | Total | Done | Verified |\n"
+            "|-------|-------|------|----------|\n"
+            "| 1     | 1     | 0    |          |\n"
+            "| **Σ** | 1     | 0    |          |"
             "\n\n## Phase 1: multiply (FR-001)\n"
             "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
         self.seed(d, "task-breaker", task_seed)
@@ -1805,9 +1900,9 @@ class Exec008VerifyInRunTests(unittest.TestCase):
 
 class Exec009PayloadBuildingTests(unittest.TestCase):
     """Implementer payloads carry the task entry byte-verbatim plus
-    the TC acceptance commands; the researcher payload carries the spec's
-    research questions (prepared at the undetermined gate for the run
-    decision — the gate itself is still a pause, never auto-spawned)."""
+    the TC acceptance commands; the researcher payload carries the
+    questions recorded in tech-spec.md § Questions & options (emitted by
+    --repair research once the run decision wrote them there)."""
 
     def tearDown(self):
         shutil.rmtree(self._tmp, ignore_errors=True)
@@ -1815,18 +1910,21 @@ class Exec009PayloadBuildingTests(unittest.TestCase):
     def test_researcher_payload_carries_research_questions(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec009b-"))
         d = spec_only(self._tmp)
-        spec = (FIXTURE / "spec.md").read_text(encoding="utf-8")
-        write(d / "spec.md", spec +
-              "\n## Open questions\n"
+        write(d / "tech-spec.md",
+              "# Tech Spec: demo\n\n## Questions & options\n\n"
+              "### Questions\n"
               "- Which integer overflow convention should multiply follow?\n"
-              "- Should the operation accept bool operands (int subclass)?\n")
-        r = run_cli(d, "--emit-spawns")
+              "- Should the operation accept bool operands (int subclass)?\n\n"
+              "### Options summary\n"
+              "- wrap or saturate — candidates: unbounded vs clamped\n")
+        r = run_cli(d, "--emit-spawns", "--repair", "research")
         self.assertEqual(r.returncode, 0, r.stderr)
-        payload = (d / "spawns" / "wave-1" / "researcher.md").read_text(
+        payload = next((d / "spawns").rglob("researcher.md")).read_text(
             encoding="utf-8")
         self.assertIn("Which integer overflow convention should multiply "
                       "follow?", payload)
         self.assertIn("Should the operation accept bool operands", payload)
+        self.assertIn("recorded in tech-spec.md § Questions & options", payload)
         self.assertIn("**FR-001**", payload)
 
 
@@ -2048,6 +2146,15 @@ class Exec011RepairDeltaTests(unittest.TestCase):
                        .glob("*.md")),
                 ["researcher.md"])
             self.assertIn("agent type spec-analyst", r.stdout)
+
+            # a repair wave stays single-payload even where the frontier
+            # would emit a fix-round implementer payload
+            fix = fix_round_fixture(tmp / "fixround")
+            r = run_cli(fix, "--emit-spawns", "--repair", "survey")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(
+                sorted(p.name for p in (fix / "spawns").rglob("*.md")),
+                ["surveyor.md"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2161,8 +2268,10 @@ class Exec012RunnerFailureTests(unittest.TestCase):
         self.seed_ok_outputs(d)
         task_seed = (
             "# Tasks: demo\n\n"
-            "## Burndown\n| Phase | Total | Done |\n|-------|-------|"
-            "------|\n| 1     | 1     | 0    |\n| **Σ** | 1     | 0    |"
+            "## Burndown\n| Phase | Total | Done | Verified |\n"
+            "|-------|-------|------|----------|\n"
+            "| 1     | 1     | 0    |          |\n"
+            "| **Σ** | 1     | 0    |          |"
             "\n\n## Phase 1: multiply (FR-001)\n"
             "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
         write(Path(f"{d}-seed-task-breaker.md"), task_seed)
@@ -2194,7 +2303,7 @@ class Exec012RunnerFailureTests(unittest.TestCase):
              "# Tech spec: demo\n\n## Approach\nA plain function in the "
              "arithmetic module (FR-001).\n\n### D-001: plain function\n"
              "Context: small module. Decision: plain function. "
-             "Consequences: none.\n"),
+             "Consequences: none.\n\n" + SKIP_SECTION_BODY),
             ("qa",
              "# Test cases: demo\n\n## TC-001 — multiply\n"
              "- **Traces to**: FR-001\n"
@@ -2285,11 +2394,10 @@ class Graph019LaunchCheckTests(unittest.TestCase):
         cls.gate_tick = implemented_fixture(cls._tmp / "d")
         # complete: every task ticked + Status done → archive-ready
         cls.archive_ready = done_fixture(cls._tmp / "h")
-        # single: research skip marker resolves the gate, survey is the
+        # single: the shipped skip form resolves the gate, survey is the
         # whole frontier — one light doc node
         cls.single_dir = spec_only(cls._tmp / "e")
-        write(cls.single_dir / "research.md",
-              "not applicable — no open questions at Stage 0\n")
+        write(cls.single_dir / "tech-spec.md", SKIP_SECTION)
         # wave (execute span): approved + crafted tasks, execute
         # is the frontier (T001 runnable; T002 dep-chained; T003 at cap)
         cls.execute_dir = approved_fixture(cls._tmp / "f", "demo")
@@ -2300,10 +2408,7 @@ class Graph019LaunchCheckTests(unittest.TestCase):
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
         write(cls.analysis_dir / "survey.md",
               (FIXTURE / "survey.md").read_text(encoding="utf-8"))
-        write(cls.analysis_dir / "research.md",
-              "## Research: demo\n\n### Q1 how to name the operation\n"
-              "- **source**: https://example.com/naming — claim: plain "
-              "names\n  relevance: direct · confidence: high\n")
+        write_research(cls.analysis_dir)
 
     @classmethod
     def tearDownClass(cls):
@@ -2408,10 +2513,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
                   + f"\n**Effort**: {effort}\n")
             write(d / "survey.md",
                   (FIXTURE / "survey.md").read_text(encoding="utf-8"))
-            write(d / "research.md",
-                  "## Research: demo\n\n### Q1 how to name the operation\n"
-                  "- **source**: https://example.com/naming — claim: plain "
-                  "names\n  relevance: direct · confidence: high\n")
+            write_research(d)
             return d
 
         cls.standard = analysis(cls._tmp / "a", "standard")
@@ -2603,9 +2705,15 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         # its own scaffold — this test writes spec.md, and the shared
         # cls.fresh must stay pristine for the effort assertions
         fresh = scaffold(self._tmp / "f", "demo")
-        self.assertEqual(
-            (fresh / "research.md").read_text(encoding="utf-8").strip(),
-            "not applicable — no open questions at Stage 0")
+        self.assertFalse((fresh / "research.md").exists())
+        tech = (fresh / "tech-spec.md").read_text(encoding="utf-8")
+        self.assertIn("## Questions & options", tech)
+        self.assertIn("### Questions", tech)
+        self.assertIn("### Options summary", tech)
+        questions = tech.split("\n### Questions\n", 1)[1].split(
+            "\n### Options summary", 1)[0]
+        self.assertIn("not applicable — no open questions at Stage 0",
+                      questions)
         write(fresh / "spec.md",
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
         st = compute(fresh)
@@ -2630,6 +2738,11 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         r = into_existing("full")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse((d / "research.md").exists())
+        tech = (d / "tech-spec.md").read_text(encoding="utf-8")
+        self.assertIn("## Questions & options", tech)
+        self.assertIn("### Questions", tech)
+        self.assertNotIn("not applicable — no open questions at Stage 0", tech)
+        self.assertNotIn("None — <why>", tech)
         self.assertEqual((d / "intent.md").read_text(encoding="utf-8"),
                          "# Intent: demo\n")
         self.assertTrue((root / "specs" / "INDEX.md").exists())
@@ -2639,6 +2752,11 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertEqual(into_existing("full").returncode, 0)
         self.assertEqual((d / "spec.md").read_text(encoding="utf-8"),
                          "drafted\n")
+        # a second run never re-opens a section the session has filled
+        write(d / "tech-spec.md", SKIP_SECTION)
+        self.assertEqual(into_existing("full").returncode, 0)
+        self.assertEqual((d / "tech-spec.md").read_text(encoding="utf-8"),
+                         SKIP_SECTION)
 
 
 class SpanPhaseTests(unittest.TestCase):

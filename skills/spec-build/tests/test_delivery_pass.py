@@ -126,6 +126,38 @@ class DeliveryPassTests(unittest.TestCase):
         gates = {n: st for n, st, _ in audit.delivery_gates(spec, self.root, [], True)}
         self.assertEqual(gates, {"DOCS IMPACT": "PASS", "ROLLBACK": "PASS", "WORK TYPE": "PASS"})
 
+    def test_verified_column_cannot_run_ahead_of_the_delivered_record(self):
+        spec = self.root / "specs" / "demo"
+        spec.mkdir(parents=True)
+        (spec / "spec.md").write_text("# Spec: demo\n\n**Type**: feature\n",
+                                      encoding="utf-8")
+        burndown = ("## Burndown\n"
+                    "| Phase | Total | Done | Verified |\n"
+                    "|-------|-------|------|----------|\n"
+                    "| 1     | 1     | 1    | pass     |\n"
+                    "| 2     | 1     | 1    |          |\n"
+                    "| **Σ** | 2     | 2    |          |\n")
+        (spec / "task.md").write_text(f"# Tasks: demo\n\n{burndown}", encoding="utf-8")
+        r = run(sys.executable, AUDIT, "dod", spec, cwd=self.root)
+        self.assertIn("VERIFIED      FAIL    `pass` on 1 with no `Delivered:` record",
+                      r.stdout)
+
+        (spec / "task.md").write_text(
+            f"# Tasks: demo\n\nDelivered: commit @ abc1234\n\n{burndown}",
+            encoding="utf-8")
+        r = run(sys.executable, AUDIT, "dod", spec, cwd=self.root)
+        self.assertIn("VERIFIED      FAIL    delivered but Verified not `pass` on 2",
+                      r.stdout)
+
+        all_green = burndown.replace("| 2     | 1     | 1    |          |",
+                                     "| 2     | 1     | 1    | pass     |")
+        (spec / "task.md").write_text(
+            f"# Tasks: demo\n\nDelivered: commit @ abc1234\n\n{all_green}",
+            encoding="utf-8")
+        r = run(sys.executable, AUDIT, "dod", spec, cwd=self.root)
+        self.assertIn("VERIFIED      PASS    2 phase row(s) `pass` with the "
+                      "`Delivered:` record", r.stdout)
+
     def test_a_failed_proof_prints_its_exit_and_stderr(self):
         spec = self.root / "specs" / "demo"
         spec.mkdir(parents=True)
@@ -200,8 +232,11 @@ class DeliveryPassTests(unittest.TestCase):
         (spec / "task.md").write_text(
             "## Phase 1: Multiply\n- [x] T001 Multiply (FR-001) (fixed 2/5)\n"
             "- [x] T002 Tests (FR-001)\n"
-            "Delivered: commit @ abc1234\n", encoding="utf-8")
-        (spec / "notes" / "delivery.md").write_text("Docs impact: README.md\n", encoding="utf-8")
+            "Delivered: commit @ abc1234\n"
+            "- Docs impact: README.md\n"
+            "- Rollback: NFR-001 — revert the module commit\n", encoding="utf-8")
+        (spec / "notes" / "delivery.md").write_text(
+            "Docs impact: superseded note\n", encoding="utf-8")
         (self.root / "specs" / "BACKLOG.md").write_text(
             "# Backlog\n\n- demo — jitter untested (source: auditor WARN 2)\n"
             "- other — not ours (source: deviation)\n", encoding="utf-8")
@@ -213,11 +248,23 @@ class DeliveryPassTests(unittest.TestCase):
         self.assertIn("Fix rounds: 2 across 2 task(s).", retro)
         self.assertIn("- D-001: Pure function\n- D-002: Cache dropped mid-build (deviation", retro)
         self.assertIn("Docs impact: README.md", retro)
+        self.assertIn("Rollback: NFR-001 — revert the module commit", retro)
+        self.assertNotIn("superseded note", retro)
         self.assertIn("- demo — jitter untested", retro)
         self.assertNotIn("not ours", retro)
         rolled = (self.root / "specs" / "context" / "decisions.md").read_text(encoding="utf-8")
         self.assertEqual([l for l in rolled.splitlines() if l.startswith("- ")],
                          ["- demo D-001: Pure function", "- demo D-002: Cache dropped mid-build"])
+
+        (spec / "retro.md").unlink()
+        (spec / "task.md").write_text(
+            "## Phase 1: Multiply\n- [x] T001 Multiply (FR-001) (fixed 2/5)\n"
+            "- [x] T002 Tests (FR-001)\n"
+            "Delivered: commit @ abc1234\n", encoding="utf-8")
+        r = run(sys.executable, SCRIPTS / "retro.py", spec, "demo", self.root, cwd=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        retro = (spec / "retro.md").read_text(encoding="utf-8")
+        self.assertIn("Docs impact: superseded note", retro)
 
 
 if __name__ == "__main__":

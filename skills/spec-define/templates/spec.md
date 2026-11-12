@@ -10,7 +10,11 @@
                                 the survey reproduces the bug red, tech-spec
                                 adds § Root-cause analysis, the first TC is the
                                 regression case. hotfix is a bugfix at
-                                `Tier: tiny`. refactor | upgrade preserve
+                                `Tier: tiny`; it alone may carry the lineage
+                                headers — uncommented header lines beside this
+                                one, either or both: `**Hotfix for**: <tag>` /
+                                `**Fixes spec**: <name>`; check.py fails them
+                                on any other type. refactor | upgrade preserve
                                 behavior: user stories and ACs are optional, a
                                 `**Preserves**:` test case is not. -->
 **Effort**: standard       <!-- standard = one merged design spawn authors

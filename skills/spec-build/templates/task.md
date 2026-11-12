@@ -6,10 +6,10 @@ Status reflects code state per [survey.md](survey.md), not intent.
 
 ## Burndown
 <!-- Recompute on every status change; `check.py` verifies the arithmetic. -->
-| Phase | Total | Done |
-|-------|-------|------|
-| 1     | 3     | 0    |
-| **Σ** | 3     | 0    |
+| Phase | Total | Done | Verified |
+|-------|-------|------|----------|
+| 1     | 3     | 0    |          |
+| **Σ** | 3     | 0    |          |
 
 ## Phase 1: <milestone name> (FR-###)
 <!-- Checkpoint: <exit condition from plan.md> -->

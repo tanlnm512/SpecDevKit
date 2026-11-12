@@ -3,9 +3,10 @@
 # specs/archive/<date>-<name>/, repoint its INDEX.md line and mark it
 # done there. Refuses unless spec.md says Status: done AND the delivery
 # record (task.md, or spec.md at Tier: tiny) names a commit. Drops the
-# regenerable spawns/ payloads; writes retro.md into the archived dir and
-# rolls its D-### titles up to specs/context/decisions.md (retro.py);
-# commits nothing.
+# regenerable spawns/ payloads; writes retro.md into the archived dir
+# (reusing one the delivery pass already wrote at ship) and rolls its
+# D-### titles up to specs/context/decisions.md (retro.py); commits
+# nothing.
 # Usage: archive.sh <kebab-case-spec-name> [target-root]
 set -euo pipefail
 

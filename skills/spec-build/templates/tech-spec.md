@@ -11,12 +11,28 @@ paragraph. Show how it sits in the existing system (grounded in survey.md).>
 ## Solution
 ### Chosen approach
 <What we're building and why this shape. Map FR-### coverage. Informed by
-[research.md](research.md) when it exists.>
+§ Questions & options when it holds real findings.>
 
 ### Alternatives rejected
 | Alternative | Why rejected |
 |-------------|--------------|
 | <...>       | <one line>   |
+
+## Questions & options
+<!-- The research gate's artifact (one owner end to end — there is no
+     separate research.md). Ships pre-filled with the resolved skip form:
+     the gate's common case. When the spec has real open questions, the
+     orchestrator replaces this form — one block per question in the
+     Questions subsection, every claim carrying **source** (URL/DOI) ·
+     retrieval date · one-sentence claim · relevance · confidence — and
+     the credible candidates with one-line trade-offs in the Options
+     summary subsection (no recommendation — choosing is § Solution's
+     job with this data). -->
+### Questions
+not applicable — no open questions at Stage 0
+
+### Options summary
+None — <why>
 
 ## Impact analysis
 <!-- Blast radius: what existing code/symbols this touches, who calls them,
@@ -57,8 +73,9 @@ strategy: the contract review BLOCKs a trigger with none. -->
 ...
 
 ## References
-<From research.md: docs, issues, benchmarks, prior art, related specs — each
-with URL/path and one line on why it matters.>
+<Docs, issues, benchmarks, prior art, related specs — each with URL/path
+and one line on why it matters. External grounding found while answering
+§ Questions & options lives there, not here.>
 
 ## Decisions
 <!-- ADR-lite. Append-only: decisions made during implementation land here too. -->

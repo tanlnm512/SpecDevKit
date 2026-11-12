@@ -26,20 +26,28 @@ markers, `done <date> — <proof>` sub-lines, a `Delivered:` record), so
 status progress stays legal while an added, edited, or struck task or
 requirement breaks the freeze.
 
-At full tier --record also demands the contract review's record,
-approvals/review.md, persisted by the orchestrator (the auditor itself
-writes nothing). Three things must be on it: the docset fingerprint the
-review payload named, the auditor's digest line (`digest: BLOCK <n> ·
+--record writes ONE file: the `## Contract review` section (the review
+payload's trio — fingerprint, digest, rulings) followed by the
+`## Freeze` manifest. At full tier the review payload the orchestrator
+saved is passed as `--review <payload>` (the auditor itself writes
+nothing); until migrate.py upgrade retires the old grammar, a
+persisted approvals/review.md backs a bare --record the same way.
+Three things must be on the review: the docset fingerprint the review
+named, the auditor's digest line (`digest: BLOCK <n> ·
 WARN <n> · NIT <n> · worst …`), and after that digest one `ruling:`
 line per BLOCK it counts. A docset repaired after its review has a new
 fingerprint, so the freeze refuses until it is re-reviewed.
 
 --verify treats the Approved-at commit as history once the docset
 records its delivery: a squash-merge or rebase rewrites the anchor, and
-the delivery record owns the proof from there.
+the delivery record owns the proof from there. It re-checks the folded
+review section's shape but never re-hashes the record — the manifest
+covers the five frozen files only — and never re-compares the
+fingerprint to the live docset, whose legal post-approval drift
+(tech-spec appends, task.md status) changes it.
 
 Usage:
-  freeze.py <spec-dir> --record [--by "<name>"]... [--repo <path>]
+  freeze.py <spec-dir> --record [--review <payload>] [--by "<name>"]... [--repo <path>]
   freeze.py <spec-dir> --record --force [--repo <path>]   # fresh approval only
   freeze.py <spec-dir> --verify [--repo <path>]
   freeze.py -h | --help
@@ -151,8 +159,11 @@ def docset_fingerprint(spec_dir: Path) -> str:
 
 REVIEW_DIGEST = re.compile(
     r"^[ \t>*`-]*digest:[ \t]*BLOCK[ \t]+(\d+)\b", re.M)
+REVIEW_FINGERPRINT = re.compile(
+    r"Docset fingerprint:[ \t]*`?([0-9a-f]{6,64})`?", re.I)
 REVIEW_RULING = re.compile(
     r"^[ \t]*(?:[-*][ \t]+)?\**ruling\b[^\n:]*:[ \t]*\S", re.I | re.M)
+REVIEW_LEAD_MARKUP = re.compile(r"^[ \t>*`-]+")
 REVIEW_SHAPE = ("`Docset fingerprint: <hash>`, then the auditor's `digest: "
                 "BLOCK <n> · WARN <n> · NIT <n> · worst …` line verbatim, "
                 "then one `ruling: <finding> — repaired | <the user's "
@@ -172,58 +183,109 @@ def approval_steps(spec_dir: Path) -> str:
     """What records an approval — a first one, or the one re-approval
     of a docset approved before the freeze existed. Tiny tier has no
     contract-review record."""
-    record = ("on the user's explicit yes run `freeze.py <spec-dir> "
-              "--record`")
     if _is_tiny(spec_dir):
-        return record
+        return "on the user's explicit yes run `freeze.py <spec-dir> --record`"
     return (f"emit the contract review with {REVIEW_EMIT}, spawn the "
-            f"auditor on it, write approvals/review.md ({REVIEW_SHAPE}), "
-            f"then {record}")
+            f"auditor on it, save the review payload ({REVIEW_SHAPE}), then "
+            "on the user's explicit yes run `freeze.py <spec-dir> --record "
+            "--review <payload>`")
 
 
-def review_problem(spec_dir: Path) -> str | None:
-    """Why approvals/review.md cannot back a freeze of the current
-    docset, or None when it can (tiny tier has no contract review)."""
-    if _is_tiny(spec_dir):
-        return None
-    review = spec_dir / "approvals" / "review.md"
+def _review_text(spec_dir: Path, review: str | None) -> str:
+    """The review payload's text: the --review file when given, else the
+    legacy approvals/review.md the old flow persisted."""
+    path = Path(review) if review else spec_dir / "approvals" / "review.md"
     try:
-        text = review.read_text(encoding="utf-8", errors="replace")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        text = ""
-    if not text.strip():
-        return (f"contract review not recorded — emit it with {REVIEW_EMIT}, "
-                "spawn the auditor on that payload, then persist its "
-                f"review to {review}: {REVIEW_SHAPE}")
-    fingerprint = docset_fingerprint(spec_dir)
-    if fingerprint not in text:
-        return (f"{review} reviews a different docset (current "
-                f"fingerprint {fingerprint} not found) — the docset "
-                f"changed after its review: re-emit with {REVIEW_EMIT}, "
-                "re-review, and record the new digest and fingerprint")
+        return ""
+
+
+def review_shape_problem(text: str) -> str | None:
+    """Why review text is not a complete REVIEW_SHAPE trio. A re-review
+    appends its digest, so the last one is the current review."""
     digests = list(REVIEW_DIGEST.finditer(text))
     if not digests:
-        return (f"{review} carries the fingerprint but no auditor digest "
+        return ("the review carries the fingerprint but no auditor digest "
                 "— a fingerprint alone is not a review: paste the "
                 "auditor's first line (`digest: BLOCK <n> · WARN <n> · NIT "
                 "<n> · worst …`) verbatim; no auditor ran yet → emit with "
                 f"{REVIEW_EMIT} and spawn it")
-    # a re-review appends its digest, so the last one is the current review
     current = digests[-1]
     blocks = int(current.group(1))
     rulings = len(REVIEW_RULING.findall(text, current.end()))
     if rulings < blocks:
-        return (f"{review} digest counts BLOCK {blocks} but {rulings} "
+        return (f"digest counts BLOCK {blocks} but {rulings} "
                 "ruling line(s) follow it — every BLOCK needs an owner: "
                 "add one `ruling: <finding> — repaired | <the user's "
                 "ruling in their words>` line per BLOCK after the digest "
                 "(a repaired docset is re-reviewed: record the new "
                 "fingerprint and digest)")
+    if not REVIEW_FINGERPRINT.search(text):
+        return ("the review carries no `Docset fingerprint: <hash>` line "
+                "— without it the record cannot name the docset the "
+                "auditor read")
     return None
 
 
+def review_problem(spec_dir: Path, review: str | None = None) -> str | None:
+    """Why the contract review cannot back a freeze of the current
+    docset, or None when it can (tiny tier has no contract review)."""
+    if _is_tiny(spec_dir):
+        return None
+    text = _review_text(spec_dir, review)
+    if not text.strip():
+        return (f"contract review not recorded — emit it with {REVIEW_EMIT}, "
+                "spawn the auditor on that payload, then pass the saved "
+                "payload: `freeze.py <spec-dir> --record --review <payload>` "
+                f"({REVIEW_SHAPE})")
+    fingerprint = docset_fingerprint(spec_dir)
+    if fingerprint not in text:
+        return (f"the review reviews a different docset (current "
+                f"fingerprint {fingerprint} not found) — the docset "
+                f"changed after its review: re-emit with {REVIEW_EMIT}, "
+                "re-review, and record the new digest and fingerprint")
+    return review_shape_problem(text)
+
+
+def _line_of(text: str, pos: int) -> str:
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", pos)
+    return text[start:len(text) if end < 0 else end].strip()
+
+
+def _heading_section(text: str, title: str) -> str | None:
+    """A `## <title>` section's body, to the next `## ` heading — None
+    when the heading is absent (the old-grammar record has neither
+    section)."""
+    m = re.search(rf"^## {re.escape(title)}[ \t]*$", text, re.M)
+    if m is None:
+        return None
+    tail = re.search(r"^## ", text[m.end():], re.M)
+    body_end = m.end() + tail.start() if tail else len(text)
+    return text[m.end():body_end]
+
+
+def fold_review(text: str) -> tuple[str, ...]:
+    """The REVIEW_SHAPE trio folded into the record: the payload's
+    fingerprint line, the last auditor digest line, then the ruling
+    lines after it."""
+    lines: list[str] = []
+    fingerprints = list(REVIEW_FINGERPRINT.finditer(text))
+    if fingerprints:
+        lines.append(f"Docset fingerprint: {fingerprints[-1].group(1)}")
+    digests = list(REVIEW_DIGEST.finditer(text))
+    if digests:
+        last = digests[-1]
+        lines.append(REVIEW_LEAD_MARKUP.sub("", _line_of(text, last.start())))
+        lines += [REVIEW_LEAD_MARKUP.sub("", _line_of(text, m.start()))
+                  for m in REVIEW_RULING.finditer(text, last.end())]
+    return tuple(lines)
+
+
 def render(spec_dir: Path, approved_at: str,
-           approvers: tuple[str, ...] = ()) -> str:
+           approvers: tuple[str, ...] = (),
+           review: tuple[str, ...] = ()) -> str:
     vals = manifest_values(spec_dir)
     lines = [
         "# Approval freeze",
@@ -238,9 +300,10 @@ def render(spec_dir: Path, approved_at: str,
         "`tech-spec.md` is verified as an immutable prefix so implementation",
         "may append D-### decisions. `task.md` is not frozen because it is the",
         "status holder.",
-        "",
-        "## Frozen contract",
     ]
+    if review:
+        lines += ["", "## Contract review", "", *review]
+    lines += ["", "## Freeze", ""]
     for name in FROZEN_FILES:
         if name not in vals:
             continue
@@ -258,19 +321,23 @@ def render(spec_dir: Path, approved_at: str,
 
 
 def record(spec_dir: Path, repo: Path, force: bool = False,
-           approvers: tuple[str, ...] = ()) -> int:
+           approvers: tuple[str, ...] = (),
+           review: str | None = None) -> int:
     if any("NEEDS CLARIFICATION" in (spec_dir / f).read_text(
             encoding="utf-8", errors="replace")
            for f in FROZEN_FILES if (spec_dir / f).exists()):
         print("FAIL: unresolved NEEDS CLARIFICATION marker — do not freeze", file=sys.stderr)
         return 1
-    problem = review_problem(spec_dir)
+    problem = review_problem(spec_dir, review)
     if problem:
         print(f"FAIL: {problem}", file=sys.stderr)
         return 1
+    review_lines = ()
+    if not _is_tiny(spec_dir):
+        review_lines = fold_review(_review_text(spec_dir, review))
     git_ok = specstate.git_available(repo)
     sha = specstate.head_sha(repo) if git_ok else "-"
-    text = render(spec_dir, sha or "-", approvers)
+    text = render(spec_dir, sha or "-", approvers, review_lines)
     out = spec_dir / "approvals" / "approval.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and not force:
@@ -372,15 +439,31 @@ def verify(spec_dir: Path, repo: Path) -> list[str]:
         else:
             if old != new:
                 problems.append(f"approval freeze: {name} changed after approval")
+    # a `## Freeze` heading marks the folded one-file grammar; old-grammar
+    # records (## Frozen contract) keep their legacy review.md sidecar and
+    # are migrate.py upgrade's to convert
+    if not _is_tiny(spec_dir) and _heading_section(text, "Freeze") is not None:
+        review = _heading_section(text, "Contract review")
+        if review is None:
+            problems.append(
+                "approval freeze: contract review section missing from the "
+                "record — a full-tier freeze folds the review trio; "
+                "re-approve (`freeze.py <spec-dir> --record --force --review "
+                "<payload>` on the user's yes)")
+        else:
+            shape = review_shape_problem(review)
+            if shape:
+                problems.append(f"approval freeze: {shape}")
     return problems
 
 
 def parse_args(
     argv: list[str],
-) -> tuple[Path, Path, str, bool, tuple[str, ...]] | None:
+) -> tuple[Path, Path, str, bool, tuple[str, ...], str | None] | None:
     spec_dir = repo = None
     mode = ""
     force = False
+    review: str | None = None
     approvers: list[str] = []
     i = 0
     while i < len(argv):
@@ -389,6 +472,11 @@ def parse_args(
             mode = arg
         elif arg == "--force":
             force = True
+        elif arg == "--review":
+            i += 1
+            if i >= len(argv):
+                return None
+            review = argv[i]
         elif arg == "--by":
             i += 1
             name = " ".join(argv[i].split()) if i < len(argv) else ""
@@ -407,10 +495,10 @@ def parse_args(
         i += 1
     if not spec_dir or mode not in ("--record", "--verify"):
         return None
-    if approvers and mode != "--record":
+    if (approvers or review) and mode != "--record":
         return None
     return (Path(spec_dir), Path(repo) if repo else Path(spec_dir).parent.parent,
-            mode, force, tuple(approvers))
+            mode, force, tuple(approvers), review)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -423,12 +511,12 @@ def main(argv: list[str] | None = None) -> int:
     if parsed is None:
         print(__doc__, file=sys.stderr)
         return 2
-    spec_dir, repo, mode, force, approvers = parsed
+    spec_dir, repo, mode, force, approvers, review = parsed
     if not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory", file=sys.stderr)
         return 1
     if mode == "--record":
-        return record(spec_dir, repo, force, approvers)
+        return record(spec_dir, repo, force, approvers, review)
     problems = verify(spec_dir, repo)
     for problem in problems:
         print(f"FAIL: {problem}")

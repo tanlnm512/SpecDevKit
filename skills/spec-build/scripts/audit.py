@@ -61,13 +61,15 @@ dod    — the Definition-of-Done scorecard (every gate must pass): runs
          scope/hygiene counts in one pass; mechanical gates print
          PASS/FAIL, judgment gates print MANUAL (NONE: no repo checks
          detected) for the orchestrator to satisfy, and gates that do
-         not apply print N/A. The delivery note
-         (specs/<name>/notes/delivery.md) carries the lines gates 11-13
-         read: `Docs impact: <files> | none — <reason>`, `Rollback:
-         <row key> — <ruling>` for a rollback row no TC proves, and
-         `Behavior preserved: ...` at Type refactor/upgrade; a bugfix
-         or hotfix needs a notes/T###.md `## Regression test (red
-         before fix)` section. Gate 5 counts the frozen
+         not apply print N/A. Gates 11-13 read the status holder's
+         delivery block (notes/delivery.md serves archived history):
+         `Docs impact: <files> | none — <reason>`, `Rollback: <row key>
+         — <ruling>` for a rollback row no TC proves, and `Behavior
+         preserved: ...` at Type refactor/upgrade; a bugfix or hotfix
+         needs a notes/T###.md `## Regression test (red before fix)`
+         section. Gate 14 reads the burndown Verified column: `pass`
+         needs the `Delivered:` record, and a `Delivered:` record needs
+         every attributable phase row `pass`. Gate 5 counts the frozen
          survey's drift WARNs (a citation's line moved, the baseline
          behind HEAD) as expected — implementation causes them and the
          freeze forbids fixing them. Like proofs --run, dod
@@ -170,6 +172,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     task_touches,
     tiny_task_text,
 )
+from check import BD_ROW, bd_label  # noqa: E402 - the sys.path setup above runs first
 
 # Debug prints across common languages. printf( is deliberately absent —
 # ordinary C output; WARN heuristics err toward recall, the orchestrator
@@ -207,8 +210,11 @@ SURVEY_DRIFT_WARN = re.compile(
 GATE_SH = Path(__file__).resolve().parent / "gate.sh"
 REGRESSION_NONE = 3
 DELIVERY_NOTE = ("notes", "delivery.md")
+DELIVERED_FIELD = re.compile(r"^[ \t]*\*{0,2}Delivered\*{0,2}[ \t]*:.*$", re.M)
+RECORD_LINE = re.compile(r"^[ \t]*\*{0,2}(?:Released|Post-release check)\*{0,2}[ \t]*:")
+FACT_BULLET = re.compile(r"^[ \t]*-[ \t]")
 DOCS_IMPACT = re.compile(r"^Docs impact:[ \t]*(.*)$", re.M)
-ROLLBACK_RULING = re.compile(r"^Rollback:[ \t]*(.+?)[ \t]+—[ \t]+\S", re.M)
+ROLLBACK_RULING = re.compile(r"^Rollback:[ \t]*(.+)[ \t]+—[ \t]+\S", re.M)
 BEHAVIOR_PRESERVED = re.compile(r"^Behavior preserved:[ \t]*\S", re.M)
 REGRESSION_FIRST = re.compile(r"^## Regression test \(red before fix\)", re.M)
 TYPE_LINE = re.compile(r"^\*\*Type\*\*:[ \t]*([A-Za-z-]+)", re.M)
@@ -337,6 +343,27 @@ def task_source(spec_dir: Path) -> str:
 def delivery_source(spec_dir: Path) -> str:
     """The text holding the `Delivered:` record: task.md, or spec.md at tiny."""
     return _read(spec_dir / ("spec.md" if is_tiny(spec_dir) else "task.md"))
+
+
+def delivery_block(spec_dir: Path) -> tuple[str, str]:
+    """(fact lines, where) from the block under the status holder's
+    Delivered field — the delivery-record commit's lines; empty on
+    specs that predate the block (archived history keeps the note)."""
+    holder = "spec.md" if is_tiny(spec_dir) else "task.md"
+    where = f"{holder} delivery block"
+    text = _read(spec_dir / holder)
+    m = DELIVERED_FIELD.search(text)
+    if not m:
+        return "", where
+    rest = text[m.end():].splitlines()
+    i = 0
+    while i < len(rest) and (not rest[i].strip() or RECORD_LINE.match(rest[i])):
+        i += 1
+    lines = []
+    while i < len(rest) and FACT_BULLET.match(rest[i]):
+        lines.append(rest[i].strip()[1:].strip())
+        i += 1
+    return "\n".join(lines), where
 
 
 def _spec_prefix(spec_dir: Path, repo: Path) -> str:
@@ -1057,6 +1084,8 @@ def rollback_items(spec_dir: Path) -> list[tuple[str, str]]:
     items = []
     tech = _section(_read(spec_dir / "tech-spec.md"), TECH_ROLLBACK_HEADING, "##")
     for cells in _table_rows(tech):
+        if cells and cells[0].strip().lower() in ("requirement", "row", "item"):
+            continue
         if len(cells) >= 2 and not PLACEHOLDER_CELL.match(cells[-1]):
             items.append((cells[0], " | ".join(cells)))
     rollout = _section(_read(spec_dir / "plan.md"), ROLLOUT_HEADING, "###")
@@ -1073,8 +1102,10 @@ def delivery_gates(spec_dir: Path, repo: Path, changed: list[str],
                    git_ok: bool) -> list[tuple[str, str, str]]:
     """(name, status, detail) for the delivery note's gates: docs impact,
     rollback, and the spec's work type."""
-    note = _read(spec_dir.joinpath(*DELIVERY_NOTE))
-    where = "/".join(DELIVERY_NOTE)
+    note, where = delivery_block(spec_dir)
+    if not note.strip():
+        note = _read(spec_dir.joinpath(*DELIVERY_NOTE))
+        where = "/".join(DELIVERY_NOTE)
     m = DOCS_IMPACT.search(note)
     if not m or not m.group(1).strip():
         docs = ("FAIL", f"no `Docs impact:` line in {where}")
@@ -1112,6 +1143,39 @@ def delivery_gates(spec_dir: Path, repo: Path, changed: list[str],
     else:
         work = ("N/A", f"Type: {kind or 'unset'}")
     return [("DOCS IMPACT", *docs), ("ROLLBACK", *rollback), ("WORK TYPE", *work)]
+
+
+def verified_gate(spec_dir: Path) -> tuple[str, str, str]:
+    """(name, status, detail) for the burndown Verified column: `pass` is
+    delivery-pass evidence, so it may not exist ahead of the `Delivered:`
+    record, and a delivered spec needs every attributable phase row
+    `pass` (FR-004). Rows read from the status holder via check.py's
+    BD_ROW/bd_label — the same attribution --fix-burndown repairs by."""
+    text = delivery_source(spec_dir)
+    rows: dict[str, str] = {}
+    for line in text.splitlines():
+        m = BD_ROW.match(line)
+        if m:
+            kind, n = bd_label(m.group(1))
+            if kind == "data" and n is not None:
+                rows[m.group(1).strip()] = m.group(4).strip()
+    if not rows:
+        return ("VERIFIED", "N/A", "no attributable burndown rows")
+    stamped = [label for label, cell in rows.items() if cell == "pass"]
+    delivered = bool(DELIVERED_FIELD.search(text))
+    if stamped and not delivered:
+        return ("VERIFIED", "FAIL",
+                f"`pass` on {', '.join(stamped)} with no `Delivered:` record"
+                " — the column cannot run ahead of delivery")
+    if delivered:
+        unverified = [label for label, cell in rows.items() if cell != "pass"]
+        if unverified:
+            return ("VERIFIED", "FAIL",
+                    f"delivered but Verified not `pass` on {', '.join(unverified)}")
+        return ("VERIFIED", "PASS",
+                f"{len(rows)} phase row(s) `pass` with the `Delivered:` record")
+    return ("VERIFIED", "PASS",
+            f"Verified empty on {len(rows)} phase row(s), no `Delivered:` record yet")
 
 
 def mode_dod(spec_dir: Path, repo: Path, base: str | None,
@@ -1230,6 +1294,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
     ]
     gates += [(n, name, st, dt) for n, (name, st, dt) in
               enumerate(delivery_gates(spec_dir, repo, paths, git_ok), 11)]
+    gates.append((len(gates) + 1, *verified_gate(spec_dir)))
     print(f"dod: {spec_dir} — {len(gates)} gates, all must pass or read N/A"
           + (" (dry run)" if dry else ""))
     for num, name, st, detail in gates:

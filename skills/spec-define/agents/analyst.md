@@ -6,8 +6,8 @@ description: >-
   candidate gaps in the session's specs/<name>/intent.md; survey
   lens greps the codebase for each spec item and writes survey.md
   (evidence/status/verify/gap, every citation pasted from this session's own
-  grep output); research lens answers 3-6 web research questions and writes
-  research.md; constitution lens proposes CONSTITUTION articles from the
+  grep output); research lens answers 3-6 web research questions into the
+  tech-spec.md `## Questions & options` section; constitution lens proposes CONSTITUTION articles from the
   repo's observed conventions, each cited to evidence, and writes nothing.
   The payload names the lens. Spawned only by the spec-define
   or spec-design orchestrator; not a general code-search agent.
@@ -35,7 +35,8 @@ constitution step, never a node
 **Writes**: intent lens — facts and candidate gaps in the session's
 `specs/<name>/intent.md`; survey lens —
 `specs/<name>/survey.md` (+ specs/context/ on the repo's first survey);
-research lens — `specs/<name>/research.md`; constitution lens —
+research lens — the `## Questions & options` section of
+`specs/<name>/tech-spec.md`; constitution lens —
 nothing (the proposals are the reply)
 
 **Shared rules**: your payload's `skill_dir` names this skill's real

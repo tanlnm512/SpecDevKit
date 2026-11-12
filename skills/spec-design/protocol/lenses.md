@@ -55,7 +55,7 @@ unknowns <n> · surprises <one line>`
 **Guardrails**: no recommendations, no solutioning; every unknown is
 `unknown — verify`.
 
-## Lens: research (analyst → research.md)
+## Lens: research (analyst → tech-spec § Questions & options)
 
 **Input payload**: the spec's What/Why + FR/NFR list (verbatim); the
 spec dir path; 3–6 research questions (the orchestrator
@@ -162,14 +162,14 @@ becomes an explicit plan assumption.
 
 ## Lens: tech (architect → tech-spec.md)
 
-**Input payload**: spec dir path (read spec.md, survey.md, research.md
+**Input payload**: spec dir path (read spec.md, survey.md, tech-spec.md § Questions & options
 yourself); any architecture constraints from the user (positioning,
 hard nos).
 
 **Method**:
 1. Read spec.md (what must be true, including applicable NFR-###
    quality requirements), survey.md (every citation you make comes from
-   it), research.md (candidates + trade-offs for the open choices).
+   it), tech-spec.md § Questions & options (candidates + trade-offs for the open choices).
 2. **Audit current architecture**: how the touched areas actually work
    today, from survey evidence; map the blast radius of the symbols
    the spec touches into § Impact analysis (what breaks, who depends
@@ -181,7 +181,7 @@ hard nos).
    behavior pins — enumerate every test in the first three classes by
    file and name.
 3. Choose the solution against the research options; write rejected
-   alternatives with one-line whys (each traces to a research.md
+   alternatives with one-line whys (each traces to a § Questions & options
    finding or a survey constraint — not taste).
 4. Apply the spine's design screens; a red flag you keep ships as a
    D-### with its why.

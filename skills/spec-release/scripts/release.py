@@ -360,13 +360,51 @@ def rollback_rows(tech: str) -> list[dict]:
     return rows
 
 
+DELIVERY_NOTE = ("notes", "delivery.md")
+DELIVERED_FIELD = re.compile(r"^[ \t]*\*{0,2}Delivered\*{0,2}[ \t]*:.*$", re.M)
+RECORD_LINE = re.compile(r"^[ \t]*\*{0,2}(?:Released|Post-release check)\*{0,2}[ \t]*:")
+FACT_BULLET = re.compile(r"^[ \t]*-[ \t]")
+BD_ROW = re.compile(r"^\|([^|]+)\|\s*(\d+)\s*\|\s*(\d+)\s*\|([^|]*)\|\s*$", re.M)
+BD_SUM_LABELS = ("σ", "sum", "total", "totals", "all")
+
+
+def delivery_block(spec_dir: Path) -> str:
+    """The fact lines under the status holder's Delivered field — the
+    delivery-record commit's block; empty on specs that predate it."""
+    text = read(holder_path(spec_dir))
+    m = DELIVERED_FIELD.search(text)
+    if not m:
+        return ""
+    rest = text[m.end():].splitlines()
+    i = 0
+    while i < len(rest) and (not rest[i].strip() or RECORD_LINE.match(rest[i])):
+        i += 1
+    lines = []
+    while i < len(rest) and FACT_BULLET.match(rest[i]):
+        lines.append(rest[i].strip()[1:].strip())
+        i += 1
+    return "\n".join(lines)
+
+
 def delivery_note(spec_dir: Path) -> dict:
-    text = read(spec_dir / "notes" / "delivery.md")
+    block = delivery_block(spec_dir)
+    source = block if block.strip() else read(spec_dir.joinpath(*DELIVERY_NOTE))
     pick = lambda key: [m.group(1).strip() for m in re.finditer(
-        rf"^\s*(?:-\s*)?{key}:\s*(.+)$", text, re.M)]
+        rf"^\s*(?:-\s*)?{key}:\s*(.+)$", source, re.M)]
     docs = pick("Docs impact")
     return {"docs_impact": docs[0] if docs else None, "rollback": pick("Rollback"),
             "behavior_preserved": pick("Behavior preserved")}
+
+
+def burndown_verdicts(holder_text: str) -> dict[str, str]:
+    """The Verified column per data row — orchestrator-stamped delivery-pass
+    evidence (D-004), never recomputed; an empty dict on a two-column table."""
+    verdicts: dict[str, str] = {}
+    for m in BD_ROW.finditer(holder_text):
+        label = m.group(1).strip().strip("*").strip()
+        if label.lower() not in BD_SUM_LABELS:
+            verdicts[label] = m.group(4).strip()
+    return verdicts
 
 
 def smoke_checks(spec_dir: Path, spec_md: str, tiny: bool) -> list[dict]:
@@ -398,7 +436,7 @@ def header_value(block: str, label: str) -> str | None:
 
 def breaking_markers(spec_dir: Path) -> list[str]:
     hits = []
-    for name in ("spec.md", "tech-spec.md", "notes/delivery.md"):
+    for name in ("spec.md", "tech-spec.md", "/".join(DELIVERY_NOTE)):
         text = clean(read(spec_dir / name))
         for m in BREAKING_FIELD.finditer(text):
             if not NEGATED.match(m.group(1).strip()):
@@ -434,6 +472,16 @@ def holder_path(spec_dir: Path) -> Path:
     return spec_dir / ("spec.md" if first_word(header(spec_md, "Tier"), "full") == "tiny" else "task.md")
 
 
+def hotfix_target(spec_md: str) -> dict:
+    """The declared `**Hotfix for**` tag and `**Fixes spec**` name; empty
+    fields when a header is absent or still a template placeholder —
+    whether the target resolves is the checker's verdict, never release's."""
+    def declared(key: str) -> str:
+        value = (header(spec_md, key) or "").strip("`")
+        return "" if PLACEHOLDER.match(value) else value
+    return {"tag": declared("Hotfix for"), "spec": declared("Fixes spec")}
+
+
 def spec_facts(repo: Path, spec_dir: Path, backlog: list[str]) -> dict:
     spec_md = read(spec_dir / "spec.md")
     tiny = first_word(header(spec_md, "Tier"), "full") == "tiny"
@@ -448,12 +496,14 @@ def spec_facts(repo: Path, spec_dir: Path, backlog: list[str]) -> dict:
         "archived": spec_dir.parent.name == "archive",
         "tier": "tiny" if tiny else "full",
         "type": first_word(header(spec_md, "Type"), "feature"),
+        "hotfix_target": hotfix_target(spec_md),
         "status": first_word(header(spec_md, "Status"), "draft"),
         "title": title.group(1).strip() if title else name,
         "what": first_sentence(section(spec_md, "What") or ""),
         "frs": [{"id": m.group(1), "text": m.group(2).strip()} for m in FR_LINE.finditer(spec_md)],
         "holder": holder.relative_to(repo).as_posix(),
         "delivered": delivered.group(1) if delivered else None,
+        "verified": burndown_verdicts(holder_text),
         "released": [{"tag": m.group(1), "sha": m.group(2)} for m in RELEASED.finditer(holder_text)],
         "post_release": [{"tag": m.group(1), "outcome": m.group(2)}
                          for m in POST_RELEASE.finditer(holder_text)],
@@ -716,12 +766,23 @@ def bullet(lines: list[str]) -> str:
     return "\n".join(lines)
 
 
+HOTFIX_LINEAGE = (("tag", "patches"), ("spec", "fixes"))
+
+
+def hotfix_lineage(spec: dict) -> str:
+    target = spec["hotfix_target"]
+    marks = [f"{verb} {target[key]}" for key, verb in HOTFIX_LINEAGE if target[key]]
+    return "".join(f" — {mark}" for mark in marks)
+
+
 def generated_section(facts: dict, version: str, date: str, style: dict) -> str:
     groups = {"added": [], "fixed": [], "changed": []}
     for s in facts["included"]:
         text = s["what"] or s["title"]
         mark = "**Breaking**: " if s["breaking"] else ""
-        groups[GROUP_BY_TYPE.get(s["type"], "added")].append(f"- {mark}{text} ({s['name']})")
+        suffix = hotfix_lineage(s) if s["type"] == "hotfix" else ""
+        groups[GROUP_BY_TYPE.get(s["type"], "added")].append(
+            f"- {mark}{text} ({s['name']}){suffix}")
     deps = [f"- `{d['file']}`: {d['change']}" for d in facts["deps"][:20]]
     if len(facts["deps"]) > 20:
         deps.append(f"- … and {len(facts['deps']) - 20} more dependency lines")

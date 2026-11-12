@@ -7,6 +7,7 @@ its None/missing/empty edge.
 
 import importlib.util
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -103,6 +104,37 @@ class WorkTypeAndDependsTests(unittest.TestCase):
             self.assertEqual(specstate.spec_depends(text), want, text)
 
 
+class HotfixTargetTests(unittest.TestCase):
+    def test_declared_headers_read_their_values_verbatim(self):
+        for text, want in (
+            ("**Hotfix for**: v1.2.3\n", specstate.HotfixTarget("v1.2.3", "")),
+            ("**Fixes spec**: auth-core\n", specstate.HotfixTarget("", "auth-core")),
+            ("**Hotfix for**: `v1.2.3`\n**Fixes spec**: `auth-core`\n",
+             specstate.HotfixTarget("v1.2.3", "auth-core")),
+            ("**Hotfix for**: v1.2.3   <!-- optional -->\n",
+             specstate.HotfixTarget("v1.2.3", "")),
+        ):
+            self.assertEqual(specstate.hotfix_target(text), want, text)
+
+    def test_absent_or_unfilled_headers_read_empty(self):
+        for text in (
+            "# Spec\n**Status**: draft\n**Type**: hotfix\n",
+            "**Hotfix for**: <tag>\n**Fixes spec**: <name>\n",
+            "**Hotfix for**:\n**Fixes spec**:\n",
+            "",
+        ):
+            self.assertEqual(specstate.hotfix_target(text),
+                             specstate.HotfixTarget("", ""), text)
+
+    def test_only_line_leading_bold_headers_count(self):
+        self.assertEqual(
+            specstate.hotfix_target(
+                "prose cites **Hotfix for**: v1 mid-line\n"
+                "- **Fixes spec**: auth-core as a bullet\n"
+                "**Hotfixy for**: v2\n"),
+            specstate.HotfixTarget("", ""))
+
+
 class TaskEntryTests(unittest.TestCase):
     def setUp(self):
         self.entries = specstate.task_entries(TASK_SAMPLE)
@@ -192,6 +224,52 @@ class ImplementedMarkerTests(unittest.TestCase):
         self.assertIsNone(e["T003"].fix_round)
 
 
+class FixRoundTests(unittest.TestCase):
+    """Fix-round note sub-lines parse into TaskEntry.rounds in round
+    order — the `fix` line's digest, closed by the `fixed` sibling with
+    resolution and proof — while the `(fix n/5)` marker field stays the
+    separate count holder. Entries without sub-lines keep empty rounds."""
+
+    SAMPLE = ("## Phase 1: p (FR-001)\n"
+              "- [ ] T001 (fix 2/5) retry the flaky bit (FR-001)\n"
+              "  - fix 1 — pytest test_x fails on empty input\n"
+              "  - fixed 1 — guard the empty case — pytest green\n"
+              "  - fix 2 — pytest test_x fails on unicode paths\n")
+
+    def test_fix_round_open_and_closed_parse_in_order(self):
+        e = {x.id: x for x in specstate.task_entries(self.SAMPLE)}["T001"]
+        self.assertEqual(
+            [(r.n, r.digest, r.resolution, r.proof, r.closed)
+             for r in e.rounds],
+            [(1, "pytest test_x fails on empty input",
+              "guard the empty case", "pytest green", True),
+             (2, "pytest test_x fails on unicode paths", "", "", False)])
+        self.assertEqual(e.fix_round, 2)
+
+    def test_fix_round_indented_shape_reads_too(self):
+        text = ("## Phase 1: p (FR-001)\n"
+                "- [ ] T001 (fix 1/5) retry (FR-001)\n"
+                "    fix 1 — command failed\n")
+        e = specstate.task_entries(text)[0]
+        self.assertEqual(
+            e.rounds, (specstate.FixRound(1, "command failed", "", "", False),))
+
+    def test_fix_round_close_without_open_keeps_empty_digest(self):
+        text = ("## Phase 1: p (FR-001)\n"
+                "- [ ] T001 (fixed 1/5) re-landed (FR-001)\n"
+                "  - fixed 1 — the actual fix — proof command\n")
+        e = specstate.task_entries(text)[0]
+        self.assertEqual(
+            e.rounds,
+            (specstate.FixRound(1, "", "the actual fix", "proof command", True),))
+
+    def test_fix_round_absent_keeps_empty_rounds(self):
+        text = ("## Phase 1: p (FR-001)\n"
+                "- [ ] T001 plain (FR-001)\n"
+                "  prose citing `fix <n> — <digest>` shapes stays prose\n")
+        e = specstate.task_entries(text)[0]
+        self.assertEqual(e.rounds, ())
+
 
 class ApprovalShaTests(unittest.TestCase):
     """approval_sha reads the `**Approved-at**` commit from approvals/approval.md,
@@ -214,6 +292,18 @@ class ApprovalShaTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as td:
                 spec = self.approval_dir(td, text)
                 self.assertEqual(specstate.approval_sha(spec), "3fa9c21")
+
+    def test_reads_the_anchor_through_the_folded_sections(self):
+        folded = ("# Approval freeze\n\n**Approved-at**: `3fa9c21`\n\n"
+                  "## Contract review\n\nDocset fingerprint: 0123abcd4567\n\n"
+                  "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n\n"
+                  "## Freeze\n\n"
+                  "- `spec.md`: exact sha256:"
+                  "5cc903d8d8f66302b24c0f4f59e99687ad037e3fcd198e350f2cc88e9a"
+                  "938c25 length:1892\n")
+        with tempfile.TemporaryDirectory() as td:
+            spec = self.approval_dir(td, folded)
+            self.assertEqual(specstate.approval_sha(spec), "3fa9c21")
 
     def test_no_freeze_yet_reads_none(self):
         with tempfile.TemporaryDirectory() as td:
@@ -351,44 +441,81 @@ class SurveyItemsTests(unittest.TestCase):
 class ResearchStateTests(unittest.TestCase):
     MARKER = "not applicable — no open questions at Stage 0"
 
+    def tech_dir(self, tech_spec: str | None) -> Path:
+        d = Path(tempfile.mkdtemp(prefix="research-"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        if tech_spec is not None:
+            write(d, "tech-spec.md", tech_spec)
+        return d
+
+    SECTION = ("# Tech Spec: demo\n\n## Architecture\nbody\n\n"
+               "## Questions & options\n\n### Questions\n{questions}\n\n"
+               "### Options summary\n{options}\n")
+
     def test_canonical_marker_is_byte_exact_em_dash(self):
         self.assertEqual(specstate.RESEARCH_SKIP_MARKER, self.MARKER)
         self.assertIn("\u2014", specstate.RESEARCH_SKIP_MARKER)
         self.assertNotIn("-", specstate.RESEARCH_SKIP_MARKER)
-        # The fixture's marker line matches byte-for-byte.
+        # The fixture's legacy marker line matches byte-for-byte.
         fixture_lines = (FIXTURE / "research.md").read_text(
             encoding="utf-8").splitlines()
         self.assertIn(self.MARKER, [l.strip() for l in fixture_lines])
 
     def test_marker_line_reads_skip_even_with_surrounding_prose(self):
-        with tempfile.TemporaryDirectory() as td:
-            p = write(Path(td), "research.md",
-                      f"# Research: demo\n\n{self.MARKER}\n\nSome rationale.\n")
-            self.assertEqual(specstate.research_state(p), "skip")
-            self.assertEqual(specstate.research_state(str(p)), "skip")
+        d = self.tech_dir(self.SECTION.format(
+            questions=f"{self.MARKER}\n\nSome rationale.",
+            options="None — nothing open"))
+        self.assertEqual(specstate.research_state(d), "skip")
+        self.assertEqual(specstate.research_state(str(d)), "skip")
 
     def test_real_content_reads_done(self):
-        with tempfile.TemporaryDirectory() as td:
-            p = write(Path(td), "research.md",
-                      "## Questions\n### Q1\n- **source**: https://x — claim\n")
-            self.assertEqual(specstate.research_state(p), "done")
+        d = self.tech_dir(self.SECTION.format(
+            questions="- Q1 — **source**: https://x · claim · high",
+            options="- choice — a or b, one-line trade-off"))
+        self.assertEqual(specstate.research_state(d), "done")
 
-    def test_empty_and_template_files_read_pending(self):
-        with tempfile.TemporaryDirectory() as td:
-            empty = write(Path(td), "empty.md", "")
-            blank = write(Path(td), "blank.md", "   \n\n")
-            template = write(Path(td), "template.md",
-                             "# Research: <name>\n### <research question 1>\n")
-            for p in (empty, blank, template):
-                self.assertEqual(specstate.research_state(p), "pending", p)
+    def test_section_ignores_headings_and_comments_when_judging_content(self):
+        d = self.tech_dir(
+            "# Tech Spec: demo\n\n## Questions & options\n"
+            "<!-- guidance -->\n### Questions\n\n### Options summary\n")
+        self.assertEqual(specstate.research_state(d), "pending")
 
-    def test_missing_file_and_none_path_read_missing(self):
-        self.assertEqual(specstate.research_state(Path("/nonexistent/research.md")),
+    def test_missing_section_reads_pending(self):
+        d = self.tech_dir("# Tech Spec: demo\n\n## Architecture\nbody\n")
+        self.assertEqual(specstate.research_state(d), "pending")
+
+    def test_missing_tech_spec_and_no_legacy_file_reads_missing(self):
+        self.assertEqual(specstate.research_state(self.tech_dir(None)),
                          "missing")
         self.assertEqual(specstate.research_state(None), "missing")
+        self.assertEqual(
+            specstate.research_state(Path("/nonexistent/spec-dir")), "missing")
+
+    def test_legacy_research_md_still_resolves_an_unsectioned_docset(self):
+        legacy = self.tech_dir(None)
+        write(legacy, "research.md",
+              f"# Research: demo\n\n{self.MARKER}\n\nRationale.\n")
+        self.assertEqual(specstate.research_state(legacy), "skip")
+        write(legacy, "research.md", "## Questions\n### Q1 — source: https://x\n")
+        self.assertEqual(specstate.research_state(legacy), "done")
+        write(legacy, "research.md", "")
+        self.assertEqual(specstate.research_state(legacy), "pending")
+
+    def test_leftover_research_md_is_inert_beside_a_resolved_section(self):
+        d = self.tech_dir(self.SECTION.format(
+            questions="- Q1 — answered from the repo",
+            options="- choice — a or b"))
+        write(d, "research.md", "## Research\nstale findings\n")
+        self.assertEqual(specstate.research_state(d), "done")
+        write(d, "tech-spec.md", self.SECTION.format(
+            questions=self.MARKER, options="None — nothing open"))
+        write(d, "research.md", "## Research\nconflicting findings\n")
+        self.assertEqual(specstate.research_state(d), "skip")
 
     def test_fixture_research_reads_skip(self):
-        self.assertEqual(specstate.research_state(FIXTURE / "research.md"), "skip")
+        # the green fixture is a pre-migration docset: legacy research.md
+        # beside a tech-spec without the section still reads skip
+        self.assertEqual(specstate.research_state(FIXTURE), "skip")
 
 
 class NextIdsTests(unittest.TestCase):

@@ -190,7 +190,7 @@ NODES = [
     "tick-commit", "archive",
 ]
 
-DOC_FILES = ["spec.md", "intent.md", "survey.md", "research.md",
+DOC_FILES = ["spec.md", "intent.md", "survey.md",
              "plan.md", "tech-spec.md", "task.md", "test.md"]
 
 # Fix-round cap: `(fix n/5)` — the cap lives in the task.md annotation, so a
@@ -571,9 +571,6 @@ def execute_holds(state: dict, every: bool = False) -> list[str]:
 FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 FR_ENTRY = re.compile(r"^-\s+\*\*(?:FR|NFR)-\d{3}\*\*", re.M)
 PASS_CONDITION = re.compile(r"\*\*Pass condition\*\*:?(.*)")
-QUESTION_SECTION = re.compile(
-    r"^#+\s*(?:open (?:technical )?questions|research questions)\s*$",
-    re.I | re.M)
 
 
 def read_raw(path: Path) -> str | None:
@@ -645,16 +642,23 @@ def spec_section(spec_text: str, name: str) -> str | None:
     return "\n".join(body).strip() or None
 
 
-def research_questions(spec_text: str) -> list[str]:
-    """The spec's recorded research/open questions — bullet lines under an
-    `Open questions` / `Research questions` heading. Empty when the spec
-    records none: the researcher brief derives 3–6 from the open technical
-    choices, so the payload says so instead of inventing questions."""
-    m = QUESTION_SECTION.search(spec_text)
+def research_questions(tech_text: str) -> list[str]:
+    """The tech-spec's recorded research questions — bullet lines under
+    `## Questions & options` → `### Questions`. Empty when the section
+    records none (a skip-form section has no bullets): the researcher
+    brief derives 3–6 from the open technical choices, so the payload
+    says so instead of inventing questions."""
+    m = specstate.QUESTIONS_SECTION.search(tech_text)
     if not m:
         return []
+    body = tech_text[m.end():]
+    end = body.find("\n## ")
+    body = body[:end] if end >= 0 else body
+    qm = re.search(r"^###\s+Questions\s*$", body, re.I | re.M)
+    if not qm:
+        return []
     out: list[str] = []
-    for line in spec_text[m.end():].splitlines():
+    for line in body[qm.end():].splitlines():
         s = line.strip()
         if s.startswith("#"):
             break
@@ -870,19 +874,27 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     if node == "research":
         what = spec_section(spec_text, "What")
         why = spec_section(spec_text, "Why")
-        questions = research_questions(spec_text)
+        questions = research_questions(
+            read_doc(spec_dir / "tech-spec.md") or "")
         lines = [f"- spec_dir: {spec_dir}"]
         if what:
             lines += ["- What (verbatim):", _indent(what)]
         if why:
             lines += ["- Why (verbatim):", _indent(why)]
         if questions:
-            lines += ["- Research questions (recorded in spec.md):"]
+            lines += ["- Research questions (recorded in tech-spec.md § "
+                      "Questions & options):"]
             lines += [_indent(q) for q in questions]
         else:
-            lines += ["- Research questions: none recorded in spec.md — "
-                      "derive 3-6 from the open technical choices in the "
-                      "requirement list below; the orchestrator confirms them."]
+            lines += ["- Research questions: none recorded in tech-spec.md "
+                      "§ Questions & options — derive 3-6 from the open "
+                      "technical choices in the requirement list below; the "
+                      "orchestrator writes them into the section and "
+                      "confirms them."]
+        lines += ["- Your findings land in that section — under "
+                  "### Questions (one block per question), with the open "
+                  "choices' candidates and one-line trade-offs under "
+                  "### Options summary; never a separate research.md file."]
         lines += ["- Requirement list (verbatim):", *fr_lines]
         return "\n".join(lines)
 
@@ -894,7 +906,8 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
         ]
     elif node == "tech":
         lines = [
-            f"- spec_dir: {spec_dir} (read spec.md, survey.md, research.md "
+            f"- spec_dir: {spec_dir} (read spec.md, survey.md, and your "
+            "file's own § Questions & options — the research record — "
             "yourself)",
             "- Architecture constraints: "
             + (f"specs/CONSTITUTION.md at {constitution}"
@@ -940,7 +953,8 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     elif node == "design":
         lines = [
             f"- spec_dir: {spec_dir} (read spec.md, survey.md, and "
-            "research.md yourself)",
+            "tech-spec.md § Questions & options — the research record — "
+            "yourself)",
             "- Effort: standard — ONE spawn authors "
             "plan.md → tech-spec.md → task.md in that order. The plan/tech "
             "wave is collapsed at this effort; check.py, the approve gate, "
@@ -982,8 +996,8 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
                 + "; survey.md is the evidence baseline",
                 *constitution_gap,
                 f"- Docset fingerprint: {freeze.docset_fingerprint(spec_dir)}"
-                " — the orchestrator records it with your findings in "
-                "approvals/review.md; the freeze refuses a review of any "
+                " — save this payload and pass it to `freeze.py <spec-dir> --record "
+                "--review <payload-path>`; the freeze refuses a review of any "
                 "other docset",
             ]
     elif node == "tick-commit":
@@ -1046,26 +1060,42 @@ def fix_note_path(spec_dir: Path, entry: specstate.TaskEntry) -> Path:
     return spec_dir / "notes" / f"{entry.id}.md"
 
 
+def round_sublines(entry: specstate.TaskEntry) -> list[str]:
+    """The entry's fix/fixed note sub-lines, verbatim from its block."""
+    return [ln for ln in entry.block.splitlines()
+            if specstate.FIX_NOTE_OPEN.match(ln)
+            or specstate.FIX_NOTE_CLOSED.match(ln)]
+
+
 def fix_evidence_lines(spec_dir: Path,
                        entry: specstate.TaskEntry) -> list[str]:
-    """The fix round's evidence, verbatim from notes/T###.md — the
-    orchestrator records each round's failing command and output there,
-    so a fresh developer gets what a continued one would remember."""
-    note = fix_note_path(spec_dir, entry)
+    """The fix round's evidence: the entry's round sub-lines verbatim,
+    then the notes/T###.md tail — the orchestrator records each round's
+    digest beside the marker and its failing command and output in the
+    note, so a fresh developer gets what a continued one would remember."""
     head = f"- Fix round {entry.fix_round}/{FIX_CAP}"
+    lines: list[str] = []
+    rounds = round_sublines(entry)
+    if rounds:
+        lines += [f"{head} — round history (the entry's fix/fixed note "
+                  "lines, verbatim):",
+                  _indent("\n".join(rounds))]
+    note = fix_note_path(spec_dir, entry)
     kept = (read_raw(note) or "").rstrip().splitlines()
     if not kept:
-        return [f"{head}: FAILURE EVIDENCE NOT RECORDED — {note} is "
-                "absent or empty. Do not implement from this payload: "
-                "return `blocked: no failure evidence` so the "
-                "orchestrator records the failing command and its "
-                "output there and re-emits"]
+        lines.append(f"{head}: FAILURE EVIDENCE NOT RECORDED — {note} is "
+                     "absent or empty. Do not implement from this payload: "
+                     "return `blocked: no failure evidence` so the "
+                     "orchestrator records the failing command and its "
+                     "output there and re-emits")
+        return lines
     cut = len(kept) - FIX_NOTE_LINE_CAP
     scope = (f"the last {FIX_NOTE_LINE_CAP} of {len(kept)} lines — Read "
              "the file for the rest" if cut > 0 else "verbatim")
-    return [f"{head} — failure evidence and prior attempts ({note}, "
-            f"{scope}):",
-            _indent("\n".join(kept[-FIX_NOTE_LINE_CAP:]))]
+    lines += [f"{head} — failure evidence and prior attempts ({note}, "
+              f"{scope}):",
+              _indent("\n".join(kept[-FIX_NOTE_LINE_CAP:]))]
+    return lines
 
 
 def frontier_payloads(state: dict, spec_dir: Path,
@@ -1807,7 +1837,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
     task_text = docs["task.md"] if tier == "full" else (
         specstate.tiny_task_text(spec_text) if spec_text else None)
     entries = specstate.task_entries(task_text) if task_text else []
-    rstate = specstate.research_state(spec_dir / "research.md")
+    rstate = specstate.research_state(spec_dir)
 
     nodes: dict[str, dict] = {}
 
@@ -1904,25 +1934,35 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                             "reason": "no open NEEDS CLARIFICATION markers"}
 
     # -- research-gate (orchestrator judgment, never auto-decided) ---------
-    if not spec_done:
+    if tier == "tiny":
+        nodes["research-gate"] = {"state": SKIPPED, "reason":
+                                  "tier: tiny — no research gate; the "
+                                  "one-file contract has no research "
+                                  "artifact"}
+    elif not spec_done:
         nodes["research-gate"] = {"state": BLOCKED, "reason":
                                   "waiting on: spec"}
     elif rstate == "skip":
         nodes["research-gate"] = {"state": DONE, "reason":
-                                  "research.md records the skip marker — "
-                                  "gate resolved: skip"}
+                                  "tech-spec.md § Questions & options "
+                                  "records the skip marker — gate "
+                                  "resolved: skip"}
     elif rstate == "done":
         nodes["research-gate"] = {"state": DONE, "reason":
-                                  "research.md written — gate resolved: run"}
+                                  "tech-spec.md § Questions & options "
+                                  "written — gate resolved: run"}
     else:
         nodes["research-gate"] = {"state": UNDETERMINED, "reason":
-                                  "research.md absent or unfilled — decide: "
-                                  "run the researcher, or record the skip "
-                                  "marker"}
+                                  "tech-spec.md § Questions & options "
+                                  "absent or unfilled — decide: run the "
+                                  "researcher, or record the skip marker"}
     gate = nodes["research-gate"]["state"]
 
     # -- research ----------------------------------------------------------
-    if gate == UNDETERMINED:
+    if tier == "tiny":
+        nodes["research"] = {"state": SKIPPED, "reason":
+                             "tier: tiny — no research gate to resolve"}
+    elif gate == UNDETERMINED:
         nodes["research"] = {"state": BLOCKED, "reason":
                              "research-gate undetermined — decide run or "
                              "skip first"}
@@ -1931,11 +1971,12 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                              "gate resolved: skip — the researcher is not run"}
     elif rstate == "done":
         nodes["research"] = {"state": DONE, "reason":
-                             "research.md holds real (non-marker) content"}
+                             "the research record holds real (non-marker) "
+                             "content"}
     else:
         nodes["research"] = {"state": BLOCKED, "reason":
-                             "gate resolved run but research.md has no "
-                             "content yet"}
+                             "gate resolved run but the research record has "
+                             "no content yet"}
     research_done = nodes["research"]["state"] == DONE
 
     nodes["intent"] = intent_node

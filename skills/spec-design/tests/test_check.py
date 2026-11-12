@@ -6,6 +6,7 @@ changelog. The broken-fixture tests mutate a temp copy, never the example.
 """
 
 import contextlib
+import datetime
 import importlib.util
 import io
 import os
@@ -135,7 +136,19 @@ class EvidenceIntegrityTests(unittest.TestCase):
             ), encoding="utf-8")
         return spec
 
-    def record_review(self, spec):
+    def record_review(self, spec, text=None):
+        """Save the review payload the approve flow hands to --review;
+        the payload lives beside the spec dir, not in it."""
+        payload = spec.parent / "review-payload.md"
+        if text is None:
+            text = (f"Docset fingerprint: "
+                    f"{check.freeze.docset_fingerprint(spec)}\n\n"
+                    "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n")
+        payload.write_text(text, encoding="utf-8")
+        return str(payload)
+
+    def legacy_review(self, spec):
+        """The old two-file flow's record — migrate.py upgrade's to fold."""
         (spec / "approvals").mkdir(exist_ok=True)
         (spec / "approvals" / "review.md").write_text(
             "# Contract review\n\nDocset fingerprint: "
@@ -143,10 +156,11 @@ class EvidenceIntegrityTests(unittest.TestCase):
             "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
             encoding="utf-8")
 
-    def record_freeze(self, spec):
+    def record_freeze(self, spec, review=None, force=False):
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
-            code = check.freeze.record(spec, Path.cwd())
+            code = check.freeze.record(spec, Path.cwd(), force=force,
+                                       review=review)
         return code, err.getvalue()
 
     def test_approved_status_without_a_freeze_fails(self):
@@ -164,22 +178,24 @@ class EvidenceIntegrityTests(unittest.TestCase):
         self.assertIn("contract review not recorded", err)
         self.assertFalse((spec / "approvals" / "approval.md").exists())
 
+        # the old two-file flow still records until migrate folds it away
+        self.legacy_review(spec)
+        self.assertEqual(self.record_freeze(spec)[0], 0)
+
         # a review of the docset as it stood before a repair backs nothing
-        self.record_review(spec)
+        payload = self.record_review(spec)
         plan = spec / "plan.md"
         plan.write_text(plan.read_text(encoding="utf-8") + "\nrepaired\n",
                         encoding="utf-8")
-        code, err = self.record_freeze(spec)
+        code, err = self.record_freeze(spec, payload)
         self.assertEqual(code, 1)
         self.assertIn("reviews a different docset", err)
 
-        self.record_review(spec)
-        self.assertEqual(self.record_freeze(spec)[0], 0)
+        payload = self.record_review(spec)
+        self.assertEqual(self.record_freeze(spec, payload, force=True)[0], 0)
 
     def test_freeze_refuses_a_review_record_without_digest_or_rulings(self):
         spec = self.approved_copy()
-        review = spec / "approvals" / "review.md"
-        review.parent.mkdir()
         fingerprint = check.freeze.docset_fingerprint(spec)
         blocked = (
             f"Docset fingerprint: {fingerprint}\n\ndigest: BLOCK 1 · WARN 0 "
@@ -192,15 +208,15 @@ class EvidenceIntegrityTests(unittest.TestCase):
         )
         for text, why in refused:
             with self.subTest(why):
-                review.write_text(text, encoding="utf-8")
-                code, err = self.record_freeze(spec)
+                payload = self.record_review(spec, text)
+                code, err = self.record_freeze(spec, payload)
                 self.assertEqual(code, 1)
                 self.assertIn(why, err)
                 self.assertFalse((spec / "approvals" / "approval.md").exists())
-        review.write_text(
-            blocked + 'ruling: 1 — user: "ship it, the bound comes later"\n',
-            encoding="utf-8")
-        self.assertEqual(self.record_freeze(spec)[0], 0)
+        payload = self.record_review(
+            spec, blocked + 'ruling: 1 — user: "ship it, the bound comes '
+            'later"\n')
+        self.assertEqual(self.record_freeze(spec, payload)[0], 0)
 
     def test_a_delivered_docset_survives_a_rewritten_approval_anchor(self):
         # a squash-merge or rebase replaces the Approved-at commit; once
@@ -218,9 +234,9 @@ class EvidenceIntegrityTests(unittest.TestCase):
         git("add", "-A")
         git("commit", "-qm", "base")
         head = git("rev-parse", "--short", "HEAD")
-        self.record_review(spec)
+        payload = self.record_review(spec)
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(check.freeze.record(spec, root), 0)
+            self.assertEqual(check.freeze.record(spec, root, review=payload), 0)
         approval = spec / "approvals" / "approval.md"
         approval.write_text(
             approval.read_text(encoding="utf-8").replace(head, "0123abc"),
@@ -240,18 +256,19 @@ class EvidenceIntegrityTests(unittest.TestCase):
         plan = spec / "plan.md"
         plan.write_text(plan.read_text(encoding="utf-8").split(
             "### Rollout")[0], encoding="utf-8")
-        self.record_review(spec)
-        self.assertEqual(self.record_freeze(spec)[0], 0)
+        payload = self.record_review(spec)
+        self.assertEqual(self.record_freeze(spec, payload)[0], 0)
         code, out = run_check(str(spec), "--repo", str(Path.cwd()))
         self.assertEqual(code, 0, out)
         self.assertIn("WARN  structure: plan.md has no `### Rollout`", out)
 
     def test_record_by_names_each_approver(self):
         spec = self.approved_copy()
-        self.record_review(spec)
+        payload = self.record_review(spec)
         with contextlib.redirect_stdout(io.StringIO()):
             code = check.freeze.main([
-                str(spec), "--record", "--by", "Ana Lim", "--by", "Raj P",
+                str(spec), "--record", "--review", payload,
+                "--by", "Ana Lim", "--by", "Raj P",
                 "--repo", str(Path.cwd())])
         self.assertEqual(code, 0)
         record = (spec / "approvals" / "approval.md").read_text(
@@ -265,9 +282,9 @@ class EvidenceIntegrityTests(unittest.TestCase):
 
     def test_approved_freeze_detects_contract_mutation(self):
         spec = self.approved_copy()
-        self.record_review(spec)
-        self.assertEqual(self.record_freeze(spec)[0], 0)
-        self.assertEqual(self.record_freeze(spec)[0], 1)
+        payload = self.record_review(spec)
+        self.assertEqual(self.record_freeze(spec, payload)[0], 0)
+        self.assertEqual(self.record_freeze(spec, payload)[0], 1)
         code, out = run_check(str(spec), "--repo", str(Path.cwd()))
         self.assertEqual(code, 0, out)
 
@@ -437,6 +454,133 @@ class CrossSpecTests(unittest.TestCase):
         self.assertIn("depends: other is still draft", out)
 
 
+HOTFIX_SPEC = """# Spec: {name}
+
+**Status**: draft
+**Tier**: tiny
+**Type**: hotfix
+{lineage}
+## What
+Patch the regression without changing anything else.
+
+## Requirements
+- **FR-001**: The system shall keep rejecting the malformed input.
+
+## Tasks
+
+- [ ] T001 restore the input guard (FR-001) [P]
+  - Touches: `repo/guard.py`
+"""
+
+FIXED_SPEC = """# Spec: {name}
+
+**Status**: draft
+**Tier**: tiny
+**Type**: feature
+
+## What
+The spec a hotfix names.
+
+## Requirements
+- **FR-001**: The system shall validate the input.
+
+## Tasks
+
+- [ ] T001 add validation (FR-001) [P]
+  - Touches: `repo/ledger.py`
+"""
+
+
+def git_repo(root):
+    """Commit root's tree on a seed commit tagged v1.0.0."""
+    for argv in (["git", "init", "-q", str(root)],
+                 ["git", "-C", str(root), "config", "user.email", "t@t"],
+                 ["git", "-C", str(root), "config", "user.name", "t"],
+                 ["git", "-C", str(root), "add", "."],
+                 ["git", "-C", str(root), "commit", "-q", "-m", "seed"],
+                 ["git", "-C", str(root), "tag", "v1.0.0"]):
+        subprocess.run(argv, check=True, capture_output=True)
+
+
+def hotfix_tree(root, lineage=""):
+    """The hotfix spec beside a live spec (ledger) and an archived one
+    (vault) — the two shapes a `**Fixes spec**` name may resolve to."""
+    specs = root / "specs"
+    hotfix = specs / "hotfix-guard"
+    hotfix.mkdir(parents=True)
+    (hotfix / "spec.md").write_text(
+        HOTFIX_SPEC.format(name="hotfix-guard", lineage=lineage),
+        encoding="utf-8")
+    for name, fixed in (("ledger", specs / "ledger"),
+                        ("vault", specs / "archive" / "2026-01-02-vault")):
+        fixed.mkdir(parents=True)
+        (fixed / "spec.md").write_text(
+            FIXED_SPEC.format(name=name), encoding="utf-8")
+    return hotfix
+
+
+class HotfixTargetGateTests(unittest.TestCase):
+    def resolving_tree(self, *lineage_lines):
+        root = Path(tempfile.mkdtemp(prefix="s2c-hotfix-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        lineage = "".join(f"{line}\n" for line in lineage_lines)
+        spec = hotfix_tree(root, lineage)
+        git_repo(root)
+        return spec
+
+    def test_resolved_targets_pass_each_header_alone_and_both(self):
+        cases = ("**Hotfix for**: v1.0.0",
+                 "**Fixes spec**: ledger",
+                 "**Hotfix for**: v1.0.0\n**Fixes spec**: vault")
+        for lineage in cases:
+            with self.subTest(lineage=lineage):
+                spec = self.resolving_tree(lineage)
+                code, out = run_check(str(spec))
+                self.assertEqual(code, 0, out)
+                self.assertIn("PASS (0 fail, 0 warn)", out)
+
+    def test_lineage_headers_on_a_non_hotfix_spec_fail(self):
+        spec = self.resolving_tree("**Hotfix for**: v1.0.0")
+        rewrite(spec / "spec.md", "**Type**: hotfix", "**Type**: feature")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertIn("a `**Type**: feature` spec carries neither", out)
+
+    def test_a_hotfix_without_any_target_fails(self):
+        spec = self.resolving_tree()
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertIn("no lineage target", out)
+
+    def test_unresolvable_targets_fail_by_name(self):
+        for lineage, named in (("**Hotfix for**: v9.9.9", "v9.9.9"),
+                               ("**Fixes spec**: ghost", "ghost")):
+            with self.subTest(lineage=lineage):
+                spec = self.resolving_tree(lineage)
+                code, out = run_check(str(spec))
+                self.assertEqual(code, 1, out)
+                self.assertIn(named, out)
+
+    def test_git_absent_is_no_exemption(self):
+        root = Path(tempfile.mkdtemp(prefix="s2c-hotfix-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        spec = hotfix_tree(root, "**Hotfix for**: v1.0.0\n")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertIn("v1.0.0", out)
+        self.assertIn("not reachable from HEAD", out)
+
+    def test_full_tier_gate_runs_beside_the_tier_warning(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        rewrite(spec / "spec.md", "**Type**: feature",
+                "**Type**: hotfix\n**Hotfix for**: ghost-tag")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertIn("type: hotfix is the tiny-tier bugfix", out)
+        self.assertIn("`**Hotfix for**: ghost-tag`", out)
+
+
 class IndexTests(unittest.TestCase):
     def test_the_index_line_is_rendered_and_a_stale_one_warns(self):
         spec = fixture_copy()
@@ -473,16 +617,169 @@ class FixBurndownTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "task.md"
             path.write_text(
-                "| Phase | Total | Done |\n"
-                "|-------|-------|------|\n"
-                "| 1     | 9     | 9    |\n"
-                "| **Σ** | 9     | 9    |\n",
+                "| Phase | Total | Done | Verified |\n"
+                "|-------|-------|------|----------|\n"
+                "| 1     | 9     | 9    | pass     |\n"
+                "| **Σ** | 9     | 9    |          |\n",
                 encoding="utf-8",
             )
             out = check.fix_burndown(path.read_text(encoding="utf-8"), path, {1: 2}, {1: 0})
-            self.assertIn("| 1 | 2 | 0 |", out)
-            self.assertIn("| **Σ** | 2 | 0 |", out)  # label cell kept verbatim
-            self.assertIn("| Phase | Total | Done |", out)  # header untouched
+            self.assertIn("| 1 | 2 | 0 | pass     |", out)  # verdict cell byte-identical
+            self.assertIn("| **Σ** | 2 | 0 |          |", out)  # label + verdict cells verbatim
+            self.assertIn("| Phase | Total | Done | Verified |", out)  # header untouched
+
+    def test_repair_never_stamps_a_missing_verdict(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "task.md"
+            path.write_text(
+                "| Phase | Total | Done | Verified |\n"
+                "|-------|-------|------|----------|\n"
+                "| 1     | 1     | 0    |          |\n"
+                "| **Σ** | 1     | 0    |          |\n",
+                encoding="utf-8",
+            )
+            out = check.fix_burndown(path.read_text(encoding="utf-8"), path, {1: 1}, {1: 1})
+            self.assertIn("| 1 | 1 | 1 |          |", out)
+
+
+class VerifiedCellGateTests(unittest.TestCase):
+    DELIVERED = (
+        "| Phase | Total | Done | Verified |\n"
+        "|-------|-------|------|----------|\n"
+        "| 1     | 1     | 1    | pass     |\n"
+        "| 2     | 1     | 0    |          |\n"
+        "| **Σ** | 2     | 1    |          |\n"
+    )
+
+    def test_gate_accepts_empty_and_pass(self):
+        self.assertEqual(check.verified_cell_problems(self.DELIVERED), [])
+
+    def test_gate_fails_any_other_value(self):
+        table = "| 1 | 1 | 1 | PASS |\n| 2 | 1 | 0 | pending |\n"
+        problems = check.verified_cell_problems(table)
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(all("must be empty or `pass`" in p for p in problems))
+
+    def test_bad_cell_fails_the_check(self):
+        spec = fixture_copy()
+        task = spec / "task.md"
+        broken = task.read_text(encoding="utf-8").replace(
+            "| 1     | 2     | 0    |          |",
+            "| 1     | 2     | 0    | maybe    |", 1)
+        self.assertNotEqual(broken, task.read_text(encoding="utf-8"))
+        task.write_text(broken, encoding="utf-8")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertIn("must be empty or `pass`", out)
+
+
+class FixRoundGateTests(unittest.TestCase):
+    MID_ROUND = ("## Phase 1: p (FR-001)\n"
+                 "- [ ] T001 (fix 3/5) third round (FR-001)\n"
+                 "  - fix 1 — pytest fails on empty input\n"
+                 "  - fixed 1 — guard the empty case — pytest green\n"
+                 "  - fix 2 — pytest fails on unicode paths\n"
+                 "  - fixed 2 — normalize paths — pytest green\n"
+                 "  - fix 3 — pytest fails on bom headers\n")
+
+    def entries(self, text):
+        return check.task_entries(text)
+
+    def test_well_formed_rounds_pass(self):
+        self.assertEqual(check.fix_round_problems(self.entries(self.MID_ROUND)), [])
+
+    def test_at_cap_is_not_readjudicated(self):
+        five = "".join(
+            f"  - fix {i} — d{i}\n  - fixed {i} — r{i} — p{i}\n"
+            for i in range(1, 5))
+        at_cap = self.MID_ROUND.replace("(fix 3/5)", "(fix 5/5)").replace(
+            "  - fix 1 — pytest fails on empty input\n"
+            "  - fixed 1 — guard the empty case — pytest green\n"
+            "  - fix 2 — pytest fails on unicode paths\n"
+            "  - fixed 2 — normalize paths — pytest green\n"
+            "  - fix 3 — pytest fails on bom headers\n",
+            five + "  - fix 5 — d5\n")
+        self.assertEqual(check.fix_round_problems(self.entries(at_cap)), [])
+
+    def test_round_above_the_cap_fails(self):
+        over = self.MID_ROUND.replace("(fix 3/5)", "(fix 6/5)").replace(
+            "  - fix 3 — pytest fails on bom headers\n",
+            "  - fix 6 — pytest fails on bom headers\n")
+        problems = check.fix_round_problems(self.entries(over))
+        self.assertTrue(
+            any("round 6 is above the cap" in p for p in problems), problems)
+
+    def test_more_than_five_rounds_fail(self):
+        six = ("## Phase 1: p (FR-001)\n"
+               "- [ ] T001 (fixed 6/5) six rounds (FR-001)\n"
+               + "".join(
+                   f"  - fix {i} — d{i}\n  - fixed {i} — r{i} — p{i}\n"
+                   for i in range(1, 7)))
+        problems = check.fix_round_problems(self.entries(six))
+        self.assertTrue(
+            any("carries 6 rounds — the cap is 5" in p for p in problems),
+            problems)
+
+    def test_closed_round_without_resolution_or_proof_fails(self):
+        thin = self.MID_ROUND.replace(
+            "  - fixed 2 — normalize paths — pytest green\n",
+            "  - fixed 2 —   — p\n")
+        problems = check.fix_round_problems(self.entries(thin))
+        self.assertTrue(
+            any("closed round 2 lacks a resolution or proof" in p
+                for p in problems), problems)
+
+    def test_sub_lines_without_a_marker_fail(self):
+        bare = ("## Phase 1: p (FR-001)\n"
+                "- [ ] T001 rounds recorded, marker lost (FR-001)\n"
+                "  - fix 1 — a\n  - fixed 1 — r1 — p1\n")
+        problems = check.fix_round_problems(self.entries(bare))
+        self.assertTrue(
+            any("no (fix n/5) or (fixed n/5) marker" in p for p in problems),
+            problems)
+
+    def test_marker_without_its_sub_line_fails(self):
+        headless = self.MID_ROUND.replace("  - fix 3 — pytest fails on bom headers\n", "")
+        problems = check.fix_round_problems(self.entries(headless))
+        self.assertTrue(
+            any("pairs with no `fix 3` sub-line" in p for p in problems),
+            problems)
+
+    def test_closed_round_with_the_marker_still_open_fails(self):
+        stale = self.MID_ROUND.replace("(fix 3/5)", "(fix 2/5)")
+        problems = check.fix_round_problems(self.entries(stale))
+        self.assertTrue(
+            any("round 2 reads closed but its marker is still open" in p
+                for p in problems), problems)
+
+    def test_closed_marker_without_its_sub_line_fails(self):
+        orphan = self.MID_ROUND.replace("(fix 3/5)", "(fixed 3/5)")
+        problems = check.fix_round_problems(self.entries(orphan))
+        self.assertTrue(
+            any("marker (fixed 3/5) pairs with no `fixed 3` sub-line" in p
+                for p in problems), problems)
+
+    def test_pre_sub_line_grammar_stays_silent(self):
+        legacy = ("## Phase 1: p (FR-001)\n"
+                  "- [ ] T001 (fix 2/5) evidence lives in notes/T001.md (FR-001)\n"
+                  "- [ ] T002 (fixed 1/5) re-landed (FR-001)\n")
+        self.assertEqual(check.fix_round_problems(self.entries(legacy)), [])
+
+    def test_mismatched_round_fails_the_check(self):
+        spec = fixture_copy()
+        task = spec / "task.md"
+        broken = task.read_text(encoding="utf-8").replace(
+            "- [ ] T001 [P] Implement multiply in `repo/calc.py` "
+            "(FR-001, FR-002)\n",
+            "- [ ] T001 [P] (fix 1/5) Implement multiply in `repo/calc.py` "
+            "(FR-001, FR-002)\n"
+            "  - fix 2 — pytest fails on unicode paths\n", 1)
+        self.assertNotEqual(broken, task.read_text(encoding="utf-8"))
+        task.write_text(broken, encoding="utf-8")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertIn("`fix 2` sub-line pairs with no (fix 2/5) marker", out)
+        self.assertIn("pairs with no `fix 1` sub-line", out)
 
 
 class GreenFixtureTests(unittest.TestCase):
@@ -520,6 +817,105 @@ class GreenFixtureTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("FR-003", out)
         self.assertIn("T003", out)
+
+
+OLD_HEADER = "| Phase | Total | Done | Verified |\n|-------|-------|------|----------|"
+NEW_HEADER = "| Phase | Total | Done |\n|---|---|---|"
+SKIP_LINE = "not applicable — no open questions at Stage 0"
+ELEMENTS = (
+    "research.md present",
+    "the unfolded approval record",
+    "notes/delivery.md present",
+    "a two-column burndown header",
+    "full-tier tech-spec.md without the `## Questions & options` section",
+)
+
+
+class MigrationDetectorTests(unittest.TestCase):
+    """FR-011's ramp: the pre-change grammar warns once (writing the
+    per-spec-dir marker), fails by name from the next cycle, and never
+    fires on done/archived docsets or on the green fixture."""
+
+    def old_grammar_copy(self, name="mini-spec"):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        rewrite(spec / "task.md", OLD_HEADER, NEW_HEADER)
+        rewrite(spec / "research.md", SKIP_LINE,
+                "- Q1 — where does the multiply sign live?")
+        (spec / "approvals").mkdir()
+        (spec / "approvals" / "review.md").write_text(
+            "# Contract review\n\ndigest: BLOCK 0 · WARN 0 · NIT 0 · "
+            "worst none\n", encoding="utf-8")
+        (spec / "notes").mkdir()
+        (spec / "notes" / "delivery.md").write_text(
+            "# Delivery\n\nDocs impact: none recorded yet\n",
+            encoding="utf-8")
+        if name != "mini-spec":
+            archive = spec.parents[1] / "specs" / "archive"
+            archive.mkdir()
+            target = archive / name
+            spec.rename(target)
+            spec = target
+        return spec
+
+    def test_warns_once_writes_marker_then_fails_by_name(self):
+        spec = self.old_grammar_copy()
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 0, out)
+        self.assertIn("migration: pre-change grammar", out)
+        self.assertIn("migrate.py <spec-dir> upgrade", out)
+        for element in ELEMENTS:
+            self.assertIn(element, out)
+        self.assertNotIn("FAIL  migration:", out)
+        marker = spec / ".grammar-v1-warned"
+        body = marker.read_text(encoding="utf-8")
+        self.assertIn(datetime.date.today().isoformat(), body)
+        for element in ELEMENTS:
+            self.assertIn(element, body)
+
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.count("FAIL  migration:"), len(ELEMENTS), out)
+        self.assertNotIn("WARN  migration: pre-change grammar", out)
+        for element in ELEMENTS:
+            self.assertIn(f"FAIL  migration: {element}", out)
+            self.assertIn("migrate.py <spec-dir> upgrade", out)
+
+    def test_a_stale_marker_over_green_grammar_is_inert(self):
+        spec = self.old_grammar_copy()
+        run_check(str(spec))
+        marker = spec / ".grammar-v1-warned"
+        warned = marker.read_text(encoding="utf-8")
+        rewrite(spec / "task.md", NEW_HEADER, OLD_HEADER)
+        rewrite((spec / "tech-spec.md"), "## Decisions",
+                "## Questions & options\n\n" + SKIP_LINE + "\n\n## Decisions")
+        (spec / "research.md").unlink()
+        (spec / "approvals" / "review.md").unlink()
+        (spec / "notes" / "delivery.md").unlink()
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("migration:", out)
+        self.assertEqual(marker.read_text(encoding="utf-8"), warned)
+
+    def test_done_status_never_trips(self):
+        spec = self.old_grammar_copy()
+        rewrite(spec / "spec.md", "**Status**: draft", "**Status**: done")
+        # the copy carries no approval freeze, so the done docset still
+        # fails approval_failures — the detector must add nothing to that
+        for _ in range(2):
+            code, out = run_check(str(spec))
+            self.assertEqual(code, 1, out)
+            self.assertNotIn("FAIL  migration:", out)
+            self.assertNotIn("WARN  migration:", out)
+            self.assertFalse((spec / ".grammar-v1-warned").exists())
+
+    def test_an_archived_docset_never_trips(self):
+        spec = self.old_grammar_copy(name="2026-01-02-mini-spec")
+        self.assertEqual(spec.parent.name, "archive")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("migration:", out)
+        self.assertFalse((spec / ".grammar-v1-warned").exists())
 
 
 class ConstitutionTests(unittest.TestCase):

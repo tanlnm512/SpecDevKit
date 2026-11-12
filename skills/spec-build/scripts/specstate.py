@@ -4,8 +4,9 @@ Every scheduling-relevant signal the tooling layer reads out of the docset
 lives here as a pure function: spec Status, task entries (checkboxes,
 phases, parallel markers, dependency chains, fix rounds, implemented
 markers), the Delivered header line and the approval-freeze anchor, the
-survey baseline header and item list, the researcher-skip marker,
-next-free-ID allocation, ID definitions, and the git availability probes.
+survey baseline header and item list, the hotfix lineage headers, the
+researcher-skip marker, next-free-ID allocation, ID definitions, and the
+git availability probes.
 check.py, audit.py, and graph.py import from this module instead
 of inlining their own copies — one canonical regex per doc shape, so the
 validators and the workflow engine can never drift apart on what the docs
@@ -72,6 +73,13 @@ WORK_TYPES = ("feature", "bugfix", "hotfix", "refactor", "upgrade")
 # ACs are optional, behavior-preservation test cases are not.
 PRESERVING_TYPES = ("refactor", "upgrade")
 
+# Hotfix lineage on a hotfix spec.md: `**Hotfix for**: <tag>` and/or
+# `**Fixes spec**: <name>` — the target its release note groups under.
+# The `<`-exclusive capture (DEPENDS_LINE precedent) keeps the unfilled
+# template placeholder reading as absent.
+HOTFIX_FOR_LINE = re.compile(r"^\*\*Hotfix for\*\*:[ \t]*([^\n<]*)", re.M)
+FIXES_SPEC_LINE = re.compile(r"^\*\*Fixes spec\*\*:[ \t]*([^\n<]*)", re.M)
+
 # Cross-spec ordering: `**Depends on**: <spec-name>[, <spec-name>…]` on
 # spec.md. Optional; `none`, a dash, or an absent line names nothing.
 DEPENDS_LINE = re.compile(r"^\*\*Depends on\*\*:[ \t]*([^\n<]*)", re.M)
@@ -95,6 +103,14 @@ STRIKETHROUGH = re.compile(r"~~[^~]*~~")
 # it indented — both shapes read). A tick without it is bookkeeping, not
 # durable evidence.
 DONE_NOTE = re.compile(r"^\s*(?:-\s*)?done \d{4}-\d{2}-\d{2} \u2014", re.M)
+
+# Fix-round note sub-lines (em dash U+2014, same two written shapes): the
+# `fix` line opens a round with the verbatim failure digest; the sibling
+# `fixed` line closes it with resolution and proof. Durable round evidence
+# beside the `(fix n/5)` marker, which stays the round-count holder.
+FIX_NOTE_OPEN = re.compile(r"^\s*(?:-\s*)?fix (\d+) \u2014 (.+)$", re.M)
+FIX_NOTE_CLOSED = re.compile(
+    r"^\s*(?:-\s*)?fixed (\d+) \u2014 (.+?) \u2014 (.+)$", re.M)
 
 # task.md header: the delivery record — `commit @ <sha>` once the plan's
 # end-of-spec commit exists, `commit @ -` the explicit non-git skip. The
@@ -141,24 +157,34 @@ SURVEY_ITEM = re.compile(r'^item\s+(\S+):\s*"([^"]*)"', re.M)
 SURVEY_ITEM_STATUS = re.compile(r"^\s*status:\s*(DONE|PARTIAL|TODO)", re.M)
 
 # The researcher-gate skip record (byte-exact, em dash U+2014). Canonical
-# home: contracts/docset.md; every occurrence anywhere must match this
-# sequence exactly. research_state matches it as a whole stripped line.
+# home: tech-spec.md `## Questions & options` (a pre-migration research.md
+# is read through the legacy fallback). Every occurrence anywhere must
+# match this sequence exactly; research_state matches it as a whole
+# stripped line.
 RESEARCH_SKIP_MARKER = "not applicable — no open questions at Stage 0"
 
-# Substrings that survive only while research.md is still the unfilled
-# scaffold template (scaffold.sh copies templates verbatim) — a file
-# carrying any of these has not been filled, and the research gate must
-# stay undetermined rather than misread the template as done research.
-RESEARCH_TEMPLATE_GLUE = (
-    "### <research question",
-    "### <open choice>",
-    "- **source**: <URL or DOI>",
-)
+# The research gate's artifact in tech-spec.md: one section, two
+# subsections. The heading is matched anywhere in the file (no
+# positional coupling); everything to the next `## ` is the section.
+QUESTIONS_SECTION = re.compile(r"^##\s+Questions & options\s*$", re.M)
 
 
 # NamedTuple, not dataclass: the suite loads scripts by file path via
 # importlib without sys.modules registration, which breaks dataclass
 # annotation processing — a plain record keeps the module loadable either way.
+class FixRound(NamedTuple):
+    """One fix round's note sub-lines from a task entry block: the round
+    number, the failure digest recorded at open, and — once closed — the
+    resolution and its proof. `closed` stays False while only the open
+    sub-line exists."""
+
+    n: int
+    digest: str
+    resolution: str
+    proof: str
+    closed: bool
+
+
 class TaskEntry(NamedTuple):
     """One `- [ ]`-anchored task entry from task.md's `## Phase N` sections.
 
@@ -181,6 +207,7 @@ class TaskEntry(NamedTuple):
     after: list[str]
     fix_round: int | None
     implemented: bool = False
+    rounds: tuple[FixRound, ...] = ()
 
 
 class SurveyItem(NamedTuple):
@@ -189,6 +216,14 @@ class SurveyItem(NamedTuple):
     id: str
     description: str
     status: str  # DONE | PARTIAL | TODO | unknown
+
+
+class HotfixTarget(NamedTuple):
+    """A hotfix spec.md's declared lineage targets: the patched release
+    tag and the fixed spec name, verbatim; an undeclared field reads ""."""
+
+    tag: str
+    spec: str
 
 
 class TickEvidence(NamedTuple):
@@ -238,6 +273,21 @@ def spec_type(spec_md: str) -> str:
     return m.group(1).lower() if m else "feature"
 
 
+def hotfix_target(spec_md: str) -> HotfixTarget:
+    """The declared `**Hotfix for**` tag and `**Fixes spec**` name from
+    spec.md, empty when a header (or its value) is absent. Whether these
+    headers belong on this spec is the checker's verdict, never the
+    parser's."""
+    if not spec_md:
+        return HotfixTarget("", "")
+    fm = HOTFIX_FOR_LINE.search(spec_md)
+    sm = FIXES_SPEC_LINE.search(spec_md)
+    return HotfixTarget(
+        fm.group(1).strip().strip("`") if fm else "",
+        sm.group(1).strip().strip("`") if sm else "",
+    )
+
+
 def spec_depends(spec_md: str) -> list[str]:
     """Spec names on the `**Depends on**:` header, in written order —
     verbatim, so the checker reports a typo instead of dropping it."""
@@ -283,6 +333,25 @@ def coverage_floor(spec_md: str, default: int = 80) -> int:
     return max(0, min(100, int(m.group(1))))
 
 
+def fix_rounds(block: str) -> tuple[FixRound, ...]:
+    """A task entry block's fix rounds in round order. The `fix` sub-line
+    opens a round with its failure digest; the `fixed` sibling closes it
+    with resolution and proof. A close without a matching open keeps an
+    empty digest — shape mismatches are the checker's verdict, never the
+    parser's."""
+    opened: dict[int, FixRound] = {}
+    for m in FIX_NOTE_OPEN.finditer(block):
+        n = int(m.group(1))
+        opened[n] = FixRound(n, m.group(2).strip(), "", "", False)
+    for m in FIX_NOTE_CLOSED.finditer(block):
+        n = int(m.group(1))
+        prior = opened.get(n)
+        opened[n] = FixRound(
+            n, prior.digest if prior else "",
+            m.group(2).strip(), m.group(3).strip(), True)
+    return tuple(opened[n] for n in sorted(opened))
+
+
 def task_entries(task_md: str) -> list[TaskEntry]:
     """Parse task.md's phase sections into TaskEntry records, in file order.
 
@@ -323,6 +392,7 @@ def task_entries(task_md: str) -> list[TaskEntry]:
                 after=AFTER_REF.findall(block),
                 fix_round=int(fix.group(1)) if fix else None,
                 implemented="(implemented)" in block and fix is None,
+                rounds=fix_rounds(block),
             ))
     return entries
 
@@ -419,28 +489,64 @@ def survey_items(survey_md: str) -> list[SurveyItem]:
     return items
 
 
-def research_state(research_path: Path | str | None) -> str:
-    """'done' | 'skip' | 'pending' | 'missing' for specs/<name>/research.md.
-
-    skip = the file carries the canonical skip-marker line (byte-exact, em
-    dash — RESEARCH_SKIP_MARKER; the marker wins over template residue
-    since writing it is the orchestrator's explicit record). pending = the
-    file exists but is empty or still the unfilled scaffold template — the
-    gate stays undetermined, never misreading the template as ran research.
-    missing = no file (or an unreadable path)."""
-    if research_path is None:
-        return "missing"
+def _read_doc_text(path: Path) -> str | None:
     try:
-        text = Path(research_path).read_text(encoding="utf-8", errors="replace")
+        return Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return "missing"
-    if any(line.strip() == RESEARCH_SKIP_MARKER for line in text.splitlines()):
+        return None
+
+
+def _marker_in(text: str) -> bool:
+    return any(line.strip() == RESEARCH_SKIP_MARKER
+               for line in text.splitlines())
+
+
+def _section_state(text: str) -> str:
+    m = QUESTIONS_SECTION.search(text)
+    if m is None:
+        return "pending"
+    body = text[m.end():]
+    end = body.find("\n## ")
+    body = body[:end] if end >= 0 else body
+    if _marker_in(body):
         return "skip"
-    if not text.strip():
-        return "pending"
-    if any(glue in text for glue in RESEARCH_TEMPLATE_GLUE):
-        return "pending"
-    return "done"
+    prose = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
+    if any(line.strip() and not line.strip().startswith("#")
+           for line in prose.splitlines()):
+        return "done"
+    return "pending"
+
+
+def research_state(spec_dir: Path | str | None) -> str:
+    """'done' | 'skip' | 'pending' | 'missing' for the research gate's
+    artifact — the `## Questions & options` section of specs/<name>/
+    tech-spec.md.
+
+    skip = the section carries the canonical skip-marker line (byte-exact,
+    em dash — RESEARCH_SKIP_MARKER; the marker wins over prose since
+    writing it is the orchestrator's explicit record). done = the section
+    holds real (non-marker, non-heading) content. pending = tech-spec.md
+    exists but the section is absent or empty — the gate stays
+    undetermined. missing = no tech-spec.md.
+
+    A pre-migration docset keeps its research.md: while the section has
+    not been authored, the legacy file's marker/content resolves the gate
+    the old way (archived history is never migrated). A resolved section
+    wins, so a leftover research.md beside a migrated docset is inert."""
+    if spec_dir is None:
+        return "missing"
+    base = Path(spec_dir)
+    tech = _read_doc_text(base / "tech-spec.md")
+    if tech is not None and QUESTIONS_SECTION.search(tech):
+        return _section_state(tech)
+    legacy = _read_doc_text(base / "research.md")
+    if legacy is not None:
+        if _marker_in(legacy):
+            return "skip"
+        if not legacy.strip():
+            return "pending"
+        return "done"
+    return "missing" if tech is None else "pending"
 
 
 def defined_ids(text: str) -> dict[str, set[str]]:
