@@ -817,6 +817,12 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
             "- [x] T001 add the greeting module (FR-001) [P] (fixed 1/5)\n"
             "  - done 2026-10-11 \u2014 greeting test green"))
         self.assertEqual(run_check(spec_dir), 0)
+        write(p, p.read_text(encoding="utf-8").replace(
+            "  - done 2026-10-11",
+            "  - fix 1 \u2014 BLOCK: the error branch has no test\n"
+            "  - fixed 1 \u2014 added the case \u2014 suite green\n"
+            "  - done 2026-10-11"))
+        self.assertEqual(run_check(spec_dir), 0)
         frozen = p.read_text(encoding="utf-8")
         write(p, frozen.replace(
             "\n## Evidence",

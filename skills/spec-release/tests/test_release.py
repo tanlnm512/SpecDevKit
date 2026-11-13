@@ -1013,6 +1013,21 @@ class CutTests(unittest.TestCase):
                              f"check.py {name}: {c.stdout}{c.stderr}")
             self.assertIn("PASS", c.stdout)
 
+    def test_tag_message_keeps_the_section_headings(self):
+        repo, _ = make_repo(
+            lambda sha: delivered_specs("tiny-rel", tiny=True, sha=sha))
+        r = rel(repo, "notes", "0.1.0", "--write")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = rel(repo, "cut", "0.1.0", "--confirm", "v0.1.0")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        tag_message = git(repo, "tag", "-l", "--format=%(contents)",
+                          "v0.1.0").stdout
+        headings = [ln for ln in (repo / "CHANGELOG.md").read_text(
+            encoding="utf-8").splitlines() if ln.startswith("### ")]
+        self.assertTrue(headings)
+        for heading in headings:
+            self.assertIn(heading, tag_message.splitlines())
+
 
 class PublishTests(unittest.TestCase):
     def cut_with_remote(self) -> tuple[Path, str]:

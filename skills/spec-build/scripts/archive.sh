@@ -4,7 +4,7 @@
 # done there. Refuses unless spec.md says Status: done AND the delivery
 # record (task.md, or spec.md at Tier: tiny) names a commit. Drops the
 # regenerable spawns/ payloads; writes retro.md into the archived dir
-# (reusing one the delivery pass already wrote at ship) and rolls its
+# (reusing the one the delivery pass wrote at C2) and rolls its
 # D-### titles up to specs/context/decisions.md (retro.py); commits
 # nothing.
 # Usage: archive.sh <kebab-case-spec-name> [target-root]

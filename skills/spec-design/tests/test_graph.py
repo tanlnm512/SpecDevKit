@@ -1328,6 +1328,18 @@ class Graph018DeliveryEvidenceTests(unittest.TestCase):
         self.assertIn("recorded in task.md", n["tick-commit"]["reason"])
         self.assertNotIn("delivery unproven", n["tick-commit"]["reason"])
 
+    def test_tiny_spec_reads_its_record_from_evidence_plain_or_bold(self):
+        for name, line in (("t1", "Delivered: commit @ "), ("t2", "**Delivered**: commit @ ")):
+            d = ticked_fixture(self._tmp / name)
+            (d / "task.md").unlink()
+            write(d / "spec.md", TINY_SPEC.replace("**Status**: draft", "**Status**: approved")
+                  .replace("- [ ] T001", "- [x] T001")
+                  .replace("  - Accept:", "  - done 2026-10-10 \u2014 green\n  - Accept:")
+                  + f"{line}{DELIVERY_SHA}\n")
+            n = self.compute_in_git(d)["nodes"]
+            self.assertEqual(n["tick-commit"]["state"], "done", n["tick-commit"])
+            self.assertIn("recorded in spec.md", n["tick-commit"]["reason"])
+
     def test_ticks_without_delivery_record_stay_ready(self):
         d = ticked_fixture(self._tmp / "b")
         n = self.compute_in_git(d)["nodes"]

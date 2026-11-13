@@ -1262,7 +1262,7 @@ def cmd_cut(repo: Path, args) -> int:
     step(repo, ["add", "--", *staged], "stage the release files")
     step(repo, ["commit", "-m", message], "the release commit")
     tag_text = f"{tag}\n\n{(ctx['section'] or '').partition(chr(10))[2].strip()}\n"
-    step(repo, ["tag", "-a", tag, "-F", "-"], "the annotated tag", stdin=tag_text)
+    step(repo, ["tag", "-a", tag, "--cleanup=verbatim", "-F", "-"], "the annotated tag", stdin=tag_text)
     done = [f"  committed {git_out(repo, 'rev-parse', '--short=12', 'HEAD')} and tagged {tag}"]
     if holders:
         specs, _ = specs_in_tag(repo, tag, args.tag_prefix)

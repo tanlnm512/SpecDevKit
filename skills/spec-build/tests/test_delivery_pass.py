@@ -95,6 +95,31 @@ class DeliveryPassTests(unittest.TestCase):
         self.assertIn("deps: no dependency manifest changed", r.stdout)
         self.assertEqual(r.returncode, 0, r.stdout)
 
+    def test_hygiene_suspect_is_ruled_in_the_delivery_block_not_silenced(self):
+        spec = self.tiny_spec()
+        (self.root / "calc.py").write_text(CALC.replace("sys.stdout.write(", "print(")
+                                           .replace('}\\n")', '}")'), encoding="utf-8")
+        args = ("--base", "HEAD", "--repo", self.root)
+        r = run(sys.executable, AUDIT, "clean", spec, *args, cwd=self.root)
+        self.assertIn("SUSPECT  calc.py:", r.stdout)
+        r = run(sys.executable, AUDIT, "dod", spec, *args, "--dry-run", cwd=self.root)
+        self.assertRegex(r.stdout, r"HYGIENE\s+FAIL\s+1 suspect")
+
+        holder = spec / "spec.md"
+        holder.write_text(holder.read_text(encoding="utf-8")
+                          + "- Hygiene: calc.py [debug print] — the CLI's own product output\n",
+                          encoding="utf-8")
+        r = run(sys.executable, AUDIT, "clean", spec, *args, cwd=self.root)
+        self.assertIn("RULED    calc.py:", r.stdout)
+        self.assertNotIn("SUSPECT", r.stdout)
+        r = run(sys.executable, AUDIT, "dod", spec, *args, "--dry-run", cwd=self.root)
+        self.assertRegex(r.stdout, r"HYGIENE\s+PASS\s+0 suspect\(s\) in added lines \(1 ruled")
+
+        holder.write_text(holder.read_text(encoding="utf-8").replace("calc.py [", "other.py ["),
+                          encoding="utf-8")
+        r = run(sys.executable, AUDIT, "dod", spec, *args, "--dry-run", cwd=self.root)
+        self.assertRegex(r.stdout, r"HYGIENE\s+FAIL")
+
     def test_delivery_note_gates_rollback_rows_and_the_bugfix_red_run(self):
         spec = self.root / "specs" / "demo"
         (spec / "notes").mkdir(parents=True)
@@ -265,6 +290,40 @@ class DeliveryPassTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         retro = (spec / "retro.md").read_text(encoding="utf-8")
         self.assertIn("Docs impact: superseded note", retro)
+
+
+    def test_retro_written_before_delivery_is_refreshed_and_counts_each_round_once(self):
+        spec = self.root / "specs" / "demo"
+        (spec / "notes").mkdir(parents=True)
+        (spec / "spec.md").write_text("# Spec: demo\n", encoding="utf-8")
+        (spec / "notes" / "T001.md").write_text(
+            "## Fix round 1\n\n## Fix round 1 \u2014 attempt\n\n## Fix round 1 \u2014 closed\n",
+            encoding="utf-8")
+        (spec / "task.md").write_text(
+            "## Phase 1: Multiply\n- [ ] T001 Multiply (FR-001) (implemented) (fixed 1/5)\n",
+            encoding="utf-8")
+        r = run(sys.executable, SCRIPTS / "retro.py", spec, "demo", self.root, cwd=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        retro = (spec / "retro.md").read_text(encoding="utf-8")
+        self.assertIn("| T001 | open | 1 |", retro)
+        self.assertIn("Delivered: commit @ -", retro)
+
+        (spec / "task.md").write_text(
+            "## Phase 1: Multiply\n- [x] T001 Multiply (FR-001) (fixed 1/5)\n"
+            "Delivered: commit @ abc1234\n", encoding="utf-8")
+        (self.root / "specs" / "BACKLOG.md").write_text(
+            "- demo \u2014 jitter untested (source: auditor WARN 2)\n", encoding="utf-8")
+        r = run(sys.executable, SCRIPTS / "retro.py", spec, "demo", self.root, cwd=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        retro = (spec / "retro.md").read_text(encoding="utf-8")
+        self.assertIn("| T001 | ticked | 1 |", retro)
+        self.assertIn("- demo \u2014 jitter untested", retro)
+        self.assertIn("Delivered: commit @ abc1234", retro)
+
+        before = retro
+        r = run(sys.executable, SCRIPTS / "retro.py", spec, "demo", self.root, cwd=self.root)
+        self.assertIn("reused", r.stdout)
+        self.assertEqual((spec / "retro.md").read_text(encoding="utf-8"), before)
 
 
 if __name__ == "__main__":

@@ -16,8 +16,8 @@ Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py -h | --help        (prints this text, exit 0)
 
 (--repo defaults to the spec dir's grandparent: specs/<name>/ -> repo
-root; clean, whose optional spec-dir positional is accepted and ignored,
-defaults to ., as does archived, which takes no positional)
+root; clean, whose optional spec-dir positional only supplies the
+delivery block's Hygiene rulings, defaults to ., as does archived, which takes no positional)
 
 scope  — every file changed vs base (default: the approval freeze's
          Approved-at SHA, falling back to HEAD; explicit --base
@@ -42,8 +42,10 @@ clean  — the diff's ADDED lines (plus untracked files' contents) scanned
          calls, essay comments (one comment line ≥120 chars), and
          comment walls (≥8 consecutive comment lines) — comments should
          state constraints, not narrate. Heuristic suspects for the
-         orchestrator to adjudicate; spec-mandated logging is a ruling,
-         not a finding.
+         orchestrator to adjudicate; a suspect that is the product's own
+         output or spec-mandated logging is ruled by a `Hygiene: <path>
+         [<kind>] — <ruling>` line in the delivery block, which the
+         spec-dir positional lets clean and dod read (RULED, not SUSPECT).
 proofs — each TC's Pass condition in test.md is classified auto (a
          runnable command) or manual (human observation) and listed; with
          --run, auto commands execute (cwd = repo root, 120s timeout
@@ -64,7 +66,8 @@ dod    — the Definition-of-Done scorecard (every gate must pass): runs
          not apply print N/A. Gates 11-13 read the status holder's
          delivery block (notes/delivery.md serves archived history):
          `Docs impact: <files> | none — <reason>`, `Rollback: <row key>
-         — <ruling>` for a rollback row no TC proves, and `Behavior
+         — <ruling>` for a rollback row no TC proves, `Hygiene: <path>
+         [<kind>] — <ruling>` for each gate-7 suspect that is not debris, and `Behavior
          preserved: ...` at Type refactor/upgrade; a bugfix or hotfix
          needs a notes/T###.md `## Regression test (red before fix)`
          section. Gate 14 reads the burndown Verified column: `pass`
@@ -216,6 +219,7 @@ FACT_BULLET = re.compile(r"^[ \t]*-[ \t]")
 DOCS_IMPACT = re.compile(r"^Docs impact:[ \t]*(.*)$", re.M)
 ROLLBACK_RULING = re.compile(r"^Rollback:[ \t]*(.+)[ \t]+—[ \t]+\S", re.M)
 BEHAVIOR_PRESERVED = re.compile(r"^Behavior preserved:[ \t]*\S", re.M)
+HYGIENE_RULING = re.compile(r"^Hygiene:[ \t]*(\S+)[ \t]+\[([^\]]+)\][ \t]+—[ \t]+\S", re.M)
 REGRESSION_FIRST = re.compile(r"^## Regression test \(red before fix\)", re.M)
 TYPE_LINE = re.compile(r"^\*\*Type\*\*:[ \t]*([A-Za-z-]+)", re.M)
 TC_ID = re.compile(r"\bTC-\d{3}\b")
@@ -536,15 +540,31 @@ def clean_findings(repo: Path, base: str | None) -> list[tuple[str, int | None, 
     return finds
 
 
-def mode_clean(repo: Path, base: str | None) -> int:
+def delivery_note(spec_dir: Path) -> tuple[str, str]:
+    note, where = delivery_block(spec_dir)
+    if note.strip():
+        return note, where
+    return _read(spec_dir.joinpath(*DELIVERY_NOTE)), "/".join(DELIVERY_NOTE)
+
+
+def hygiene_rulings(spec_dir: Path | None) -> set[tuple[str, str]]:
+    if spec_dir is None:
+        return set()
+    return {(path.strip("`"), kind.strip())
+            for path, kind in HYGIENE_RULING.findall(delivery_note(spec_dir)[0])}
+
+
+def mode_clean(repo: Path, base: str | None, spec_dir: Path | None = None) -> int:
     if not git_available(repo):
         print("clean: SKIPPED (not a git repo) — no cleanliness verdict")
         return 0
     finds = clean_findings(repo, base)
+    ruled = hygiene_rulings(spec_dir)
     print(f"clean: scanned added lines vs {base or 'working tree'}")
     for path, ln, kind, text in finds:
         loc = f"{path}:{ln}" if ln else path
-        print(f"  SUSPECT  {loc}  [{kind}]  {text[:100]}")
+        label = "RULED  " if (path, kind) in ruled else "SUSPECT"
+        print(f"  {label}  {loc}  [{kind}]  {text[:100]}")
     if not finds:
         print("  no debug prints, markers, commented-out calls, essay "
               "comments, or comment walls in added lines")
@@ -1102,10 +1122,7 @@ def delivery_gates(spec_dir: Path, repo: Path, changed: list[str],
                    git_ok: bool) -> list[tuple[str, str, str]]:
     """(name, status, detail) for the delivery note's gates: docs impact,
     rollback, and the spec's work type."""
-    note, where = delivery_block(spec_dir)
-    if not note.strip():
-        note = _read(spec_dir.joinpath(*DELIVERY_NOTE))
-        where = "/".join(DELIVERY_NOTE)
+    note, where = delivery_note(spec_dir)
     m = DOCS_IMPACT.search(note)
     if not m or not m.group(1).strip():
         docs = ("FAIL", f"no `Docs impact:` line in {where}")
@@ -1252,8 +1269,12 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
         scope_dt = f"{len(unment)} unmentioned of {len(paths)} changed"
         if outside:
             scope_dt += f" ({len(outside)} outside this spec)"
-        hyg_st = "PASS" if not dirt else "FAIL"
-        hyg_dt = f"{len(dirt)} suspect(s) in added lines"
+        ruled = hygiene_rulings(spec_dir)
+        unruled = [d for d in dirt if (d[0], d[2]) not in ruled]
+        hyg_st = "PASS" if not unruled else "FAIL"
+        hyg_dt = f"{len(unruled)} suspect(s) in added lines"
+        if len(dirt) > len(unruled):
+            hyg_dt += f" ({len(dirt) - len(unruled)} ruled in the delivery block)"
     else:
         scope_st = hyg_st = "SKIPPED"
         scope_dt = "(not a git repo) — no scope verdict"
@@ -1476,9 +1497,8 @@ def parse_args(argv: list[str]):
         print(__doc__)
         return None
     if mode == "clean" and len(rest) > 1:
-        # One optional spec-dir positional is accepted and ignored — the
-        # other audit subcommands all take it, and uniform invocation
-        # should not be a usage error.
+        # The optional spec-dir positional keeps invocation uniform with
+        # the other audit subcommands; it only supplies Hygiene rulings.
         print(__doc__)
         return None
     return (mode, (rest[0] if rest else None), repo, base, run, dry,
@@ -1512,7 +1532,7 @@ def main(argv: list[str] | None = None) -> int:
     elif mode == "regression":
         rc = mode_regression(spec_dir, repo, base, dry)
     elif mode == "clean":
-        rc = mode_clean(repo, base)
+        rc = mode_clean(repo, base, spec_dir)
     elif mode == "archived":
         rc = mode_archived(repo)
     elif mode == "mutate":

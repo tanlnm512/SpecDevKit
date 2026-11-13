@@ -2183,14 +2183,16 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                                     "every tick with its proof note — "
                                     "commit SKIPPED (not a git repo)"}
         else:
-            delivery = specstate.delivery_state(task_text or "")
+            holder = "spec.md" if tier == "tiny" else "task.md"
+            delivery = specstate.delivery_state(
+                (spec_text if tier == "tiny" else task_text) or "")
             if delivery[0] == "delivered" and delivery[1] != "-":
                 nodes["tick-commit"] = {"state": DONE, "reason":
                                         f"task.md cites {ticks.ticked} ticked "
                                         f"+ {ticks.struck} struck of "
                                         f"{ticks.total}, every tick with its "
                                         "proof note — Delivered: commit @ "
-                                        f"{delivery[1]} recorded in task.md"}
+                                        f"{delivery[1]} recorded in {holder}"}
             else:
                 nodes["tick-commit"] = {"state": READY, "reason":
                                         "tick transition due — "
