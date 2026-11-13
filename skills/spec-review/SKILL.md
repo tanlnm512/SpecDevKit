@@ -13,7 +13,7 @@ description: >-
   (spec-build).
 metadata:
   owner: platform-core
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # spec-review — gated, confirmed code review (with optional fix loop)

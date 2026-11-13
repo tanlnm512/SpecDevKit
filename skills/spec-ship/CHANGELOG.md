@@ -4,6 +4,21 @@ Release history. The skill began life 2026-11-11 as the integration
 phase of the SpecDevKit suite: the span spec-build leaves to the user
 — from the delivered commit to a merged pull request.
 
+## 0.1.1 — 2026-11-13
+
+- The run contract is pinned by a 34-test suite: the stage table
+  (`status`), the refusal rows (`preflight`), the write surface of
+  `record` and `evidence`, and the headline guarantee — toward the
+  remote the script only reads (D-004). The suite's TODO branch now
+  fails instead of exiting 0 proving nothing.
+- SKILL.md slimmed to a summary with the full statement moved to its
+  contracts; rule ledgers recorded; eval results stamped with the
+  content hash.
+
+Migration: none required — tests and docs only; the command, verbs,
+and records keep their shape. `bash tools/sync.sh` refreshes the
+install.
+
 ## 0.1.0
 
 - New skill and command, `/spec-ship [verb] <spec-name>`: preflight,

@@ -5,7 +5,7 @@ middle phase of the split spec suite (spec-to-prod-split): gated intake
 over a validated intent, the authoring waves to the approve handoff —
 execution is spec-execute's, intake spec-intent's.
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
 - At `Tier: tiny`, graph.py finds `Delivered: commit @ <sha>` (plain or
   bold) anywhere in spec.md, § Evidence included, so a delivered tiny
@@ -222,6 +222,7 @@ execution is spec-execute's, intake spec-intent's.
   removed early (D-006): eleven commands install; a skill may name
   no self-titled command. Migration: re-run `bash tools/sync.sh`.
 
+Migration: none required for approved-or-later specs (the new requirements only warn); a new full-tier draft must triage all six quality families and carry the new headers. `bash tools/sync.sh` refreshes the install.
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (`graph.py --span shape` — intake gate,

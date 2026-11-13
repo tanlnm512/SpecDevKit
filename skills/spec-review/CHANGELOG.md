@@ -5,7 +5,7 @@ Release history. The skill began life 2026-09-23 as the validated
 review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
 - SKILL.md § Run sequence is a summary; the command table, ask ctx
   keys, report data, role table, and order moved verbatim to

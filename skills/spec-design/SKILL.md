@@ -10,7 +10,7 @@ description: >-
   idea or red intent (spec-define); not once approved (spec-build).
 metadata:
   owner: platform-core
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # spec-design — gated authoring: validated intent → approved docset

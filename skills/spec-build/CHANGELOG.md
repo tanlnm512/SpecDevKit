@@ -5,7 +5,7 @@ back half of the split spec suite (spec-to-prod-split): implementer
 waves over approved task.md frontiers through the tick-commit gate —
 authoring is spec-shape's, intake spec-intent's.
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
 - A `- Hygiene: <path> [<kind>] — <ruling>` line in the delivery block
   rules an `audit.py clean` suspect that is the product's own output;
@@ -227,6 +227,7 @@ authoring is spec-shape's, intake spec-intent's.
   review BLOCKs a `**Type**: bugfix | hotfix` diff with no regression
   test for the reported failure (spec-design D-056).
 
+Migration: none required — `bash tools/sync.sh` refreshes the install; delivered docsets keep their records, and a merge-orphaned delivery record is re-pointed with `tick.py --redeliver <new-sha>`.
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (`graph.py --span execute` — invocation

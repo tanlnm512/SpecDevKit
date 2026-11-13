@@ -5,7 +5,7 @@ door of the split spec suite (spec-to-prod-split): repo scouting +
 requirement grilling to a validated `specs/<name>/intent.md`, hard
 stop — the docset is spec-shape's, execution spec-execute's.
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
 - `templates/intent.md` carries the `**Type**` header (feature |
   bugfix | hotfix | refactor | upgrade) spec.md inherits, and one
@@ -122,6 +122,7 @@ stop — the docset is spec-shape's, execution spec-execute's.
   `bash tools/sync.sh` — the stale prune removes the old `spec.md`
   from every root.
 
+Migration: `/spec-idea` and the spec-intent install are retired — run `bash tools/sync.sh` once and the retired sweep removes them; existing `specs/<name>/` trees and in-flight sessions carry over unchanged.
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (scaffold-lite → scout → grill → gate →
