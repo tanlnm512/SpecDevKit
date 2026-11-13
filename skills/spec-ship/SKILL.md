@@ -15,7 +15,7 @@ description: >-
   reviewing code (spec-review), or tagging a release (spec-release).
 metadata:
   owner: platform-core
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # spec-ship — integration: delivered commit → merged PR

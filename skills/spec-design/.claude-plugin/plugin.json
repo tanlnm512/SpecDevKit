@@ -1,6 +1,6 @@
 {
   "name": "spec-design",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Gated spec authoring for a spec that is not yet approved \u2014 an intent.md or spec.md exists.",
   "author": {
     "name": "Stanley",

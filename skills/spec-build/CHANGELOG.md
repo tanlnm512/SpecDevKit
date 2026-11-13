@@ -5,8 +5,21 @@ back half of the split spec suite (spec-to-prod-split): implementer
 waves over approved task.md frontiers through the tick-commit gate —
 authoring is spec-shape's, intake spec-intent's.
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
+- A `- Hygiene: <path> [<kind>] — <ruling>` line in the delivery block
+  rules an `audit.py clean` suspect that is the product's own output;
+  `clean <spec-dir>` prints it RULED and dod gate 7 reads PASS with the
+  count of rulings, instead of FAIL with no recourse (D-037).
+- retro.py is written in C2, after the tick and the delivery record, so
+  `retro.md` shows ticked tasks, parked lines and the delivery sha; a
+  retro still stamped `Delivered: commit @ -` beside a recorded commit
+  is rewritten, and a round logged under several headings in
+  `notes/T###.md` counts once (D-037).
+- SKILL.md § The delivery pass is a summary; the full statement of the
+  pass — each step, the delivery block, the work-type, tiny-tier, and
+  rewritten-history rules — moved verbatim to
+  `contracts/delivery-pass.md`, read before the pass starts.
 - Close-of-run next steps name `/spec-ship <name>` after delivery and
   `/spec-release` after the merge, replacing "push/PR are the user's".
 - `tick.py <spec-dir> --redeliver <new-sha>` re-points a delivery
@@ -214,6 +227,7 @@ authoring is spec-shape's, intake spec-intent's.
   review BLOCKs a `**Type**: bugfix | hotfix` diff with no regression
   test for the reported failure (spec-design D-056).
 
+Migration: none required — `bash tools/sync.sh` refreshes the install; delivered docsets keep their records, and a merge-orphaned delivery record is re-pointed with `tick.py --redeliver <new-sha>`.
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (`graph.py --span execute` — invocation

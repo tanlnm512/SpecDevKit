@@ -17,9 +17,9 @@ decision, or strike it when resolved outright.
    field use shows a need.
 3. **The evals have never run live.** S1–S5 need a scratch remote
    with CI; none has been run.
-4. **No mechanical suite yet.** `tests/run.sh` is a runner with no
-   test files; the script's parsers, the record writer, and the
-   preflight rows are unproven beyond a syntax check.
+4. ~~**No mechanical suite yet.**~~ (decided: D-004) —
+   `tests/test_ship.py` pins the run contract: the preflight rows, the
+   PR body, the record and evidence writers, the stage reader.
 5. **The outward-action gate is prose.** No script can verify a human
    yes. A stronger form would have the script run each action itself
    against a fingerprint of the shown preview, refusing when the head

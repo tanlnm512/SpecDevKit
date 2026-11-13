@@ -648,7 +648,8 @@ class KitRulesSyncTests(SyncShBase):
         self.assertNotIn("stale hand-edit", installed)
 
     def test_check_reports_stale_carrier_as_drift_and_writes_nothing(self):
-        self.assertEqual(self.run_sync().returncode, 0)
+        r0 = self.run_sync()
+        self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
         carrier = (self.repo / "skills" / "spec-review" / "agents"
                    / "review-fixer.md")
         self.hand_edit(carrier)

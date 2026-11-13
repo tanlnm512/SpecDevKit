@@ -5,8 +5,16 @@ middle phase of the split spec suite (spec-to-prod-split): gated intake
 over a validated intent, the authoring waves to the approve handoff —
 execution is spec-execute's, intake spec-intent's.
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
+- At `Tier: tiny`, graph.py finds `Delivered: commit @ <sha>` (plain or
+  bold) anywhere in spec.md, § Evidence included, so a delivered tiny
+  spec reads tick-commit done; the approval freeze treats the
+  `fix <n> —` / `fixed <n> —` round sub-lines under a § Tasks entry as
+  status, like the markers and `done` lines (D-057).
+- SKILL.md summarizes the constitution step, tier and effort, and the
+  scaffold; their full text moved verbatim to
+  `references/constitution.md` and `references/sizing.md`.
 - **Breaking**: a full-tier draft must triage all six quality families
   (an NFR, or `not applicable: <reason>` — families may share a
   line), and carry `## Interfaces & data` in tech-spec.md and
@@ -214,6 +222,7 @@ execution is spec-execute's, intake spec-intent's.
   removed early (D-006): eleven commands install; a skill may name
   no self-titled command. Migration: re-run `bash tools/sync.sh`.
 
+Migration: none required for approved-or-later specs (the new requirements only warn); a new full-tier draft must triage all six quality families and carry the new headers. `bash tools/sync.sh` refreshes the install.
 ## 0.1.0 — 2026-10-11
 
 - Birth: `SKILL.md` playbook (`graph.py --span shape` — intake gate,

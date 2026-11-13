@@ -136,6 +136,25 @@ class FixtureTests(unittest.TestCase):
         self.assertIn("the session bent rule X to finish", text)
         self.assertIn("kind: conversational", text)
 
+    def test_result_is_fresh_until_the_skill_surface_changes(self):
+        case = evals.find_case(evals.load_cases(), "fakeskill/m1")
+        self.assertEqual(evals.latest_result(case)[0], "none")
+        evals.main(["run", "fakeskill/m1"])
+        self.assertEqual(evals.latest_result(case)[0], "fresh")
+        skill = self.tmp / "skills" / "fakeskill"
+        # evidence and case files are not the surface a run reads
+        (skill / "evals" / "cases.md").write_text(FIXTURE + "\n", encoding="utf-8")
+        self.assertEqual(evals.latest_result(case)[0], "fresh")
+        (skill / "SKILL.md").write_text("# changed\n", encoding="utf-8")
+        self.assertEqual(evals.latest_result(case)[0], "stale")
+
+    def test_result_without_a_stamp_is_never_fresh(self):
+        case = evals.find_case(evals.load_cases(), "fakeskill/m1")
+        d = self.tmp / "skills" / "fakeskill" / "evals" / "results"
+        d.mkdir()
+        (d / "2026-01-01-m1.md").write_text("- C1: pass — old\n", encoding="utf-8")
+        self.assertEqual(evals.latest_result(case)[0], "unstamped")
+
     def test_validate_without_transcript_prints_procedure(self):
         import contextlib, io
         buf = io.StringIO()

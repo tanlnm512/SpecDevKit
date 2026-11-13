@@ -3,6 +3,12 @@
 Release history. The skill began life 2026-11-11 as the kit's release
 phase: the `release` HUMAN node spec-build's D-014 deferred.
 
+## 0.1.1 — 2026-11-13
+
+- **Fix:** `cut` keeps the changelog section's `###` group headings in
+  the annotated tag's message; git's default cleanup used to strip them.
+
+Migration: none required.
 ## 0.1.0 — 2026-11-11
 
 - **New skill.** `/spec-release [collect|notes|preflight|cut|verify|status]`

@@ -7,7 +7,8 @@ verdicts under the case's skill's evals/results/. The runner records;
 the observer judges.
 
 Usage:
-  evals.py list
+  evals.py list                             each case's latest result:
+                                            fresh, stale, or none
   evals.py run <skill>/<case-id> [--overwrite]
                                             mechanical cases only
   evals.py validate <skill>/<case-id> [transcript] [--contract-bent T]
@@ -20,6 +21,7 @@ with a verdict and evidence, e.g. "- C1: pass — <evidence>" or
 """
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -36,6 +38,10 @@ VERDICT_LINE = re.compile(
     r"^\s*[-*]?\s*C(\d+)\s*[:\-]\s*(pass|fail|finding)\b\s*[:\-—]?\s*(.*)$",
     re.IGNORECASE | re.MULTILINE,
 )
+# What a run reads: a result is fresh while these are unchanged.
+SURFACE_PARTS = ("SKILL.md", "agents", "commands", "contracts", "gates",
+                 "protocol", "references", "scripts", "templates")
+SURFACE_LINE = re.compile(r"^- surface: ([0-9a-f]{12})$", re.M)
 VERDICTS_HEADING = re.compile(r"^#+\s*Verdicts\s*$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -120,6 +126,39 @@ def find_case(cases, selector):
     return None
 
 
+def surface_hash(skill):
+    root = ROOT / "skills" / skill
+    files = []
+    for part in SURFACE_PARTS:
+        p = root / part
+        if p.is_file():
+            files.append(p)
+        elif p.is_dir():
+            files += [f for f in p.rglob("*")
+                      if f.is_file() and "__pycache__" not in f.parts]
+    h = hashlib.sha256()
+    for f in sorted(files):
+        h.update(f.relative_to(root).as_posix().encode())
+        h.update(b"\0")
+        h.update(f.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()[:12]
+
+
+def latest_result(case):
+    """(state, path) of the case's newest result: none, unstamped, stale,
+    or fresh against the skill's current surface."""
+    hits = sorted((ROOT / "skills" / case.skill / RESULTS_DIR).glob(
+        f"*-{case.cid.lower()}.md"))
+    if not hits:
+        return "none", None
+    m = SURFACE_LINE.search(hits[-1].read_text(encoding="utf-8"))
+    if not m:
+        return "unstamped", hits[-1]
+    state = "fresh" if m.group(1) == surface_hash(case.skill) else "stale"
+    return state, hits[-1]
+
+
 def repo_context():
     """Where the case ran, so real-repo evidence labels itself — a
     result that claims a real repo must name it (kit rubric S4)."""
@@ -143,6 +182,7 @@ def render_results(case, verdicts, findings, contract_bent, via):
         f"- kind: {case.kind}",
         f"- source: {case.source}",
         f"- repo: {repo_context()}",
+        f"- surface: {surface_hash(case.skill)}",
         f"- recorded via: {via}",
         "",
         "## Verdicts",
@@ -188,7 +228,7 @@ def cmd_list(_):
         kind = c.kind if c.run_value else "malformed (no Run: bullet)"
         if not c.run_value:
             rc = 2
-        print(f"{c.selector:26} {kind:14} {c.source}")
+        print(f"{c.selector:26} {kind:14} {latest_result(c)[0]:9} {c.source}")
     print(f"{len(cases)} case(s)")
     return rc
 

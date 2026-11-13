@@ -5,7 +5,7 @@ resident skill of the SpecDevKit repo: the pre-spec front door —
 five rigid stages from a raw idea to a durable design
 specification that feeds spec-to-prod's `/spec` intake.
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
 - **D-010 — payload by path**: stage-2 spawns pass the `<skill_dir>`
   paths of the lens file (plus lens name) and panel protocol instead of

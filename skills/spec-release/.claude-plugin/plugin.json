@@ -1,6 +1,6 @@
 {
   "name": "spec-release",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cuts a release from work that is already merged and delivered \u2014 the suite's release phase.",
   "author": {
     "name": "Stanley",

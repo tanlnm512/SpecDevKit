@@ -1,6 +1,6 @@
 {
   "name": "spec-define",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Requirements intake for a settled direction \u2014 turns a raw idea (or a spec-discover handoff) into one validated specs/<name>/intent.md: probes the repo, grills the open questions until none remain, gates the result, stops.",
   "author": {
     "name": "Stanley",

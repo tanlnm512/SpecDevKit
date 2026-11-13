@@ -10,8 +10,10 @@ block, with notes/delivery.md as the fallback for specs that predate
 the block — the spec's specs/BACKLOG.md lines, and the local telemetry
 counts for the spec. Then appends each D-###
 title to specs/context/decisions.md, so the decisions outlive the
-archived spec. The delivery pass writes the retro at ship; an existing
-retro.md is reused, never rewritten — nothing is committed.
+archived spec. The delivery pass writes the retro once the delivery
+record is drafted; an existing retro.md is reused, except one written
+before the spec was delivered (`Delivered: commit @ -`) once a commit
+SHA is recorded — that snapshot is rewritten. Nothing is committed.
 
 Usage: retro.py <spec-dir> <spec-name> [<repo-root>]
 Exit:  0 = written or an existing retro reused · 1 = unreadable spec dir or a failed write · 2 = usage.
@@ -30,7 +32,8 @@ import telemetry  # noqa: E402
 
 DECISION = re.compile(r"^###[ \t]+(D-\d{3})[ \t]*[:—-][ \t]*(.+?)[ \t]*$", re.M)
 FIXED = re.compile(r"\(fixed (\d)/5\)")
-FIX_ROUND_HEADING = re.compile(r"^## Fix round \d+", re.M)
+FIX_ROUND_HEADING = re.compile(r"^## Fix round (\d+)", re.M)
+RECORDED_UNDELIVERED = re.compile(r"^Delivered: commit @ -$", re.M)
 TECH_PREFIX = re.compile(r"^-\s+`tech-spec\.md`:\s+prefix\s+sha256:[0-9a-f]{64}\s+length:(\d+)", re.M)
 DECISIONS_HEADER = ("# Decisions\n\nArchitecture decisions of archived specs, one line each; "
                     "the full record lives in the archived spec.\n\n")
@@ -59,7 +62,7 @@ def task_rows(spec_dir: Path) -> list[tuple[str, str, int, tuple[specstate.FixRo
     for e in specstate.task_entries(source):
         state = "struck" if e.struck else "ticked" if e.done else "open"
         fixed = FIXED.search(e.first_line)
-        logged = len(FIX_ROUND_HEADING.findall(_read(spec_dir / "notes" / f"{e.id}.md")))
+        logged = len(set(FIX_ROUND_HEADING.findall(_read(spec_dir / "notes" / f"{e.id}.md"))))
         rounds = max(int(fixed.group(1)) if fixed else 0, logged, len(e.rounds))
         rows.append((e.id or e.first_line.strip(), state, rounds, e.rounds))
     return rows
@@ -85,6 +88,16 @@ def telemetry_lines(name: str) -> list[str]:
     return [f"- {key}: {n} run(s), {red} red" for key, (n, red) in sorted(counts.items())]
 
 
+def delivery_record(spec_dir: Path) -> tuple[str, str | None]:
+    return specstate.delivery_state(_read(spec_dir / (
+        "spec.md" if specstate.spec_tier(_read(spec_dir / "spec.md")) == "tiny" else "task.md")))
+
+
+def predates_delivery(spec_dir: Path, existing: str) -> bool:
+    sha = delivery_record(spec_dir)[1]
+    return bool(sha and sha != "-" and RECORDED_UNDELIVERED.search(existing))
+
+
 def retro(spec_dir: Path, name: str, root: Path) -> str:
     backlog = [line for line in _read(root / "specs" / "BACKLOG.md").splitlines()
                if line.startswith(f"- {name} — ")]
@@ -92,8 +105,7 @@ def retro(spec_dir: Path, name: str, root: Path) -> str:
     rows = task_rows(spec_dir)
     facts, _ = audit.delivery_block(spec_dir)
     note = facts.strip() or _read(spec_dir / "notes" / "delivery.md").strip()
-    record = specstate.delivery_state(_read(spec_dir / (
-        "spec.md" if specstate.spec_tier(_read(spec_dir / "spec.md")) == "tiny" else "task.md")))
+    record = delivery_record(spec_dir)
     out = [f"# Retro: {name}", "",
            "Assembled from this spec's own records; no line is a judgement.", "",
            "## Tasks", "", "| Task | State | Fix rounds |", "|------|-------|------------|",
@@ -135,7 +147,7 @@ def main(argv: list[str]) -> int:
         print(f"retro: {spec_dir}/spec.md not found", file=sys.stderr)
         return 1
     target = spec_dir / "retro.md"
-    if target.is_file():
+    if target.is_file() and not predates_delivery(spec_dir, _read(target)):
         print(f"retro: {target} exists — reused, not rewritten")
         return 0
     try:

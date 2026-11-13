@@ -1,6 +1,6 @@
 {
   "name": "spec-review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Gated code review for any git repository \u2014 a diff, a pull request, a branch, or the whole project.",
   "author": {
     "name": "Stanley",
