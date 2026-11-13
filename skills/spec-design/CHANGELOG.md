@@ -7,6 +7,14 @@ execution is spec-execute's, intake spec-intent's.
 
 ## Unreleased
 
+- At `Tier: tiny`, graph.py finds `Delivered: commit @ <sha>` (plain or
+  bold) anywhere in spec.md, § Evidence included, so a delivered tiny
+  spec reads tick-commit done; the approval freeze treats the
+  `fix <n> —` / `fixed <n> —` round sub-lines under a § Tasks entry as
+  status, like the markers and `done` lines (D-057).
+- SKILL.md summarizes the constitution step, tier and effort, and the
+  scaffold; their full text moved verbatim to
+  `references/constitution.md` and `references/sizing.md`.
 - **Breaking**: a full-tier draft must triage all six quality families
   (an NFR, or `not applicable: <reason>` — families may share a
   line), and carry `## Interfaces & data` in tech-spec.md and

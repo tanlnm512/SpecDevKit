@@ -140,53 +140,18 @@ re-run, until the span drains. Typical waves:
 ### The constitution (with the user, before approve)
 
 `specs/CONSTITUTION.md` holds the repo's non-negotiable articles.
-scaffold.sh creates it from the template on the repo's first spec;
-filling it is this step and no agent's. Unfilled (`check.py <spec-dir>
---constitution` exits 1) it binds nothing: payloads do not cite it,
-and `check.py` WARNs on the repo's first spec and FAILs from the
-second. Once per repo, while the first waves run, draft it with the
-user: propose three to five MUST-strength articles from the intent's
-Constraints and the repo's conventions, one rationale line each; the
-user confirms or rewords each, and their wording wins. In a repo with
-existing code, let the analyst find the conventions: `graph.py
-<spec-dir> --emit-spawns --repair constitution` emits `constitution.md`
-(analyst + constitution lens), which returns proposed articles each
-cited to repo evidence and writes nothing — they are proposals until
-the user confirms them. It is due
-before the approve gate — the contract review reads the docset
-against it. Later amendments append; never weaken an article
-silently.
+Filling it is this step and no agent's: once per repo, while the
+first waves run, draft three to five MUST-strength articles with the
+user — their wording wins. It is due before the approve gate. Read
+`references/constitution.md` (the procedure, the analyst's proposals)
+when `check.py <spec-dir> --constitution` exits 1.
 
 ### Choosing tier and effort
 
-Two spec.md headers right-size the artifacts, never the gates (a
-third, `**Type**: feature | bugfix | hotfix | refactor | upgrade`,
-names the work type the lenses and check.py key on — the template's
-header comment has the rules; absent reads feature):
-
-- **`Tier: tiny`** — a small, single-area, low-risk change: SKIPs the
-  authoring nodes, the task list lives in spec.md § Tasks, the one
-  file is the contract. Absent means full (the seven-file docset);
-  growing a tiny spec later is `migrate.py grow`. Tiny is approved
-  and frozen like full: `freeze.py --record` writes
-  `approvals/approval.md` and is required before execute — a bare
-  `Status: approved` fails `check.py`. Only the record's
-  `## Contract review` section is waived at tiny (`--record` without
-  `--review`). The freeze covers § Tasks:
-  status markers move freely, but an added, edited, or struck task
-  or requirement is a re-approval (`--record --force`).
-- **`Effort: standard`** (the template default) — one merged architect
-  payload authors plan + tech + tasks, with the tester separate in the same
-  wave. Use for work inside one area.
-- **`Effort: large`** — the full plan ∥ tech ∥ qa wave, then a separate
-  tasks wave. Use for multi-area, auth, persistence, migration, or
-  research-heavy work. A missing or unknown Effort reads large.
-
-Effort has exactly these two values. `tiny` is a Tier, never an
-effort; a doc still carrying `Effort: tiny` reads standard. The
-intent's `**Effort**` line is the intake's guess; spec.md's header is
-the one the engine reads — confirm it when drafting spec.md.
-
+Two spec.md headers right-size the artifacts, never the gates:
+`Tier: tiny` (one file; absent means full) and `Effort: standard |
+large` (missing or unknown reads large). `**Type**` names the work
+type. Rules per value: `references/sizing.md`.
 | Exit | Meaning |
 |------|---------|
 | 0 | wave emitted, span drained (a handoff), gate pause, or AWAITING (read the last line) |
@@ -316,22 +281,9 @@ implementer is ever spawned from here.
 ## Templates and scaffolding
 
 `scripts/scaffold.sh [--tier tiny|full] [--into-existing] <name>`
-writes the skeleton from `templates/` (default `tiny`: spec.md with
-§ Tasks, constitution; `full`: spec, plan, tech-spec, task, test,
-survey too — tech-spec ships the research gate's `## Questions &
-options` pre-filled with the skip form). `--into-existing` fills an
-intake dir without overwriting anything and, at full tier, strips that
-skip form so the section stays open for the research gate. Growing a
-tiny spec to full:
-spec-build's `scripts/migrate.py grow <spec-dir>`. intent.md's
-template belongs to spec-define.
-
-`specs/INDEX.md` is the cross-spec view — one rendered line per spec
-(status · type · tier · `**Depends on**` names). `scripts/index.py
-<spec-dir>` is its only writer: run it when check.py reports the line
-stale, never hand-edit it. A `**Depends on**` header orders specs;
-check.py refuses a name that is no spec and warns when another
-in-flight spec's `Touches:` overlap this one's.
+writes the skeleton from `templates/`; `scripts/index.py <spec-dir>`
+is the only writer of `specs/INDEX.md` — never hand-edit it. Details:
+`references/sizing.md`.
 
 ## Telemetry
 
