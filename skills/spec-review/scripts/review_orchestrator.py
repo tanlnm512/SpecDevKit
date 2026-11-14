@@ -15,20 +15,34 @@ Usage:
                                 [--base REF] [--pr SPEC] [--repo DIR]
                                 [--paths TERMS] [--include-gate]
   review_orchestrator.py gate    [--repo DIR] [--base REF] [--tree] [--pr SPEC]
-  review_orchestrator.py fix-snapshot [--repo DIR]
-  review_orchestrator.py fix-check --head SHA --stash-count N --tree SHA [--repo DIR]
+  review_orchestrator.py run-init  --target … (scope's args) [--keep N]
+  review_orchestrator.py run-save  --run-dir D --stage S --data @FILE|STR
+  review_orchestrator.py run-resume --run-dir D
+  review_orchestrator.py run-gc    [--repo DIR] [--keep N]
   review_orchestrator.py shard   --files-json LIST [--budget N] [--max-files N]
   review_orchestrator.py id-next --prefix P --used N
   review_orchestrator.py findings-parse (--file PATH | --text STR)
   review_orchestrator.py report  --kind review|fix --data @FILE|STR
   review_orchestrator.py systems
   review_orchestrator.py ask     --kind KIND --ctx @FILE|JSON   (ctx {"batch": [...]} renders a wave)
+
+run-init / run-save / run-resume checkpoint a review run into
+<repo>/.spec-review/runs/<run-id>/ (D-020): run-init records the
+target's fingerprint (the exact diff + untracked files scope lists)
+after scope ran; run-save stores one stage's JSON (the stage names are
+the STAGES tuple); run-resume re-computes the fingerprint and either
+returns {completed, next, data} — continue at `next` — or refuses: a
+changed target never resumes. The folder carries its own .gitignore
+containing `*`, so runs are never committed.
 """
 
 import argparse
+import datetime
+import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -387,59 +401,64 @@ def stage_err(stage, **extra):
     return 1
 
 
-def cmd_scope(a):
+def _scope_result(a) -> tuple[bool, dict]:
+    """The scope resolution shared by the scope command and run-init —
+    (ok, result-or-error-doc); the caller prints. On error the doc
+    carries `stage` like stage_err's output."""
     repo_abs = resolve_repo(a.repo)
     result = {"target": a.target, "repo_abs": repo_abs, "base": a.base or "HEAD"}
     if a.target == "diff":
         if git(["rev-parse", "-q", "--verify", a.base or "HEAD"], repo_abs).returncode != 0:
-            return stage_err("base-unresolved", base=a.base or "HEAD")
+            return False, {"stage": "base-unresolved", "base": a.base or "HEAD"}
         result.update(diff_scope(a.base or "HEAD", repo_abs))
         result["mode"] = "diff"
     elif a.target == "branch":
         base_ref = detect_base_branch(a.base, repo_abs)
         if not base_ref:
-            return stage_err("branch-no-base")
+            return False, {"stage": "branch-no-base"}
         mb = merge_base_with_count(base_ref, repo_abs)
         if mb is None:
-            return stage_err("branch-merge-base", base=base_ref)
+            return False, {"stage": "branch-merge-base", "base": base_ref}
         sc = diff_scope(mb["sha"], repo_abs)
         result.update({"mode": "branch", "base": base_ref, "merge_base": mb["sha"],
                        "commit_count": mb["count"], **sc})
     elif a.target == "pr":
         if not a.pr:
-            return stage_err("pr-no-arg")
+            return False, {"stage": "pr-no-arg"}
         meta = pr_meta(a.pr, repo_abs)
         if meta is None:
-            return stage_err("pr-view", pr=a.pr)
+            return False, {"stage": "pr-view", "pr": a.pr}
         head = git_out(["rev-parse", "HEAD"], repo_abs) or ""
         if not head.strip():
-            return stage_err("pr-state")
+            return False, {"stage": "pr-state"}
         dirty = (git_out(["status", "--porcelain"], repo_abs) or "").strip() != ""
         if head.strip() != meta["headRefOid"]:
             # The refusal is unconditional: a dirty tree misattributes
             # uncommitted work to the PR either way.
             if dirty:
-                return stage_err("pr-dirty", head_matches=False, head=head.strip())
+                return False, {"stage": "pr-dirty", "head_matches": False,
+                               "head": head.strip()}
             prev = head.strip()
             prev_ref = (git_out(["symbolic-ref", "-q", "--short", "HEAD"], repo_abs) or "").strip()
             co = subprocess.run(["gh", "pr", "checkout", a.pr], capture_output=True, text=True)
             head = git_out(["rev-parse", "HEAD"], repo_abs) or ""
             if co.returncode != 0 or head.strip() != meta["headRefOid"]:
-                return stage_err("pr-checkout")
+                return False, {"stage": "pr-checkout"}
             result["previous_head"] = prev
             result["previous_ref"] = prev_ref or prev
         elif dirty:
-            return stage_err("pr-dirty", head_matches=True, head=head.strip())
+            return False, {"stage": "pr-dirty", "head_matches": True,
+                           "head": head.strip()}
         mb = merge_base_with_count(meta["baseRefOid"], repo_abs)
         if mb is None:
-            return stage_err("pr-merge-base", base=meta["baseRefOid"])
+            return False, {"stage": "pr-merge-base", "base": meta["baseRefOid"]}
         sc = diff_scope(mb["sha"], repo_abs)
         result.update({"mode": "pr", "pr": meta, "merge_base": mb["sha"],
                        "checked_out_head": head.strip(), **sc})
     elif a.target == "project":
         pf = project_files(a.paths, repo_abs)
         if pf is None:
-            return stage_err("ls-files")
+            return False, {"stage": "ls-files"}
         parts = shard_files(pf["files"], pf["sizes"])
         result.update({"mode": "project", "files": pf["files"], "sizes": pf["sizes"],
                        "candidates": pf["candidates"], "parts": parts,
@@ -448,7 +467,7 @@ def cmd_scope(a):
                        "reviewer_spawns": len(parts) * len(LENSES),
                        "confirm_before_spawn": len(parts) > PROJECT_CONFIRM_PARTS})
     else:
-        return stage_err("target-unknown", target=a.target)
+        return False, {"stage": "target-unknown", "target": a.target}
     result["suggest_split"] = bool(
         result.get("added", 0) > SUGGEST_SPLIT_LINES
         or len(result.get("files", [])) > SUGGEST_SPLIT_FILES
@@ -464,7 +483,12 @@ def cmd_scope(a):
     elif a.include_gate:
         rows = gate_rows(repo_abs, gate_base, a.target == "project")
         result["gate"] = gate_summary(rows + (ci_rows(a.pr, repo_abs) if a.target == "pr" else []))
-    return out(True, **result)
+    return True, result
+
+
+def cmd_scope(a):
+    ok, result = _scope_result(a)
+    return out(ok, **result)
 
 
 def cmd_gate(a):
@@ -764,6 +788,270 @@ def backlog_offer(d, assessment):
     return {"backlog_offer": {"path": str(BACKLOG), "lines": lines}}
 
 
+# --- resumable runs (spec-review D-020) -------------------------------
+# A full review is 10+ agent turns, all of it in conversation — a crash
+# restarted from zero. A run folder under <repo>/.spec-review/runs/
+# checkpoints each stage's JSON; run-resume verifies the target did not
+# move (the diff + untracked fingerprint) and reports where to continue.
+# The folder carries its own .gitignore containing `*`, so a run is
+# never committed and the user's .gitignore is never edited.
+
+STAGES = (
+    "scope",
+    "scout",
+    "review-<lens>",
+    "triage-<lens>",
+    "crosslens",
+    "confirm-<F-id>",
+    "assessment",
+    "report",
+    "fix-<n>-snapshot", "fix-<n>-fixer", "fix-<n>-check",
+    "fix-<n>-gate", "fix-<n>-verify", "fix-<n>-review",
+)
+
+RUNS_DIRNAME = ".spec-review/runs"
+RUN_GC_KEEP = 5
+
+
+def _stage_pattern(stage: str) -> str | None:
+    """The STAGES pattern a concrete stage name instantiates, or None —
+    the save path's vocabulary check."""
+    for pat in STAGES:
+        rx = re.escape(pat)
+        rx = rx.replace(re.escape("<lens>"), r"[a-z0-9-]+")
+        rx = rx.replace(re.escape("<F-id>"), r"[A-Za-z0-9-]+")
+        rx = rx.replace(re.escape("<n>"), r"\d+")
+        if re.fullmatch(rx, stage):
+            return pat
+    return None
+
+
+def _stage_file(run_dir: Path, stage: str) -> Path:
+    return run_dir / (re.sub(r"[^A-Za-z0-9._-]", "-", stage) + ".json")
+
+
+def _atomic_write_json(path: Path, doc: dict) -> None:
+    """Same-directory temp file, then os.replace — a reader never sees
+    half a stage file."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent),
+                               prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _run_fingerprint(repo_abs: str, base: str, files: list[str]) -> str:
+    """sha256 over the exact diff and the untracked files scope lists —
+    run-resume recomputes it; a different value means the target moved
+    and the run must not resume."""
+    h = hashlib.sha256()
+    h.update((git_out(["diff", base], repo_abs)
+              or "").encode("utf-8", "replace"))
+    root = Path(repo_abs)
+    for f in sorted(files or []):
+        h.update(f.encode("utf-8", "replace"))
+        h.update(b"\0")
+        try:
+            h.update((root / f).read_bytes())
+        except OSError:
+            h.update(b"<unreadable>")
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def _run_gc(runs_root: Path, keep: int) -> list[str]:
+    """Delete the oldest run dirs beyond `keep` (names are
+    date-prefixed, so name order is age order); returns what went."""
+    runs = sorted(d for d in runs_root.iterdir()
+                  if d.is_dir() and not d.name.startswith("."))
+    removed = []
+    for d in runs[:-keep] if len(runs) > keep else []:
+        shutil.rmtree(d, ignore_errors=True)
+        removed.append(d.name)
+    return removed
+
+
+def cmd_run_init(a):
+    ok, result = _scope_result(a)
+    if not ok:
+        return out(False, **result)
+    repo_abs = result["repo_abs"]
+    base = result.get("merge_base") or result.get("base") or "HEAD"
+    run_id = (datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+              + "-" + secrets.token_hex(2))
+    run_dir = Path(repo_abs) / RUNS_DIRNAME / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / ".gitignore").write_text("*\n", encoding="utf-8")
+    head_sha = (git_out(["rev-parse", "HEAD"], repo_abs) or "").strip()
+    record = {
+        "run_id": run_id,
+        "created": datetime.datetime.now(datetime.timezone.utc).isoformat(
+            timespec="seconds"),
+        "target": a.target,
+        "args": {"base": a.base, "pr": a.pr, "paths": a.paths,
+                 "repo": a.repo},
+        "base_sha": base,
+        "head_sha": head_sha,
+        "diff_sha256": _run_fingerprint(repo_abs, base,
+                                        result.get("files") or []),
+        "mode": result.get("mode"),
+    }
+    _atomic_write_json(run_dir / "run.json", record)
+    removed = _run_gc(run_dir.parent, a.keep)
+    return out(True, run_dir=str(run_dir), run_id=run_id,
+               fingerprint=record["diff_sha256"], gc_removed=removed)
+
+
+def cmd_run_save(a):
+    run_dir = Path(a.run_dir)
+    record = run_dir / "run.json"
+    if not record.is_file():
+        return out(False, error=f"no run record in {run_dir}")
+    if _stage_pattern(a.stage) is None:
+        return out(False, error=(
+            f"unknown stage {a.stage!r} — the vocabulary is the STAGES "
+            f"tuple: {', '.join(STAGES)}"))
+    try:
+        data = json.loads(_read_arg(a.data))
+    except ValueError as e:
+        return out(False, error=f"--data is not JSON: {e}")
+    _atomic_write_json(_stage_file(run_dir, a.stage),
+                       {"stage": a.stage, "data": data})
+    return out(True, stage=a.stage, run_dir=str(run_dir))
+
+
+def _read_arg(v: str) -> str:
+    """@FILE reads the file; anything else is the literal JSON string —
+    the same convention report/ask take."""
+    if v.startswith("@"):
+        return Path(v[1:]).read_text(encoding="utf-8")
+    return v
+
+
+def _saved_stages(run_dir: Path) -> list[str]:
+    """The saved concrete stages, canonically ordered: pattern rank,
+    then name within the pattern."""
+    def rank(name: str):
+        pat = _stage_pattern(name)
+        return (STAGES.index(pat) if pat else len(STAGES), name)
+    out_ = []
+    for p in run_dir.glob("*.json"):
+        if p.name == "run.json":
+            continue
+        stage = p.name[:-len(".json")]
+        if _stage_pattern(stage) is not None:
+            out_.append(stage)
+    return sorted(out_, key=rank)
+
+
+def _kept_ids(crosslens_data) -> list[str]:
+    """The kept finding ids a saved crosslens stage names — best effort:
+    the orchestrator's cross-lens output shape is its own."""
+    if not isinstance(crosslens_data, dict):
+        return []
+    kept = crosslens_data.get("kept")
+    if not isinstance(kept, list):
+        return []
+    ids = []
+    for k in kept:
+        if isinstance(k, dict) and k.get("id"):
+            ids.append(str(k["id"]))
+        elif isinstance(k, str):
+            ids.append(k)
+    return ids
+
+
+def _next_stage(saved: list[str], data: dict[str, dict]) -> str | None:
+    """The first skeleton slot with no save. Lenses: fast mode (the
+    saved scope's `fast_mode_default`) runs one general lens, full mode
+    runs every LENSES lens — the lens set is the mode's, never the
+    saved subset. Confirm slots come from the saved crosslens data's
+    kept ids. None means the skeleton is exhausted — continue from the
+    saved data (the fix loop's rounds are the orchestrator's count)."""
+    scope_data = (data.get("scope", {}) or {}).get("data") or {}
+    if scope_data.get("fast_mode_default"):
+        lenses = ["general"]
+    else:
+        lenses = [l["label"] for l in LENSES]
+    order = (["scope", "scout"]
+             + [f"review-{l}" for l in lenses]
+             + [f"triage-{l}" for l in lenses]
+             + ["crosslens"])
+    if "crosslens" in saved:
+        order += [f"confirm-{i}" for i in _kept_ids(
+            data.get("crosslens", {}).get("data"))]
+    order += ["assessment", "report"]
+    for s in order:
+        if s not in saved:
+            return s
+    return None
+
+
+def cmd_run_resume(a):
+    run_dir = Path(a.run_dir)
+    record = run_dir / "run.json"
+    if not record.is_file():
+        return out(False, error=f"no run record in {run_dir}")
+    try:
+        rec = json.loads(record.read_text(encoding="utf-8"))
+    except ValueError as e:
+        return out(False, error=f"run.json is not JSON: {e}")
+    base = rec.get("base_sha") or "HEAD"
+    # the target re-resolves from the run record's own args unless the
+    # caller overrides them — the fingerprint is over the same target
+    # the run scoped, not over whatever the CLI points at now
+    args2 = argparse.Namespace(
+        target=a.target or rec.get("target"),
+        base=a.base if a.base is not None else (rec.get("args") or {}).get("base"),
+        pr=a.pr if a.pr is not None else (rec.get("args") or {}).get("pr"),
+        paths=a.paths if a.paths is not None else (rec.get("args") or {}).get("paths"),
+        repo=a.repo if a.repo is not None else (rec.get("args") or {}).get("repo"),
+        include_gate=False,
+    )
+    ok, result = _scope_result(args2)
+    if not ok:
+        return out(False, error=(
+            f"the target no longer resolves: {result.get('stage')} — "
+            "start a new run (or continue from the saved report with "
+            "fix_from)"))
+    now = _run_fingerprint(result["repo_abs"], base,
+                           result.get("files") or [])
+    if now != rec.get("diff_sha256"):
+        return out(False, error=(
+            "target changed since the run started — start a new run "
+            "(or continue from the saved report with fix_from)"),
+            diff_sha256=now, run_diff_sha256=rec.get("diff_sha256"))
+    saved = _saved_stages(run_dir)
+    data: dict[str, dict] = {}
+    for s in saved:
+        try:
+            data[s] = json.loads(
+                _stage_file(run_dir, s).read_text(encoding="utf-8"))
+        except ValueError:
+            data[s] = {}
+    return out(True, run_id=rec.get("run_id"), completed=saved,
+               next=_next_stage(saved, data), data=data)
+
+
+def cmd_run_gc(a):
+    repo_abs = resolve_repo(a.repo)
+    runs_root = Path(repo_abs) / RUNS_DIRNAME
+    if not runs_root.is_dir():
+        return out(True, removed=[], kept=0)
+    removed = _run_gc(runs_root, a.keep)
+    kept = len([d for d in runs_root.iterdir()
+                if d.is_dir() and not d.name.startswith(".")])
+    return out(True, removed=removed, kept=kept)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="spec-review shared state oracle")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -772,6 +1060,26 @@ def main(argv=None):
     s.add_argument("--base"), s.add_argument("--pr"), s.add_argument("--repo")
     s.add_argument("--paths"), s.add_argument("--include-gate", action="store_true")
     s.set_defaults(fn=cmd_scope)
+    ri = sub.add_parser("run-init")
+    ri.add_argument("--target", required=True, choices=["diff", "branch", "pr", "project"])
+    ri.add_argument("--base"), ri.add_argument("--pr"), ri.add_argument("--repo")
+    ri.add_argument("--paths"), ri.add_argument("--include-gate", action="store_true")
+    ri.add_argument("--keep", type=int, default=RUN_GC_KEEP)
+    ri.set_defaults(fn=cmd_run_init)
+    rs = sub.add_parser("run-save")
+    rs.add_argument("--run-dir", required=True)
+    rs.add_argument("--stage", required=True)
+    rs.add_argument("--data", required=True)
+    rs.set_defaults(fn=cmd_run_save)
+    rr = sub.add_parser("run-resume")
+    rr.add_argument("--run-dir", required=True)
+    rr.add_argument("--target", choices=["diff", "branch", "pr", "project"])
+    rr.add_argument("--base"), rr.add_argument("--pr"), rr.add_argument("--repo")
+    rr.add_argument("--paths"), rr.add_argument("--include-gate", action="store_true")
+    rr.set_defaults(fn=cmd_run_resume)
+    rg = sub.add_parser("run-gc")
+    rg.add_argument("--repo"), rg.add_argument("--keep", type=int, default=RUN_GC_KEEP)
+    rg.set_defaults(fn=cmd_run_gc)
     g = sub.add_parser("gate")
     g.add_argument("--repo"), g.add_argument("--base"), g.add_argument("--tree", action="store_true")
     g.add_argument("--pr")

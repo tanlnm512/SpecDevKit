@@ -11,6 +11,7 @@ prints one JSON object; `status: error` stops the run, naming its
 | Phase | Command | Read from the result |
 |---|---|---|
 | scope + gate | `O scope --target diff\|branch\|pr\|project [--base R] [--pr N] [--repo D] [--paths P] --include-gate` | `files` (tracked + `untracked`), `added`, `fast_mode_default`, `suggest_split`, `gate{rows, green, repo_checks, note}`; pr: `previous_ref`, `gate_deferred`; project: `parts`, `excluded`, `reviewer_spawns`, `confirm_before_spawn` |
+| checkpoint | `O run-init --target …` (scope's args) right after scope; `O run-save --run-dir D --stage S --data @F.json` after EVERY stage | `run_dir` (also in every later result); a crash mid-run resumes (see Resume) |
 | gate re-run | `O gate --base <merge_base or base> [--pr N]` (project: `--tree`) | the same `gate` object |
 | prompts | `O systems`, once | system text per role; `lenses[]`, `general` |
 | asks | `O ask --kind K --ctx @ctx.json` — `{"batch": [{kind, ctx}, …]}` renders a wave | one ask per spawn |
@@ -18,6 +19,27 @@ prints one JSON object; `status: error` stops the run, naming its
 | fix_from | `O findings-parse --file F` | `tracked[]` |
 | fix guard | `O fix-snapshot` before each fixer turn; `O fix-check --head H --stash-count N --tree T` after it | error `fixer-moved-head` / `fixer-touched-stash` → abort the loop and report it; `test_hunks` → the verify and fix-review ctx |
 | report | `O report --kind review\|fix --data @report.json` | `markdown`, `reported_findings`, `backlog_offer` |
+
+**Stage order** — the `--stage` vocabulary and the run's checkpoint
+order; the oracle's `STAGES` tuple is the executable form and a drift
+test keeps the two in step:
+
+```
+scope, scout, review-<lens>, triage-<lens>, crosslens, confirm-<F-id>,
+assessment, report, fix-<n>-{snapshot, fixer, check, gate, verify, review}
+```
+
+`<lens>` is a lens label (`correctness|security|quality`, or
+`general` in fast mode), `<F-id>` a confirmed finding's id, `<n>` the
+fix round. **Resume** — a crashed run continues instead of restarting:
+`O run-resume --run-dir D` re-computes the target's fingerprint; a
+changed target is refused (`status: error`, start a new run — or
+continue from the saved report with `fix_from`), a match returns
+`{completed, next, data}` and the run continues at `next`, replaying
+`run-save` after every stage from there. The stage data goes back to
+the ORCHESTRATOR, never into an `ask` — the ask builders keep choosing
+their own context (D-020, panel.md), so a resumed confirmer still
+never sees the scout map or the stated intent.
 
 Ask ctx keys (`gate_line` = the gate object's `note`):
 
@@ -71,23 +93,40 @@ reviewer and inline confirmation, so every finding is `unconfirmed
 
 **Order**:
 
-1. `scope … --include-gate`. No files → "nothing to review". pr mode
-   with `gate_deferred` (a fork PR): tell the user the gate runs the
-   PR author's code and run `O gate` only on their go-ahead. Project
-   mode with `confirm_before_spawn`: print the part count and
+1. `scope … --include-gate`, then `run-init` with the same args (the
+   checkpoint starts here; `run-save --stage scope` right after). No
+   files → "nothing to review". pr mode with `gate_deferred` (a fork
+   PR): tell the user the gate runs the PR author's code and run
+   `O gate` only on their go-ahead. Project mode with
+   `confirm_before_spawn`: print the part count and
    `reviewer_spawns`, then wait for a go-ahead or narrower `paths`;
    name `excluded` under notCovered.
 2. Gate red → stop (except a project audit and fix_from).
    `repo_checks: 0` → find and run the documented check command
    (README, CI config, AGENTS.md) or report "no repo checks detected".
-3. `systems`; the scout ask → the scout.
-4. The review wave (`batch`; project mode: every lens × every part).
-5. Triage per lens → cross-lens → confirm each kept finding.
-6. The final ask → `report --kind review`. `backlog_offer` present
-   (the repo keeps `specs/BACKLOG.md`) → offer its residual-risk lines
-   for that file; append only on the user's yes.
-7. Fix loop, per round: `fix-snapshot` → fixer → `fix-check` → `gate`
-   → verify each finding → fix-review → next round; then `loop-final`
-   → `report --kind fix`.
+3. `systems`; the scout ask → the scout; `run-save --stage scout`.
+4. The review wave (`batch`; project mode: every lens × every part);
+   `run-save --stage review-<lens>` per lens result.
+5. Triage per lens (`run-save --stage triage-<lens>`) → cross-lens
+   (`run-save --stage crosslens`) → confirm each kept finding
+   (`run-save --stage confirm-<F-id>` each).
+6. The final ask → `report --kind review` (`run-save --stage
+   assessment` for the assessment, `--stage report` for the report).
+   `backlog_offer` present (the repo keeps `specs/BACKLOG.md`) →
+   offer its residual-risk lines for that file; append only on the
+   user's yes.
+7. Fix loop, per round n: `run-save --stage fix-<n>-snapshot` →
+   fixer → `fix-<n>-check` → `fix-<n>-gate` → verify each finding
+   (`fix-<n>-verify`) → fix-review (`fix-<n>-review`) → next round;
+   then `loop-final` → `report --kind fix`.
 8. pr mode with `previous_ref`: `git checkout <previous_ref>` once the
    report is out, or tell the user the PR head is still checked out.
+
+**Resume** (a session killed mid-run): run `O run-resume --run-dir D`
+for the latest run dir. `status: error` naming a changed target → the
+diff moved; start a new run (or continue from the saved report with
+fix_from). A match returns `completed`, `next` and every saved stage's
+`data`: re-fetch `systems`, then continue AT `next` — re-running no
+saved stage, `run-save`-ing each result from there as in the order
+above. The saved data goes back to the orchestrator only; asks are
+rebuilt through `ask` exactly as a fresh run builds them.

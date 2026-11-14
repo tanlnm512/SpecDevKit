@@ -148,6 +148,9 @@ are all-or-nothing — there is no path scoping)**:
 - Digest —
   `digest: task <T###> · status <implemented|already-satisfied|blocked:why> · files <n> · commit-line <suggested line> · deviation <none | summary needing D-###> · note <none | acceptance command red outside my files: command — file>`
   — a deviation WITHOUT a D-### is a failure — report it plainly
+- Digest file — your payload's `## Digest file` section names the path
+  (`specs/<name>/digests/wave-<N>/<payload-stem>.md`); write the digest
+  there verbatim as your FINAL action (spec-build D-040)
 
 ## Guardrails
 - One task only: adjacent TODO tasks stay untouched even if "easy"

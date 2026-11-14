@@ -74,6 +74,7 @@ FROZEN_FILES = ("spec.md", "plan.md", "survey.md", "test.md", "tech-spec.md")
 TINY_EVIDENCE_HEADING = "## Evidence"
 TASK_STATUS_LINE = re.compile(
     r"^\s*(?:-\s*)?(?:done \d{4}-\d{2}-\d{2} \u2014|fix(?:ed)? \d+ \u2014"
+    r"|claimed \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \u2014 run "
     r"|\*{0,2}Delivered\*{0,2}\s*:)")
 TASK_STATUS_MARKER = re.compile(
     r"\s*\((?:in-progress|implemented|fix(?:ed)?\s+\d+/\d+)\)")

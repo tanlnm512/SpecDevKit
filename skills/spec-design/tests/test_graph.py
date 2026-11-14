@@ -2894,5 +2894,34 @@ class SpanPhaseTests(unittest.TestCase):
         self.assertNotIn("researcher", r.stdout)
 
 
+class Exec009HonestStopTests(unittest.TestCase):
+    """The unchanged-state stop after a doc wave is honest (spec-build
+    D-038): the old text blamed 'the runner changed nothing', which is
+    false whenever code changed but doc state did not — the message now
+    names the move the orchestrator owes the frontier."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="graph009-"))
+        cls.half = copy_fixture(cls._tmp / "a")
+        set_status(cls.half, "approved")
+        # strip the authoring docs so the shape span's authoring wave is
+        # the frontier — a doc wave a custom runner may run
+        for name in ("plan.md", "tech-spec.md", "task.md", "test.md"):
+            (cls.half / name).unlink()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_a_doc_wave_that_moved_nothing_stops_honestly(self):
+        r = run_cli(self.half, "--run", "--span", "shape",
+                    "--runner", "true")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("== wave", r.stdout)  # a wave actually ran
+        self.assertIn("doc state did not move after the wave", r.stdout)
+        self.assertNotIn("the runner changed nothing", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

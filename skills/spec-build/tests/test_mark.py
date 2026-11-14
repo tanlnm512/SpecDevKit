@@ -1,0 +1,653 @@
+"""mark.py's transition table — D-034's marker table made executable
+(spec-build D-039).
+
+The table test owns the state machine: one table of (starting entry,
+verb, args) → expected entry text | refusal, covering every D-034 row
+plus the claim stamp's life (written on claim, removed on land/release/
+tick, never history). Beyond the table:
+
+  - claim --wave refuses a stale wave: a hand-written claim on T001
+    makes a wave holding T001 refuse everything, task.md unchanged;
+  - lock contention: a held task_lock exits 5; a 60s+-old lock file is
+    broken and the claim succeeds;
+  - land refuses on red proofs (a deterministically red TC) and on
+    zero runnable proofs;
+  - tick strips the stamp sub-line of exactly the ticked entry;
+  - the tiny tier: a stamped claim keeps the frozen spec verifiable,
+    and drop refuses outright.
+
+Fixtures are mutated copies of examples/mini-spec (claims, fail rounds,
+drops — no TC execution) and a hand-authored docset whose TC pass
+conditions are deterministic one-liners (land's proofs gate). Every CLI
+run gets its own telemetry dir.
+"""
+
+import contextlib
+import datetime
+import io
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from test_execute_gates import (  # noqa: E402
+    T1,
+    T2,
+    TINY_SPEC,
+    copy_fixture,
+    edit_tasks,
+    hand_docset,
+    record_approval,
+    set_status,
+    write,
+)
+import freeze  # noqa: E402
+import specstate  # noqa: E402
+
+SKILL = Path(__file__).resolve().parents[1]
+SCRIPTS = SKILL / "scripts"
+MARK = SCRIPTS / "mark.py"
+
+EM = "\u2014"
+
+# The fixture entries' FULL first lines (T1/T2 from test_execute_gates are
+# prefixes — a prefix replace would glue a stamp mid-line)
+T1F = ("- [ ] T001 [P] Implement multiply in `repo/calc.py` "
+       "(FR-001, FR-002)")
+T2F = ("- [ ] T002 [P] Add multiply tests to `repo/test_calc.py` "
+       "(FR-001, FR-002)")
+
+
+def run_mark(spec_dir: Path, *args: str, tel: Path) -> subprocess.CompletedProcess:
+    """mark.py <verb> <spec-dir> … as the CLI — args[0] is the verb, the
+    spec dir rides behind it."""
+    env = dict(os.environ, KIT_TELEMETRY_DIR=str(tel), KIT_TELEMETRY="on")
+    return subprocess.run(
+        [sys.executable, str(MARK), args[0], str(spec_dir), *args[1:]],
+        capture_output=True, text=True, timeout=300, env=env)
+
+
+def mark_events(tel: Path) -> list[dict]:
+    p = tel / "spec-build.jsonl"
+    if not p.exists():
+        return []
+    return [json.loads(ln) for ln in
+            p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+def entry_text(spec_dir: Path, task_id: str) -> str:
+    """The entry's block as the file holds it: the first line plus its
+    sub-lines up to the blank line — what a refusal or a write shapes.
+    Matches the struck form too (a dropped entry keeps its T-id)."""
+    holder = spec_dir / "task.md"
+    lines = holder.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines)
+                 if re.match(rf"^- \[[x ]\] (?:~~)?{task_id}\b", ln))
+    end = start + 1
+    while end < len(lines) and lines[end].strip() \
+            and not lines[end].startswith("- ["):
+        end += 1
+    return "\n".join(lines[start:end])
+
+
+def make_wave(spec_dir: Path, *task_ids: str, wave: int = 4) -> Path:
+    """A fresh wave dir: a wave emit clears its dir first, so the claim
+    sees exactly this wave's payloads."""
+    d = spec_dir / "spawns" / f"wave-{wave}"
+    d.mkdir(parents=True, exist_ok=True)
+    for stale in d.glob("implementer-T*.md"):
+        stale.unlink()
+    for tid in task_ids:
+        (d / f"implementer-{tid}.md").write_text("payload\n", encoding="utf-8")
+    return d
+
+
+def hand_fixture(tmp: Path, name: str = "hand", *, fail_tc: bool = False) -> Path:
+    """An approved hand-authored docset whose T001 proof is a
+    deterministic one-liner — green, or deterministically red for the
+    land-refusal test."""
+    d = hand_docset(tmp / name, "approved")
+    if fail_tc:
+        test = d / "test.md"
+        write(test, test.read_text(encoding="utf-8").replace(
+            "`python3 -c 'print(\"HI\")'`",
+            "`python3 -c 'import sys; sys.exit(1)'`"))
+    return d
+
+
+class TransitionTableTests(unittest.TestCase):
+    """One table row per D-034 transition: starting entry → verb → the
+    written entry, or the refusal. Every write is lock-and-atomic; every
+    refusal changes nothing."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-table-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+        self.spec = copy_fixture(self._tmp, "demo")
+        set_status(self.spec, "approved")
+
+    def fresh(self, *edits: tuple[str, str]) -> Path:
+        root = self._tmp / f"r{time.monotonic_ns()}"
+        spec = copy_fixture(root)
+        set_status(spec, "approved")
+        if edits:
+            edit_tasks(spec, *edits)
+        return spec
+
+    def test_table_claim_writes_in_progress_and_stamp(self):
+        r = run_mark(self.spec, "claim", "--wave", str(make_wave(self.spec, "T001", "T002")),
+                     "--run-id", "r-table", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("claimed 2: T001, T002", r.stdout)
+        for tid in ("T001", "T002"):
+            block = entry_text(self.spec, tid)
+            self.assertIn("(in-progress)", block.splitlines()[0])
+            stamp = [ln for ln in block.splitlines()[1:]
+                     if specstate.CLAIM_NOTE.match(ln)]
+            self.assertEqual(len(stamp), 1, block)
+            self.assertRegex(stamp[0],
+                             r"^  - claimed \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+                             rf" {EM} run r-table$")
+        events = [e for e in mark_events(self.tel) if e["event"] == "task_claim"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["payload"]["tasks"], 2)
+
+    def test_table_claim_without_run_id_prints_a_generated_one(self):
+        r = run_mark(self.spec, "claim", "--wave", str(make_wave(self.spec, "T001")),
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("claimed 1: T001", r.stdout)
+        self.assertRegex(r.stdout, r"run id: r-[0-9a-f]{4}")
+
+    def test_table_land_writes_implemented_and_drops_the_stamp(self):
+        make_wave(self.spec, "T001")
+        run_mark(self.spec, "claim", "--wave",
+                 str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+        r = run_mark(self.spec, "land", "T001",
+                     "--digest", "digest: task T001 · status implemented · "
+                     "files 1 · commit-line x", tel=self.tel)
+        # the fixture's proofs run its real TC commands; this machine has
+        # no pytest, so the red path is exercised below on a deterministic
+        # red TC — here we only pin the refusal shape when proofs run
+        self.assertIn(r.returncode, (0, 1), r.stdout + r.stderr)
+        if r.returncode == 0:
+            block = entry_text(self.spec, "T001")
+            self.assertIn("(implemented)", block.splitlines()[0])
+            self.assertNotIn("(in-progress)", block.splitlines()[0])
+            self.assertFalse(specstate.CLAIM_NOTE.search(block))
+
+    def test_table_land_refuses_a_pending_entry(self):
+        r = run_mark(self.spec, "land", "T001",
+                     "--digest", "digest: task T001 · status implemented",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("allowed from: (in-progress)", r.stdout)
+        self.assertNotIn("(implemented)", entry_text(self.spec, "T001"))
+
+    def test_table_land_refuses_without_a_digest(self):
+        make_wave(self.spec, "T001")
+        run_mark(self.spec, "claim", "--wave",
+                 str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+        r = run_mark(self.spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("digest", r.stdout + r.stderr)
+
+    def test_table_release_clears_claim_and_stamp(self):
+        edit_tasks(self.spec, (T1F, T1F.replace("[P]", "[P] (in-progress)")
+                               + f"\n  - claimed 2026-11-13T10:00:00Z "
+                                 f"{EM} run r-dead"))
+        r = run_mark(self.spec, "release", "T001",
+                     "--reason", "orphan: dead session", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        block = entry_text(self.spec, "T001")
+        self.assertNotIn("(in-progress)", block)
+        self.assertFalse(specstate.CLAIM_NOTE.search(block))
+        self.assertIn("orphan", r.stdout)
+        events = [e for e in mark_events(self.tel)
+                  if e["event"] == "task_release"]
+        self.assertEqual(events[0]["payload"]["reason"], "orphan")
+
+    def test_table_release_refuses_a_pending_entry(self):
+        r = run_mark(self.spec, "release", "T001",
+                     "--reason", "orphan", tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("nothing to release", r.stdout)
+
+    def test_table_fail_opens_round_one_from_a_claim(self):
+        edit_tasks(self.spec, (T1, T1.replace("[P]", "[P] (in-progress)")))
+        evidence = self._tmp / "ev.txt"
+        digest = "E   AssertionError: multiply(2, 3) returned 5"
+        write(evidence, f"$ pytest -k multiply\n{digest}\n")
+        r = run_mark(self.spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", digest, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        block = entry_text(self.spec, "T001")
+        self.assertIn("(fix 1/5)", block.splitlines()[0])
+        self.assertNotIn("(in-progress)", block)
+        self.assertIn(f"  - fix 1 {EM} {digest}", block)
+        note = (self.spec / "notes" / "T001.md").read_text(encoding="utf-8")
+        self.assertIn("## Fix round 1", note)
+        self.assertIn(digest, note)  # verbatim, not summarized
+        events = [e for e in mark_events(self.tel)
+                  if e["event"] == "task_fail"]
+        self.assertEqual(events[0]["payload"]["round"], 1)
+
+    def test_table_fail_opens_beside_implemented(self):
+        edit_tasks(self.spec, (T1, T1.replace("[P]", "[P] (implemented)")))
+        evidence = self._tmp / "ev.txt"
+        digest = "BLOCK: the error branch has no test"
+        write(evidence, digest)
+        r = run_mark(self.spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", digest, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        first = entry_text(self.spec, "T001").splitlines()[0]
+        self.assertIn("(implemented)", first)
+        self.assertIn("(fix 1/5)", first)
+
+    def test_table_fail_supersedes_the_in_flight_round(self):
+        edit_tasks(self.spec, (T1, T1.replace(
+            "[P]", "[P] (in-progress) (fix 2/5)")
+            + f"\n  - fix 2 {EM} previous failure digest"))
+        evidence = self._tmp / "ev.txt"
+        digest = "E   TypeError: multiply(None, 3) crashed"
+        write(evidence, digest)
+        r = run_mark(self.spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", digest, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        block = entry_text(self.spec, "T001")
+        self.assertIn("(fix 3/5)", block.splitlines()[0])
+        self.assertNotIn("(in-progress)", block)
+        self.assertIn(f"  - fixed 2 {EM} failed again {EM} superseded by "
+                      "round 3", block)
+        self.assertIn(f"  - fix 3 {EM} {digest}", block)
+
+    def test_table_fail_refuses_a_digest_not_in_the_evidence(self):
+        edit_tasks(self.spec, (T1, T1.replace("[P]", "[P] (in-progress)")))
+        evidence = self._tmp / "ev.txt"
+        write(evidence, "$ pytest -k multiply\nE   something else\n")
+        r = run_mark(self.spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", "E   invented failure", tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("verbatim", r.stderr)
+        self.assertNotIn("(fix", entry_text(self.spec, "T001"))
+
+    def test_table_fail_refuses_past_the_cap(self):
+        edits = [(T1, T1.replace("[P]", "[P] (fix 5/5)")
+                  + f"\n  - fix 5 {EM} d5")]
+        edit_tasks(self.spec, *edits)
+        evidence = self._tmp / "ev.txt"
+        write(evidence, "E   yet another failure")
+        r = run_mark(self.spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", "E   yet another failure", tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("above the cap", r.stderr)
+
+    def test_table_fail_announces_round_guidance(self):
+        for start, n, fragment in (
+                (2, 3, "/spec-design before round 4"),
+                (3, 4, "spawn one tier up"),
+                (4, 5, "the cap")):
+            spec = self.fresh(
+                (T1F, T1F.replace(
+                    "[P]",
+                    f"[P] (in-progress) (fix {start}/5)")
+                 + f"\n  - fix {start} {EM} d{start}"))
+            evidence = self._tmp / f"ev{n}.txt"
+            digest = f"E   failure {n}"
+            write(evidence, digest)
+            r = run_mark(spec, "fail", "T001", "--evidence", str(evidence),
+                         "--digest", digest, tel=self.tel)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn(fragment, r.stdout, n)
+            self.assertIn(f"(fix {n}/5)", entry_text(spec, "T001"))
+
+    def test_table_drop_strikes_with_the_decision(self):
+        r = run_mark(self.spec, "drop", "T002", "--decision", "D-001",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        block = entry_text(self.spec, "T002")
+        self.assertRegex(block.splitlines()[0],
+                         r"^- \[ \] ~~T002~~ dropped \d{4}-\d{2}-\d{2} "
+                         r"\(D-001\)$")
+        events = [e for e in mark_events(self.tel) if e["event"] == "task_drop"]
+        self.assertEqual(events[0]["payload"]["decision"], "D-001")
+
+    def test_table_drop_refuses_an_undefined_decision(self):
+        before = (self.spec / "task.md").read_bytes()
+        r = run_mark(self.spec, "drop", "T002", "--decision", "D-042",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not defined in tech-spec.md", r.stderr)
+        self.assertEqual((self.spec / "task.md").read_bytes(), before)
+
+    def test_table_drop_refuses_a_ticked_entry(self):
+        edit_tasks(self.spec, (T1, T1.replace("- [ ]", "- [x]")))
+        r = run_mark(self.spec, "drop", "T001", "--decision", "D-001",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("delivered work", r.stdout)
+
+    def test_table_refusals_leave_the_entry_unchanged(self):
+        before = (self.spec / "task.md").read_bytes()
+        evidence = self._tmp / "ev-refuse.txt"
+        write(evidence, "$ pytest\nE   real output\n")
+        for verb, args in (("land", ("T002",)),
+                           ("release", ("T002", "--reason", "orphan")),
+                           ("fail", ("T002", "--evidence", str(evidence),
+                                     "--digest", "x")),
+                           ("drop", ("T002", "--decision", "D-042"))):
+            r = run_mark(self.spec, verb, *args, tel=self.tel)
+            self.assertEqual(r.returncode, 1, (verb, r.stdout, r.stderr))
+            self.assertIn("refused", r.stdout + r.stderr, verb)
+        self.assertEqual((self.spec / "task.md").read_bytes(), before)
+
+
+class LandProofGateTests(unittest.TestCase):
+    """land's two gates on a docset whose proofs are deterministic:
+    a red TC refuses (entry still claimed), a task with no runnable
+    proof refuses, and a green run lands."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-land-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+
+    def land(self, spec: Path, task: str, *extra: str):
+        make_wave(spec, task)
+        run_mark(spec, "claim", "--wave", str(spec / "spawns" / "wave-4"),
+                 tel=self.tel)
+        return run_mark(spec, "land", task, *extra, tel=self.tel)
+
+    def test_red_proofs_refuse_and_the_fail_command_is_printed(self):
+        spec = hand_fixture(self._tmp, "red", fail_tc=True)
+        r = self.land(spec, "T001",
+                      "--digest", "digest: task T001 · status implemented")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("FAIL", r.stdout)
+        self.assertIn("fail", r.stdout)  # the exact next command
+        self.assertIn("(in-progress)", entry_text(spec, "T001"))
+
+    def test_green_proofs_land(self):
+        spec = hand_fixture(self._tmp, "green")
+        r = self.land(spec, "T001",
+                      "--digest", "digest: task T001 · status implemented "
+                      "· files 1 · commit-line x")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented)", r.stdout)
+        block = entry_text(spec, "T001")
+        self.assertIn("(implemented)", block.splitlines()[0])
+        self.assertFalse(specstate.CLAIM_NOTE.search(block))
+        events = [e for e in mark_events(self.tel)
+                  if e["event"] == "task_land"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["payload"]["task"], "T001")
+
+    def test_a_task_with_no_runnable_proof_refuses(self):
+        spec = hand_fixture(self._tmp, "noproof")
+        # T001 lands green first, which makes T002 runnable; T002 then
+        # loses its runnable proof (its TC degrades to a MANUAL
+        # observation), so land has nothing to execute
+        green = self.land(spec, "T001",
+                          "--digest", "digest: task T001 · status "
+                          "implemented")
+        self.assertEqual(green.returncode, 0, green.stdout + green.stderr)
+        test = spec / "test.md"
+        write(test, test.read_text(encoding="utf-8").replace(
+            "- **Pass condition**: `python3 -c 'print(\"HI!\")'`",
+            "- **Pass condition**: observed by hand — no command"))
+        r = self.land(spec, "T002",
+                      "--digest", "digest: task T002 · status implemented")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("no auto proof ran", r.stderr)
+        self.assertIn("(in-progress)", entry_text(spec, "T002"))
+
+    def test_a_digest_file_lands_without_the_override(self):
+        spec = hand_fixture(self._tmp, "file")
+        make_wave(spec, "T001")
+        run_mark(spec, "claim", "--wave", str(spec / "spawns" / "wave-4"),
+                 tel=self.tel)
+        digests = spec / "digests" / "wave-4"
+        digests.mkdir(parents=True)
+        write(digests / "implementer-T001.md",
+              "digest: task T001 · status implemented · files 2 · "
+              "commit-line feat(x): T001 shout (FR-001) · deviation none · "
+              "note none\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("override", r.stderr)
+        self.assertIn("landed T001 (implemented)", r.stdout)
+
+    def test_a_blocked_digest_file_refuses_toward_release(self):
+        spec = hand_fixture(self._tmp, "blocked")
+        make_wave(spec, "T001")
+        run_mark(spec, "claim", "--wave", str(spec / "spawns" / "wave-4"),
+                 tel=self.tel)
+        digests = spec / "digests" / "wave-4"
+        digests.mkdir(parents=True)
+        write(digests / "implementer-T001.md",
+              "digest: task T001 · status blocked: no failure evidence · "
+              "files 0 · commit-line none · deviation none · note none\n")
+        r = run_mark(spec, "land", "T001",
+                     "--digest", "digest: task T001 · status implemented",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("blocked digest", r.stderr)
+        self.assertIn("release", r.stderr)
+        self.assertIn("(in-progress)", entry_text(spec, "T001"))
+
+    def test_a_foreign_tasks_digest_file_is_ignored(self):
+        # the digest line's task field must match — a stem can lie
+        spec = hand_fixture(self._tmp, "foreign")
+        make_wave(spec, "T001")
+        run_mark(spec, "claim", "--wave", str(spec / "spawns" / "wave-4"),
+                 tel=self.tel)
+        digests = spec / "digests" / "wave-4"
+        digests.mkdir(parents=True)
+        write(digests / "implementer-T001.md",
+              "digest: task T002 · status implemented · files 1\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("none on file", r.stderr)
+
+    def test_an_open_round_needs_a_resolution(self):
+        spec = hand_fixture(self._tmp, "round")
+        edit_tasks(spec, ("- [ ] T001 implement",
+                          "- [ ] T001 (in-progress) (fix 1/5) implement"
+                          f"\n  - fix 1 {EM} it failed"))
+        make_wave(spec, "T001")
+        run_mark(spec, "claim", "--wave", str(spec / "spawns" / "wave-4"),
+                 tel=self.tel)
+        r = run_mark(spec, "land", "T001",
+                     "--digest", "digest: task T001 · status implemented",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        r = run_mark(spec, "land", "T001",
+                     "--digest", "digest: task T001 · status implemented",
+                     "--resolution", "guard the empty case",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        block = entry_text(spec, "T001")
+        self.assertIn("(implemented)", block.splitlines()[0])
+        self.assertIn("(fixed 1/5)", block.splitlines()[0])
+        self.assertRegex(block, rf"- fixed 1 {EM} guard the empty case "
+                         rf"{EM} audit\.py proofs --task T001 green")
+
+
+class ClaimWaveTests(unittest.TestCase):
+    """claim --wave's own contract: exactly the wave's files, the
+    frontier re-run refusing a stale wave, and nothing written on a
+    refusal."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-wave-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+        self.spec = copy_fixture(self._tmp)
+        set_status(self.spec, "approved")
+
+    def test_claims_exactly_the_waves_files(self):
+        make_wave(self.spec, "T001")
+        r = run_mark(self.spec, "claim", "--wave",
+                     str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("claimed 1: T001", r.stdout)
+        self.assertIn("(in-progress)", entry_text(self.spec, "T001"))
+        self.assertNotIn("(in-progress)", entry_text(self.spec, "T002"))
+
+    def test_a_stale_wave_is_refused_whole(self):
+        # T001 claimed by hand (no stamp — an older docset's shape), so
+        # the wave holding T001 no longer matches the frontier
+        edit_tasks(self.spec, (T1, T1.replace("[P]", "[P] (in-progress)")))
+        before = (self.spec / "task.md").read_bytes()
+        r = run_mark(self.spec, "claim", "--wave",
+                     str(make_wave(self.spec, "T001", "T002")), tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("stale wave: T001", r.stdout)
+        self.assertIn("nothing claimed", r.stdout)
+        self.assertEqual((self.spec / "task.md").read_bytes(), before)
+
+    def test_a_wave_naming_an_unknown_task_is_refused(self):
+        r = run_mark(self.spec, "claim", "--wave",
+                     str(make_wave(self.spec, "T009")), tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("no such entry", r.stdout)
+
+    def test_a_wave_dir_without_payloads_is_usage(self):
+        d = self.spec / "spawns" / "wave-empty"
+        d.mkdir(parents=True)
+        r = run_mark(self.spec, "claim", "--wave", str(d), tel=self.tel)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_a_fix_round_wave_claims_again(self):
+        edit_tasks(self.spec, (T1, T1.replace("[P]", "[P] (fix 1/5)")
+                               + f"\n  - fix 1 {EM} it failed"))
+        r = run_mark(self.spec, "claim", "--wave",
+                     str(make_wave(self.spec, "T001")), tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        first = entry_text(self.spec, "T001").splitlines()[0]
+        self.assertIn("(fix 1/5)", first)
+        self.assertIn("(in-progress)", first)
+
+
+class LockTests(unittest.TestCase):
+    """The shared lock: a held lock exits 5, a stale one is broken."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-lock-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+        self.spec = copy_fixture(self._tmp)
+        set_status(self.spec, "approved")
+
+    def test_a_held_lock_exits_five(self):
+        make_wave(self.spec, "T001")
+        holder = (
+            "import sys, time\n"
+            f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
+            "import specstate\n"
+            f"with specstate.task_lock({str(self.spec)!r}):\n"
+            "    print('held', flush=True)\n"
+            "    time.sleep(8)\n")
+        hpath = self._tmp / "holder.py"
+        write(hpath, holder)
+        p = subprocess.Popen([sys.executable, str(hpath)],
+                             stdout=subprocess.PIPE, text=True)
+        self.addCleanup(p.wait)
+        try:
+            self.assertEqual(p.stdout.readline().strip(), "held")
+            r = run_mark(self.spec, "claim", "--wave",
+                         str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+            self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+            self.assertIn("lock busy", r.stderr)
+        finally:
+            p.kill()
+
+    def test_a_stale_lock_is_broken(self):
+        make_wave(self.spec, "T001")
+        lock = self.spec / ".task.lock"
+        write(lock, "12345 2026-11-13T10:00:00")
+        old = time.time() - 120
+        os.utime(lock, (old, old))
+        r = run_mark(self.spec, "claim", "--wave",
+                     str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("stale task lock", r.stderr)
+        self.assertFalse(lock.exists())
+
+
+class TickStampTests(unittest.TestCase):
+    """tick.py strips exactly the ticked entry's stamp — another claimed
+    entry's stamp survives."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-tick-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+        self.spec = copy_fixture(self._tmp)
+        set_status(self.spec, "approved")
+
+    def test_tick_strips_the_ticked_entrys_stamp_only(self):
+        make_wave(self.spec, "T001")
+        r = run_mark(self.spec, "claim", "--wave",
+                     str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # T002 keeps a hand stamp of its own — it must survive T001's tick
+        edit_tasks(self.spec, (T2F, T2F.replace("[P]", "[P] (in-progress)")
+                               + f"\n  - claimed 2026-11-13T10:00:00Z "
+                                 f"{EM} run r-hand"))
+        r = subprocess.run(
+            [sys.executable, str(SCRIPTS / "tick.py"), str(self.spec),
+             "--note", "T001 :: pytest green"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        t001 = entry_text(self.spec, "T001")
+        self.assertIn("- [x]", t001.splitlines()[0])
+        self.assertFalse(specstate.CLAIM_NOTE.search(t001))
+        # the untouched claim keeps its stamp
+        self.assertTrue(specstate.CLAIM_NOTE.search(entry_text(self.spec, "T002")))
+
+
+class TinyTierTests(unittest.TestCase):
+    """The tiny tier: a stamped claim keeps the frozen spec verifiable
+    (the hard ordering rule behind freeze.py's claimed alternative), and
+    drop refuses outright."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-tiny-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+        self.spec = self._tmp / "specs" / "tiny"
+        self.spec.mkdir(parents=True)
+        write(self.spec / "spec.md", TINY_SPEC)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(freeze.record(self.spec, self._tmp), 0)
+
+    def test_a_stamped_claim_keeps_the_freeze_verifiable(self):
+        r = run_mark(self.spec, "claim", "--wave",
+                     str(make_wave(self.spec, "T001", wave=2)), tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(specstate.CLAIM_NOTE.search(
+            (self.spec / "spec.md").read_text(encoding="utf-8")))
+        rc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "freeze.py"), str(self.spec),
+             "--verify"], capture_output=True, text=True, timeout=120)
+        self.assertEqual(rc.returncode, 0, rc.stdout + rc.stderr)
+
+    def test_drop_refuses_outright_at_tiny_tier(self):
+        r = run_mark(self.spec, "drop", "T001", "--decision", "D-001",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Tier: tiny", r.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

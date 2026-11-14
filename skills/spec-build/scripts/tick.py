@@ -78,10 +78,19 @@ def _tasks_by_id(task_md: str) -> dict:
 
 def _apply_ticks(task_md: str, notes: list[tuple[str, str]], date: str) -> str:
     """Flip the named entries and insert done-lines. Caller has validated
-    that every target exists, is unticked, and is unclaimed-or-claimable."""
+    that every target exists, is unticked, and is unclaimed-or-claimable.
+    The claim stamp sub-line (spec-build D-039) goes with the claim: a
+    ticked entry is landed history, not a live claim. Only the ticked
+    entry's own stamp (the sub-line directly under it) is dropped — other
+    entries' stamps are theirs."""
     out: list[str] = []
     pending = dict(notes)
+    skip_stamp = False
     for line in task_md.splitlines():
+        if skip_stamp and specstate.CLAIM_NOTE.match(line):
+            skip_stamp = False
+            continue
+        skip_stamp = False
         m = TASK_LINE_RE.match(line)
         if m and m.group(1) in pending:
             proof = pending.pop(m.group(1))
@@ -90,6 +99,7 @@ def _apply_ticks(task_md: str, notes: list[tuple[str, str]], date: str) -> str:
             flipped = flipped.replace(" (implemented)", "", 1)
             out.append(flipped)
             out.append(f"  - done {date} — {proof}")
+            skip_stamp = True  # the flipped entry's stamp, if it has one
         else:
             out.append(line)
     assert not pending, f"validated task vanished mid-write: {sorted(pending)}"
@@ -257,6 +267,16 @@ def redeliver(spec_dir: Path, new_sha: str, repo: Path, dry: bool) -> int:
     if not path.is_file():
         print(f"no {path.name} under {spec_dir}", file=sys.stderr)
         return 1
+    try:
+        with specstate.task_lock(spec_dir):
+            return _redeliver_locked(path, spec_dir, new_sha, repo, dry)
+    except specstate.TaskLockBusy as exc:
+        print(f"lock busy: {exc}", file=sys.stderr)
+        return 1
+
+
+def _redeliver_locked(path: Path, spec_dir: Path, new_sha: str,
+                      repo: Path, dry: bool) -> int:
     original = path.read_text(encoding="utf-8")
     record = RECORD_RE.search(original)
     if record is None:
@@ -364,6 +384,21 @@ def main(argv=None) -> int:
     if not task_path.is_file():
         print(f"no task.md under {spec_dir}", file=sys.stderr)
         return 1
+
+    # One marker writer at a time (spec-build D-039): the whole
+    # validate → transform → write → postcheck transaction holds
+    # specstate.task_lock, the same lock mark.py takes.
+    try:
+        lock_ctx = specstate.task_lock(Path(spec_dir))
+    except specstate.TaskLockBusy as exc:
+        print(f"lock busy: {exc}", file=sys.stderr)
+        return 1
+    with lock_ctx:
+        return _tick_locked(task_path, spec_dir, notes, parks, dry, date)
+
+
+def _tick_locked(task_path: Path, spec_dir: Path, notes: list[tuple[str, str]],
+                 parks: list[tuple[str, str]], dry: bool, date: str) -> int:
     original = task_path.read_text(encoding="utf-8")
 
     # Validate everything BEFORE writing anything: every target exists,

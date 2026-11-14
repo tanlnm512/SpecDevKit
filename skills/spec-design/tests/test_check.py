@@ -729,6 +729,38 @@ class FixRoundGateTests(unittest.TestCase):
             any("closed round 2 lacks a resolution or proof" in p
                 for p in problems), problems)
 
+    # claim-stamp pairing (spec-build D-039): the same shape gate reads
+    # the stamp sub-lines mark.py writes
+    def test_a_stamp_on_a_claimed_entry_passes(self):
+        stamped = self.MID_ROUND.replace(
+            "- [ ] T001 (fix 3/5)",
+            "- [ ] T001 (in-progress) (fix 3/5)").replace(
+            "  - fix 1 — pytest fails on empty input\n",
+            "  - claimed 2026-11-14T09:12:03Z — run r-7f3a\n"
+            "  - fix 1 — pytest fails on empty input\n")
+        self.assertEqual(check.fix_round_problems(self.entries(stamped)), [])
+
+    def test_a_stamp_without_the_claim_marker_fails(self):
+        loose = self.MID_ROUND.replace(
+            "  - fix 1 — pytest fails on empty input\n",
+            "  - claimed 2026-11-14T09:12:03Z — run r-7f3a\n"
+            "  - fix 1 — pytest fails on empty input\n")
+        problems = check.fix_round_problems(self.entries(loose))
+        self.assertTrue(
+            any("no (in-progress) marker" in p for p in problems), problems)
+
+    def test_two_stamps_on_one_entry_fail(self):
+        twice = self.MID_ROUND.replace(
+            "  - fix 1 — pytest fails on empty input\n",
+            "  - claimed 2026-11-14T09:12:03Z — run r-7f3a\n"
+            "  - claimed 2026-11-14T10:00:00Z — run r-dead\n"
+            "  - fix 1 — pytest fails on empty input\n").replace(
+            "- [ ] T001 (fix 3/5)",
+            "- [ ] T001 (in-progress) (fix 3/5)")
+        problems = check.fix_round_problems(self.entries(twice))
+        self.assertTrue(
+            any("carries 2 claim stamps" in p for p in problems), problems)
+
     def test_sub_lines_without_a_marker_fail(self):
         bare = ("## Phase 1: p (FR-001)\n"
                 "- [ ] T001 rounds recorded, marker lost (FR-001)\n"

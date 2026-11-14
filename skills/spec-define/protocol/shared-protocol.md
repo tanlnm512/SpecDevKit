@@ -15,7 +15,10 @@ the orchestrator re-briefs the owner.
 ## Your artifact is the deliverable
 Your artifact on disk is the deliverable — not your reply. Ensure it is
 complete before you stop; nothing you say back is read as the record.
-Return your digest per your brief's contract.
+Return your digest per your brief's contract — and when your payload
+names a digest file, that file holds the same text as your returned
+digest: write it as your final action, so it survives whatever happens
+to the session that spawned you.
 
 ## Universal rules (canonical — your brief does not repeat these)
 1. **Citations verbatim** from survey.md, or from your own session's grep
@@ -30,7 +33,9 @@ Return your digest per your brief's contract.
    the artifact its brief names — nothing else (the survey lens's
    `specs/context/` files are the one named exception). An implementer
    writes its task's `Touches:` set and the tests for it — nothing under
-   `specs/` beyond the note its brief allows.
+   `specs/` beyond the note its brief allows. Your payload's digest
+   file is the one second write every write-capable role gets: it is
+   evidence of what you reported, never status.
 6. **You never spawn agents, and you never commit or push.**
 
 ## Long foreground tasks

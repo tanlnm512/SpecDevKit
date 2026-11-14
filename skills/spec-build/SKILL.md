@@ -74,7 +74,16 @@ The frontier is the only scheduler: compute, run the ready wave,
 recompute, repeat — bounded to the execute span's nodes (execute,
 tick-commit). `--explain execute` prints every task's state and why.
 Unattended runs are safe only on this span (no gate ahead until
-tick-commit); the run parks there by design.
+tick-commit); the run parks there by design. A custom `--runner`
+DRIVES execute headlessly (D-041): per wave, `mark.py claim` → the
+runner runs the payloads (batched `--parallel N`) → `mark.py land` for
+each task whose digest reports implemented → the loop continues to the
+tick-commit gate and parks `AWAITING HUMAN`. Anything else — a blocked
+or missing digest, red proofs, a failed runner — leaves the tasks
+CLAIMED and stops `AWAITING ORCHESTRATOR: execute` for you to settle.
+Where mark.py does not ship (the other packages' graph.py copies), the
+old refusal stands (D-038): use the default print runner and spawn the
+payloads yourself.
 
 ### Implementation — per-task frontier waves
 
@@ -86,7 +95,9 @@ writes payloads for the runnable tasks, in task-id order, whose
 task's, and prints `deferred: T### (shares <path> with T###)` for
 the rest. A task with no parseable `Touches:` runs alone. Per round:
 
-1. Mark every emitted task `(in-progress)`.
+1. Run the `mark.py claim --wave` line the emit prints — it claims
+   exactly the emitted payloads' tasks (`(in-progress)` + claim stamp)
+   or refuses a wave the frontier has outgrown.
 2. Spawn exactly the emitted payloads in ONE message — one developer
    each; deferred and chained tasks come up on a later emit.
 3. Collect digests. A reported deviation → append the D-### to
@@ -96,10 +107,10 @@ the rest. A task with no parseable `Touches:` runs alone. Per round:
    digest `note` (an acceptance command red in a file outside the
    task's `Touches:`) is the owning task's failure, never the
    reporter's: re-run the command once the wave has landed.
-4. Record `(implemented)` only after the digest plus your own
-   scoped re-verification of its acceptance commands prove the
-   landing — the marker releases chained dependents; one without
-   verified landing is a fabricated tick in cheaper clothing.
+4. `mark.py land` the task only after the digest plus the scoped
+   proofs gate prove the landing — the marker releases chained
+   dependents; one without verified landing is a fabricated tick in
+   cheaper clothing.
 
 No per-task gate, no per-phase stop, no commit while implementing.
 **Rulings, not stalls**: a mid-execution conflict gets a D-###
@@ -108,21 +119,28 @@ and ask only for an irreversible or destructive operation, a
 security-sensitive action, a side effect outside the workspace, or
 a plan broken enough that every path is a guess.
 
-### Task markers — who writes each transition
+### Task markers — written only through `mark.py` / `tick.py`
 
 You are the sole status writer; developers return digests and never
-touch task.md. One marker change per event:
+touch task.md. One marker change per event — every transition is one
+`scripts/mark.py` verb (D-039), which checks the current marker, takes
+the spec's `.task.lock`, and refuses anything else. The verbs, not
+hand edits, are the sanctioned writer:
 
-| Entry reads | Event | You write |
-|-------------|-------|-----------|
-| `- [ ] T###` (pending) | its payload is spawned | add `(in-progress)` |
-| `(in-progress)` | digest `implemented` or `already-satisfied`, and your re-run of its acceptance commands is green | `(implemented)` in place of the claim |
-| `(in-progress)` | digest `blocked:why` | clear the claim; rule (D-###) and re-spawn, or route to `/spec-design` — no fix round |
-| `(in-progress)` or `(implemented)` | it came back wrong | `(fix n/5)` — in place of the claim, or beside `(implemented)` — plus the round's open sub-line `fix <n> — <digest>` |
-| `(fix n/5)` | the round's payload is spawned | add `(in-progress)` |
-| `(in-progress) (fix n/5)` | landed and verified | `(implemented) (fixed n/5)`, the round's close sub-line `fixed <n> — <resolution> — <proof>` appended |
-| `(implemented)` | delivery pass green and the user's yes | `- [x]` + proof note, by `tick.py` |
-| any open entry | dropped by ruling | `~~T###~~ dropped <date> (D-###)` |
+| Entry reads | Event | The mark.py verb |
+|-------------|-------|------------------|
+| `- [ ] T###` (pending) | its payload's wave is claimed | `mark.py claim <spec> --wave <wave-dir> [--run-id ID]` — writes `(in-progress)` + the claim stamp sub-line `  - claimed <UTC ISO> — run <id>` on exactly the wave's `implementer-T###.md` tasks |
+| `(in-progress)` | digest `implemented` or `already-satisfied`, and `audit.py proofs <spec> --run --task T###` is green | `mark.py land <spec> T###` — writes `(implemented)` in place of the claim, the stamp gone |
+| `(in-progress) (fix n/5)` | the round landed and verified | `mark.py land <spec> T### --resolution "<text>"` — writes `(implemented) (fixed n/5)`, the round's close sub-line `fixed <n> — <resolution> — <proof>` appended |
+| `(in-progress)` | digest `blocked:why` | `mark.py release <spec> T### --reason "<text>"` — claim and stamp cleared; rule (D-###) and re-spawn, or route to `/spec-design` — no fix round |
+| `(in-progress)` or `(implemented)` | it came back wrong | `mark.py fail <spec> T### --evidence <file> --digest "<line>"` — writes `(fix n/5)` (in place of the claim, or beside `(implemented)`) plus the round's open sub-line `fix <n> — <digest>`, evidence verbatim into `notes/T###.md` |
+| `(implemented)` | delivery pass green and the user's yes | `- [x]` + proof note, by `tick.py` (it also strips the stamp) |
+| any open entry | dropped by ruling | `mark.py drop <spec> T### --decision D-###` — refuses a D-### tech-spec.md does not define, and refuses outright at `Tier: tiny` |
+
+The claim stamp names when the task was claimed and by which run —
+resume reads its age and run id; land, release and tick remove it. A
+claim with no stamp (hand-written, older docset) stays valid; a stamp
+with no claim is a check.py finding.
 
 `(fix n/5)` is an OPEN round: while it stands the task is runnable
 again whatever else the entry says — `(implemented) (fix 1/5)` is
@@ -140,23 +158,23 @@ Only failed implementation opens a round: your re-run of the task's
 acceptance commands is red, a delivery-pass proof failure traces to
 it, or the auditor BLOCKs its change. `blocked:why` is not a
 failure and consumes no round. To open round n (n = the times this
-task has come back wrong):
+task has come back wrong), run
+`mark.py fail <spec> T### --evidence <file> --digest "<line>"`
+(D-039) — mark.py refuses a digest that is not copied verbatim from
+the evidence file, so:
 
-1. Append the evidence to `specs/<name>/notes/T###.md` under
-   `## Fix round n` — the failing command and its output verbatim,
-   never a summary (`audit.py proofs --run` prints both for each
-   failed proof: the exit code and the stdout+stderr tail). The
-   payload embeds this file; an emit without it prints `evidence
-   missing`.
-2. Write `(fix n/5)` on the entry with its open sub-line
-   `fix <n> — <digest>`, the digest copied verbatim from the evidence
-   just appended — the line is never rewritten; the round closes by
-   appending its sibling `fixed <n> — <resolution> — <proof>`.
-   Re-emit, and spawn. Continue the same developer if the harness can
-   message a finished agent; otherwise a fresh spawn — the payload
-   carries the note and the evidence either way. The developer may
-   append what it tried to the same note: its one exception to
-   "never touch specs/".
+1. Put the evidence in a file first — the failing command and its
+   output verbatim, never a summary (`audit.py proofs --run` prints
+   both for each failed proof: the exit code and the stdout+stderr
+   tail). mark.py appends it to `specs/<name>/notes/T###.md` under
+   `## Fix round n` and writes the marker plus the open sub-line
+   `fix <n> — <digest>`. The payload embeds this file; an emit
+   without it prints `evidence missing`.
+2. Re-emit, `mark.py claim` the fresh wave, and spawn. Continue the
+   same developer if the harness can message a finished agent;
+   otherwise a fresh spawn — the payload carries the note and the
+   evidence either way. The developer may append what it tried to
+   the same note: its one exception to "never touch specs/".
 
 Rounds 1–3 run at the same capability tier. Round 3 failing
 suspects the plan: repair the area's tech/tasks docs through
@@ -171,15 +189,23 @@ D-###), isolated (defer), or load-bearing (`/spec-design` re-plans).
 Run the same command. A wave that died leaves `(in-progress)` claims
 with no developer behind them: `--run` stops `AWAITING ORCHESTRATOR:
 execute` when nothing else can run, and every emit and `--explain
-execute` flag each claimed task as a possible orphan. Settle each
-one before spawning anything that shares its files:
+execute` flag each claimed task as a possible orphan — with the claim
+stamp's age and its run id (`claimed 3h ago by run r-7f3a`), and
+`--run-id <your run>` narrowing the orphan flags to OTHER runs'
+claims. Settle each one before spawning anything that shares its
+files. Step 0 reads each claimed task's digest column
+(`digest on file: …`): an `implemented` digest → `mark.py land` (it
+re-runs the proofs); a `blocked:` digest → `mark.py release` and rule;
+no digest → read the diff as below:
 
 1. Read `git status` and `git diff -- <the task's Touches files>`
    to see what the dead developer left.
 2. Re-run the task's acceptance commands. Green, and the diff is the
-   task → write `(implemented)`. Otherwise clear `(in-progress)`: the
-   next emit re-spawns it, and its partial edits stay in the tree
-   for that developer to continue — never reset the tree to clean up.
+   task → `mark.py land <spec> T### --digest "<the developer's digest
+   line>"`. Otherwise `mark.py release <spec> T### --reason "orphan:
+   <what the diff shows>"`: the next emit re-spawns it, and its
+   partial edits stay in the tree for that developer to continue —
+   never reset the tree to clean up.
 
 ### The delivery pass (once, all-or-nothing)
 

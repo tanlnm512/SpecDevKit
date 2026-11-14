@@ -14,7 +14,8 @@ say.
 
 Pure functions, stdlib only, no CLI: importing this module has no side
 effects — no output, no file writes (the file-reading exceptions are
-research_state/git helpers, which take an explicit path). Text arguments
+research_state/git helpers and `task_lock`, which take an explicit
+path). Text arguments
 are the already-read file contents; check.py strips invisible/control
 characters at read time before any parser sees the text, so the patterns
 below can stay simple.
@@ -23,8 +24,13 @@ Exit-code/CLI contracts live in the tooling scripts, not here.
 """
 from __future__ import annotations
 
+import contextlib
+import datetime
+import os
 import re
 import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -112,6 +118,18 @@ FIX_NOTE_OPEN = re.compile(r"^\s*(?:-\s*)?fix (\d+) \u2014 (.+)$", re.M)
 FIX_NOTE_CLOSED = re.compile(
     r"^\s*(?:-\s*)?fixed (\d+) \u2014 (.+?) \u2014 (.+)$", re.M)
 
+# The claim stamp (spec-build D-039): `  - claimed <UTC ISO> — run <id>`,
+# a sub-line under a claimed entry written by mark.py claim. A sub-line —
+# not an inline `(in-progress r-id)` — on purpose: the claim stays
+# detected by the `(in-progress)` substring and the freeze's marker
+# regex keeps matching only the exact marker words, the same way the fix
+# sub-lines work. History of round sub-lines is durable; a stamp is not —
+# land, release and tick remove it. A claim with no stamp stays valid
+# (older docsets); a stamp with no claim is the checker's finding.
+CLAIM_NOTE = re.compile(
+    r"^\s*(?:-\s*)?claimed (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)"
+    r" \u2014 run (\S+)$", re.M)
+
 # task.md header: the delivery record — `commit @ <sha>` once the plan's
 # end-of-spec commit exists, `commit @ -` the explicit non-git skip. The
 # record must name `commit` directly after the colon, so the scaffold's
@@ -163,6 +181,15 @@ SURVEY_ITEM_STATUS = re.compile(r"^\s*status:\s*(DONE|PARTIAL|TODO)", re.M)
 # stripped line.
 RESEARCH_SKIP_MARKER = "not applicable — no open questions at Stage 0"
 
+# The developer digest line (agents/developer.md's contract, D-040):
+# `digest: task T### · status <…> · files <n> · commit-line … ·
+# deviation … · note …` — one line, middle-dot separated. Agents write
+# it verbatim into specs/<name>/digests/wave-<N>/<payload-stem>.md as
+# their final action; latest_digest parses it back. Run scratch, not
+# archived contract (archive.sh removes digests/ with spawns/).
+DIGEST_DIR = "digests"
+DIGEST_TASK = re.compile(r"^digest:\s*task\s+(T\d{3})\b")
+
 # The research gate's artifact in tech-spec.md: one section, two
 # subsections. The heading is matched anywhere in the file (no
 # positional coupling); everything to the next `## ` is the section.
@@ -185,6 +212,16 @@ class FixRound(NamedTuple):
     closed: bool
 
 
+class ClaimStamp(NamedTuple):
+    """A claimed entry's claim stamp (spec-build D-039): the UTC ISO time
+    mark.py claimed the task and the run id whose wave holds it. `at` is
+    informational (the resume view prints its age); `run` tells orphan
+    reports which dead run left the claim behind."""
+
+    at: str
+    run: str
+
+
 class TaskEntry(NamedTuple):
     """One `- [ ]`-anchored task entry from task.md's `## Phase N` sections.
 
@@ -194,7 +231,8 @@ class TaskEntry(NamedTuple):
     first line doesn't open with a T-ID (e.g. the struck form
     `- [ ] ~~T005~~ …`) and `phase` is None under an unnumbered phase
     header — both stay in the list so consumers count them where the
-    source file counts them."""
+    source file counts them. `claim` is the entry's claim stamp, None
+    when the entry carries none (hand-written claims and older docsets)."""
 
     id: str | None
     phase: int | None
@@ -208,6 +246,7 @@ class TaskEntry(NamedTuple):
     fix_round: int | None
     implemented: bool = False
     rounds: tuple[FixRound, ...] = ()
+    claim: ClaimStamp | None = None
 
 
 class SurveyItem(NamedTuple):
@@ -380,6 +419,7 @@ def task_entries(task_md: str) -> list[TaskEntry]:
             first_line = block.split("\n", 1)[0]
             own = TASK_ID.match(block)
             fix = FIX_ROUND.search(block)
+            cm = CLAIM_NOTE.search(block)
             entries.append(TaskEntry(
                 id=own.group(1) if own else None,
                 phase=phase,
@@ -393,6 +433,7 @@ def task_entries(task_md: str) -> list[TaskEntry]:
                 fix_round=int(fix.group(1)) if fix else None,
                 implemented="(implemented)" in block and fix is None,
                 rounds=fix_rounds(block),
+                claim=ClaimStamp(cm.group(1), cm.group(2)) if cm else None,
             ))
     return entries
 
@@ -458,6 +499,60 @@ def tick_evidence(task_md: str) -> TickEvidence:
         noteless=[e.id for e in entries
                   if e.id and e.done and not DONE_NOTE.search(e.block)],
     )
+
+
+def _parse_digest_line(line: str) -> dict | None:
+    """One `digest: task T### · status … · …` line → its middle-dot
+    segments as a dict (task, status, and whatever optional fields
+    follow). None when the line names no task and status."""
+    m = re.match(r"^digest:\s*(.+)$", line.strip())
+    if not m:
+        return None
+    out: dict = {}
+    for seg in m.group(1).split("\u00b7"):
+        seg = seg.strip()
+        for key, width in (("task", 5), ("status", 7), ("files", 6),
+                           ("commit-line", 12), ("deviation", 10),
+                           ("note", 5)):
+            if seg.startswith(key + " "):
+                out[key.replace("-", "_")] = seg[width:].strip()
+                break
+    return out if out.get("task") and out.get("status") else None
+
+
+def latest_digest(spec_dir: Path | str, task_id: str) -> dict | None:
+    """The newest developer digest on file for `task_id`, or None.
+
+    Digests live at `specs/<name>/digests/wave-<N>/implementer-T###.md`
+    (D-040) — one per wave, so a fix-round re-spawn never overwrites an
+    earlier wave's record. Highest wave wins; within it the parsed
+    digest line's `task` must name `task_id` (a stem can lie; the line
+    cannot). The dict carries the parsed fields plus `wave` and `path`.
+    Pure read: a missing or unreadable digests/ tree is simply None."""
+    base = Path(spec_dir) / DIGEST_DIR
+    if not base.is_dir():
+        return None
+    best: dict | None = None
+    for path in sorted(base.glob("wave-*/implementer-*.md")):
+        m = re.match(r"wave-(\d+)", path.parent.name)
+        if not m:
+            continue
+        wave = int(m.group(1))
+        text = _read_doc_text(path)
+        if not text:
+            continue
+        line = next((ln for ln in text.splitlines()
+                     if ln.strip().startswith("digest:")), None)
+        if line is None:
+            continue
+        parsed = _parse_digest_line(line)
+        if not parsed or parsed.get("task") != task_id:
+            continue
+        if best is None or wave >= best["wave"]:
+            parsed["wave"] = wave
+            parsed["path"] = str(path)
+            best = parsed
+    return best
 
 
 def survey_baseline(survey_md: str) -> tuple[str, str] | None:
@@ -732,3 +827,84 @@ def diff_paths(repo: Path | str, base: str, head: str) -> list[str] | None:
     if r.returncode != 0:
         return None
     return sorted({l.strip() for l in r.stdout.splitlines() if l.strip()})
+
+
+# ---------------------------------------------------------------------------
+# The marker-writers' lock (spec-build D-039). mark.py and tick.py are the
+# only sanctioned writers of task markers; the lock serializes them so two
+# sessions cannot read-rewrite task.md (or a tiny spec's § Tasks) at once.
+# Hand edits skip it — no tool can stop those — and the SKILL's rule says so.
+# ---------------------------------------------------------------------------
+
+class TaskLockBusy(RuntimeError):
+    """task_lock timed out waiting for the spec's marker-writer lock."""
+
+
+TASK_LOCK_NAME = ".task.lock"
+TASK_LOCK_STALE_SECONDS = 60.0
+TASK_LOCK_TIMEOUT_SECONDS = 5.0
+TASK_LOCK_RETRY_SECONDS = 0.05
+
+
+@contextlib.contextmanager
+def task_lock(spec_dir: Path | str,
+              timeout: float = TASK_LOCK_TIMEOUT_SECONDS):
+    """The one cross-writer lock over a spec's task markers.
+
+    Lock file `<spec-dir>/.task.lock`, created with O_CREAT|O_EXCL (the
+    one atomic create every supported platform gives us), holding the
+    owner pid and its UTC timestamp. A held lock is waited on for
+    `timeout` seconds (retry every 50 ms), then TaskLockBusy is raised —
+    callers turn that into their own exit code. A lock older than 60 s is
+    stale: the lock is held for milliseconds, so only a crash mid-write
+    leaves one behind — it is broken (and a warning printed) rather than
+    waited on forever. The holder reads, rewrites and os.replace()s the
+    status file inside the `with`, so a reader never sees half a file."""
+    spec_dir = Path(spec_dir)
+    lock = spec_dir / TASK_LOCK_NAME
+    deadline = time.monotonic() + timeout
+    fd: int | None = None
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lock.stat().st_mtime
+            except OSError:
+                age = 0.0
+            if age > TASK_LOCK_STALE_SECONDS:
+                # only a crash mid-write leaves one — break it and say so
+                owner = _lock_owner(lock)
+                with contextlib.suppress(OSError):
+                    lock.unlink()
+                print(f"warning: broke stale task lock {lock} "
+                      f"({age:.0f}s old, pid {owner or 'unknown'})",
+                      file=sys.stderr)
+                continue
+            if time.monotonic() >= deadline:
+                raise TaskLockBusy(
+                    f"{lock} is held by another writer — retry shortly")
+            time.sleep(TASK_LOCK_RETRY_SECONDS)
+    try:
+        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with contextlib.suppress(OSError):
+            os.write(fd, f"{os.getpid()} {stamp}".encode())
+    finally:
+        os.close(fd)
+    try:
+        yield lock
+    finally:
+        with contextlib.suppress(OSError):
+            lock.unlink()
+
+
+def _lock_owner(lock: Path) -> str | None:
+    """The pid a lock file names, for the stale-lock warning; None when
+    unreadable or the file was already unlinked by the breaking race."""
+    try:
+        head = lock.read_text(encoding="utf-8",
+                              errors="replace").split(" ", 1)[0].strip()
+    except OSError:
+        return None
+    return head or None
