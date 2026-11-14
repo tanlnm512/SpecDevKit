@@ -833,6 +833,194 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
         self.assertEqual(run_check(spec_dir), 1)
 
 
+class Gate007CustomRunnerHonestStopTests(unittest.TestCase):
+    """The custom-runner contract as it reads after the D-041 headless
+    lift: in THIS package a custom runner drives execute waves (Gate009
+    pins the claim/land/stop behavior end to end; Gate009's no-mark test
+    pins the exit-2 refusal where mark.py does not ship, and spec-design's
+    Exec009 pins the honest unchanged-state stop on a doc wave). What
+    stays pinned here: the print runner still drives a wave for the
+    orchestrator to spawn, untouched by the lift."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="gate007-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+
+    def test_print_runner_still_drives_the_wave(self):
+        spec_dir = copy_fixture(self._tmp / "p")
+        set_status(spec_dir, "approved")
+        r = run_graph(spec_dir, "--span", "execute", "--run", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.count("runner[print]: implementer:"), 2)
+
+
+class Gate008DigestFileTests(unittest.TestCase):
+    """Write-capable payloads carry the digest-file block with a per-wave
+    path (D-040); the read-only reviewer's payload never does."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="gate008-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+
+    def test_developer_payload_names_its_digest_file(self):
+        spec_dir = copy_fixture(self._tmp)
+        set_status(spec_dir, "approved")
+        r = run_graph(spec_dir, "--span", "execute", "--emit-spawns",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        payload = next((spec_dir / "spawns").glob(
+            "*/implementer-T001.md")).read_text(encoding="utf-8")
+        self.assertIn("## Digest file", payload)
+        self.assertRegex(payload, r"digests/wave-\d+/implementer-T001\.md")
+        self.assertIn("as your final action", " ".join(payload.split()))
+
+    def test_reviewer_payload_carries_no_digest_block(self):
+        spec_dir = copy_fixture(self._tmp)
+        set_status(spec_dir, "approved")
+        land_all_tasks(spec_dir)
+        r = run_graph(spec_dir, "--span", "execute", "--emit-spawns",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        payload = next((spec_dir / "spawns").glob(
+            "*/reviewer-diff.md")).read_text(encoding="utf-8")
+        self.assertNotIn("## Digest file", payload)
+
+    def test_digest_capable_covers_the_write_roles_only(self):
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "graph_gate008", SCRIPTS / "graph.py")
+        graph = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(graph)
+        for brief in ("developer.md", "analyst.md", "architect.md",
+                      "tester.md"):
+            self.assertTrue(graph.digest_capable({"brief": brief}), brief)
+        for brief in ("auditor.md", "integrator.md", "release-manager.md"):
+            self.assertFalse(graph.digest_capable({"brief": brief}), brief)
+        # the merged designer carries the architect brief
+        self.assertTrue(graph.digest_capable({"briefs": ["architect.md"]}))
+
+
+class Gate009HeadlessExecuteTests(unittest.TestCase):
+    """The headless lift (D-041): where mark.py ships beside graph.py, a
+    custom --runner drives execute waves end to end — mark.py claims,
+    the runner runs (batched --parallel), mark.py lands each task whose
+    digest reports implemented, and the loop parks at the tick-commit
+    HUMAN gate. A blocked digest leaves the task CLAIMED and stops
+    AWAITING ORCHESTRATOR. The tick-commit gate is never auto-satisfied."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="gate009-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+        self.spec = hand_docset(self._tmp / "specs" / "a", "approved")
+        # the runners write their marker beside the spec dir
+        self.repo = self.spec.parent
+        self.runner = self._write_runner(blocked=False)
+
+    def _write_runner(self, blocked: bool) -> str:
+        """The headless 'developer': read the payload it was handed,
+        write its digest file (blocked or implemented), and leave a
+        marker file proving it ran. Its TCs are deterministic one-liners,
+        so the scoped proofs land green once the digest is in."""
+        if blocked:
+            body = ("digest = (f'digest: task {tid} · status blocked: "
+                    "cannot reach the module · files 0 · commit-line "
+                    "none · deviation none · note none')\n")
+        else:
+            body = ("(spec_dir.parent / f'.built-{tid}').write_text('ok')\n"
+                    "digest = (f'digest: task {tid} · status implemented "
+                    "· files 1 · commit-line feat: T### · deviation "
+                    "none · note none')\n")
+        path = self._tmp / f"runner{'-blocked' if blocked else ''}.py"
+        write(path, 'import re, sys\n'
+              'from pathlib import Path\n'
+              'prompt = Path(sys.argv[1]).read_text(encoding="utf-8")\n'
+              'spec_dir = Path(re.search(r"- spec_dir: (.+)", prompt)'
+              '.group(1).strip())\n'
+              'm = re.search(r"implementer-(T\\d{3})", prompt)\n'
+              'tid = m.group(1) if m else "T000"\n'
+              'digests = spec_dir / "digests" / "wave-1"\n'
+              'digests.mkdir(parents=True, exist_ok=True)\n'
+              + body +
+              '(digests / f"implementer-{tid}.md")'
+              '.write_text(digest + "\\n")\n')
+        return f"{sys.executable} {path} {{prompt_file}}"
+
+    def test_headless_run_lands_both_tasks_and_parks_at_tick_commit(self):
+        r = run_graph(self.spec, "--span", "execute", "--run",
+                      "--runner", self.runner, "--parallel", "2",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("mark.py claim", r.stdout)
+        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+        # the runner ran for both tasks, each landed, stamps removed
+        for tid in ("T001", "T002"):
+            self.assertTrue((self.repo / f".built-{tid}").is_file(),
+                            r.stdout)
+        t = (self.spec / "task.md").read_text(encoding="utf-8")
+        self.assertEqual(t.count("(implemented)"), 2, t)
+        self.assertNotIn("(in-progress)", t)
+        self.assertNotIn("claimed ", t)
+        # execute reads done; the gate stays the user's
+        s = json.loads(run_graph(self.spec, "--state-json",
+                                 tel=self.tel).stdout)
+        self.assertEqual(s["nodes"]["execute"]["state"], "done")
+        self.assertEqual(s["nodes"]["tick-commit"]["state"], "READY")
+        self.assertNotIn("ticked", t)  # tick.py is still the only ticker
+
+    def test_a_blocked_digest_leaves_the_task_claimed(self):
+        blocked_runner = self._write_runner(blocked=True)
+        r = run_graph(self.spec, "--span", "execute", "--run",
+                      "--runner", blocked_runner, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("AWAITING ORCHESTRATOR: execute", r.stdout)
+        self.assertIn("held: T001", r.stdout)
+        self.assertIn("blocked", r.stdout + r.stderr)
+        t = (self.spec / "task.md").read_text(encoding="utf-8")
+        self.assertIn("(in-progress)", t)
+        self.assertIn("claimed ", t)  # the stamp survives: still claimed
+        self.assertNotIn("(implemented)", t)
+
+    def test_a_failing_runner_leaves_the_wave_claimed(self):
+        r = run_graph(self.spec, "--span", "execute", "--run",
+                      "--runner", "false", tel=self.tel)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("stay CLAIMED", r.stdout)
+        t = (self.spec / "task.md").read_text(encoding="utf-8")
+        self.assertIn("(in-progress)", t)
+
+    def test_a_package_without_mark_py_still_refuses(self):
+        # the lift is scoped to packages that ship mark.py: a package
+        # with the same graph.py but no scripts/mark.py keeps the D-038
+        # refusal — execute payloads are writable only through the one
+        # marker writer
+        pkg = self._tmp / "nomark"
+        (pkg / "scripts").mkdir(parents=True)
+        (pkg / "agents").mkdir()
+        (pkg / "protocol").mkdir()
+        shutil.copy(SCRIPTS / "graph.py", pkg / "scripts" / "graph.py")
+        for name in ("check.py", "specstate.py", "freeze.py",
+                     "telemetry.py", "contract.py", "index.py"):
+            shutil.copy(SCRIPTS / name, pkg / "scripts" / name)
+        shutil.copy(SKILL / "agents" / "developer.md",
+                    pkg / "agents" / "developer.md")
+        shutil.copy(SKILL / "protocol" / "shared-protocol.md",
+                    pkg / "protocol" / "shared-protocol.md")
+        env = dict(os.environ, KIT_TELEMETRY_DIR=str(self.tel),
+                   KIT_TELEMETRY="on")
+        r = subprocess.run(
+            [sys.executable, str(pkg / "scripts" / "graph.py"),
+             str(self.spec), "--span", "execute", "--run",
+             "--runner", self.runner],
+            capture_output=True, text=True, timeout=300, env=env)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("execute payloads need the orchestrator", r.stdout)
+        # nothing ran: the wave was refused before any subprocess
+        self.assertFalse(any(self.repo.glob(".built-*")), r.stdout)
+
+
 class Gate005LifecycleCommandSurfaceTests(unittest.TestCase):
     """One command per skill (D-033): spec-build.md is this package's
     single command, every lifecycle verb rides it, and extra.txt claims

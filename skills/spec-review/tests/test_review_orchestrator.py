@@ -7,6 +7,7 @@ silently proceed."""
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -508,6 +509,126 @@ class AskRenderingTests(unittest.TestCase):
 
     def test_unknown_ask_kind_fails_loudly(self):
         err(["ask", "--kind", "nope", "--ctx", "{}"])
+
+
+class RunFolderTests(unittest.TestCase):
+    """The run folder's contract (spec-review D-020): run-init records
+    the target's fingerprint after scope ran; run-save stores stage
+    JSON under the STAGES vocabulary; run-resume continues at `next` on
+    an unchanged target and refuses a changed one; the folder carries
+    its own self-ignoring .gitignore; gc prunes old runs."""
+
+    def test_round_trip_reports_next_with_saved_data(self):
+        holder, repo = make_repo()
+        with holder:
+            (repo / "app.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+            init = ok(["run-init", "--target", "diff", "--repo", str(repo)])
+            run_dir = init["run_dir"]
+            self.assertEqual(init["status"], "ok")
+            self.assertTrue((Path(run_dir) / ".gitignore").is_file())
+            self.assertEqual(
+                (Path(run_dir) / ".gitignore").read_text(encoding="utf-8"),
+                "*\n")
+            ok(["run-save", "--run-dir", run_dir, "--stage", "scope",
+                "--data", '{"fast_mode_default": false, "files": 1}'])
+            ok(["run-save", "--run-dir", run_dir, "--stage", "scout",
+                "--data", '{"riskAreas": []}'])
+            ok(["run-save", "--run-dir", run_dir,
+                "--stage", "review-correctness", "--data", '{"findings": []}'])
+            resumed = ok(["run-resume", "--run-dir", run_dir])
+            self.assertEqual(resumed["completed"],
+                             ["scope", "scout", "review-correctness"])
+            # the saved lens was the mode's FIRST lens — the next slot
+            # is the second lens's review, not a triage
+            self.assertEqual(resumed["next"], "review-security")
+            self.assertEqual(resumed["data"]["scout"]["data"],
+                             {"riskAreas": []})
+            # the saved scope data rides through verbatim — the lens set
+            # for `next` read its fast_mode_default (false → the full
+            # LENSES order, so review-security is the second slot)
+            self.assertFalse(resumed["data"]["scope"]["data"]
+                             ["fast_mode_default"])
+
+    def test_changed_target_refuses_to_resume(self):
+        holder, repo = make_repo()
+        with holder:
+            (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+            init = ok(["run-init", "--target", "diff", "--repo", str(repo)])
+            run_dir = init["run_dir"]
+            ok(["run-save", "--run-dir", run_dir, "--stage", "scope",
+                "--data", "{}"])
+            (repo / "new.py").write_text("b = 1\n", encoding="utf-8")
+            e = err(["run-resume", "--run-dir", run_dir])
+            self.assertIn("target changed", e)
+            self.assertIn("fix_from", e)
+
+    def test_resume_from_the_run_record_alone(self):
+        holder, repo = make_repo()
+        with holder:
+            (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+            init = ok(["run-init", "--target", "diff", "--repo", str(repo)])
+            run_dir = init["run_dir"]
+            resumed = ok(["run-resume", "--run-dir", run_dir])
+            self.assertEqual(resumed["completed"], [])
+            self.assertEqual(resumed["next"], "scope")
+
+    def test_run_save_refuses_a_stage_outside_the_vocabulary(self):
+        holder, repo = make_repo()
+        with holder:
+            init = ok(["run-init", "--target", "diff", "--repo", str(repo)])
+            e = err(["run-save", "--run-dir", init["run_dir"],
+                     "--stage", "bogus", "--data", "{}"])
+            self.assertIn("STAGES", e)
+            # the concrete forms of every pattern save cleanly
+            for stage in ("scope", "review-correctness", "triage-general",
+                          "confirm-F-001", "fix-2-gate"):
+                ok(["run-save", "--run-dir", init["run_dir"],
+                    "--stage", stage, "--data", '{"n": 1}'])
+
+    def test_gc_keeps_the_newest_runs(self):
+        holder, repo = make_repo()
+        with holder:
+            root = Path(repo) / ".spec-review" / "runs"
+            root.mkdir(parents=True)
+            for name in ("20260101-000000-aaaa", "20260102-000000-bbbb",
+                         "20260103-000000-cccc", "20260104-000000-dddd",
+                         "20260105-000000-eeee", "20260106-000000-ffff"):
+                (root / name).mkdir()
+                (root / name / "run.json").write_text("{}", encoding="utf-8")
+            d = ok(["run-gc", "--repo", str(repo), "--keep", "5"])
+            self.assertEqual(d["removed"], ["20260101-000000-aaaa"])
+            self.assertEqual(d["kept"], 5)
+            # run-init gcs too
+            ok(["run-init", "--target", "diff", "--repo", str(repo)])
+            self.assertEqual(len(list(root.iterdir())), 5)
+
+    def test_stage_order_matches_run_sequence_md(self):
+        import importlib.util
+        sys.path.insert(0, str(SCRIPT.parent))
+        _spec = importlib.util.spec_from_file_location(
+            "review_orchestrator_drift", SCRIPT)
+        ro = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(ro)
+        md = (Path(__file__).resolve().parent.parent / "contracts"
+              / "run-sequence.md").read_text(encoding="utf-8")
+        block = re.search(r"^```\n(.*?)^```", md, re.S | re.M)
+        assert block, "run-sequence.md lost its STAGES block"
+        tokens = re.findall(
+            r"scope|scout|review-<lens>|triage-<lens>|crosslens|"
+            r"confirm-<F-id>|assessment|report|fix-<n>-\{[^}]*\}",
+            block.group(1))
+        # the md's fix-group expands to the oracle's six fix slots
+        expanded = []
+        for t in tokens:
+            if t.startswith("fix-<n>-{"):
+                inner = t[len("fix-<n>-{"):-1]
+                expanded += [f"fix-<n>-{s.strip()}"
+                             for s in inner.split(",")]
+            else:
+                expanded.append(t)
+        self.assertEqual(expanded, list(ro.STAGES),
+                         "run-sequence.md's stage order drifted from the "
+                         "oracle's STAGES tuple")
 
 
 if __name__ == "__main__":

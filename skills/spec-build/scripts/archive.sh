@@ -3,7 +3,9 @@
 # specs/archive/<date>-<name>/, repoint its INDEX.md line and mark it
 # done there. Refuses unless spec.md says Status: done AND the delivery
 # record (task.md, or spec.md at Tier: tiny) names a commit. Drops the
-# regenerable spawns/ payloads; writes retro.md into the archived dir
+# regenerable spawns/ payloads and the run-scratch digests/ (retro.md,
+# written at C2 while the digests still exist, keeps their counts —
+# spec-build D-040); writes retro.md into the archived dir
 # (reusing the one the delivery pass wrote at C2) and rolls its
 # D-### titles up to specs/context/decisions.md (retro.py); commits
 # nothing.
@@ -87,7 +89,7 @@ restore_source() {
   fi
 }
 
-rm -rf "$spec/spawns"
+rm -rf "$spec/spawns" "$spec/digests"
 
 if ! mv "$spec" "$dest"; then
   rm -f "$journal"

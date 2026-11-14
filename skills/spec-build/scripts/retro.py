@@ -93,6 +93,38 @@ def delivery_record(spec_dir: Path) -> tuple[str, str | None]:
         "spec.md" if specstate.spec_tier(_read(spec_dir / "spec.md")) == "tiny" else "task.md")))
 
 
+def digest_rows(spec_dir: Path) -> list[str]:
+    """One line per task with a digest on file (the newest wave wins):
+    what it reported, its deviation. The digests/ tree is run scratch —
+    archive removes it — so this count is the record that outlives it
+    (spec-build D-040)."""
+    base = spec_dir / specstate.DIGEST_DIR
+    if not base.is_dir():
+        return []
+    seen: dict[str, dict] = {}
+    for path in sorted(base.glob("wave-*/implementer-*.md")):
+        m = re.match(r"wave-(\d+)", path.parent.name)
+        if not m:
+            continue
+        text = _read(path)
+        line = next((ln for ln in text.splitlines()
+                     if ln.strip().startswith("digest:")), None)
+        parsed = specstate._parse_digest_line(line) if line else None
+        if not parsed:
+            continue
+        if parsed["task"] not in seen or int(m.group(1)) >= seen[parsed["task"]]["wave"]:
+            parsed["wave"] = int(m.group(1))
+            seen[parsed["task"]] = parsed
+    rows = []
+    for tid in sorted(seen):
+        d = seen[tid]
+        row = f"- {tid} wave {d['wave']} — {d['status']}"
+        if d.get("deviation"):
+            row += f" · deviation {d['deviation']}"
+        rows.append(row)
+    return rows
+
+
 def predates_delivery(spec_dir: Path, existing: str) -> bool:
     sha = delivery_record(spec_dir)[1]
     return bool(sha and sha != "-" and RECORDED_UNDELIVERED.search(existing))
@@ -117,6 +149,16 @@ def retro(spec_dir: Path, name: str, root: Path) -> str:
     out += ["", "## Decisions", ""]
     out += [f"- {d}: {t}" + (" (deviation, after approval)" if dev else "")
             for d, t, dev in decided] or ["None recorded."]
+    digest_lines = digest_rows(spec_dir)
+    out += ["", "## Digests (run scratch — removed at archive)", ""]
+    out += digest_lines or ["None on file."]
+    if digest_lines:
+        blocked = sum(1 for ln in digest_lines
+                      if re.search(r"— blocked", ln))
+        deviations = sum(1 for ln in digest_lines if "deviation" in ln)
+        out += [f"Digests: {len(digest_lines)} task(s) on file, "
+                f"{blocked} blocked, {deviations} with a recorded "
+                "deviation."]
     out += ["", "## Delivery note", "", note or "None recorded.", "", "## Parked", ""]
     out += backlog or ["Nothing parked."]
     out += ["", "## Telemetry (this machine)", ""]

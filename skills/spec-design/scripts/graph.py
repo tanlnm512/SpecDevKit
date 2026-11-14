@@ -100,17 +100,22 @@ Modes:
                  `AWAITING ORCHESTRATOR: execute` when no task can be
                  spawned (claimed, blocked, or at the fix cap — each
                  named with what it needs) —
-                 gates are never auto-satisfied and this loop mutates
-                 no doc state of its own; run the mechanical verify node
+                 gates are never auto-satisfied and this loop mutates no
+                 doc state of its own EXCEPT through mark.py, the single
+                 marker writer (the headless execute wave: mark.py
+                 claims, the runner runs, mark.py lands — spec-build
+                 D-041; where this package ships no mark.py a custom
+                 runner is refused with exit 2 before any invocation,
+                 spec-build D-038); run the mechanical verify node
                  (check.py) directly; emit payloads for the ready agent
                  wave; invoke --runner per payload (default `print`: echo
                  the invocation, then stop after the one emitted wave —
-                 the orchestrator spawns it and re-runs) — a runner that
+                 the orchestrator spawns it and re-runs); a runner that
                  exits nonzero or raises
                  stops the loop with a role/node diagnostic and exit 3, so
                   no later wave starts; recompute and repeat until a gate,
-                  workflow completion, --max-waves, or a wave that changed
-                  nothing.
+                  workflow completion, --max-waves, or a wave that moved
+                  no doc state.
   --span PHASE   with --run/--emit-spawns: bound the wave to one phase's
                  frontier — `intent` (the analyst node; spec/clarify
                  mechanics unchanged), `shape` (intent + the authoring wave
@@ -146,13 +151,15 @@ Usage: graph.py <spec-dir> [--repo <path>] [--state-json] [--mermaid]
 Exit:  0 = report produced (any workflow state) · 1 = unreadable spec-dir,
        or a phase span stopped red/held (verify RED, blocked nodes) ·
        2 = usage error (unknown flag, unknown --explain node, missing
-       args, a --repair node this package cannot emit)
+       args, a --repair node this package cannot emit), or --run refused:
+       a custom runner met execute payloads (D-038, nothing invoked)
        · 3 = --run stopped: a runner exited nonzero or raised
        · 4 = span entry refused (the blocking gate and its reason printed)
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import re
 import subprocess
@@ -308,6 +315,11 @@ PRINT_RUNNER = "print"
 # the loop (0/1/2 keep their documented meanings).
 RUNNER_FAILED_EXIT = 3
 
+# --run's execute refusal (spec-build D-038): a custom runner never invokes
+# execute payloads — claiming and landing tasks is the orchestrator's move.
+# The refusal sits in front of the subprocess call, so no edit happens.
+EXECUTE_RUNNER_REFUSED_EXIT = 2
+
 # --span's refusal exit: the span-entry gate read an already-computed node
 # state and refused the invocation — distinct from every runner or
 # usage failure so callers can route it to the right phase.
@@ -428,7 +440,27 @@ def task_files(entry: specstate.TaskEntry) -> list[str]:
     return specstate.task_touches(entry)
 
 
-def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
+def claim_age(iso: str) -> str:
+    """A claim stamp's age as a coarse human delta (`12s`, `4m`, `3h`,
+    `2d`) — the resume view's "how long has this claim been sitting
+    there". Unparseable stamps read `unknown age`, never raise."""
+    try:
+        then = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        secs = max(0, int(datetime.datetime.now(
+            datetime.timezone.utc).timestamp() - then.timestamp()))
+    except ValueError:
+        return "unknown age"
+    if secs < 90:
+        return f"{secs}s"
+    if secs < 5400:
+        return f"{secs // 60}m"
+    if secs < 129600:
+        return f"{secs // 3600}h"
+    return f"{secs // 86400}d"
+
+
+def task_frontier(entries: list[specstate.TaskEntry],
+                  run_id: str | None = None) -> list[dict]:
     """The per-task frontier inside execute (§2.1): a task is runnable when
     it is `- [ ]`, unimplemented, its `(after T###)` deps are all
     implemented, ticked, or struck, and it is not at the fix-round cap. An
@@ -438,7 +470,11 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
     At-cap tasks are surfaced for adjudication, never runnable. Runnable
     tasks whose files overlap each other's, or a claimed task's, cannot
     share a wave: `deferred` names why a runnable task waits for the
-    next one (schedule_wave)."""
+    next one (schedule_wave). `run_id` is the calling run's own claim
+    stamp id, when it has one: a claim stamped with that id is this
+    run's wave still in flight, not an orphan; every other claim —
+    stamped with a different run id, or unstamped (hand-written,
+    older docset) — reads as a possible orphan as before."""
     by_id = {e.id: e for e in entries if e.id}
     # A struck entry's own id is unparseable (`- [ ] ~~T004~~ …` has no
     # leading T-id), so index the T-id its block names: a struck dep counts
@@ -461,11 +497,20 @@ def task_frontier(entries: list[specstate.TaskEntry]) -> list[dict]:
                 "landed unticked — the plan-wide tick follows the "
                 "pre-tick proof pass")
         elif e.claimed:
-            state, why = "claimed", (
-                "marked (in-progress) — a developer holds it; with no "
-                "developer running (a killed session) it is an orphan: "
-                "re-run its acceptance commands and mark it "
-                "(implemented), or clear the claim to re-run it")
+            held = (f" (claimed {claim_age(e.claim.at)} ago by run "
+                    f"{e.claim.run})" if e.claim else "")
+            if e.claim and run_id and e.claim.run == run_id:
+                state, why = "claimed", (
+                    "marked (in-progress) — held by this run's wave"
+                    f"{held}: its payload ran or is out; land it with "
+                    "mark.py land, or mark.py release it to re-run")
+            else:
+                state, why = "claimed", (
+                    "marked (in-progress) — a developer holds it"
+                    f"{held}; with no developer running (a killed "
+                    "session) it is an orphan: re-run its acceptance "
+                    "commands and mark it (implemented), or clear the "
+                    "claim to re-run it")
         elif e.id is None:
             state, why = "blocked", "entry line has no T-### id — fix the entry"
         else:
@@ -539,11 +584,15 @@ def schedule_wave(runnable: list[dict], in_flight: list[dict]) -> None:
 
 
 def task_line(t: dict) -> str:
-    """One per-task report line: id, state, reason, and the wave note."""
+    """One per-task report line: id, state, reason, and the wave note —
+    claimed tasks add their digest-file reading (D-040)."""
     note = (f"deferred: {t['deferred']}" if t.get("deferred")
             else t.get("note"))
-    return (f"{t['id'] or '—':<6} {t['state']:<11} {t['reason']}"
+    line = (f"{t['id'] or '—':<6} {t['state']:<11} {t['reason']}"
             + (f"  [{note}]" if note else ""))
+    if t["state"] == "claimed" and "digest" in t:
+        line += f"  [digest on file: {t['digest'] or 'none'}]"
+    return line
 
 
 def execute_holds(state: dict, every: bool = False) -> list[str]:
@@ -1374,14 +1423,40 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int,
                   f"## Shared protocol — protocol/shared-protocol.md ({scope})",
                   "",
                   protocol]
+    if digest_capable(item):
+        stem = Path(item["filename"]).stem
+        parts += ["",
+                  "## Digest file",
+                  "",
+                  f"Write your digest, exactly as returned, to "
+                  f"`{spec_dir}/digests/wave-{wave}/{stem}.md` as your "
+                  "final action — it survives whatever happens to this "
+                  "session, and the orchestrator lands, releases and "
+                  "resumes from that file (spec-build D-040)."]
     return "\n".join(parts)
+
+
+# The write-capable archetypes (spec-build D-040): developer, analyst,
+# architect, tester — the roles whose digest is evidence worth a file.
+# The read-only roles (auditor/reviewer, panelist, integrator,
+# release-manager) keep conversation-only digests: adding a write tool
+# to them would weaken the guarantee that they write nothing.
+DIGEST_CAPABLE_BRIEFS = frozenset(
+    {"analyst.md", "architect.md", "tester.md", "developer.md"})
+
+
+def digest_capable(item: dict) -> bool:
+    """True when the payload's role may write its digest file."""
+    brief = item.get("brief") or next(iter(item.get("briefs") or []), None)
+    return brief in DIGEST_CAPABLE_BRIEFS
 
 
 def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
                         wave_dir: Path | None,
                         repair: str | None = None,
                         span: str = "full",
-                        native: bool = False) -> list[tuple[Path, str, str]]:
+                        native: bool = False,
+                        run_id: str | None = None) -> list[tuple[Path, str, str]]:
     """Write the wave's payloads; returns (path, role, node) per file.
     `repair` names one agent node and emits that node's payload ALONE,
     whether or not it is in the frontier (--emit-spawns --repair NODE,
@@ -1391,7 +1466,10 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     is the orchestrator's explicit instrument, so it bypasses the span
     filter. A wave emit first clears the kit's earlier payloads from the
     wave dir, so the dir holds exactly this wave; a repair emit adds its
-    one file and clears nothing (a wave may be in flight beside it)."""
+    one file and clears nothing (a wave may be in flight beside it).
+    `run_id` only shapes the printed next step: an execute wave's last
+    line names the exact mark.py claim command, so the next move cannot
+    be missed (spec-build D-039)."""
     wave = wave_number(state)
     target = Path(wave_dir) if wave_dir else (
         spec_dir / "spawns" / f"wave-{wave}")
@@ -1435,6 +1513,13 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     if not repair and span_allows(span, "execute"):
         for line in execute_holds(state):
             print(line)
+    if any(node == "execute" for _, _, node in written):
+        claim = (f"python3 {SKILL_DIR / 'scripts' / 'mark.py'} claim "
+                 f"{spec_dir} --wave {target}"
+                 + (f" --run-id {run_id}" if run_id else ""))
+        print(f"   next: {claim}")
+        print("   (claim --wave claims exactly this wave's "
+              "implementer-T### files — run it before spawning them)")
     return written
 
 
@@ -1657,10 +1742,92 @@ def span_stop(state: dict, span: str, waves_done: int) -> int:
     return rc
 
 
+def _headless_execute_wave(spec_dir: Path, written: list[tuple[Path, str, str]],
+                           runner: str, parallel: int,
+                           run_id: str | None) -> int | None:
+    """One headless execute wave (spec-build D-041): mark.py claims the
+    wave, the runner runs the payloads (batched --parallel at a time —
+    schedule_wave already made the wave file-disjoint), then mark.py
+    lands each task whose digest reports implemented. Returns None to
+    continue the loop (every task landed), or an exit code to stop:
+    RUNNER_FAILED_EXIT when the claim or a runner fails, 0 with
+    AWAITING ORCHESTRATOR when any task is left claimed (blocked digest,
+    no digest, red proofs) — fix rounds and adjudication stay with the
+    orchestrator."""
+    mark = SKILL_DIR / "scripts" / "mark.py"
+    wave_dir = written[0][0].parent
+    ids = sorted({p.stem.replace("implementer-", "")
+                  for p, _, node in written if node == "execute"})
+    claim = [sys.executable, str(mark), "claim", str(spec_dir),
+             "--wave", str(wave_dir)]
+    if run_id:
+        claim += ["--run-id", run_id]
+    print("   headless: mark.py claim")
+    r = subprocess.run(claim, capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    if r.returncode != 0:
+        print(f"stopping: the wave's claim was refused (exit "
+              f"{r.returncode}) — settle the tasks mark.py named, then "
+              "re-run; no later wave starts")
+        return RUNNER_FAILED_EXIT
+    this_run = run_id
+    m = re.search(r"run id: (r-\S+)", r.stdout)
+    if m:
+        this_run = m.group(1)
+        print(f"   headless: run id {this_run} (reused for this "
+              "session's waves)")
+    pending = list(written)
+    failed: list[tuple[str, int]] = []
+    while pending:
+        batch, pending = pending[:parallel], pending[parallel:]
+        procs = []
+        for path, role, node in batch:
+            invocation = substitute(runner, path, role, spec_dir, SKILL_DIR)
+            print(f"   runner: {role}: {invocation}")
+            procs.append((subprocess.Popen(invocation, shell=True),
+                          role, invocation))
+        for proc, role, invocation in procs:
+            rc = proc.wait()
+            print(f"   runner: {role}: {invocation} → exit {rc}")
+            if rc != 0 and not failed:
+                failed.append((role, rc))
+    if failed:
+        role, rc = failed[0]
+        print(f"stopping: runner for role {role} exited {rc} — the "
+              "wave's tasks stay CLAIMED; settle them "
+              "(mark.py land on a green digest, or mark.py release), "
+              "then re-run. No later wave starts.")
+        return RUNNER_FAILED_EXIT
+    print(f"   headless: landing {len(ids)} task(s)")
+    held: list[str] = []
+    for tid in ids:
+        r = subprocess.run(
+            [sys.executable, str(mark), "land", str(spec_dir), tid],
+            capture_output=True, text=True)
+        sys.stdout.write(r.stdout)
+        if r.returncode != 0:
+            sys.stderr.write(r.stderr)
+            held.append(tid)
+    if held:
+        print(f"AWAITING ORCHESTRATOR: execute — {len(held)} task(s) "
+              "left CLAIMED (a blocked or missing digest, or red "
+              "proofs — mark.py's output above names each):")
+        for tid in held:
+            print(f"   held: {tid}")
+        print("fix rounds and adjudication stay with you: settle each "
+              "held task (land on a green digest, release and rule, or "
+              "mark.py fail with the evidence), then re-run")
+        return 0
+    return None
+
+
 def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
              dry_run: bool, max_waves: int | None,
              wave_dir: str | None = None,
-             span: str = "full", native: bool = False) -> int:
+             span: str = "full", native: bool = False,
+             run_id: str | None = None,
+             parallel: int = 1) -> int:
     """The auto-trigger loop (architecture §4.5): pause at every judgment
     node, run the mechanical verify directly, emit payloads for the ready
     agent wave, invoke the runner per payload — the first runner that exits
@@ -1676,10 +1843,26 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
     gate is not the intent phase's to answer), a drained shape span stops
     at the approve handoff, and a span with nothing left to run stops
     through span_stop. The print runner executes nothing, so it stops
-    after one emitted wave."""
+    after one emitted wave. A custom runner never invokes execute
+    payloads DIRECTLY: where mark.py ships beside this script, the loop
+    runs the wave headlessly — mark.py claims it, the runner runs the
+    payloads (batched --parallel at a time), mark.py lands each task
+    whose digest reports implemented, and the loop continues; any task
+    left claimed stops the loop AWAITING ORCHESTRATOR (spec-build
+    D-041). Without mark.py (this package ships none) the wave is
+    refused with EXECUTE_RUNNER_REFUSED_EXIT before any subprocess
+    starts (spec-build D-038 — only the orchestrator claims and lands
+    tasks). The loop mutates doc state only through mark.py, the single
+    marker writer. `run_id` stamps the printed claim command, marks
+    this run's claims, and scopes orphan reports to other runs' claims;
+    a generated one is reused across the session's waves.
+    `parallel` batches the headless wave's runner subprocesses."""
     waves_done = 0
+    if run_id is None and runner != PRINT_RUNNER:
+        import secrets
+        run_id = f"r-{secrets.token_hex(2)}"
     while True:
-        state = compute_state(spec_dir, repo_override)
+        state = compute_state(spec_dir, repo_override, run_id)
         log_verify(state, repo_override)
         pause = find_pause(state)
         if pause and not (span == "intent" and pause[0] == "research-gate"):
@@ -1720,10 +1903,28 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
               f"{', '.join(frontier if span == 'full' else runnable)}")
         written = write_wave_payloads(state, Path(spec_dir), repo,
                                       Path(wave_dir) if wave_dir else None,
-                                      span=span, native=native)
+                                      span=span, native=native,
+                                      run_id=run_id)
         _record(SKILL_NAME, "wave", wave=wave,
                 roles=sorted(frontier if span == "full" else runnable),
                 payloads=len(written))
+        execute_nodes = [w for w in written if w[2] == "execute"]
+        if (runner != PRINT_RUNNER and not dry_run and execute_nodes):
+            if not (SKILL_DIR / "scripts" / "mark.py").is_file():
+                print("execute payloads need the orchestrator to claim and "
+                      "land tasks (spec-build § Task markers) — use the "
+                      "print runner and spawn them yourself")
+                return EXECUTE_RUNNER_REFUSED_EXIT
+            rc = _headless_execute_wave(spec_dir, written, runner,
+                                        parallel, run_id)
+            if rc is not None:
+                return rc
+            waves_done += 1
+            if max_waves is not None and waves_done >= max_waves:
+                print(f"stopping: --max-waves {max_waves} bound reached "
+                      f"({waves_done} wave(s) run)")
+                return 0
+            continue
         if not written:
             print("   no runnable payloads this wave — nothing to invoke")
         for path, role, node in written:
@@ -1765,9 +1966,8 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
         if runner == PRINT_RUNNER:
             return 0
         if compute_state(spec_dir, repo_override) == state:
-            print("no doc-state change after the wave — stopping (the "
-                  "runner changed nothing; act on the frontier, then "
-                  "re-run)")
+            print("stopping: doc state did not move after the wave — "
+                  "act on the frontier, then re-run")
             return 0
 
 
@@ -1783,13 +1983,15 @@ def print_execute_held(state: dict) -> None:
 
 def emit_spawns(spec_dir: Path, repo_override: str | None,
                 wave_dir: str | None, repair: str | None = None,
-                span: str = "full", native: bool = False) -> int:
+                span: str = "full", native: bool = False,
+                run_id: str | None = None) -> int:
     """--emit-spawns: write this wave's payloads and list them. With
     --repair NODE, exactly that node's payload is emitted, in or out of
     the frontier (single-agent repair run — a single-role payload, never
     the merged architect). `span` bounds the emitted payloads to the
-    phase's frontier nodes."""
-    state = compute_state(spec_dir, repo_override)
+    phase's frontier nodes. `run_id` stamps the printed claim command on
+    an execute wave."""
+    state = compute_state(spec_dir, repo_override, run_id)
     repo = resolved_repo(spec_dir, repo_override)
     if not repair and not frontier_payloads(state, spec_dir, repo, span=span):
         if "execute" in state["frontier"] and span_allows(span, "execute"):
@@ -1802,7 +2004,8 @@ def emit_spawns(spec_dir: Path, repo_override: str | None,
         return 0
     written = write_wave_payloads(state, spec_dir, repo,
                                   Path(wave_dir) if wave_dir else None,
-                                  repair, span=span, native=native)
+                                  repair, span=span, native=native,
+                                  run_id=run_id)
     note = f" (repair: {repair} — single-node emit)" if repair else ""
     print(f"emitted {len(written)} payload(s) for wave "
           f"{wave_number(state)}{note} — spawns/ is derived: delete "
@@ -1810,11 +2013,15 @@ def emit_spawns(spec_dir: Path, repo_override: str | None,
     return 0
 
 
-def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
+def compute_state(spec_dir: Path, repo_override: str | None = None,
+                  run_id: str | None = None) -> dict:
     """Derive the full workflow-graph state from doc state alone — the same
     dict --state-json serializes. Pure reads: no doc file is ever written and
     no repository or test.md command ever executes — the check.py probes run
-    only once their node's inputs are in place."""
+    only once their node's inputs are in place. `run_id` is this run's own
+    claim-stamp id, when the caller has one: it only changes how claimed
+    tasks are phrased (this run's wave vs a possible orphan), never any
+    node state."""
     spec_dir = Path(spec_dir)
     repo = Path(repo_override) if repo_override else spec_dir.parent.parent
     docs = {f: read_doc(spec_dir / f) for f in DOC_FILES}
@@ -2115,7 +2322,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                              else "task.md has no task entries — spawn "
                                   "the task-breaker")}
     else:
-        per_task = task_frontier(entries)
+        per_task = task_frontier(entries, run_id)
         open_tasks = [t for t in per_task
                       if t["state"] not in ("ticked", "struck",
                                            "implemented")]
@@ -2134,6 +2341,13 @@ def compute_state(spec_dir: Path, repo_override: str | None = None) -> dict:
                                 "fix cap)"}
     execute_done = nodes["execute"]["state"] == DONE
     if per_task:
+        # the resume view's digest column (spec-build D-040): a claimed
+        # task shows whether a developer digest is on file and what it
+        # reported — pure doc reads, never status
+        for t in per_task:
+            if t["state"] == "claimed" and t["id"]:
+                d = specstate.latest_digest(spec_dir, t["id"])
+                t["digest"] = d["status"] if d else None
         nodes["execute"]["tasks"] = per_task
 
     counts = {
@@ -2421,6 +2635,15 @@ def main(argv: list[str] | None = None) -> int:
                         "nothing (payload files are still written)")
     p.add_argument("--max-waves", type=int, metavar="N",
                     help="with --run: stop after N waves")
+    p.add_argument("--parallel", type=int, default=1, metavar="N",
+                   help="with --run: run up to N payload subprocesses "
+                        "concurrently per wave (the headless execute wave "
+                        "batches its runners with it; default 1)")
+    p.add_argument("--run-id", metavar="ID",
+                   help="this session's run id, reused across waves — the "
+                        "orchestrator generates one (mark.py prints it) "
+                        "and passes it here so --explain execute and the "
+                        "orphan notices only flag claims from OTHER runs")
     p.add_argument("--span", choices=("intent", "shape", "execute", "full"),
                    default=None, metavar="PHASE",
                    help="bound the wave to one phase's frontier "
@@ -2436,9 +2659,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.explain is not None and args.explain not in NODES:
         p.error(f"unknown node: {args.explain!r} — valid nodes: "
                 f"{', '.join(NODES)}")
-    if (args.runner or args.dry_run or args.max_waves is not None) \
-            and not args.run:
-        p.error("--runner/--dry-run/--max-waves require --run")
+    if (args.runner or args.dry_run or args.max_waves is not None
+            or args.parallel != 1) and not args.run:
+        p.error("--runner/--dry-run/--max-waves/--parallel require --run")
+    if args.parallel < 1:
+        p.error("--parallel must be >= 1")
     if args.launch_check and (args.state_json or args.emit_spawns
                               or args.run):
         p.error("--launch-check is its own mode — not combinable with "
@@ -2488,13 +2713,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.emit_spawns:
         return emit_spawns(spec_dir, args.repo, args.wave_dir, args.repair,
-                           span, args.native_agents)
+                           span, args.native_agents, args.run_id)
     if args.run:
         return run_loop(spec_dir, args.repo, args.runner or PRINT_RUNNER,
                         args.dry_run, args.max_waves, args.wave_dir,
-                        span=span, native=args.native_agents)
+                        span=span, native=args.native_agents,
+                        run_id=args.run_id, parallel=args.parallel)
 
-    state = compute_state(spec_dir, args.repo)
+    state = compute_state(spec_dir, args.repo, args.run_id)
 
     if args.launch_check:
         print(json.dumps(

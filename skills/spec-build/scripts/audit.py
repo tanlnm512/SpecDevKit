@@ -7,7 +7,7 @@ their own; findings are adjudicated by the orchestrator).
 Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py regression <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
        audit.py clean    [<spec-dir>] [--repo <path>] [--base <rev>]
-       audit.py proofs   <spec-dir> [--repo <path>] [--run]
+       audit.py proofs   <spec-dir> [--repo <path>] [--run] [--task T###]
        audit.py mutate   <spec-dir> [--repo <path>] [--base <rev>] [--max-mutants N]
        audit.py coverage <spec-dir> [--repo <path>] [--threshold N]
        audit.py dod      <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
@@ -176,6 +176,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     tiny_task_text,
 )
 from check import BD_ROW, bd_label  # noqa: E402 - the sys.path setup above runs first
+import graph  # noqa: E402 - acceptance_for: the payload's task→TC mapping
 
 # Debug prints across common languages. printf( is deliberately absent —
 # ordinary C output; WARN heuristics err toward recall, the orchestrator
@@ -645,15 +646,46 @@ def classify_proofs(spec_dir: Path) -> dict:
     return {"auto": auto, "manual": manual, "expect_fail": set()}
 
 
-def proofs_data(spec_dir: Path, repo: Path, run: bool) -> dict:
+def _task_proof_labels(spec_dir: Path, task: str) -> set[str]:
+    """The proof labels one task's acceptance covers — the scoped surface
+    behind `proofs --task T###` (mark.py land's gate). At Tier: tiny the
+    entry's own Accept labels (T###, or T###.n for a second line); at
+    full tier the TCs whose requirements the entry cites, through
+    graph.acceptance_for — the same mapping the implementer payload
+    uses, so a task's landing proofs are exactly what its payload asked
+    for. Empty when the entry does not exist or names no proof."""
+    if is_tiny(spec_dir):
+        entries = task_entries(task_source(spec_dir))
+        if not any(e.id == task for e in entries):
+            return set()
+        return {lab for lab, _ in classify_accepts(spec_dir)["auto"]
+                + classify_accepts(spec_dir)["manual"]
+                if lab == task or lab.startswith(task + ".")}
+    entry = next((e for e in task_entries(task_source(spec_dir))
+                  if e.id == task), None)
+    if entry is None:
+        return set()
+    test_text = _read(spec_dir / "test.md") or ""
+    lines = graph.acceptance_for(entry.block, test_text)
+    return set(re.findall(r"^(TC-\d{3}):", "\n".join(lines), re.M))
+
+
+def proofs_data(spec_dir: Path, repo: Path, run: bool,
+                task: str | None = None) -> dict:
     """classify_proofs plus, only when run, execution of the auto commands:
     {"auto": [(tc, cmd)], "manual": [(tc, note)], "ok": {tc: (passed,
     summary)}, "errors": [(tc, cmd, err)], "failed": n} — ok/errors/failed
-    stay empty/zero on a dry run. Shared by proofs and dod's live path;
+    stay empty/zero on a dry run. `task` (proofs --task T###) scopes the
+    run to that entry's proofs. Shared by proofs and dod's live path;
     callers that must stay inert use classify_proofs itself."""
     data: dict = {"ok": {}, "errors": [], "failed": 0, "timeouts": set(),
                   "tails": {}}
     data.update(classify_proofs(spec_dir))
+    if task is not None:
+        keep = _task_proof_labels(spec_dir, task)
+        data["auto"] = [(tc, cmd) for tc, cmd in data["auto"] if tc in keep]
+        data["manual"] = [(tc, note) for tc, note in data["manual"]
+                          if tc in keep]
     if not run:
         return data
     for tc, cmd in data["auto"]:
@@ -708,14 +740,25 @@ def proof_verdict_lines(data: dict) -> dict[str, str]:
     return lines
 
 
-def mode_proofs(spec_dir: Path, repo: Path, run: bool) -> int:
-    d = proofs_data(spec_dir, repo, run)
+def mode_proofs(spec_dir: Path, repo: Path, run: bool,
+                task: str | None = None) -> int:
+    if task is not None:
+        entries = task_entries(task_source(spec_dir))
+        if not any(e.id == task for e in entries):
+            print(f"proofs: no task entry named {task}")
+            return 2
+        if not _task_proof_labels(spec_dir, task):
+            print(f"proofs: {task} names no runnable proof — its "
+                  "requirements match no TC pass condition")
+            return 2
+    d = proofs_data(spec_dir, repo, run, task)
     auto, manual = d["auto"], d["manual"]
+    scope = f", scoped to {task}" if task else ""
     source = ("spec.md § Tasks Accept lines (Tier: tiny)" if is_tiny(spec_dir)
               else "test.md pass conditions")
     if not run:
-        print(f"proofs: {len(auto)} auto · {len(manual)} manual from {source} "
-              "(dry run — add --run to execute)")
+        print(f"proofs: {len(auto)} auto · {len(manual)} manual from {source}"
+              f"{scope} (dry run — add --run to execute)")
         for tc, cmd in auto:
             note = "  [expects nonzero]" if tc in d["expect_fail"] else ""
             print(f"  AUTO   {tc}  {cmd}{note}")
@@ -723,7 +766,7 @@ def mode_proofs(spec_dir: Path, repo: Path, run: bool) -> int:
             print(f"  MANUAL {tc}  {note}")
         return 0
     print(f"proofs: running {len(auto)} auto command(s) from {source}, "
-          f"{len(manual)} manual (yours to observe)")
+          f"{len(manual)} manual (yours to observe){scope}")
     for line in proof_verdict_lines(d).values():
         print(line)
     return 1 if d["failed"] else 0
@@ -1458,6 +1501,7 @@ def parse_args(argv: list[str]):
     dry = "--dry-run" in argv
     max_mutants = 40
     threshold = None
+    task = None
     rest = []
     i = 1
     while i < len(argv):
@@ -1466,6 +1510,11 @@ def parse_args(argv: list[str]):
             i += 1
         elif a == "--dry-run":
             i += 1
+        elif a == "--task":
+            if i + 1 >= len(argv) or not re.match(r"^T\d{3}$", argv[i + 1]):
+                return None
+            task = argv[i + 1]
+            i += 2
         elif a == "--repo":
             if i + 1 >= len(argv):
                 return None
@@ -1493,6 +1542,10 @@ def parse_args(argv: list[str]):
                 "converge") and len(rest) != 1:
         print(__doc__)
         return None
+    if task is not None and mode != "proofs":
+        # --task scopes proofs only; on any other mode it is a typo
+        print(__doc__)
+        return None
     if mode == "archived" and rest:
         print(__doc__)
         return None
@@ -1502,7 +1555,7 @@ def parse_args(argv: list[str]):
         print(__doc__)
         return None
     return (mode, (rest[0] if rest else None), repo, base, run, dry,
-            max_mutants, threshold)
+            max_mutants, threshold, task)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1518,7 +1571,7 @@ def main(argv: list[str] | None = None) -> int:
     if parsed is None:
         return 2
     (mode, spec_dir_s, repo_arg, base, run, dry,
-     max_mutants, threshold) = parsed
+     max_mutants, threshold, task) = parsed
     spec_dir = Path(spec_dir_s) if spec_dir_s else None
     if spec_dir is not None and not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory")
@@ -1544,7 +1597,7 @@ def main(argv: list[str] | None = None) -> int:
     elif mode == "converge":
         rc = mode_converge(spec_dir, repo, base)
     else:
-        rc = mode_proofs(spec_dir, repo, run)
+        rc = mode_proofs(spec_dir, repo, run, task)
     from telemetry import record  # fire-and-forget local telemetry
     record("spec-build", "audit", mode=mode, rc=rc,
            spec=spec_dir.name if spec_dir else "")

@@ -249,11 +249,22 @@ commit decision and message are the user's.
 prints one JSON object, and `status: error` stops the run.
 `contracts/run-sequence.md` is canonical — commands, ask ctx keys,
 report data, role table, order: read it before the first `O` call.
-Phases: `O scope … --include-gate` → `O systems` → the scout ask →
-the review wave (`O ask`) → triage per lens → cross-lens → confirm
-each kept finding → the final ask → `O report --kind review`; when
-fixing, per round `O fix-snapshot` → fixer → `O fix-check` → `O gate`
-→ verify → fix-review, then `O report --kind fix`.
+Phases: `O scope … --include-gate` → `O run-init` (the checkpoint
+starts; D-020) → `O systems` → the scout ask → the review wave
+(`O ask`) → triage per lens → cross-lens → confirm each kept finding →
+the final ask → `O report --kind review`; when fixing, per round
+`O fix-snapshot` → fixer → `O fix-check` → `O gate` → verify →
+fix-review, then `O report --kind fix`. `O run-save --run-dir D
+--stage <stage> --data @F.json` after EVERY stage — the stage names
+are the oracle's `STAGES` tuple.
+
+**Resume** — a crash restarts nothing: `O run-resume --run-dir D`
+re-fingerprints the target; changed → refused (new run, or `fix_from`
+from the saved report), unchanged → `{completed, next, data}` and the
+run continues at `next`, `run-save`-ing from there. The saved stage
+data returns to YOU (the orchestrator), never into an `ask` — rebuild
+every ask through `O ask` exactly as a fresh run does, so a resumed
+confirmer still never sees the scout map or the stated intent.
 
 **Mode** — `auto` (default) is `fast` when scope's `fast_mode_default`
 holds (≤ 400 added lines, ≤ 5 files), else `full`: three lenses, each

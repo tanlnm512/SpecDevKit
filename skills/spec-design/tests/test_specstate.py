@@ -734,7 +734,8 @@ class ModuleShapeTests(unittest.TestCase):
         roots = {m.split(".")[0] for m in mods}
         self.assertTrue(roots)
         self.assertLessEqual(roots, {
-            "__future__", "pathlib", "re", "subprocess", "sys", "typing",
+            "__future__", "contextlib", "datetime", "os", "pathlib", "re",
+            "subprocess", "sys", "time", "typing",
         }, f"non-stdlib import found: {roots}")
 
 

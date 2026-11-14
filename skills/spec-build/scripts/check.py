@@ -103,6 +103,7 @@ if _SCRIPTS_DIR not in sys.path:
 
 from specstate import (  # noqa: E402 - the sys.path setup above runs first
     CODE_SPAN,
+    CLAIM_NOTE,
     DEFINITIONS,
     HTML_COMMENT,
     PLACEHOLDER,
@@ -941,6 +942,20 @@ def fix_round_problems(entries: list[TaskEntry]) -> list[str]:
     problems: list[str] = []
     for e in entries:
         label = e.id or "task"
+        # claim-stamp pairing (spec-build D-039, same shape gate): a stamp
+        # rides a claimed entry; a stamp without the marker means the
+        # claim was cleared by hand while its sub-line stayed, and more
+        # than one stamp means two writers — mark.py writes exactly one.
+        stamps = CLAIM_NOTE.findall(e.block)
+        if len(stamps) > 1:
+            problems.append(
+                f"claim stamp: {label} carries {len(stamps)} claim stamps "
+                "— one entry holds one stamp; clear the stale ones")
+        elif stamps and not e.claimed:
+            problems.append(
+                f"claim stamp: {label} has a `claimed … — run …` sub-line "
+                "but no (in-progress) marker — clear the stamp or restore "
+                "the marker")
         if e.fix_round is not None and e.fix_round > FIX_ROUND_CAP:
             problems.append(
                 f"fix rounds: {label} marker (fix {e.fix_round}/"

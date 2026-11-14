@@ -114,6 +114,12 @@ failed scout degrades to the raw target with a `notCovered` line; it
 never stops the run. The step runs in fast mode too: one bounded turn
 buys every reviewer the same starting ground.
 
+The same rule holds on a RESUMED run (D-020): `run-resume` returns the
+saved stages' data to the orchestrator only — the ask builders keep
+choosing their own context, so a resumed confirmer still never sees
+the scout map or the stated intent. Saved data never flows into an
+`ask`'s ctx; the ctx keys stay exactly the fresh-run ones.
+
 ## Findings
 
 Every finding, in any representation (agent output, triage, report,
