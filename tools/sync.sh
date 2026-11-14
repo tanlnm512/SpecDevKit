@@ -226,8 +226,11 @@ atomic_put() {  # <src> <dest>
   local tmp
   tmp="$(dirname "$2")/$LEDGER_NAME.tmp-$(basename "$2").tmp"
   rm -f "$tmp"
-  cp -p "$1" "$tmp"
-  mv "$tmp" "$2"
+  # named failures: install_command runs under suspended errexit
+  # (`|| fail=1` caller), so a bare cp/mv failure would fall through
+  # silently and surface only as an opaque MISSING at verify
+  cp -p "$1" "$tmp" || { echo "ERROR: staging copy failed: $1 -> $2" >&2; return 1; }
+  mv "$tmp" "$2" || { echo "ERROR: atomic rename failed: $2" >&2; return 1; }
 }
 
 # Flat command roots are shared turf: a name this kit deployed that no
@@ -247,17 +250,22 @@ claimed_command_names() {
       printf '%s\n' "$base"
     done
   done
+  # the loop's last `[ -f ] && printf` can end nonzero; callers consume
+  # the output, never the status — and pipefail would kill the pipeline
+  return 0
 }
 
 stale_commands_in() {  # <root> — ledgered, unclaimed, hash-verified names
   local root="$1"
-  local ledger="$root/$LEDGER_NAME" name claimed
+  local ledger="$root/$LEDGER_NAME" name
   [ -f "$ledger" ] || return 0
-  claimed="$(claimed_command_names | sort -u)"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     [ -f "$root/$name.md" ] || continue
-    printf '%s\n' "$claimed" | grep -qx "$name" && continue
+    # grep the snapshot FILE directly: `... | grep -q` under pipefail
+    # reports 141 when grep -q's early exit SIGPIPEs the producer, and
+    # a match would fall through and emit the name as stale
+    grep -qx "$name" "$preflight_stage/claimed-commands.txt" && continue
     ledger_entry_matches "$ledger" "$name" "$root/$name.md" || continue
     printf '%s\n' "$name"
   done < <(awk '{print $2}' "$ledger")
@@ -314,13 +322,14 @@ agent_def_roots() {  # the ledgered flat agent roots this machine has
 
 stale_defs_in() {  # <root> — ledgered, unshipped, hash-verified def names
   local root="$1"
-  local ledger="$root/$LEDGER_NAME" name shipped
+  local ledger="$root/$LEDGER_NAME" name
   [ -f "$ledger" ] || return 0
-  shipped="$(shipped_def_names | sort -u)"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     [ -f "$root/$name" ] || continue
-    printf '%s\n' "$shipped" | grep -qxF "$name" && continue
+    # same pipefail/SIGPIPE hazard as stale_commands_in — no pipes into
+    # grep -q
+    grep -qxF "$name" "$preflight_stage/shipped-defs.txt" && continue
     ledger_entry_matches "$ledger" "$name" "$root/$name" || continue
     printf '%s\n' "$name"
   done < <(awk '{print $2}' "$ledger")
@@ -407,8 +416,7 @@ sweep_retired_command() {  # <root> <retired-name>
   # A shipping skill claiming the bare name owns it now (a
   # thin alias does exactly that); an unclaimed foreign file at a flat
   # root is shared turf — neither is this sweep's to touch.
-  if printf '%s\n' "$(claimed_command_names | sort -u)" \
-      | grep -qx "$name"; then
+  if grep -qx "$name" "$preflight_stage/claimed-commands.txt"; then
     return 0
   fi
   ledger_entry_matches "$root/$LEDGER_NAME" "$name" "$dest" || return 0
@@ -677,6 +685,14 @@ install_command() {  # <master-file> <base> <root> — ledger-guarded copy
 # validated before any write.
 PREFLIGHT_FAIL=0
 preflight_stage="$(mktemp -d)"
+
+# One snapshot of the flat-root ownership, computed once per run: the
+# sweep, prune, and check passes read it instead of each recomputing
+# the set, so a name this run installs can never be mispruned or
+# condemned as stale by a divergent recomputation mid-run (the masters
+# are frozen for the whole sync, so one read is as true as five).
+claimed_command_names | sort -u > "$preflight_stage/claimed-commands.txt"
+shipped_def_names | sort -u > "$preflight_stage/shipped-defs.txt"
 
 plan_tree_root() {  # <src-dir> <dest-dir> — fail the run on any refusal
   local dest="$2" out rc line
