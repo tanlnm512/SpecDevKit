@@ -12,6 +12,8 @@ Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py coverage <spec-dir> [--repo <path>] [--threshold N]
        audit.py dod      <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
        audit.py converge <spec-dir> [--repo <path>] [--base <rev>]
+       audit.py block    <spec-dir> [--repo <path>] [--base <rev>]
+       audit.py preflight <spec-dir> [--repo <path>]
        audit.py archived [--repo <path>]
        audit.py -h | --help        (prints this text, exit 0)
 
@@ -123,6 +125,16 @@ coverage — line-coverage floor over the tasks' intended files:
          Exit 0 = every touched file at/above the floor · 1 = below,
          unmeasured, or the suite is red.
 
+block  — drafts the delivery block the dod gates 11-13 read: the docs and
+         schemas the diff touched as `Docs impact:`, a `Rollback: <row>
+         — <ruling>` placeholder for every rollback row no TC proves,
+         a `Hygiene:` line per unruled suspect. Prints; writes nothing.
+
+preflight — run before the first wave: every proof command's program is
+         on PATH, a Docker engine answers when the docset's proofs lean
+         on Docker/Testcontainers, and which proofs are PENDING because
+         the tests they name are not written yet. Exit 1 on NO-GO.
+
 archived — the archive gate (OpenSpec validate --archived semantics):
          every dir under specs/archive/ must hold its task list (task.md,
          or spec.md § Tasks at Tier: tiny) with no unticked, unstruck
@@ -135,8 +147,10 @@ archived — the archive gate (OpenSpec validate --archived semantics):
 Exit:  0 = report produced (scope/clean/converge always; proofs without
       --run) · regression: 0 PASS · 1 FAIL · 3 NONE (no repo checks
       detected) · proofs --run / dod / archived: 0 = every mechanical gate
-      green, 1 = any FAILED or errored (dod --dry-run: gate 1 reads DRY —
-      classified, not executed — and is not a failure) · 2 = usage error.
+      green, 1 = any FAILED, errored or PENDING (a proof whose named tests
+      do not exist never reads PASS; dod --dry-run: gate 1 reads DRY —
+      classified, not executed — and is not a failure) · preflight: 1 =
+      NO-GO · 2 = usage error.
 
 Non-git repos: git-derived output degrades explicitly, never silently —
 scope/clean print `SKIPPED (not a git repo)` instead of a false all-clear
@@ -378,6 +392,26 @@ def _spec_prefix(spec_dir: Path, repo: Path) -> str:
         return f"specs/{spec_dir.name}"
 
 
+GLOB_TOKEN = re.compile(r"[\w./-]*[*?][\w./*?-]*")
+
+
+def _mentioned(path: str, docs: str) -> bool:
+    """A changed path is named by a contract doc: its full path, its bare
+    file name, or a glob the docs spell (`HoldWindow*Test.java`,
+    `src/test/**/Foo*.java`). A glob needs two literal characters, so a
+    bare `*` bullet or `**bold**` matches nothing."""
+    name = Path(path).name
+    if path in docs or name in docs:
+        return True
+    for tok in GLOB_TOKEN.findall(docs):
+        if not re.search(r"\w{2}", tok):
+            continue
+        if (fnmatch.fnmatch(path, tok) or fnmatch.fnmatch(path, "*/" + tok)
+                or fnmatch.fnmatch(name, tok)):
+            return True
+    return False
+
+
 def _touched(path: str, touches: set[str]) -> bool:
     return any(path == t or path.startswith(t.rstrip("/") + "/") or fnmatch.fnmatch(path, t)
                for t in touches)
@@ -423,7 +457,7 @@ def scope_data(spec_dir: Path, repo: Path, base: str | None
         if p in outside:
             continue
         if not p.startswith("specs/"):
-            if p not in docs and Path(p).name not in docs:
+            if not _mentioned(p, docs):
                 unmentioned.append(p)
             continue
         # This spec's own contract/evidence tree is expected delivery
@@ -436,9 +470,7 @@ def scope_data(spec_dir: Path, repo: Path, base: str | None
             continue
         if p in ("specs/INDEX.md", "specs/CONSTITUTION.md", "specs/BACKLOG.md"):
             continue
-        if not p.startswith("specs/context/") or (
-            p not in docs and Path(p).name not in docs
-        ):
+        if not p.startswith("specs/context/") or not _mentioned(p, docs):
             unmentioned.append(p)
     return paths, unmentioned, outside
 
@@ -585,6 +617,109 @@ def looks_runnable(cmd: str) -> bool:
     return bool(shutil.which(first))
 
 
+TEST_SOURCE_EXT = (".java", ".kt", ".groovy", ".scala")
+TEST_SKIP_DIRS = {".git", "target", "build", "node_modules", "__pycache__",
+                  ".gradle", ".venv", "venv", "dist"}
+SUREFIRE_SELECTOR = re.compile(
+    r"-Dtest(?:=|\s+)(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
+GRADLE_SELECTOR = re.compile(r"--tests\s+(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
+PYTEST_SELECTOR = re.compile(r"(?<![\w/.-])([\w./-]+\.py)::([\w:\[\]-]+)")
+_SOURCE_INDEX: dict[str, dict[str, list[Path]]] = {}
+
+
+def _source_index(repo: Path) -> dict[str, list[Path]]:
+    """{file stem: [paths]} for the JVM test sources under repo, built once
+    per repo per process (build output and VCS directories skipped)."""
+    key = str(repo)
+    if key not in _SOURCE_INDEX:
+        index: dict[str, list[Path]] = {}
+        for root, dirs, files in os.walk(repo):
+            dirs[:] = [d for d in dirs if d not in TEST_SKIP_DIRS]
+            for name in files:
+                if name.endswith(TEST_SOURCE_EXT):
+                    index.setdefault(name.rsplit(".", 1)[0], []).append(
+                        Path(root) / name)
+        _SOURCE_INDEX[key] = index
+    return _SOURCE_INDEX[key]
+
+
+def _defines(text: str, method: str) -> bool:
+    pattern = re.escape(method).replace(r"\*", r"\w*").replace(r"\?", r"\w")
+    return re.search(rf"\b{pattern}\s*\(", text) is not None
+
+
+def _jvm_selector_missing(item: str, repo: Path) -> str | None:
+    """One `Class`, `Class#method` or `Class#a+b` selector: its descriptor
+    when no source defines it, else None. Wildcard class patterns need at
+    least one matching source file."""
+    if not item or item.startswith("!"):
+        return None
+    cls, _, methods = item.partition("#")
+    simple = cls.rsplit(".", 1)[-1]
+    index = _source_index(repo)
+    if re.search(r"[*?]", simple):
+        if any(fnmatch.fnmatch(stem, simple) for stem in index):
+            return None
+        return item
+    files = index.get(simple, [])
+    if not files:
+        return item
+    if not methods:
+        return None
+    texts = [f.read_text(encoding="utf-8", errors="replace") for f in files]
+    for method in methods.split("+"):
+        if method and not any(_defines(t, method) for t in texts):
+            return f"{simple}#{method}"
+    return None
+
+
+def _gradle_selector_missing(item: str, repo: Path) -> str | None:
+    parts = item.split(".")
+    if len(parts) >= 2 and parts[-1][:1].islower() and parts[-2][:1].isupper():
+        return _jvm_selector_missing(f"{parts[-2]}#{parts[-1]}", repo)
+    return _jvm_selector_missing(parts[-1], repo)
+
+
+def _pytest_selector_missing(path: str, name: str, repo: Path) -> str | None:
+    target = repo / path
+    if not target.is_file():
+        return f"{path}::{name}"
+    text = target.read_text(encoding="utf-8", errors="replace")
+    for seg in name.split("::"):
+        base = seg.split("[", 1)[0]
+        if base and not re.search(rf"\b(def|class)\s+{re.escape(base)}\b", text):
+            return f"{path}::{name}"
+    return None
+
+
+def missing_named_tests(cmd: str, repo: Path) -> list[str]:
+    """The tests a proof command names that no source in repo defines.
+
+    A runner told to select tests that do not exist exits 0 when the
+    command also tolerates an empty selection (Maven's
+    failIfNoSpecifiedTests=false) or runs quiet, so the proof would read
+    PASS having proved nothing. Understood selectors: Maven `-Dtest=`,
+    Gradle `--tests`, pytest node ids. A command naming no test selector
+    returns [] — nothing to judge here."""
+    missing: list[str] = []
+    for m in SUREFIRE_SELECTOR.finditer(cmd):
+        spec = next(g for g in m.groups() if g is not None)
+        for item in spec.split(","):
+            gone = _jvm_selector_missing(item.strip(), repo)
+            if gone:
+                missing.append(gone)
+    for m in GRADLE_SELECTOR.finditer(cmd):
+        spec = next(g for g in m.groups() if g is not None)
+        gone = _gradle_selector_missing(spec.strip(), repo)
+        if gone:
+            missing.append(gone)
+    for m in PYTEST_SELECTOR.finditer(cmd):
+        gone = _pytest_selector_missing(m.group(1), m.group(2), repo)
+        if gone:
+            missing.append(gone)
+    return missing
+
+
 def classify_accepts(spec_dir: Path) -> dict:
     """The tiny tier's proofs: each open-or-ticked § Tasks entry's
     `Accept:` commands, labelled by task id (T001, or T001.2 for a
@@ -679,7 +814,7 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool,
     run to that entry's proofs. Shared by proofs and dod's live path;
     callers that must stay inert use classify_proofs itself."""
     data: dict = {"ok": {}, "errors": [], "failed": 0, "timeouts": set(),
-                  "tails": {}}
+                  "tails": {}, "pending": {}}
     data.update(classify_proofs(spec_dir))
     if task is not None:
         keep = _task_proof_labels(spec_dir, task)
@@ -689,6 +824,10 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool,
     if not run:
         return data
     for tc, cmd in data["auto"]:
+        missing = missing_named_tests(cmd, repo)
+        if missing:
+            data["pending"][tc] = missing
+            continue
         expect_fail = tc in data["expect_fail"]
         try:
             r = subprocess.run(
@@ -726,7 +865,10 @@ def proof_verdict_lines(data: dict) -> dict[str, str]:
     for tc, cmd in data["auto"]:
         if tc in data["expect_fail"]:
             cmd += "  [expects nonzero]"
-        if tc in data["ok"]:
+        if tc in data["pending"]:
+            lines[tc] = (f"  PENDING  {tc}  {cmd}  ->  not run: no source "
+                         f"defines {', '.join(data['pending'][tc])}")
+        elif tc in data["ok"]:
             ok, summary = data["ok"][tc]
             verdict = "TIMEOUT" if (not ok and tc in data["timeouts"]) else ("PASS" if ok else "FAIL")
             lines[tc] = f"  {verdict:<7}  {tc}  {cmd}  ->  {summary}"
@@ -769,7 +911,11 @@ def mode_proofs(spec_dir: Path, repo: Path, run: bool,
           f"{len(manual)} manual (yours to observe){scope}")
     for line in proof_verdict_lines(d).values():
         print(line)
-    return 1 if d["failed"] else 0
+    if d["pending"]:
+        print(f"proofs: {len(d['pending'])} pending — the tests they name "
+              "do not exist yet, so nothing ran; a pending proof is never a "
+              "pass: write the tests, then re-run")
+    return 1 if d["failed"] or d["pending"] else 0
 
 
 # --- mutation testing ----------------------------------------------
@@ -1161,6 +1307,31 @@ def rollback_items(spec_dir: Path) -> list[tuple[str, str]]:
     return items
 
 
+def docs_impact_files(value: str) -> list[str]:
+    """The files a `Docs impact:` value lists: comma-separated, a trailing
+    parenthetical per file (`CLAUDE.md (Contract, Config)`) is prose, not
+    part of the path, and commas inside it do not split."""
+    items: list[str] = []
+    depth, cur = 0, ""
+    for ch in value:
+        if ch == "(":
+            depth += 1
+        elif ch == ")" and depth:
+            depth -= 1
+        if ch == "," and depth == 0:
+            items.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    items.append(cur)
+    files = []
+    for item in items:
+        item = re.sub(r"\s*\([^)]*\)\s*$", "", item.strip()).strip().strip("`")
+        if item:
+            files.append(item)
+    return files
+
+
 def delivery_gates(spec_dir: Path, repo: Path, changed: list[str],
                    git_ok: bool) -> list[tuple[str, str, str]]:
     """(name, status, detail) for the delivery note's gates: docs impact,
@@ -1172,7 +1343,7 @@ def delivery_gates(spec_dir: Path, repo: Path, changed: list[str],
     elif re.match(r"none\s+—\s+\S", m.group(1).strip()):
         docs = ("PASS", m.group(1).strip())
     else:
-        listed = [f.strip().strip("`") for f in m.group(1).split(",") if f.strip()]
+        listed = docs_impact_files(m.group(1))
         unchanged = [f for f in listed if git_ok and f not in changed]
         docs = (("FAIL", f"listed but unchanged: {', '.join(unchanged)}") if unchanged
                 else ("PASS", f"updated: {', '.join(listed)}"))
@@ -1299,6 +1470,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
         bad_tcs = sorted(
             {tc for tc, (ok, _) in pr["ok"].items() if not ok}
             | {tc for tc, _, _ in pr["errors"]}
+            | set(pr["pending"])
         )
     nauto = len(pr["auto"])
     regression = regression_data(spec_dir, repo, base, plan=dry)
@@ -1328,11 +1500,15 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
         proof_dt = (f"{nauto} auto TC(s) classified, not executed — drop "
                     "--dry-run to prove them")
     else:
-        proof_st = "PASS" if pr["failed"] == 0 else "FAIL"
-        proof_dt = (f"{nauto - pr['failed']}/{nauto} proofs green"
-                    if nauto else "no auto proofs (n/a)")
+        proof_st = ("PASS" if pr["failed"] == 0 and not pr["pending"]
+                    else "FAIL")
+        proof_dt = (f"{nauto - pr['failed'] - len(pr['pending'])}/{nauto} "
+                    "proofs green" if nauto else "no auto proofs (n/a)")
         if bad_tcs:
             proof_dt += f" — failed: {', '.join(bad_tcs)}"
+        if pr["pending"]:
+            proof_dt += (f" ({len(pr['pending'])} pending: the tests they "
+                         "name do not exist)")
 
     gates = [
         (1, "PROOF auto", proof_st, proof_dt),
@@ -1492,7 +1668,7 @@ def parse_args(argv: list[str]):
         return None
     mode = argv[0]
     if mode not in ("scope", "regression", "clean", "proofs", "mutate", "coverage",
-                    "dod", "converge", "archived"):
+                    "dod", "converge", "archived", "block", "preflight"):
         print(__doc__)
         return None
     repo = None
@@ -1539,7 +1715,7 @@ def parse_args(argv: list[str]):
             rest.append(a)
             i += 1
     if mode in ("scope", "regression", "proofs", "mutate", "coverage", "dod",
-                "converge") and len(rest) != 1:
+                "converge", "block", "preflight") and len(rest) != 1:
         print(__doc__)
         return None
     if task is not None and mode != "proofs":
@@ -1556,6 +1732,93 @@ def parse_args(argv: list[str]):
         return None
     return (mode, (rest[0] if rest else None), repo, base, run, dry,
             max_mutants, threshold, task)
+
+
+DOC_SURFACE = re.compile(
+    r"\.md$|\.schema\.json$|(^|/)docs?/|(^|/)(README|CHANGELOG)", re.I)
+
+
+def mode_block(spec_dir: Path, repo: Path, base: str | None) -> int:
+    """A draft of the delivery block the dod gates 11-13 read — the lines a
+    run would otherwise discover by trial and error: the docs and schemas
+    the diff touched, every rollback row no TC proves or a ruling covers,
+    every hygiene suspect without a ruling. Each ruling is a placeholder
+    for the orchestrator to fill; nothing is written."""
+    if not git_available(repo):
+        print("block: SKIPPED (not a git repo) — no delivery block drafted")
+        return 0
+    base = effective_base(spec_dir, base)
+    note, _where = delivery_note(spec_dir)
+    paths = [p for p in changed_paths(repo, base) if not p.startswith("specs/")]
+    docs = [p for p in paths if DOC_SURFACE.search(p)]
+    print("# draft delivery block — fill each <ruling>; paste under the "
+          "status holder's Delivered: field")
+    print("- Docs impact: " + (", ".join(docs) if docs
+                               else "none — <reason>"))
+    if not is_tiny(spec_dir):
+        proven = set(TC_ID.findall(_read(spec_dir / "test.md")))
+        ruled = {k.strip().strip("`") for k in ROLLBACK_RULING.findall(note)}
+        for key, text in rollback_items(spec_dir):
+            if not (set(TC_ID.findall(text)) & proven) and key not in ruled:
+                print(f"- Rollback: {key} — <ruling>")
+    hygiene = hygiene_rulings(spec_dir)
+    seen: set[tuple[str, str]] = set()
+    for path, _ln, kind, _text in clean_findings(repo, base):
+        if (path, kind) not in hygiene and (path, kind) not in seen:
+            seen.add((path, kind))
+            print(f"- Hygiene: {path} [{kind}] — <ruling>")
+    tm = TYPE_LINE.search(_read(spec_dir / "spec.md"))
+    if tm and tm.group(1).lower() in ("refactor", "upgrade"):
+        print("- Behavior preserved: <TCs> green at <Approved-at> and now")
+    return 0
+
+
+def mode_preflight(spec_dir: Path, repo: Path) -> int:
+    """Whether the proofs can run at all, before any wave is spawned: every
+    proof command's program resolves on PATH, a Docker engine answers when
+    the docset leans on Docker, and which proofs are still pending because
+    the tests they name are not written. Exit 1 on a missing prerequisite."""
+    cl = classify_proofs(spec_dir)
+    problems: list[str] = []
+    pending: dict[str, list[str]] = {}
+    for tc, cmd in cl["auto"]:
+        words = [w for w in cmd.split()
+                 if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w)]
+        first = words[0] if words else ""
+        if first.startswith(("./", "/")):
+            target = Path(first) if first.startswith("/") else repo / first
+            if not target.exists():
+                problems.append(f"{tc}: `{first}` does not exist")
+        elif first and not shutil.which(first):
+            problems.append(f"{tc}: `{first}` is not on PATH")
+        missing = missing_named_tests(cmd, repo)
+        if missing:
+            pending[tc] = missing
+    text = " ".join(_read(spec_dir / f) or ""
+                    for f in ("task.md", "test.md", "tech-spec.md", "spec.md"))
+    text += " ".join(cmd for _, cmd in cl["auto"])
+    if re.search(r"docker|testcontainers", text, re.I):
+        try:
+            up = subprocess.run(["docker", "info"], capture_output=True,
+                                timeout=30).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            up = False
+        if not up:
+            hint = re.search(r"DOCKER_HOST=\S+", text)
+            problems.append(
+                "no Docker engine answers, and the docset's proofs lean on "
+                "Docker/Testcontainers — start the engine"
+                + (f" and export {hint.group(0)}" if hint else ""))
+    print(f"preflight: {len(cl['auto'])} auto proof(s), "
+          f"{len(cl['manual'])} manual")
+    for line in problems:
+        print(f"  NO-GO  {line}")
+    for tc, names in sorted(pending.items()):
+        print(f"  PENDING  {tc}: no source defines {', '.join(names)} yet")
+    print("preflight: " + ("NO-GO" if problems else "GO")
+          + (f" ({len(pending)} proof(s) pending until their tests exist)"
+             if pending else ""))
+    return 1 if problems else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1596,6 +1859,10 @@ def main(argv: list[str] | None = None) -> int:
         rc = mode_dod(spec_dir, repo, base, dry)
     elif mode == "converge":
         rc = mode_converge(spec_dir, repo, base)
+    elif mode == "block":
+        rc = mode_block(spec_dir, repo, base)
+    elif mode == "preflight":
+        rc = mode_preflight(spec_dir, repo)
     else:
         rc = mode_proofs(spec_dir, repo, run, task)
     from telemetry import record  # fire-and-forget local telemetry

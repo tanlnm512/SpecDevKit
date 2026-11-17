@@ -1005,6 +1005,47 @@ class ChecklistTests(unittest.TestCase):
             shutil.rmtree(spec_dir.parent.parent)
 
 
+class SupersededDecisionTests(unittest.TestCase):
+    """A struck decision cited as if it still held is a stale reference."""
+
+    def struck(self, spec_dir):
+        tech = spec_dir / "tech-spec.md"
+        text = tech.read_text(encoding="utf-8")
+        text = text.replace(
+            "### D-001: Pure function, no class or operator surface",
+            "### D-001: ~~Pure function, no class or operator surface~~ "
+            "\u2014 superseded by D-002")
+        text = text.rstrip("\n") + (
+            "\n\n### D-002: Pure function with a dispatch table\n"
+            "- **Context**: replaces D-001.\n"
+            "- **Decision**: a dispatch table.\n"
+            "- **Consequences**: none.\n")
+        tech.write_text(text, encoding="utf-8")
+
+    def test_a_live_citation_of_a_superseded_decision_warns(self):
+        spec_dir = fixture_copy()
+        try:
+            self.struck(spec_dir)
+            with (spec_dir / "plan.md").open("a", encoding="utf-8") as f:
+                f.write("\nThe design follows D-001 throughout.\n")
+            code, out = run_check(str(spec_dir))
+            self.assertIn("stale reference: D-001 is superseded by D-002", out)
+            self.assertIn("plan.md:", out)
+        finally:
+            shutil.rmtree(spec_dir.parent.parent)
+
+    def test_history_lines_and_the_struck_block_are_not_flagged(self):
+        spec_dir = fixture_copy()
+        try:
+            self.struck(spec_dir)
+            with (spec_dir / "plan.md").open("a", encoding="utf-8") as f:
+                f.write("\nD-001 was superseded by D-002 and ~~D-001~~ is struck.\n")
+            _code, out = run_check(str(spec_dir))
+            self.assertNotIn("stale reference", out)
+        finally:
+            shutil.rmtree(spec_dir.parent.parent)
+
+
 class BrokenFixtureTests(unittest.TestCase):
     def test_dangling_fr_fails(self):
         spec_dir = fixture_copy()

@@ -37,7 +37,12 @@ separate gates:
    `reviewer-diff.patch`, while delivery is pending). The auditor is
    one reader: for a change touching auth, persistence, or a
    migration — or whenever the user asks — also run `/spec-review
-   branch` and treat its confirmed findings like the auditor's.
+   branch` and treat its confirmed findings like the auditor's. When the
+   full oracle run is out of proportion to the change, the light form is
+   the three review briefs (correctness, security, quality) spawned
+   directly on the diff, each finding verified by reading its cited
+   lines before it is reported — say in the summary that this form ran
+   and what it did not cover (no independent confirmation stage).
    Resolve every BLOCK; own or rule every WARN/NIT. A frozen survey's
    drift WARNs (a citation's line moved, the baseline behind HEAD)
    are expected once code lands — dod counts them as ruled. Draft

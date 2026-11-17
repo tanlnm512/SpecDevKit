@@ -10,7 +10,7 @@ description: >-
   idea or red intent (spec-define); not once approved (spec-build).
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # spec-design — gated authoring: validated intent → approved docset
@@ -223,6 +223,20 @@ constitution step's `constitution.md` by `--repair constitution`):
 `tick-commit` rows belong to spec-build: this skill ships no developer
 (D-044) — its briefs write docs, not code.
 
+## A decision that changes the contract
+
+A user ruling that adds or changes a requirement (a new FR, a changed
+rule) reaches every doc, in this order: spec.md (yours, inline) → a
+delta survey when it opens a code area the survey never read → tech-spec
+(a new D-### that supersedes the old one, struck as `### D-007: ~~…~~ —
+superseded by D-009`) → plan → test → tasks. Before each repair spawn,
+grep the docset for the terms the decision retires (a removed method
+name, "merge only", the old rule's words) and put the hits in the repair
+payload as lines to remove — a repair told only the new rule leaves the
+old one standing beside it. `check.py` WARNs `stale reference` for a
+superseded decision still cited as if it held. A change reaches the
+approve gate once, not once per doc.
+
 ## Repair runs (single agent, never the wave)
 
 One artifact stale or red → `--emit-spawns --repair <node>` emits
@@ -244,7 +258,13 @@ With verify green:
 2. **Every BLOCK gets an owner** — repair it (a repair run, then ONE
    re-review: re-emit and re-spawn, the docset fingerprint changed),
    or put it to the user, who rules it. You never rule a BLOCK away
-   yourself.
+   yourself. **The review converges** (D-062): a re-review is owed to
+   BLOCK repairs only, once. WARN and NIT findings are owned by a repair
+   or a stated ruling and never re-open the review; `check.py` already
+   re-reads their structure. Stop when the digest has no BLOCK and every
+   remaining WARN is a ruling you can state — a round that returns only
+   wording nits on a docset the user has not changed is the signal to
+   present, not to repair again.
 3. **Record** — the auditor writes nothing, and the approve record
    keeps one writer, freeze.py: save the review payload it will fold
    in, in this order: the emitted payload's `Docset fingerprint:

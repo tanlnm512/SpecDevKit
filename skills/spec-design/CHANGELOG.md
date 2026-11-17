@@ -5,6 +5,22 @@ middle phase of the split spec suite (spec-to-prod-split): gated intake
 over a validated intent, the authoring waves to the approve handoff —
 execution is spec-execute's, intake spec-intent's.
 
+## 0.1.2 — 2026-11-17
+
+- The approve review converges: a re-review is owed to BLOCK repairs
+  only, once; WARN and NIT findings never reopen it. A decision that
+  changes the contract reaches every doc in one order with the retired
+  terms grepped first, and `check.py` WARNs `stale reference` for a
+  superseded decision still cited as live (D-062).
+- The tasks lens makes a task own the tests that prove it, chains tasks
+  that must compile together, and turns another repo's required change
+  into a follow-up task; sizing no longer reads auth, persistence or a
+  migration in one service as `large` by itself (D-062).
+
+Migration: none required — convergence and sizing change how reviews
+and sizes run, not any doc contract; existing docsets re-check green
+unchanged. `bash tools/sync.sh` refreshes the install.
+
 ## 0.1.1 — 2026-11-13
 
 - At `Tier: tiny`, graph.py finds `Delivered: commit @ <sha>` (plain or

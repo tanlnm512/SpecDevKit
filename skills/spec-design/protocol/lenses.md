@@ -233,6 +233,24 @@ tech-spec.md, survey.md yourself).
 3. Enumerate tasks: verb-phrase + a `Touches:` block + `(FR-### or
    applicable NFR-###)`. One task = one commit-sized unit; a task too
    big to commit alone is two tasks.
+3a. **A task owns the tests that prove it.** Name, in the task's own
+   entry, the test class or method that makes each of its TCs pass and
+   create it in that task — never a closing "write the tests" task
+   alone: every task before it would land proving nothing, and a proof
+   of a test that does not exist reads PENDING (spec-build D-042). A
+   test task is right only for tests that need the whole plan (an
+   end-to-end suite); say so on the earlier tasks (`proofs land later:
+   T009`) so landing them unproven is deliberate.
+3b. **Chain what must compile together.** A task that adds a type,
+   signature or constructor another task's code calls is `(after
+   T###)`, not `[P]`: parallel tasks share one working tree, and a
+   half-built neighbor breaks every wave-mate's build. `[P]` is for
+   tasks that compile alone.
+3c. **A change another repo must make is a task too.** Deploy config
+   (env keys, manifests), a consumer, a vendored copy: a line in the
+   plan's Rollout and a follow-up task naming the repo and file, even
+   when this spec does not edit it — the delivery should not discover it
+   after the build.
 4. Mark `[P]` by DEFAULT per the spine; a chained task names the exact
    interface it consumes from its upstream — symbol names, signatures,
    file formats — implementers see only their own task entry, so the

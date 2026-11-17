@@ -13,7 +13,7 @@ description: >-
   (spec-review).
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # spec-build — execution: approved docset → delivered commit
@@ -85,6 +85,16 @@ Where mark.py does not ship (the other packages' graph.py copies), the
 old refusal stands (D-038): use the default print runner and spawn the
 payloads yourself.
 
+### Preflight (before the first wave)
+
+`python3 <skill_dir>/scripts/audit.py preflight specs/<name>` says
+whether the proofs can run at all: every proof command's program
+resolves, a Docker engine answers when the docset leans on
+Docker/Testcontainers, and which proofs are still PENDING because the
+tests they name do not exist. A NO-GO is the user's to settle (start the
+engine, export the variables the docset names) before any developer is
+spawned — a prerequisite found mid-wave costs every wave-mate's build.
+
 ### Implementation — per-task frontier waves
 
 A task is runnable when it is `- [ ]`, its `(after T###)`
@@ -110,7 +120,12 @@ the rest. A task with no parseable `Touches:` runs alone. Per round:
 4. `mark.py land` the task only after the digest plus the scoped
    proofs gate prove the landing — the marker releases chained
    dependents; one without verified landing is a fabricated tick in
-   cheaper clothing.
+   cheaper clothing. A proof whose named tests do not exist is PENDING,
+   never a pass (D-042): `land` refuses a task none of whose proofs ran —
+   the tests belong with the task. Only when a later task owns them is
+   `mark.py land <spec> T### --allow-pending` right: the landing is
+   `(implemented)` and unproven, printed as such, and the delivery pass
+   stays red until the pending proofs run.
 
 No per-task gate, no per-phase stop, no commit while implementing.
 **Rulings, not stalls**: a mid-execution conflict gets a D-###
@@ -217,10 +232,14 @@ the work-type, tiny-tier, and rewritten-history rules: read it in
 full before starting the pass. One pass over the whole plan — the
 lifecycle verbs below are its steps, never separate gates:
 
-1. **Proofs** — `scripts/audit.py proofs <spec-dir> --run`, fresh.
+1. **Proofs** — `scripts/audit.py proofs <spec-dir> --run`, fresh. A
+   PENDING proof (its named tests do not exist) fails the pass. `dod`'s
+   gate 1 is itself a live proofs run: read failures from `proofs`, take
+   the verdict from `dod`, and run neither again until code changed.
 2. **Regression gate** — `audit.py regression`: NONE is never a pass.
 3. **Review instruments** — `audit.py scope`, `clean`, `mutate`,
-   `dod`, and the read-only auditor in implementation-diff mode.
+   `block` (drafts the delivery block the gates 11–13 read), `dod`, and
+   the read-only auditor in implementation-diff mode.
    Resolve every BLOCK; own or rule every WARN/NIT.
 4. **Delivery summary → the user's yes** — tick and commit only on
    the user's explicit yes to this summary: an earlier "build it", a
@@ -282,7 +301,8 @@ copied byte-identical and pinned by `tools/tests/test_parity.py`):
 - `scripts/tick.py` — the mechanical tick: validated in full, applied
   atomically, refuses partial writes.
 - `scripts/audit.py` — the review instruments: scope, regression,
-  clean, proofs, mutate, coverage, dod, converge, archived.
+  clean, proofs, mutate, coverage, dod, converge, block, preflight,
+  archived.
 - `scripts/archive.sh` — moves a delivered spec to
   `specs/archive/<date>-<name>/`; commits nothing.
 - `scripts/migrate.py` — brings a v1 docset's task.md headers to the
