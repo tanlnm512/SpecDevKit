@@ -32,6 +32,12 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                       skills/*/agents/
                                                       (tools/agent-defs.py
                                                       --target agy)
+  evals       skills/*/evals/cases.md and            vs the parse +
+              skills/*/evals/results/*.md          referential integrity
+                                                   rules of tools/evals.py
+                                                   (case grammar, Check
+                                                   bullets in range, results
+                                                   citing real cases)
 
 Exit: 0 every surface matches its canonical source · 1 drift · 2 usage
 error.
@@ -270,12 +276,76 @@ def check_personas() -> int:
     return 1 if problems else 0
 
 
+def check_evals() -> int:
+    """The eval corpus: cases parse cleanly and every recorded result
+    cites a real case — the corpus the runner, grade.py's S4, and
+    RELEASE.md's live-eval gate all read."""
+    print("== evals — canonical source: skills/*/evals/cases.md via "
+          "tools/evals.py")
+    spec = importlib.util.spec_from_file_location(
+        "kit_evals", PKG_ROOT / "tools" / "evals.py")
+    evals = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(evals)
+    cases = evals.load_cases()
+    problems: list[str] = []
+    by_case = {}
+    for case in cases:
+        by_case[case.selector] = case
+        if not case.run_value:
+            problems.append(f"{case.source} — {case.selector} has no "
+                            f"Run: bullet (malformed, never a pass)")
+        oor, dupes = evals.check_defects(case)
+        if oor:
+            problems.append(f"{case.source} — {case.selector} Check "
+                            f"bullets name no criterion: C{oor}")
+        if dupes:
+            problems.append(f"{case.source} — {case.selector} duplicates "
+                            f"Check bullets: C{dupes}")
+    if not cases:
+        problems.append("skills/*/evals/cases.md — no cases discovered")
+    for rf in sorted(PKG_ROOT.glob("skills/*/evals/results/*.md")):
+        rel = rf.relative_to(PKG_ROOT)
+        skill = rel.parts[-4]
+        text = rf.read_text(encoding="utf-8")
+        caseid = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", rf.stem)
+        m = re.search(r"^- selector: (\S+)$", text, re.M)
+        if not m:
+            problems.append(f"{rel} — no selector line (record via "
+                            f"tools/evals.py validate)")
+            continue
+        selector = m.group(1)
+        if selector != f"{skill}/{caseid}":
+            problems.append(f"{rel} — selector {selector} disagrees with "
+                            f"the filename ({skill}/{caseid})")
+        elif selector not in by_case:
+            problems.append(f"{rel} — selector {selector} names no case in "
+                            f"{skill}/evals/cases.md")
+        elif not re.search(r"^#+\s+Verdicts\s*$", text, re.M | re.I):
+            problems.append(f"{rel} — no Verdicts section")
+        else:
+            n = len(by_case[selector].criteria)
+            verdicts = re.split(r"^#+\s+Findings", text, maxsplit=1,
+                                flags=re.M)[0]
+            for cid, _, _ in evals.VERDICT_LINE.findall(verdicts):
+                if int(cid) > n:
+                    problems.append(f"{rel} — C{cid} names no criterion of "
+                                    f"{selector} ({n} criteria)")
+    for problem in problems:
+        print(f"DRIFT {problem}")
+    if not problems:
+        print(f"  OK  {len(cases)} cases across "
+              f"{len({c.skill for c in cases})} skills, "
+              f"{len(list(PKG_ROOT.glob('skills/*/evals/results/*.md')))} "
+              f"recorded results, all citing real cases")
+    return 1 if problems else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="drift-check.py",
         description="Release-validate every generated surface against its "
                     "canonical source: contract, manifests, kit-rules, "
-                    "parity, diagrams, examples, personas.")
+                    "parity, diagrams, examples, personas, evals.")
     p.parse_args(argv)
 
     failed = []
@@ -285,7 +355,8 @@ def main(argv: list[str] | None = None) -> int:
                         ("parity", check_parity),
                         ("diagrams", check_diagrams),
                         ("examples", check_examples),
-                        ("personas", check_personas)):
+                        ("personas", check_personas),
+                        ("evals", check_evals)):
         if check():
             failed.append(name)
     if failed:
@@ -293,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
               f"canonical sources")
         return 1
     print("drift check: OK — contract, manifests, kit-rules, parity, "
-          "diagrams, examples, personas match their canonical sources")
+          "diagrams, examples, personas, evals match their canonical sources")
     return 0
 
 

@@ -7,6 +7,8 @@ works: scouting before asking, grilling to an empty frontier, the
 non-answer hard stop, and the stale-baseline repair. Judge each case
 in a scratch git repo, transcript + `specs/` output against the
 criteria; a criterion failed = a finding with the transcript line.
+Held-out cases' Pass criteria are read only at judging time — never
+while authoring or editing the skill (D-061).
 
 ## I1 — Raw idea to validated intent
 
@@ -28,6 +30,7 @@ criteria; a criterion failed = a finding with the transcript line.
 
 ## I2 — Non-answer round hard-stops
 
+- **Held-out**: yes
 - **Setup**: I1's repo mid-run; when the first grilling round is put
   to the user, the reply is empty, skipped, or harness-resolved
   without a real answer.
@@ -41,6 +44,7 @@ criteria; a criterion failed = a finding with the transcript line.
 
 ## I3 — Stale baseline refusal
 
+- **Held-out**: yes
 - **Setup**: a validated `specs/demo/intent.md` (I1's artifact), then
   a new commit changes code outside `specs/` with intent.md
   untouched; ask to hand off.

@@ -10,7 +10,8 @@ rigid stage shapes, the panel's independence, the user-owned
 direction). Judging: run the case in a scratch repo, check the
 transcript and `brainstorms/<name>.md` against the criteria; a
 failed criterion is a finding naming the moment it broke. Never
-average — aggregate.
+average — aggregate. Held-out cases' Pass criteria are read only at
+judging time — never while authoring or editing the skill (D-061).
 
 ## B1 — Raw vague idea (stage discipline)
 
@@ -70,6 +71,7 @@ average — aggregate.
 
 ## B5 — The weak idea is told it's weak
 
+- **Held-out**: yes
 - **Setup**: any repo.
 - **Ask**: "pressure-test this idea before we spec it: a
   local-first sync engine" (or another idea whose honest cynic

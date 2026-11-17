@@ -91,6 +91,9 @@ on any conflict the canonical file wins.
 | generated surface | any regenerate-only artifact: root `agents/`, the SKILL.md node table (`scripts/contract.py`), the plugin/marketplace manifests, the `§ Engineering rules` sections | `AGENTS.md` house rules |
 | ADR (D-###) | an append-only decision record; every divergence from a doc contract gets its own entry (C-05) | `skills/<name>/decisions/` |
 | eval case | an entry in a skill's `evals/cases.md`; every increment names its served case (C-10) | `skills/<name>/evals/cases.md` |
+| eval result | one recorded run of an eval case — per-criterion verdicts with evidence, date, repo, and the skill's `surface:` hash; append-only, never restamped | `skills/<name>/evals/results/` |
+| held-out case | an eval case marked `Held-out: yes` whose Pass criteria are read only at judging time, never while authoring the skill (D-061) | `skills/<name>/evals/cases.md` |
+| eval check | a case's `- **Check C<n>**:` shell bullet proving a criterion mechanically against the prepared scratch repo; the check's verdict wins over an observer's (D-061) | `tools/evals.py` |
 | sync | `tools/sync.sh` — the one harness-neutral install pipeline to every machine harness root | `tools/` |
 | telemetry | the local append-only run record (`scripts/telemetry.py` → `~/.spec-dev-kit/telemetry/*.jsonl`) — evidence for self-improvement, never status, never contents | `skills/*/scripts/telemetry.py` |
 | skill command | one `/spec-*` command per skill, named for it — `/spec-discover`, `/spec-define`, `/spec-design`, `/spec-build`, `/spec-review`, `/spec-ship`, `/spec-release`; spec-build's implement/test/audit/ship ride its router as verbs (D-033) | D-029, spec-build D-033, spec-design D-048, D-054 |
