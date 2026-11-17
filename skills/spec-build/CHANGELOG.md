@@ -5,7 +5,7 @@ back half of the split spec suite (spec-to-prod-split): implementer
 waves over approved task.md frontiers through the tick-commit gate —
 authoring is spec-shape's, intake spec-intent's.
 
-## Unreleased
+## 0.1.2 — 2026-11-17
 
 - A proof naming a test no source defines is PENDING, not PASS:
   `audit.py proofs` skips it and exits 1, `dod` gate 1 fails, and
@@ -15,6 +15,12 @@ authoring is spec-shape's, intake spec-intent's.
   engine) before the first wave; `audit.py block` drafts the delivery
   block; `scope` reads globs the docs spell; `Docs impact:` tolerates a
   trailing parenthetical per file (D-042).
+
+Migration: none required — `bash tools/sync.sh` refreshes the install;
+existing docsets and their delivery records are untouched. A plan that
+relied on a proof reading PASS while its test did not exist now fails
+there: write the test with its task, or land with `--allow-pending`
+until a later task owns it.
 
 ## 0.1.1 — 2026-11-13
 

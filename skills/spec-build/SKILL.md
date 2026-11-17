@@ -13,7 +13,7 @@ description: >-
   (spec-review).
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # spec-build — execution: approved docset → delivered commit
