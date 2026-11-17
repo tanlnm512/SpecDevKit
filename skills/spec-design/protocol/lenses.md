@@ -237,7 +237,7 @@ tech-spec.md, survey.md yourself).
    entry, the test class or method that makes each of its TCs pass and
    create it in that task — never a closing "write the tests" task
    alone: every task before it would land proving nothing, and a proof
-   of a test that does not exist reads PENDING (spec-build D-062). A
+   of a test that does not exist reads PENDING (spec-build D-042). A
    test task is right only for tests that need the whole plan (an
    end-to-end suite); say so on the earlier tasks (`proofs land later:
    T009`) so landing them unproven is deliberate.
