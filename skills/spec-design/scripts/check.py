@@ -1066,6 +1066,17 @@ def hotfix_target_problems(spec_dir: Path, spec_text: str,
     return problems
 
 
+def _superseded_decisions(tech: str) -> list[tuple[str, str]]:
+    """(old, new) for each tech-spec decision heading struck as superseded:
+    `### D-007: ~~title~~ — superseded by D-009`."""
+    out = []
+    for m in re.finditer(
+            r"^###\s+(D-\d{3})\b.*?supersed\w*\s+by\s+(D-\d{3})", tech,
+            re.M | re.I):
+        out.append((m.group(1), m.group(2)))
+    return out
+
+
 def heading_body(text: str, heading: str) -> str | None:
     """The body under an exact heading, up to the next heading of its
     level or higher, HTML comments removed; None when the heading is
@@ -1683,6 +1694,21 @@ def main(argv: list[str] | None = None) -> int:
         fails.append(f"dangling: {ref} referenced but not defined in spec.md")
     for ref in sorted(set(re.findall(r"D-\d{3}", task + spec)) - ds):
         fails.append(f"dangling: {ref} referenced but not defined in tech-spec.md")
+    # A superseded decision's id still cited as if it held: the decision was
+    # struck (`### D-007: ~~…~~ — superseded by D-009`) but a sibling doc keeps
+    # describing the design it replaced. WARN — a line saying "supersede" or
+    # "replace", or struck through, is history, not a live claim.
+    for old, new in _superseded_decisions(tech):
+        for doc in ("spec.md", "plan.md", "task.md", "test.md", "tech-spec.md"):
+            body = texts[doc]
+            if doc == "tech-spec.md":
+                body = body.replace(d_blocks.get(old, ""), "")
+            for n, line in enumerate(body.splitlines(), 1):
+                if (re.search(rf"\b{old}\b", line)
+                        and not re.search(r"supersed|replac|~~", line, re.I)):
+                    warns.append(
+                        f"stale reference: {old} is superseded by {new} but "
+                        f"{doc}:{n} still cites it — re-point it or strike it")
     # D-### structural completeness: a heading alone isn't a decision — the
     # template's shape is Context/Decision/Consequences, bulleted or (as
     # real specs also do it) written as bold-labelled prose paragraphs.

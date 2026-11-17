@@ -42,6 +42,9 @@ yourself (never a reason to guess):
 | "professional" / "clean" | vague aesthetic | the concrete, checkable property |
 | "do whatever it takes" | no boundary | what the solution must not touch |
 | nothing about load, data, access, failure, or screens | silent quality bounds | which of security, privacy, performance, reliability, observability, accessibility binds, and the bound — "none, because …" is an answer |
+| "operator", "admin", "force", "override", "bypass", "skip", "retry now" | a privileged path with no stated authority | who may invoke it, and how the system verifies that from the caller — never from a field the caller writes; a bypass whose authority is unsaid is the question a security review finds later |
+| a count, window, limit, size or timeout | an unpinned default and boundary | the default, the unit, what counts (is the first one 1 or 0? does a repeat count?), whether zero/negative/off is valid, and whether startup refuses a bad value |
+| a rule that applies to "jobs", "requests", "users" generally | unnamed exceptions | which sources, roles or paths are exempt, and what happens at each exemption's edge |
 
 A pattern found is not a question dumped on the user — the facts
 behind a row (what exists, what the reference actually does) stay the

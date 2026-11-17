@@ -22,8 +22,12 @@ header comment has the rules; absent reads feature):
   payload authors plan + tech + tasks, with the tester separate in the same
   wave. Use for work inside one area.
 - **`Effort: large`** — the full plan ∥ tech ∥ qa wave, then a separate
-  tasks wave. Use for multi-area, auth, persistence, migration, or
-  research-heavy work. A missing or unknown Effort reads large.
+  tasks wave. Use for work spanning services or areas, or research-heavy
+  work. Auth, persistence or a migration inside one service does not by
+  itself make it large: size by the change (a few hundred lines in one
+  service reads standard), because large costs a six-document docset and
+  a review per document. When unsure start at standard — Effort can be
+  raised at any repair run. A missing or unknown Effort reads large.
 
 Effort has exactly these two values. `tiny` is a Tier, never an
 effort; a doc still carrying `Effort: tiny` reads standard. The

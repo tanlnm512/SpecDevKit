@@ -5,6 +5,13 @@ door of the split spec suite (spec-to-prod-split): repo scouting +
 requirement grilling to a validated `specs/<name>/intent.md`, hard
 stop — the docset is spec-shape's, execution spec-execute's.
 
+## Unreleased
+
+- The grill's failure-pattern table asks who may invoke a privileged
+  path (operator, admin, force, bypass) and how it is verified from the
+  caller, pins a count or window's default, unit, boundary and startup
+  validation, and names a general rule's exemptions (D-022).
+
 ## 0.1.1 — 2026-11-13
 
 - `templates/intent.md` carries the `**Type**` header (feature |

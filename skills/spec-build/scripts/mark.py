@@ -16,7 +16,7 @@ says markers are written only through mark.py / tick.py).
 Verbs and the transitions they own (the D-034 table, executable):
 
   mark.py claim   <spec-dir> --wave <wave-dir> [--run-id ID]
-  mark.py land    <spec-dir> T### [--resolution "<text>"] [--digest "<line>"]
+  mark.py land    <spec-dir> T### [--resolution "<text>"] [--digest "<line>"] [--allow-pending]
   mark.py release <spec-dir> T### --reason "<text>"
   mark.py fail    <spec-dir> T### --evidence <file> --digest "<line>"
   mark.py drop    <spec-dir> T### --decision D-###
@@ -38,7 +38,11 @@ FILE the agent wrote (digests/wave-<N>/<stem>.md, D-040) is the
 primary evidence, `--digest` the override when the file is missing —
 and on `audit.py proofs <spec> --run --task T###` running at least one
 acceptance command green — on red it prints the failure and the exact
-fail command to run. fail copies the digest verbatim from the recorded
+fail command to run. A proof whose named tests do not exist is PENDING,
+never a pass: when none of the task's proofs ran, land refuses unless
+`--allow-pending` says the tests are written by a later task — the
+landing is then an unproven `(implemented)`, and the delivery pass (dod
+gate 1) stays red until the pending proofs run. fail copies the digest verbatim from the recorded
 evidence and refuses a digest that is not a substring of it; a
 superseded in-flight round closes as `fixed n — failed again — …` so
 the checker's pairing gate stays green; round 3 points at
@@ -273,7 +277,7 @@ def _stamp_line(run_id: str) -> str:
 # --- land ----------------------------------------------------------------
 
 def land(spec_dir: Path, task_id: str, resolution: str | None,
-         digest: str | None) -> int:
+         digest: str | None, allow_pending: bool = False) -> int:
     """(implemented) in place of the claim — gated on the developer
     digest and a green scoped proofs run. On red proofs nothing is
     written and the fail command is printed."""
@@ -337,6 +341,24 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
                       f"{task_id} --evidence <file> --digest \"<line from "
                       "the output above>\"")
                 return 1
+            pending = d["pending"]
+            if pending and len(pending) == len(d["auto"]):
+                if not allow_pending:
+                    print(f"refused: none of {task_id}'s proofs ran — the "
+                          "tests they name do not exist yet "
+                          f"({', '.join(sorted(pending))}). Write them with "
+                          "the task; if a later task owns them, land with "
+                          "--allow-pending (an unproven landing the "
+                          "delivery pass will not accept)", file=sys.stderr)
+                    return 1
+                print(f"warning: {task_id} lands unproven — pending: "
+                      f"{', '.join(sorted(pending))}; the delivery pass "
+                      "stays red until these tests exist and pass",
+                      file=sys.stderr)
+            elif pending:
+                print(f"note: {len(pending)} of {task_id}'s proofs are "
+                      f"pending ({', '.join(sorted(pending))}) — the "
+                      "delivery pass needs them", file=sys.stderr)
 
             open_round = entry.fix_round
             if open_round is not None and not resolution:
@@ -625,9 +647,12 @@ def main(argv=None) -> int:
     opts: dict[str, str] = {}
     flags = {"--wave", "--run-id", "--resolution", "--digest",
              "--reason", "--evidence", "--decision"}
+    switches = {"--allow-pending"}
     it = iter(args)
     for a in it:
-        if a in flags:
+        if a in switches:
+            opts[a] = "1"
+        elif a in flags:
             v = next(it, None)
             if v is None:
                 print(f"{a} needs a value\n{USAGE}", file=sys.stderr)
@@ -652,7 +677,8 @@ def main(argv=None) -> int:
                      opts.get("--run-id"))
     if verb == "land":
         return land(Path(positional[0]), positional[1],
-                    opts.get("--resolution"), opts.get("--digest"))
+                    opts.get("--resolution"), opts.get("--digest"),
+                    "--allow-pending" in opts)
     if verb == "release":
         if "--reason" not in opts:
             print(USAGE, file=sys.stderr)

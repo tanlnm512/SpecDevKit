@@ -5,6 +5,17 @@ back half of the split spec suite (spec-to-prod-split): implementer
 waves over approved task.md frontiers through the tick-commit gate —
 authoring is spec-shape's, intake spec-intent's.
 
+## Unreleased
+
+- A proof naming a test no source defines is PENDING, not PASS:
+  `audit.py proofs` skips it and exits 1, `dod` gate 1 fails, and
+  `mark.py land` refuses a task none of whose proofs ran unless
+  `--allow-pending` marks the landing unproven (D-042).
+- `audit.py preflight` checks proof prerequisites (programs, a Docker
+  engine) before the first wave; `audit.py block` drafts the delivery
+  block; `scope` reads globs the docs spell; `Docs impact:` tolerates a
+  trailing parenthetical per file (D-042).
+
 ## 0.1.1 — 2026-11-13
 
 - A `- Hygiene: <path> [<kind>] — <ruling>` line in the delivery block
