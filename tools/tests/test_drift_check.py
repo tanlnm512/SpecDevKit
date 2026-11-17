@@ -84,7 +84,7 @@ class DriftTests(unittest.TestCase):
         self.assertIn("drift check: OK", r.stdout)
         for section in ("== contract", "== manifests", "== kit-rules",
                         "== parity", "== diagrams", "== examples",
-                        "== personas"):
+                        "== personas", "== evals"):
             self.assertIn(section, r.stdout)
 
     def test_manifest_drift_fails_and_regeneration_repairs(self):
@@ -180,6 +180,27 @@ class DriftTests(unittest.TestCase):
         victim.write_text(
             text[:start] + gen.stdout.strip("\n")
             + text[end + len(m.END):])
+        self.assertEqual(self.run_drift_check(repo).returncode, 0)
+
+    def test_orphan_eval_result_fails_and_deletion_repairs(self):
+        # a recorded result must cite a real case — an orphan result (as
+        # after a case is renamed or its file hand-planted) is eval drift
+        repo = self.clean_copy()
+        victim = repo / "skills" / "spec-ship" / "evals" / "results"
+        victim.mkdir(parents=True)
+        (victim / "2026-11-17-s9.md").write_text(
+            "# Eval result — spec-ship/s9\n\n"
+            "- selector: spec-ship/s9\n- date: 2026-11-17\n"
+            "- kind: conversational\n- source: skills/spec-ship/evals/cases.md\n"
+            "- repo: scratch\n- surface: 0123456789abcdef\n"
+            "- recorded via: validate\n\n## Verdicts\n\n"
+            "- C1: pass — seen\n\n## Findings\n\nNone — every criterion passed.\n",
+            encoding="utf-8")
+        r = self.run_drift_check(repo)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("evals", r.stdout)
+        self.assertIn("spec-ship/s9", r.stdout)
+        (victim / "2026-11-17-s9.md").unlink()
         self.assertEqual(self.run_drift_check(repo).returncode, 0)
 
 

@@ -8,6 +8,8 @@ the case in a scratch repo with a bare local remote (never a real
 one), check the transcript, the changelog, the spec records, and
 `git log`/`git tag` against the criteria; a failed criterion is a
 finding naming the moment it broke. Never average — aggregate.
+Held-out cases' Pass criteria are read only at judging time — never
+while authoring or editing the skill (D-061).
 
 ## R1 — A release from delivered specs (the full run)
 
@@ -32,6 +34,7 @@ finding naming the moment it broke. Never average — aggregate.
 
 ## R2 — Refusals: a dirty tree and an unreachable delivery record
 
+- **Held-out**: yes
 - **Setup**: as R1, plus an unrelated modified file in the working
   tree, and the feature spec's `Delivered:` sha replaced by a commit
   that is not an ancestor of HEAD (as after a squash-merge).
@@ -60,6 +63,7 @@ finding naming the moment it broke. Never average — aggregate.
 
 ## R4 — Post-release verification fails
 
+- **Held-out**: yes
 - **Setup**: R1 completed through publish to the bare remote; the
   feature spec's plan § Rollout names a post-release check.
 - **Ask**: "run the post-release checks" — then report "the check

@@ -20,6 +20,9 @@ SKILL.md: `graph.py` (report or `--state-json`) is consulted before and
 after every wave and gate action, and the captured snapshot sequence is
 part of the evidence — the frontier is the only scheduler being judged.
 
+Held-out cases' Pass criteria are read only at judging time — never
+while authoring or editing the skill (D-061).
+
 ## E1 — Feature authoring, small spec (happy path)
 
 - **Setup**: scratch repo with a real test runner and a validated
@@ -52,6 +55,7 @@ part of the evidence — the frontier is the only scheduler being judged.
 
 ## E3 — Researcher gate, negative branch
 
+- **Held-out**: yes
 - **Setup**: feature whose approach is already obvious (single
   known-pattern internal change), validated intent.
 - **Pass criteria**: zero spawns beyond the needed waves; research.md
@@ -81,6 +85,7 @@ part of the evidence — the frontier is the only scheduler being judged.
 
 ## E8 — Intake handoff: draft the spec, review the contract, stop at approve
 
+- **Held-out**: yes
 - **Setup**: scratch repo with a real test runner; `/spec-define <name>`
   run to a green `specs/<name>/intent.md` and NO spec.md; then
   `/spec-design <name>`.

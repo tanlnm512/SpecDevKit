@@ -34,6 +34,17 @@ Standing cases for the synthetic fixture.
 ## C1 — conversational case
 - **Run**: session: do the thing in a session; judge from the transcript against the criteria above
 - **Pass criteria**: first criterion holds; second criterion holds
+
+## H1 — hybrid case
+- **Pass criteria**: the file exists; the marker line holds; the session judged the flow
+- **Check C1**: test -f prepared.txt
+- **Check C2**: grep -q marker prepared.txt
+- **Run**: session: do the hybrid thing in a session; judge the flow against the criteria above
+
+## C2 — held-out case
+- **Held-out**: yes
+- **Pass criteria**: first criterion holds; second criterion holds
+- **Run**: session: held-out procedure; judge from the transcript
 """
 
 COMPLETE_TRANSCRIPT = """\
@@ -80,6 +91,24 @@ class RealCorpusTests(unittest.TestCase):
         self.assertGreater(len(by_sel["spec-review/e2"].criteria), 1)
         # a single-clause bullet parses to exactly one
         self.assertGreaterEqual(len(by_sel["spec-review/e1"].criteria), 1)
+
+    def test_corpus_split_pins_the_held_out_set(self):
+        # the ~40% adversarial/negative-path split is a recorded contract (D-061)
+        held = sorted(c.selector for c in self.cases if c.held_out)
+        self.assertEqual(len(held), 15)
+        for sel in ("spec-ship/s2", "spec-ship/s4", "spec-ship/s5",
+                    "spec-build/e5", "spec-build/e6", "spec-build/e9",
+                    "spec-define/i2", "spec-design/e3", "spec-discover/b5",
+                    "spec-release/r2", "spec-review/e1"):
+            self.assertIn(sel, held)
+
+    def test_pilot_checks_live_on_spec_build_e8_and_e9(self):
+        checked = sorted(c.selector for c in self.cases if c.checks)
+        self.assertEqual(checked, ["spec-build/e8", "spec-build/e9"])
+        for c in self.cases:
+            ns = [n for n, _ in c.checks]
+            self.assertTrue(all(1 <= n <= len(c.criteria) for n in ns),
+                            f"{c.selector} has out-of-range checks")
 
 
 class FixtureTests(unittest.TestCase):
@@ -172,6 +201,132 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("conversational", buf.getvalue())
         self.assertIsNone(self.any_result("c1"))
+
+    def test_run_hybrid_prints_sheet_records_nothing(self):
+        import contextlib, io, os
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        (repo / "prepared.txt").write_text("the marker line\n", encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(repo)
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = evals.main(["run", "fakeskill/h1"])
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(rc, 0)
+        self.assertIn("C1: pass", buf.getvalue())
+        self.assertIn("C3", buf.getvalue())  # the criterion no check covers
+        self.assertIsNone(self.any_result("h1"))
+
+    def test_run_hybrid_failing_check_exits_nonzero(self):
+        import os
+        (self.tmp / "repo").mkdir()  # no prepared.txt: C1, C2 fail
+        cwd = os.getcwd()
+        os.chdir(self.tmp / "repo")
+        try:
+            rc = evals.main(["run", "fakeskill/h1"])
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(rc, 1)
+        self.assertIsNone(self.any_result("h1"))
+
+    def test_validate_hybrid_merges_checks_with_transcript(self):
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        (repo / "prepared.txt").write_text("the marker line\n", encoding="utf-8")
+        t = self.tmp / "h1.md"
+        t.write_text("# t\n\n- C3: pass — the session judged the flow at turn 2\n",
+                     encoding="utf-8")
+        rc = evals.main(["validate", "fakeskill/h1", str(t), "--repo", str(repo)])
+        self.assertEqual(rc, 0)
+        text = self.any_result("h1")
+        self.assertIn("- C1: pass — check `test -f prepared.txt` exited 0", text)
+        self.assertIn("- C2: pass", text)
+        self.assertIn("- C3: pass — the session judged the flow", text)
+        self.assertIn("None — every criterion passed.", text)
+
+    def test_validate_hybrid_check_beats_observer_verdict(self):
+        repo = self.tmp / "repo"
+        repo.mkdir()  # prepared.txt missing: checks fail, observer claims pass
+        t = self.tmp / "h1.md"
+        t.write_text("# t\n\n- C1: pass — observer claims the file exists\n"
+                     "- C3: fail — the flow broke at turn 4\n", encoding="utf-8")
+        rc = evals.main(["validate", "fakeskill/h1", str(t), "--repo", str(repo)])
+        self.assertEqual(rc, 0)
+        text = self.any_result("h1")
+        self.assertIn("- C1: fail — check `test -f prepared.txt` exited 1", text)
+        self.assertIn("- C2: fail", text)
+        self.assertIn("contradicts the check", text)
+        self.assertIn("- C3: the flow broke at turn 4", text)
+
+    def test_validate_hybrid_observer_fail_on_green_check_stays_a_finding(self):
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        (repo / "prepared.txt").write_text("the marker line\n", encoding="utf-8")
+        t = self.tmp / "h1.md"
+        t.write_text("# t\n\n- C1: fail — the observer saw the file missing mid-session\n"
+                     "- C3: pass — the flow held\n", encoding="utf-8")
+        rc = evals.main(["validate", "fakeskill/h1", str(t), "--repo", str(repo)])
+        self.assertEqual(rc, 0)
+        text = self.any_result("h1")
+        self.assertIn("- C1: pass — check `test -f prepared.txt` exited 0", text)
+        self.assertIn("- C1: observer verdict (fail) contradicts the check", text)
+        self.assertIn("- C2: pass", text)  # green check, no observer verdict
+
+    def test_validate_hybrid_still_requires_unchecked_verdicts(self):
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        (repo / "prepared.txt").write_text("the marker line\n", encoding="utf-8")
+        t = self.tmp / "h1.md"
+        t.write_text("# t\n\nonly checks ran, the observer said nothing about C3\n",
+                     encoding="utf-8")
+        rc = evals.main(["validate", "fakeskill/h1", str(t), "--repo", str(repo)])
+        self.assertEqual(rc, 1)
+        self.assertIsNone(self.any_result("h1"))
+
+    def test_malformed_check_bullets_are_a_usage_error(self):
+        d2 = self.tmp / "skills" / "badchecks" / "evals"
+        d2.mkdir(parents=True)
+        (d2 / "cases.md").write_text(
+            "# Eval cases\n\n## X1 — bad checks\n"
+            "- **Pass criteria**: it holds; it also holds\n"
+            "- **Check C9**: true\n"
+            "- **Check C2**: true\n"
+            "- **Check C2**: true\n"
+            "- **Run**: session: do it\n", encoding="utf-8")
+        self.assertEqual(evals.main(["run", "badchecks/x1"]), 2)
+        good = self.tmp / "x.md"
+        good.write_text("- C1: pass — seen\n", encoding="utf-8")
+        self.assertEqual(evals.main(["validate", "badchecks/x1", str(good)]), 2)
+        self.assertIsNone(self.any_result("x1"))
+
+    def test_held_out_procedure_notes_withholding(self):
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = evals.main(["procedure", "fakeskill/c2"])
+        self.assertEqual(rc, 0)
+        self.assertIn("held-out case", buf.getvalue())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = evals.main(["procedure", "fakeskill/c1"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("held-out", buf.getvalue())
+
+    def test_report_counts_split_and_verdicts(self):
+        import contextlib, io
+        evals.main(["run", "fakeskill/m1"])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = evals.main(["report"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("heldout", out)
+        self.assertIn("fakeskill", out)
+        self.assertIn("2/2", out)  # m1's two criteria, both stamped pass
+        self.assertIn("corpus", out)
 
     def test_runless_case_is_malformed_never_a_pass(self):
         # a missing Run: bullet is a parse failure, never a run that fabricates a pass

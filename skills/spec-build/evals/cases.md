@@ -17,6 +17,9 @@ SKILL.md: `graph.py` (report or `--state-json`) is consulted before and
 after every wave and gate action, and the captured snapshot sequence is
 part of the evidence — the frontier is the only scheduler being judged.
 
+Held-out cases' Pass criteria are read only at judging time — never
+while authoring or editing the skill (D-061).
+
 ## E4 — Resume mid-implementation
 
 - **Setup**: run the spec-design/e1 pipeline through approval, then
@@ -41,6 +44,7 @@ part of the evidence — the frontier is the only scheduler being judged.
 
 ## E5 — Single-agent fix round
 
+- **Held-out**: yes
 - **Setup**: the spec-design/e1 pipeline approved and executed to the
   delivery pass, but one task's TC proof runs red (a planted
   failing acceptance command or a genuine small defect); ask:
@@ -60,6 +64,7 @@ part of the evidence — the frontier is the only scheduler being judged.
 
 ## E6 — Delivery pass, red
 
+- **Held-out**: yes
 - **Setup**: the spec-design/e1 pipeline run through execute, but one
   implementer briefed to leave a debug print and touch an
   out-of-scope file.
@@ -103,20 +108,24 @@ part of the evidence — the frontier is the only scheduler being judged.
 - **Pass criteria**: `audit.py regression` runs `make test` against
   the `Approved-at` base and dod gate 3 reads PASS from it (never
   MANUAL); the delivery summary shows the `deps:` line naming the new
-  requirement; `notes/delivery.md` carries `Docs impact: README.md`
-  and the README change is in the diff (the developer updated it);
-  every tech-spec rollback row is proven by a TC or ruled by a
-  `Rollback:` line before dod passes; the ruled-later WARN is parked
-  with `tick.py --park` into `specs/BACKLOG.md` and listed by tick;
-  C2 stages the delivery note and BACKLOG.md by path; `archive.sh`
-  writes the archived dir's `retro.md` (tasks, fix rounds, decisions,
-  the parked line) and appends the spec's D-### titles to
+  requirement; the status holder's delivery block carries
+  `Docs impact: README.md` and the README change is in the diff (the
+  developer updated it); every tech-spec rollback row is proven by a
+  TC or ruled by a `Rollback:` line before dod passes; the
+  ruled-later WARN is parked with `tick.py --park` into
+  `specs/BACKLOG.md` and listed by tick; C2 stages the delivery
+  record and BACKLOG.md by path; `archive.sh` writes the archived
+  dir's `retro.md` (tasks, fix rounds, decisions, the parked line)
+  and appends the spec's D-### titles to
   `specs/context/decisions.md`; nothing ticked or committed before the
   user's yes.
+- **Check C3**: grep -rq "Docs impact: README.md" specs/archive/*/task.md
+- **Check C5**: test -s specs/BACKLOG.md && grep -qi warn specs/BACKLOG.md
 - **Run**: session: ship and archive the spec per **Setup**; judge the delivery summary, dod output, BACKLOG.md, and retro.md against the pass criteria above
 
 ## E9 — Hotfix on a busy branch
 
+- **Held-out**: yes
 - **Setup**: a `Tier: tiny`, `Type: hotfix` spec approved with one
   task; between approval and delivery another spec's commit
   (`feat(other-spec): …`) lands on the branch; `/spec-build <spec>`
@@ -130,4 +139,5 @@ part of the evidence — the frontier is the only scheduler being judged.
   detectable checks, gate 3 reads NONE and the orchestrator runs the
   repo's documented check and records it rather than calling the
   gate green; the delivery pass is otherwise the ordinary tiny pass.
+- **Check C1**: grep -rl "Regression test (red before fix)" specs/*/notes/
 - **Run**: session: land a foreign commit after approval, then run the hotfix through ship per **Setup**; judge the notes, scope output, and dod scorecard against the pass criteria above

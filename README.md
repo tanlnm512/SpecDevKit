@@ -556,7 +556,7 @@ tools/
 ├── plugin-manifest.py      # shared: generates .claude-plugin/marketplace.json + per-skill plugin.json
 ├── kit-rules.py            # shared: injects rules/engineering-rules.md into the § Engineering rules carriers
 ├── drift-check.py          # shared: release-validate generated surfaces against their canonical sources
-├── evals.py                # shared: list/run/validate the skills' standing eval cases, record results
+├── evals.py                # shared: list/run/validate the skills' standing eval cases, record results, report coverage
 ├── ownership.py            # shared: ownership-plan primitives — classify destinations against the provenance ledger before sync writes
 └── tests/                  # suite for the shared tooling itself (bash tests/run.sh)
 ```

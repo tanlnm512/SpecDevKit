@@ -7,10 +7,13 @@ these prove the *panel* works — precision, confirmation, verdicts.
 Fixture: `examples/review-target/` (seeded-bug diff with labeled
 expectations). Judging: run the case in a scratch repo, check the
 report against the criteria; a failed criterion is a finding naming
-the report line. Never average — aggregate.
+the report line. Never average — aggregate. Held-out cases' Pass
+criteria are read only at judging time — never while authoring or
+editing the skill (D-061).
 
 ## E1 — Clean diff, precision (zero findings is success)
 
+- **Held-out**: yes
 - **Setup**: any repo; a trivially correct one-file change (rename a
   local variable, fix a comment typo).
 - **Ask**: "review the diff".
@@ -69,6 +72,7 @@ the report line. Never average — aggregate.
 
 ## E6 — PR with red CI and a new dependency
 
+- **Held-out**: yes
 - **Setup**: scratch GitHub repo with an open PR that adds a
   dependency to `package.json` (or `requirements.txt`) and whose CI
   has one failing check; the repo keeps `specs/BACKLOG.md`; local
