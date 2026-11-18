@@ -146,7 +146,7 @@ fix_from payload), carries:
   after a fix round `fixStatus` — `fixed` | `unfixed` | `worse` |
   `pending` | `rejected-valid` | `rejected-invalid` | `out-of-scope`
   (D-022: a fixer skip is ruled on by the next verifier — `rejected-valid`
-  withdraws the finding, `rejected-invalid` stands, an unrulled skip
+  withdraws the finding, `rejected-invalid` stands, an unruled skip
   stands; `out-of-scope` names a widening call only the user can make
   and burns no round).
 

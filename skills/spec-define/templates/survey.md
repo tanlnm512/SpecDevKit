@@ -3,7 +3,8 @@
 **Created**: YYYY-MM-DD | **Baseline**: <version @ commit>
 The survey node's output — the single source of truth for code state. Every citation
 in the other four docs must trace to a line here. Evidence is pasted
-verbatim from grep/read output in the session that wrote it.
+verbatim from grep/read output in the session that wrote it, or carried
+verbatim from intent.md under the rule below.
 
 ## Items
 
@@ -20,7 +21,9 @@ item <id>: "<one-line description>"
 couplings, consumer lists, counts. Same verbatim rule.>
 
 ## Rules
-- Every `file:line` pasted from grep/read in this survey — never from memory.
+- Every `file:line` pasted from grep/read in this survey — never from memory —
+  or carried verbatim from intent.md § Constraints when the file is unchanged
+  since intent's baseline (its verify command re-run here).
   Can't find it → write `unknown — verify`, don't guess.
 - Status derives from evidence, not intent. Run every verify command.
 - A number in an old doc is a claim, not evidence — re-count it.

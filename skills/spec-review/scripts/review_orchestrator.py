@@ -723,6 +723,8 @@ RECOMMENDATION_RANK = {"merge": 0, "fix-first": 1, "human": 2}
 RESOLVED_FIX = ("fixed", "rejected-valid")
 KNOWN_FIX = RESOLVED_FIX + ("unfixed", "worse", "rejected-invalid",
                             "out-of-scope", "pending")
+# out-of-scope waits on the user's widening call, never on a round
+OFF_LOOP_FIX = RESOLVED_FIX + ("out-of-scope",)
 
 
 def derive_conclusion(gate_green, reported):
@@ -752,6 +754,10 @@ def cmd_report(a):
     gate_green = d.get("gate_green", False)
     assessment = d.get("assessment", {})
     reported = [reported_finding(t) for t in tracked]
+    unknown = sorted({f["fixStatus"] for f in reported} - set(KNOWN_FIX))
+    if unknown:
+        return out(False, error=(f"unknown fix status {', '.join(map(repr, unknown))} — "
+                                 f"one of: {', '.join(KNOWN_FIX)}"))
     conclusion = d.get("conclusion", "")
     derived = None
     if a.kind == "fix":
@@ -1465,6 +1471,7 @@ def _final_ask_project(ctx):
 
 
 def _fixer_ask(ctx):
+    ctx = {**ctx, "unresolved": [t for t in ctx["unresolved"] if t.get("fix") not in OFF_LOOP_FIX]}
     if ctx["round"] == 1:
         opening = ("Fix the confirmed findings in the project's code:\n" if ctx["project"]
                    else f"Fix the confirmed findings on the change (`git diff {_base(ctx)}`):\n")
@@ -1511,7 +1518,7 @@ def _verify_ask(ctx):
             "If the author SKIPPED this finding (their reason is in the notes), do not verify a fix — rule on the skip "
             "instead: rejected-valid when the reason holds (the finding was not a real defect the author must fix — "
             "say what the code actually does), rejected-invalid when it does not (the finding stands whatever the "
-            "author believes). An unrulled skip leaves the finding standing. Do not edit anything.")
+            "author believes). An unruled skip leaves the finding standing. Do not edit anything.")
 
 
 def _fix_review_ask(ctx):

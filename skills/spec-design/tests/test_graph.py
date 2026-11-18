@@ -2027,8 +2027,10 @@ class Exec011RepairDeltaTests(unittest.TestCase):
     fresh baseline, or a failing diff never reads as an empty delta."""
 
     def payload_for(self, tmp: Path, git=True, head="def5678",
-                    diff=("repo/calc.py", "repo/test_calc.py")):
+                    diff=("repo/calc.py", "repo/test_calc.py"), prep=None):
         d = copy_fixture(tmp)
+        if prep:
+            prep(d)
         patches = [
             unittest.mock.patch.object(graph.specstate, "git_available",
                                        lambda repo: git),
@@ -2055,6 +2057,23 @@ class Exec011RepairDeltaTests(unittest.TestCase):
             self.assertIn("do NOT rebuild", payload)
             self.assertIn("repo/calc.py", payload)
             self.assertIn("repo/test_calc.py", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_first_survey_seeds_from_a_baselined_intent(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011g-"))
+        try:
+            def first_survey_after_intake(d):
+                (d / "survey.md").unlink()
+                (d / "intent.md").write_text(
+                    "# Intent: mini\n\n**Baseline**: mini-calc v1 @ 3fa9c21\n",
+                    encoding="utf-8")
+            _d, stale = self.payload_for(tmp, prep=first_survey_after_intake)
+            self.assertIn("INTENT SEED", stale)
+            self.assertIn("probed at 3fa9c21 (HEAD def5678)", stale)
+            self.assertIn("repo/calc.py", stale)
+            self.assertIn("never statuses", stale)
+            self.assertNotIn("DELTA RE-SURVEY", stale)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

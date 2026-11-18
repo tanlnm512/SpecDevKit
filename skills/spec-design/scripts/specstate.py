@@ -539,30 +539,37 @@ def failure_signature_run(note_text: str) -> tuple[str | None, int]:
     failing command and its output verbatim, the command on the first
     `$ `-prefixed line — that line is the round's failure signature.
     The run counts how many trailing rounds (highest numbers backward)
-    share one command; 0 when no section carries a command line.
+    share one command; a round with no command line ends the run, and
+    (None, 0) means the newest round carries none.
     D-044: a repeated signature means another round, or a stronger
     model, re-runs the same failing command — the plan is the suspect,
     not the tier."""
-    sigs: dict[int, str] = {}
+    sigs: dict[int, str | None] = {}
     current: int | None = None
     for ln in note_text.splitlines():
         m = re.match(r"^## Fix round (\d+)\b", ln)
         if m:
             current = int(m.group(1))
+            sigs.setdefault(current, None)
             continue
-        if current is not None and current not in sigs \
+        # the developer may append its own sections after a round
+        if ln.startswith("## "):
+            current = None
+            continue
+        if current is not None and sigs[current] is None \
                 and ln.startswith("$ "):
             sigs[current] = ln.strip()
     if not sigs:
         return None, 0
-    order = sorted(sigs)
-    last = sigs[order[-1]]
+    order = sorted(sigs, reverse=True)
+    last = sigs[order[0]]
+    if last is None:
+        return None, 0
     run = 0
-    for n in reversed(order):
-        if sigs[n] == last:
-            run += 1
-        else:
+    for n in order:
+        if sigs[n] != last:
             break
+        run += 1
     return last, run
 
 

@@ -543,12 +543,22 @@ class ReportTests(unittest.TestCase):
                                                                                 "what": "x", "severity": "high",
                                                                                 "lens": "correctness"}},
                                                         "project": False, "base": "HEAD", "notes": "wrong: never nil"})])["ask"])
-        self.assertIn("outOfScope", ok(["ask", "--kind", "fixer", "--ctx",
-                                        json.dumps({"round": 1, "project": False, "base": "HEAD",
-                                                    "unresolved": [{"finding": {"id": "F-1", "where": "a.py:1",
-                                                                                "what": "x", "evidence": "e",
-                                                                                "severity": "high",
-                                                                                "lens": "correctness"}}]})])["ask"])
+        def item(fid, fix=None):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "x", "evidence": "e",
+                                "severity": "high", "lens": "correctness"}, "fix": fix}
+        ask = ok(["ask", "--kind", "fixer", "--ctx",
+                  json.dumps({"round": 1, "project": False, "base": "HEAD",
+                              "unresolved": [item("F-1"), item("F-8", "out-of-scope"),
+                                             item("F-9", "rejected-valid")]})])["ask"]
+        self.assertIn("outOfScope", ask)
+        self.assertIn('"F-1"', ask)
+        # off-loop items never reach the fixer, whatever the session passed
+        self.assertNotIn('"F-8"', ask)
+        self.assertNotIn('"F-9"', ask)
+        # a fix status outside the vocabulary is an inconsistent report, never counted
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True, "tracked": [tracked("F-1", "skipped")]})])
+        self.assertIn("unknown fix status 'skipped'", msg)
 
 
 ASK_CASES = [

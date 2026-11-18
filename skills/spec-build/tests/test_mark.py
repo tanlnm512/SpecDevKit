@@ -706,6 +706,14 @@ class SameSignatureTests(unittest.TestCase):
         self.assertEqual(sig(note), ("$ go test ./...", 2))
         self.assertEqual(sig("## Fix round 1\n$ a\n## Fix round 2\n$ a\n"
                               "## Fix round 3\n$ a\n"), ("$ a", 3))
+        # a round with no command breaks the run; the newest without one reads none
+        self.assertEqual(sig("## Fix round 1\n$ a\n## Fix round 2\nno cmd\n"
+                              "## Fix round 3\n$ a\n"), ("$ a", 1))
+        self.assertEqual(sig("## Fix round 1\n$ a\n## Fix round 2\nno cmd\n"),
+                         (None, 0))
+        # a developer-appended section is not part of the round above it
+        self.assertEqual(sig("## Fix round 1\n$ a\n## Fix round 2\nno cmd\n"
+                              "## Developer notes\n$ a\n"), (None, 0))
 
     def _seed_two_rounds(self, spec, cmd):
         edit_tasks(spec, ("- [ ] T001 implement",

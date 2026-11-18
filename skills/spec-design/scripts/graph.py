@@ -468,6 +468,15 @@ def claim_age(iso: str) -> str:
     return f"{secs // 86400}d"
 
 
+def failure_run(spec_dir: Path, task_id: str) -> tuple[str | None, int]:
+    try:
+        note = (spec_dir / "notes" / f"{task_id}.md").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return None, 0
+    return specstate.failure_signature_run(note)
+
+
 def task_frontier(entries: list[specstate.TaskEntry],
                   run_id: str | None = None,
                   spec_dir: Path | None = None) -> list[dict]:
@@ -543,12 +552,7 @@ def task_frontier(entries: list[specstate.TaskEntry],
                     f"fix cap reached ({e.fix_round}/{FIX_CAP}) — adjudicate "
                     "before another round (plan-suspect → re-brief tech)")
                 if spec_dir is not None and e.id:
-                    try:
-                        note = (spec_dir / "notes" / f"{e.id}.md").read_text(
-                            encoding="utf-8", errors="replace")
-                    except OSError:
-                        note = ""
-                    sig, run = specstate.failure_signature_run(note)
+                    sig, run = failure_run(spec_dir, e.id)
                     if sig and run >= SAME_FAILURE_ADVISORY:
                         why = (f"fix cap reached ({e.fix_round}/{FIX_CAP}) — "
                                f"the same failing command has failed {run} "
@@ -870,6 +874,51 @@ def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
     return out
 
 
+def _intent_seed_lines(spec_dir: Path, repo: Path) -> list[str]:
+    """The INTENT SEED block for a first survey (D-064): intake already
+    grepped the touched areas and pasted verbatim evidence into intent.md
+    § Constraints at its baseline. Evidence in a file unchanged since that
+    baseline cannot have moved, so the surveyor re-runs the item's verify
+    command instead of re-grepping; changed files and uncovered items
+    are surveyed fresh. Statuses never carry over — only evidence."""
+    intent = read_doc(spec_dir / "intent.md")
+    base = specstate.survey_baseline(intent) if intent else None
+    if not base or not specstate.git_available(repo):
+        return []
+    head = specstate.head_sha(repo)
+    if not head:
+        return []
+    intent_ref = spec_dir / "intent.md"
+    if base[1].startswith(head) or head.startswith(base[1]):
+        paths: list[str] = []
+    else:
+        raw, paths = code_delta(repo, spec_dir, base[1], head)
+        if raw is None:
+            return [f"- intent seed: unavailable (git diff {base[1]}..{head} "
+                    "failed) — survey every item fresh"]
+    out = [
+        f"- INTENT SEED: {intent_ref} § Constraints holds verbatim evidence "
+        f"probed at {base[1]} (HEAD {head}) — start from it:",
+        "  - an item that evidence already grounds, citing a file NOT "
+        "listed below: copy the evidence line as-is and re-run the item's "
+        "verify command — do not re-grep;",
+        "  - grep fresh every item it does not cover, and every item whose "
+        "evidence cites a listed file;",
+        "  - intent facts are evidence only, never statuses: every status "
+        "comes from a verify command you ran.",
+    ]
+    if not paths:
+        out.append("  No code files changed since the intent baseline.")
+        return out
+    shown = paths[:DELTA_FILE_CAP]
+    out.append(f"  Files changed since the intent baseline ({len(paths)}):")
+    out += [f"     {p}" for p in shown]
+    if len(paths) > len(shown):
+        out.append(f"     … +{len(paths) - len(shown)} more (payload cap "
+                   f"{DELTA_FILE_CAP}) — survey every item fresh")
+    return out
+
+
 def input_payload_for(node: str, spec_dir: Path, repo: Path,
                       entry: specstate.TaskEntry | None,
                       diff_file: Path | None = None) -> str:
@@ -946,7 +995,8 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             "- baseline: " + (f"{base[0]} @ {base[1]}" if base
                               else "none recorded yet (first survey)"),
         ]
-        lines += _survey_delta_lines(base, repo, spec_dir)
+        lines += (_survey_delta_lines(base, repo, spec_dir) if base
+                  else _intent_seed_lines(spec_dir, repo))
         lines += [work_type_line,
                   "- The spec's proposed items (FR/NFR list, verbatim):",
                   *fr_lines]
@@ -2395,14 +2445,10 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
         # the early signal (>= SAME_FAILURE_WATCH) before the advisory
         # bound makes the plan the suspect
         for t in per_task:
-            if not t.get("id"):
+            if not t.get("id") or t["state"] in ("ticked", "struck",
+                                                 "implemented"):
                 continue
-            try:
-                note = (spec_dir / "notes" / f"{t['id']}.md").read_text(
-                    encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            sig, run = specstate.failure_signature_run(note)
+            sig, run = failure_run(spec_dir, t["id"])
             if sig and run >= SAME_FAILURE_WATCH:
                 t["watch"] = f"same failing command {run} round(s): {sig}"
         nodes["execute"]["tasks"] = per_task

@@ -15,7 +15,8 @@ brief carries the spine; this file carries the specialization.
 goals, verbatim); the spec dir path; repo root; baseline version/
 commit — and, on a delta re-survey, the `DELTA RE-SURVEY` block (the
 files git says changed since the survey's baseline commit, plus the
-current HEAD).
+current HEAD); on a first survey after intake, the `INTENT SEED` block (the
+files changed since intent.md's baseline).
 
 **Method**:
 1. If the repo keeps a domain glossary (GLOSSARY.md, CONTEXT.md, or
@@ -38,9 +39,15 @@ current HEAD).
    keep every untouched item byte-identical; refresh the Baseline
    header to the block's HEAD sha. The self-check stays full-strength
    over the merged file.
-5. Produce per item the exact survey shape (evidence / status / verify
+5. **Intent seed** (only with an INTENT SEED block, first survey):
+   intent.md § Constraints is your starting evidence. An item it
+   already grounds in a file the block does not list as changed takes
+   that evidence line verbatim — re-run the item's verify command,
+   skip the re-grep. Grep fresh every item it does not cover and every
+   item citing a changed file. Never take a status from intent.md.
+6. Produce per item the exact survey shape (evidence / status / verify
    / gap) from the survey template — no prose, no recommendations.
-6. `**Type**: bugfix | hotfix` specs survey the bug itself: location
+7. `**Type**: bugfix | hotfix` specs survey the bug itself: location
    (file:symbol, verbatim), suspected cause evidence, existing
    regression coverage (usually none — that is the finding); "bug
    exists" is proven by the repro command failing — run it and paste
