@@ -18,7 +18,7 @@ prints one JSON object; `status: error` stops the run, naming its
 | ids | `O id-next --prefix <lens> --used N` | the id minted at confirmation |
 | fix_from | `O findings-parse --file F` | `tracked[]` |
 | fix guard | `O fix-snapshot` before each fixer turn; `O fix-check --head H --stash-count N --tree T` after it | error `fixer-moved-head` / `fixer-touched-stash` → abort the loop and report it; `test_hunks` → the verify and fix-review ctx |
-| report | `O report --kind review\|fix --data @report.json` | `markdown`, `reported_findings`, `backlog_offer` |
+| report | `O report --kind review\|fix --data @report.json` | `markdown`, `reported_findings`, `backlog_offer`; kind fix also `derived_conclusion` (D-021: a `conclusion` below it is an error — re-run `report` with a claim at or above the floor) |
 
 **Stage order** — the `--stage` vocabulary and the run's checkpoint
 order; the oracle's `STAGES` tuple is the executable form and a drift
@@ -56,9 +56,12 @@ Ask ctx keys (`gate_line` = the gate object's `note`):
 - `final` / `final-project`: base, summary, gate_line, untracked,
   intent, scout_map (project: files, repo_abs)
 - `fixer`: round, project, base, unresolved, intent, repo_abs,
-  gate_feedback (round ≥ 2)
+  gate_feedback (round ≥ 2) — `unresolved` never carries an
+  `out-of-scope` item (it waits on the user, not on a round) or a
+  `rejected-valid` one (withdrawn)
 - `verify`: tracked (one item), project, base, notes, repo_abs,
-  test_hunks
+  test_hunks — a skipped item is RULED on here (D-022:
+  `rejected-valid` | `rejected-invalid`, never a fix verdict)
 - `fix-review`: paths, base, gate_green, repo_abs, test_hunks
 - `loop-final`: tracked, rounds_used, gate_green, changed_paths,
   project, base, scout_map
@@ -70,7 +73,12 @@ self_checked}}, fix, fixNote}`), gate_rows (verbatim — keep
 spec or branch name for `backlog_offer`), assessment `{verdict, testGaps,
 residualRisks}`, dropped[], checked[], fix_checked[], rounds_used,
 fixer_notes[], conclusion. `fix` is one of `pending` (default when
-absent or null), `fixed`, `unfixed`, `worse`.
+absent or null), `fixed`, `unfixed`, `worse`, `rejected-valid`,
+`rejected-invalid`, `out-of-scope` (D-022: `fixed` and `rejected-valid`
+resolve a finding; a carried item already resolved is dropped at
+parse). `conclusion` (fix runs) is checked against the derived floor
+(D-021, `gates/recommendation.md`): below it the call errors; at or
+above it the claim stands; absent it is filled with the floor.
 
 **Who runs each role** — a fresh spawn per ask, never the instance
 that wrote what it now judges:

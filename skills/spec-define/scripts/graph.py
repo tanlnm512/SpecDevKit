@@ -204,6 +204,15 @@ DOC_FILES = ["spec.md", "intent.md", "survey.md",
 # task at cap is surfaced for adjudication, never auto-retried past it.
 FIX_CAP = 5
 
+# D-044 same-failure thresholds, read from each fix round's evidence
+# (specstate.failure_signature_run over notes/T###.md): at ADVISORY rounds
+# of one repeated failing command, mark.py's fail and the at-cap reason say
+# the plan is the suspect — another round or a stronger tier re-runs the
+# same command. The WATCH bound is the earlier, never-blocking signal the
+# per-task lines print.
+SAME_FAILURE_ADVISORY = 3
+SAME_FAILURE_WATCH = 2
+
 # Payload cap for a fix round's evidence note: the newest round is
 # appended last, so the tail is what the developer needs.
 FIX_NOTE_LINE_CAP = 200
@@ -460,7 +469,8 @@ def claim_age(iso: str) -> str:
 
 
 def task_frontier(entries: list[specstate.TaskEntry],
-                  run_id: str | None = None) -> list[dict]:
+                  run_id: str | None = None,
+                  spec_dir: Path | None = None) -> list[dict]:
     """The per-task frontier inside execute (§2.1): a task is runnable when
     it is `- [ ]`, unimplemented, its `(after T###)` deps are all
     implemented, ticked, or struck, and it is not at the fix-round cap. An
@@ -474,7 +484,10 @@ def task_frontier(entries: list[specstate.TaskEntry],
     stamp id, when it has one: a claim stamped with that id is this
     run's wave still in flight, not an orphan; every other claim —
     stamped with a different run id, or unstamped (hand-written,
-    older docset) — reads as a possible orphan as before."""
+    older docset) — reads as a possible orphan as before.
+    `spec_dir`, when given, lets an at-cap task's reason name a repeated
+    failure signature (D-044): the same failing command across rounds
+    means the plan is the suspect, not the tier."""
     by_id = {e.id: e for e in entries if e.id}
     # A struck entry's own id is unparseable (`- [ ] ~~T004~~ …` has no
     # leading T-id), so index the T-id its block names: a struck dep counts
@@ -529,6 +542,19 @@ def task_frontier(entries: list[specstate.TaskEntry],
                 state, why = "at-fix-cap", (
                     f"fix cap reached ({e.fix_round}/{FIX_CAP}) — adjudicate "
                     "before another round (plan-suspect → re-brief tech)")
+                if spec_dir is not None and e.id:
+                    try:
+                        note = (spec_dir / "notes" / f"{e.id}.md").read_text(
+                            encoding="utf-8", errors="replace")
+                    except OSError:
+                        note = ""
+                    sig, run = specstate.failure_signature_run(note)
+                    if sig and run >= SAME_FAILURE_ADVISORY:
+                        why = (f"fix cap reached ({e.fix_round}/{FIX_CAP}) — "
+                               f"the same failing command has failed {run} "
+                               f"rounds ({sig}): another round re-runs it; "
+                               "adjudicate (wrong → park D-###, isolated → "
+                               "defer, load-bearing → /spec-design)")
             elif e.fix_round is not None:
                 state, why = "runnable", (
                     f"fix round {e.fix_round}/{FIX_CAP} open — re-run with "
@@ -585,13 +611,19 @@ def schedule_wave(runnable: list[dict], in_flight: list[dict]) -> None:
 
 def task_line(t: dict) -> str:
     """One per-task report line: id, state, reason, and the wave note —
-    claimed tasks add their digest-file reading (D-040)."""
+    claimed tasks add their digest-file reading (D-040), a typed
+    deviation riding beside it (D-043), and a watch suffix when the
+    same failing command recurs across fix rounds (D-044)."""
     note = (f"deferred: {t['deferred']}" if t.get("deferred")
             else t.get("note"))
     line = (f"{t['id'] or '—':<6} {t['state']:<11} {t['reason']}"
             + (f"  [{note}]" if note else ""))
     if t["state"] == "claimed" and "digest" in t:
         line += f"  [digest on file: {t['digest'] or 'none'}]"
+        if t.get("deviation"):
+            line += f"  [deviation {t['deviation']}]"
+    if t.get("watch"):
+        line += f"  [watch: {t['watch']}]"
     return line
 
 
@@ -1817,7 +1849,10 @@ def _headless_execute_wave(spec_dir: Path, written: list[tuple[Path, str, str]],
             print(f"   held: {tid}")
         print("fix rounds and adjudication stay with you: settle each "
               "held task (land on a green digest, release and rule, or "
-              "mark.py fail with the evidence), then re-run")
+              "mark.py fail with the evidence), then re-run. A typed "
+              "deviation names its route (D-043): scope: → widen "
+              "Touches under the D-### and re-emit; spec-defect: → "
+              "/spec-design — neither opens a fix round")
         return 0
     return None
 
@@ -2322,7 +2357,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
                              else "task.md has no task entries — spawn "
                                   "the task-breaker")}
     else:
-        per_task = task_frontier(entries, run_id)
+        per_task = task_frontier(entries, run_id, spec_dir)
         open_tasks = [t for t in per_task
                       if t["state"] not in ("ticked", "struck",
                                            "implemented")]
@@ -2343,11 +2378,33 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
     if per_task:
         # the resume view's digest column (spec-build D-040): a claimed
         # task shows whether a developer digest is on file and what it
-        # reported — pure doc reads, never status
+        # reported — pure doc reads, never status. A typed deviation
+        # (D-043) rides along: scope → widen Touches + D-###;
+        # spec-defect → /spec-design; neither opens a fix round.
         for t in per_task:
             if t["state"] == "claimed" and t["id"]:
                 d = specstate.latest_digest(spec_dir, t["id"])
-                t["digest"] = d["status"] if d else None
+                if d:
+                    t["digest"] = d["status"]
+                    if d.get("deviation_kind"):
+                        t["deviation"] = d["deviation"]
+                else:
+                    t["digest"] = None
+        # D-044 watch, once per report per task, never blocking: the
+        # same failing command recurring across a task's fix rounds —
+        # the early signal (>= SAME_FAILURE_WATCH) before the advisory
+        # bound makes the plan the suspect
+        for t in per_task:
+            if not t.get("id"):
+                continue
+            try:
+                note = (spec_dir / "notes" / f"{t['id']}.md").read_text(
+                    encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            sig, run = specstate.failure_signature_run(note)
+            if sig and run >= SAME_FAILURE_WATCH:
+                t["watch"] = f"same failing command {run} round(s): {sig}"
         nodes["execute"]["tasks"] = per_task
 
     counts = {

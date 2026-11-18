@@ -444,6 +444,41 @@ class LandProofGateTests(unittest.TestCase):
         self.assertIn("release", r.stderr)
         self.assertIn("(in-progress)", entry_text(spec, "T001"))
 
+    def test_a_typed_deviation_digest_names_its_route(self):
+        # D-043: the deviation prefix routes mechanically — scope widens
+        # Touches, spec-defect goes to /spec-design; an untyped value keeps
+        # the free-form ruling
+        def digest_file(spec, deviation):
+            digests = spec / "digests" / "wave-4"
+            digests.mkdir(parents=True, exist_ok=True)
+            write(digests / "implementer-T001.md",
+                  "digest: task T001 · status blocked: cannot finish · "
+                  f"files 0 · commit-line none · deviation {deviation} · "
+                  "note none\n")
+        parsed = specstate._parse_digest_line(
+            "digest: task T001 · status blocked: cannot finish · files 0 · "
+            "commit-line none · deviation spec-defect: FR-003 contradicts "
+            "survey.md §2 · note none")
+        self.assertEqual(parsed["deviation_kind"], "spec-defect")
+        self.assertIsNone(specstate._parse_digest_line(
+            "digest: task T001 · status blocked · deviation needs a "
+            "ruling").get("deviation_kind"))
+        for deviation, route in (
+                ("scope: repo/calc.py needs repo/eval.py too",
+                 "widen the entry's Touches"),
+                ("spec-defect: FR-003 contradicts survey.md §2",
+                 "route to /spec-design")):
+            with self.subTest(deviation=deviation):
+                spec = hand_fixture(self._tmp, "typed-" + deviation[:5])
+                make_wave(spec, "T001")
+                run_mark(spec, "claim", "--wave",
+                         str(spec / "spawns" / "wave-4"), tel=self.tel)
+                digest_file(spec, deviation)
+                r = run_mark(spec, "land", "T001", tel=self.tel)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("blocked digest", r.stderr)
+                self.assertIn(route, r.stderr)
+
     def test_a_foreign_tasks_digest_file_is_ignored(self):
         # the digest line's task field must match — a stem can lie
         spec = hand_fixture(self._tmp, "foreign")
@@ -647,6 +682,84 @@ class TinyTierTests(unittest.TestCase):
                      tel=self.tel)
         self.assertEqual(r.returncode, 1)
         self.assertIn("Tier: tiny", r.stderr)
+
+
+class SameSignatureTests(unittest.TestCase):
+    """D-044: the failing command recurring across a task's fix rounds —
+    the trailing run specstate.failure_signature_run counts, mark.py's
+    advisory at 3, and the at-cap reason naming the repeated command."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-sig-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+
+    def test_the_run_counts_trailing_identical_commands(self):
+        sig = specstate.failure_signature_run
+        self.assertEqual(sig(""), (None, 0))
+        self.assertEqual(sig("# Notes: T001\n\n## Fix round 1\nno command\n"),
+                         (None, 0))
+        note = ("# Notes: T001\n\n"
+                "## Fix round 1\n$ pytest -k mul\nE   AssertionError: 5\n"
+                "## Fix round 2\n$ go test ./...\nFAIL: TestMul\n"
+                "## Fix round 3\n$ go test ./...\nFAIL: TestMul\n")
+        self.assertEqual(sig(note), ("$ go test ./...", 2))
+        self.assertEqual(sig("## Fix round 1\n$ a\n## Fix round 2\n$ a\n"
+                              "## Fix round 3\n$ a\n"), ("$ a", 3))
+
+    def _seed_two_rounds(self, spec, cmd):
+        edit_tasks(spec, ("- [ ] T001 implement",
+                          "- [ ] T001 (fix 2/5) implement"
+                          f"\n  - fix 1 {EM} first\n  - fix 2 {EM} second"))
+        notes = spec / "notes"
+        notes.mkdir(parents=True, exist_ok=True)
+        write(notes / "T001.md",
+              f"# Notes: T001\n\n## Fix round 1\n{cmd}\nE   one\n"
+              f"## Fix round 2\n{cmd}\nE   two\n")
+
+    def test_fail_advises_at_three_repeats_of_one_command(self):
+        spec = hand_fixture(self._tmp, "sig3")
+        self._seed_two_rounds(spec, "$ pytest -k mul")
+        evidence = spec / "ev.txt"
+        write(evidence, "$ pytest -k mul\nE   AssertionError: 5 again\n")
+        r = run_mark(spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", "E   AssertionError: 5 again", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("same-signature: $ pytest -k mul has failed 3 "
+                      "consecutive round(s)", r.stdout)
+        self.assertIn("D-044", r.stdout)
+
+    def test_fail_stays_quiet_when_the_command_varies(self):
+        spec = hand_fixture(self._tmp, "sig0")
+        self._seed_two_rounds(spec, "$ pytest -k mul")
+        evidence = spec / "ev.txt"
+        write(evidence, "$ go test ./...\nFAIL: TestMul\n")
+        r = run_mark(spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", "FAIL: TestMul", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("same-signature", r.stdout)
+
+    def test_the_at_cap_reason_names_a_repeated_signature(self):
+        spec = hand_fixture(self._tmp, "sigcap")
+        edit_tasks(spec, ("- [ ] T001 implement",
+                          f"- [ ] T001 (fix 5/5) implement\n  - fix 5 {EM} "
+                          "cap"))
+        notes = spec / "notes"
+        notes.mkdir(parents=True, exist_ok=True)
+        write(notes / "T001.md",
+              "# Notes: T001\n\n"
+              "## Fix round 3\n$ pytest -k mul\nE   c\n"
+              "## Fix round 4\n$ pytest -k mul\nE   d\n"
+              "## Fix round 5\n$ pytest -k mul\nE   e\n")
+        import graph  # the replica closure shares the master's behavior
+        per_task = graph.task_frontier(
+            specstate.task_entries(
+                (spec / "task.md").read_text(encoding="utf-8")),
+            None, spec)
+        cap = next(t for t in per_task if t["state"] == "at-fix-cap")
+        self.assertIn("same failing command has failed 3 rounds "
+                      "($ pytest -k mul)", cap["reason"])
+        self.assertIn("/spec-design", cap["reason"])
 
 
 if __name__ == "__main__":

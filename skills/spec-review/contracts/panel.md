@@ -144,7 +144,11 @@ fix_from payload), carries:
   gate.
 - `status` — `verified` | `unconfirmed` (independent confirmation);
   after a fix round `fixStatus` — `fixed` | `unfixed` | `worse` |
-  `pending`.
+  `pending` | `rejected-valid` | `rejected-invalid` | `out-of-scope`
+  (D-022: a fixer skip is ruled on by the next verifier — `rejected-valid`
+  withdraws the finding, `rejected-invalid` stands, an unrulled skip
+  stands; `out-of-scope` names a widening call only the user can make
+  and burns no round).
 
 A finding that fails confirmation is labelled `unconfirmed`, never
 dropped. Triage drops carry a one-line reason. Zero findings is the

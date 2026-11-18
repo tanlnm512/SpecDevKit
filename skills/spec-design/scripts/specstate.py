@@ -187,8 +187,16 @@ RESEARCH_SKIP_MARKER = "not applicable — no open questions at Stage 0"
 # it verbatim into specs/<name>/digests/wave-<N>/<payload-stem>.md as
 # their final action; latest_digest parses it back. Run scratch, not
 # archived contract (archive.sh removes digests/ with spawns/).
+#
+# The deviation field is TYPED (D-043): `scope:<paths>` (the change
+# genuinely needs files outside the task's Touches set), `spec-defect:
+# <why>` (the task itself is wrong — a retry would fail again), or
+# `other:<summary needing D-###>` (anything else). An untyped
+# deviation string (older digests) parses with no kind and keeps the
+# free-form D-### routing.
 DIGEST_DIR = "digests"
 DIGEST_TASK = re.compile(r"^digest:\s*task\s+(T\d{3})\b")
+DEVIATION_KIND = re.compile(r"^(scope|spec-defect|other):")
 
 # The research gate's artifact in tech-spec.md: one section, two
 # subsections. The heading is matched anywhere in the file (no
@@ -517,7 +525,45 @@ def _parse_digest_line(line: str) -> dict | None:
             if seg.startswith(key + " "):
                 out[key.replace("-", "_")] = seg[width:].strip()
                 break
-    return out if out.get("task") and out.get("status") else None
+    if out.get("task") and out.get("status"):
+        kind = DEVIATION_KIND.match(out.get("deviation") or "")
+        if kind:
+            out["deviation_kind"] = kind.group(1)
+        return out
+    return None
+
+
+def failure_signature_run(note_text: str) -> tuple[str | None, int]:
+    """(command, trailing-run length) of a task's fix-round evidence:
+    each `## Fix round n` section a `mark.py fail` wrote holds the
+    failing command and its output verbatim, the command on the first
+    `$ `-prefixed line — that line is the round's failure signature.
+    The run counts how many trailing rounds (highest numbers backward)
+    share one command; 0 when no section carries a command line.
+    D-044: a repeated signature means another round, or a stronger
+    model, re-runs the same failing command — the plan is the suspect,
+    not the tier."""
+    sigs: dict[int, str] = {}
+    current: int | None = None
+    for ln in note_text.splitlines():
+        m = re.match(r"^## Fix round (\d+)\b", ln)
+        if m:
+            current = int(m.group(1))
+            continue
+        if current is not None and current not in sigs \
+                and ln.startswith("$ "):
+            sigs[current] = ln.strip()
+    if not sigs:
+        return None, 0
+    order = sorted(sigs)
+    last = sigs[order[-1]]
+    run = 0
+    for n in reversed(order):
+        if sigs[n] == last:
+            run += 1
+        else:
+            break
+    return last, run
 
 
 def latest_digest(spec_dir: Path | str, task_id: str) -> dict | None:

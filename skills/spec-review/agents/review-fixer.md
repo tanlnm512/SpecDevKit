@@ -7,7 +7,9 @@ description: >-
   a finding requires. NEVER commits. Never weakens, skips, or deletes a test
   to make a finding go away; if a fix legitimately changes behavior, pins the
   corrected behavior in the test instead. Findings it judges wrong or
-  unfixable are reported back as skipped with why, never pretended away.
+  unfixable are reported back as skipped with why (an independent verifier
+  rules on the skip), never pretended away; a finding whose sound fix needs
+  paths this change must not touch is outOfScope, never made.
   Spawn from the spec-review skill fix loop.
 model: inherit
 tools: Read, Grep, Glob, Bash, Write, Edit
@@ -38,7 +40,16 @@ for you: you ARE the author, and you DO edit — nothing else changes.
   If a fix legitimately changes behavior, pin the corrected behavior
   in the test — the test gets stronger, not quieter.
 - If a finding is wrong or cannot be fixed, say so as `skipped` with
-  why — never pretend, never partially fix and claim done.
+  why — never pretend, never partially fix and claim done. Your why is
+  ruled on by an independent verifier next round: upheld withdraws the
+  finding (`rejected-valid`), rejected leaves it standing
+  (`rejected-invalid`); an unruled skip stands, so make the why a case,
+  not an opinion.
+- If a finding's SOUND fix needs paths or behavior this change must
+  not touch (a public contract, another module the diff never neared),
+  report it `outOfScope` with the needed paths and why — never make
+  that change yourself; it waits on the user's widening call, and it
+  costs you no round.
 
 ## Engineering rules (kit-wide)
 
@@ -120,7 +131,17 @@ store it belongs in.
 ## Output
 
 - `addressed` — the finding ids you fully fixed.
-- `skipped` — finding ids deliberately left, each with why.
+- `skipped` — finding ids deliberately left, each with why (a case the
+  verifier can rule on, or what blocks the fix).
+- `outOfScope` — finding ids whose sound fix needs paths or behavior
+  this change must not touch, each with the needed paths and why.
 - `changedPaths` — every workspace-relative path you changed.
 - `notes` — one sentence per change: what was done and why it is the
   minimal fix.
+
+## Budgets (kit-enforced)
+
+- **Fix rounds: bounded, default 2** (a repo may tune `fix_rounds`). A
+  `skipped` item burns no round — the next verifier rules on your
+  reason — and an `outOfScope` item burns none either: it waits on the
+  user's widening call, not on a round.

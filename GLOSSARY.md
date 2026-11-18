@@ -50,6 +50,9 @@ on any conflict the canonical file wins.
 | `**Approved-by**` | a line in `approvals/approval.md` naming one person who signed the approval, written by `freeze.py --record --by "<name>"` (repeatable); optional — a record without it is the session user's yes | `skills/spec-design/scripts/freeze.py` |
 | `approvals/review.md` | full tier's record of the contract review — the findings digest, one ruling per BLOCK, and the payload's docset fingerprint (a hash of the frozen manifest plus task.md); `freeze.py --record` refuses a missing or stale one; tiny tier has none | `skills/spec-design/decisions/050-approval-records-and-payload-contracts.md` |
 | `(fix n/5)` / `(fixed n/5)` | a task entry's fix-round marker: `(fix n/5)` is an OPEN round (the task is runnable again), `(fixed n/5)` the same round landed; `n` counts failures and 5/5 is the cap | `skills/spec-design/decisions/051-engine-enforces-wave-fix-and-tiny-approval.md` |
+| typed deviation | the developer digest's `deviation` field with a routing prefix: `scope:<paths>` (needs files outside `Touches:` → widen under the D-### and re-emit), `spec-defect:<why>` (the task itself is wrong → `/spec-design`), `other:<summary needing D-###>`; neither typed flavor opens a fix round | `skills/spec-build/decisions/043-typed-deviations.md` |
+| failure signature | a fix round's failing command — the first `$ <command>` line of its evidence in `notes/T###.md`; the same signature recurring across rounds suspects the plan, not the tier (advisory at 3 repeats, watch from 2) | `skills/spec-build/decisions/044-same-failure-signature.md` |
+| budgets | the numeric limits the engine holds a writing agent to, stated in its brief's generated `§ Budgets` section from `rules/agent-limits.md` (fix cap, self-check reruns, fix-round bound) — an agent reads its budget, never learns it by hitting it | `rules/agent-limits.md`; `tools/kit-rules.py` |
 | deferred | a runnable task the engine left out of this wave because its files overlap a wave-mate or an `(in-progress)` task; printed `deferred: T### (<why>)`, emitted on a later wave | same |
 | `--native-agents` | `graph.py --emit-spawns\|--run` flag for a harness with registered agent types: the payload names the type and omits the brief the type already carries; default payloads embed the brief | same |
 | `reviewer-diff.patch` | the implementation-diff review's full diff, written beside its auditor payload because the auditor holds no shell; its header lists the untracked files the diff omits | `skills/spec-design/decisions/050-approval-records-and-payload-contracts.md` |
@@ -78,7 +81,10 @@ on any conflict the canonical file wins.
 |------|-------|----------------|
 | mechanical gate | stage 1: the target repo's own checks (Makefile, npm scripts, cargo, go, pytest/unittest, shell syntax, secret shapes) | `skills/spec-review/SKILL.md`, `scripts/gate.sh` |
 | finding | a kept review observation with an ID, independently confirmed before it survives triage | `skills/spec-review/contracts/panel.md` |
-| verdict | a fix-loop verification outcome for one finding | same |
+| verdict | a fix-loop verification outcome for one finding: `fixed`, `unfixed`, `worse` — or a skip ruling | same |
+| skip ruling | the fix verifier's adjudication of a fixer skip: `rejected-valid` (the reason holds — the finding is withdrawn and resolves) or `rejected-invalid` (it stands); an unruled skip stands | `skills/spec-review/decisions/022-adjudicated-skips-and-out-of-scope.md` |
+| out-of-scope | a fix disposition: the sound fix needs paths or behavior the change must not touch — it burns no round and waits on the user's widening call | same |
+| recommendation floor | the recommendation (`merge`/`fix-first`/`human`) the oracle derives from the report's own state; a claim below it errors, escalation above it always stands | `skills/spec-review/gates/recommendation.md` (D-021) |
 | shared review oracle | `review_orchestrator.py` — the single home of review state, systems, asks, finding IDs, and report assembly | D-014 |
 | probe | one thin per-phase call by which any caller fetches JSON from the oracle (scope, gate, shard, ask, report) | D-014 |
 | dialect twin | (retired, D-035) the per-harness workflow scripts deleted with the one-engine move — history only; the shared oracle is the one executable form | `skills/spec-review/decisions/016` |
@@ -88,7 +94,7 @@ on any conflict the canonical file wins.
 | Term | Means | Canonical home |
 |------|-------|----------------|
 | skill dir | `skills/<name>/`, self-contained by packaging (marketplace `source: ./skills/<name>`) | `AGENTS.md` |
-| generated surface | any regenerate-only artifact: root `agents/`, the SKILL.md node table (`scripts/contract.py`), the plugin/marketplace manifests, the `§ Engineering rules` sections | `AGENTS.md` house rules |
+| generated surface | any regenerate-only artifact: root `agents/`, the SKILL.md node table (`scripts/contract.py`), the plugin/marketplace manifests, the `§ Engineering rules` and `§ Budgets` sections | `AGENTS.md` house rules |
 | ADR (D-###) | an append-only decision record; every divergence from a doc contract gets its own entry (C-05) | `skills/<name>/decisions/` |
 | eval case | an entry in a skill's `evals/cases.md`; every increment names its served case (C-10) | `skills/<name>/evals/cases.md` |
 | eval result | one recorded run of an eval case — per-criterion verdicts with evidence, date, repo, and the skill's `surface:` hash; append-only, never restamped | `skills/<name>/evals/results/` |

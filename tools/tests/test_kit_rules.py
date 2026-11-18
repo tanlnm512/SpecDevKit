@@ -1,12 +1,15 @@
-"""Kit-wide engineering rules: each carrier's injected section matches the
-canonical source, the rules keep their load-bearing phrases, each
-audience's entry file points at them, and only the code-writing briefs
-carry the section.
+"""Kit-wide engineering rules and agent budgets: each carrier's injected
+sections match the canonical sources, the rules keep their load-bearing
+phrases, each audience's entry file points at them, only the
+code-writing briefs carry the sections — and every number the Budgets
+section states agrees with the engine that enforces it.
 
-The canonical text is rules/engineering-rules.md, injected by
-tools/kit-rules.py. Run via tools/tests/run.sh (needs Python >= 3.10).
+The canonical texts are rules/engineering-rules.md and
+rules/agent-limits.md, injected by tools/kit-rules.py. Run via
+tools/tests/run.sh (needs Python >= 3.10).
 """
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -17,6 +20,7 @@ SEXEC = REPO_ROOT / "skills" / "spec-build"
 SCR = REPO_ROOT / "skills" / "spec-review"
 SBR = REPO_ROOT / "skills" / "spec-discover"
 SOURCE = REPO_ROOT / "rules" / "engineering-rules.md"
+LIMITS_SOURCE = REPO_ROOT / "rules" / "agent-limits.md"
 
 _spec = importlib.util.spec_from_file_location(
     "kit_rules_tool", REPO_ROOT / "tools" / "kit-rules.py")
@@ -24,6 +28,7 @@ kit_rules = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(kit_rules)
 
 SECTION_HEADING = "## Engineering rules (kit-wide)"
+BUDGETS_HEADING = "## Budgets (kit-enforced)"
 
 # Phrases that carry each rule's load: watering one down fails here first.
 ANCHORS = (
@@ -68,10 +73,49 @@ class KitRulesParityTests(unittest.TestCase):
             self.assertEqual(current, kit_rules.inject(current, body),
                              carrier)
 
+    def test_carriers_match_their_budgets_sections(self):
+        # each carrier carries ONLY its own role's budgets — the other
+        # role's key never leaks into it
+        for carrier, role_key in kit_rules.CARRIERS:
+            current = carrier.read_text(encoding="utf-8")
+            fresh = kit_rules.inject(
+                current, kit_rules.budgets_section(role_key),
+                kit_rules.BUDGETS_HEADING)
+            self.assertEqual(current, fresh, carrier)
+            self.assertIn(BUDGETS_HEADING, current)
+
     def test_source_keeps_every_anchor(self):
         body = flat(SOURCE.read_text(encoding="utf-8"))
         for anchor in ANCHORS:
             self.assertIn(anchor, body)
+
+
+class BudgetsTruthTests(unittest.TestCase):
+    """Every number a Budgets section states is checked against the
+    engine that enforces it — a stated budget that drifts from the code
+    is worse than none (the agent works to a number nothing counts)."""
+
+    def test_developers_fix_cap_matches_the_engine(self):
+        graph = (SSHAPE / "scripts" / "graph.py").read_text(encoding="utf-8")
+        m = re.search(r"^FIX_CAP = (\d+)", graph, re.M)
+        self.assertIsNotNone(m, "FIX_CAP constant not found in graph.py")
+        stated = flat((SEXEC / "agents" / "developer.md")
+                      .read_text(encoding="utf-8"))
+        self.assertIn(f"Fix rounds: at most {m.group(1)} per task", stated)
+
+    def test_fixer_section_states_the_round_bound_and_default(self):
+        stated = flat((SCR / "agents" / "review-fixer.md")
+                      .read_text(encoding="utf-8"))
+        panel = flat((SCR / "contracts" / "panel.md")
+                     .read_text(encoding="utf-8"))
+        self.assertIn("Fix rounds: bounded, default 2", stated)
+        self.assertIn("fix_rounds` defaults to 2", panel)
+
+    def test_limits_source_has_both_roles_and_no_hand_edited_carrier_drift(
+            self):
+        text = LIMITS_SOURCE.read_text(encoding="utf-8")
+        for _, role_key in kit_rules.CARRIERS:
+            self.assertIn(f"## {role_key}", text)
 
 
 class KitRulesWiringTests(unittest.TestCase):

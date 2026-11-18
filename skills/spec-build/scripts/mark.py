@@ -309,10 +309,21 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
             if dig is not None:
                 status = dig["status"]
                 if not re.match(r"(implemented|already-satisfied)\b", status):
+                    route = {
+                        "scope": ("its scope: deviation names paths outside "
+                                  "Touches — widen the entry's Touches under "
+                                  "the D-### ruling and re-emit; no fix round"),
+                        "spec-defect": ("its spec-defect: deviation says the "
+                                        "task itself is wrong — route to "
+                                        "/spec-design; no fix round, no "
+                                        "higher tier"),
+                    }.get(dig.get("deviation_kind"),
+                          "rule on the block (D-###) and re-spawn, or route "
+                          "to /spec-design")
                     print(f"refused: {task_id}'s digest on file reports "
                           f"{status!r} ({dig['path']}) — a blocked digest "
-                          "is not a landing: `mark.py release` the task "
-                          "and rule on the block", file=sys.stderr)
+                          f"is not a landing: `mark.py release` the task "
+                          f"and {route}", file=sys.stderr)
                     return 1
             elif digest and DIGEST_STATUS.search(digest):
                 print("warning: no digest file under digests/ — using the "
@@ -564,6 +575,13 @@ def fail(spec_dir: Path, task_id: str, evidence: Path, digest: str) -> int:
     if n == 3:
         print("round 3 suspects the plan: repair via /spec-design before "
               "round 4")
+    sig, run = specstate.failure_signature_run(
+        note_path.read_text(encoding="utf-8", errors="replace"))
+    if sig and run >= graph.SAME_FAILURE_ADVISORY:
+        print(f"same-signature: {sig} has failed {run} consecutive "
+              f"round(s) — another round, or a stronger tier, re-runs the "
+              "same failing command; repair the plan (/spec-design) or "
+              "adjudicate now (D-044)")
     if n == 4:
         print("round 4: spawn one tier up")
     if n == graph.FIX_CAP:
