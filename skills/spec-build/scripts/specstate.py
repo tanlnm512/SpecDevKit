@@ -68,6 +68,10 @@ EFFORT_ALIASES = {"tiny": "standard"}
 # file (tasks live in spec.md § Tasks); absent/unknown reads "full",
 # so docsets without the field keep the full-contract graph.
 TIER_LINE = re.compile(r"^\*\*Tier\*\*:\s*`?([A-Za-z]+)", re.M)
+# `**Mode**: fast` (D-065): the session implements a tiny spec's tasks
+# itself instead of spawning a developer per task; absent/unknown reads
+# "standard", and only Tier: tiny honors fast.
+MODE_LINE = re.compile(r"^\*\*Mode\*\*:\s*`?([A-Za-z]+)", re.M)
 TASKS_HEADING = "## Tasks"
 
 # Work type: `**Type**: <word>` on spec.md (and intent.md, which seeds
@@ -311,6 +315,15 @@ def spec_tier(spec_md: str) -> str:
     m = TIER_LINE.search(spec_md) if spec_md else None
     word = m.group(1).lower() if m else ""
     return word if word in ("tiny", "full") else "full"
+
+
+def spec_mode(spec_md: str) -> str:
+    """The spec.md run mode as written — `fast` or `standard`; absent or
+    unknown reads `standard`. Whether the tier honors it is the engine's
+    call (fast holds only at Tier: tiny)."""
+    m = MODE_LINE.search(spec_md) if spec_md else None
+    word = m.group(1).lower() if m else ""
+    return word if word in ("fast", "standard") else "standard"
 
 
 def spec_type(spec_md: str) -> str:

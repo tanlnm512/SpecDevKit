@@ -2485,6 +2485,23 @@ class Graph019LaunchCheckTests(unittest.TestCase):
         # one runnable task (T001) — execute is heavy even as one payload
         self.assertEqual(adv["payloads"], 1)
 
+    def test_fast_mode_runs_a_tiny_execute_inline(self):
+        d = scaffold(self._tmp / "fast", "demo")
+        write(d / "spec.md", TINY_SPEC.replace(
+            "**Effort**: standard\n", "**Effort**: standard\n**Mode**: fast\n"))
+        set_status(d, "approved")
+        adv = self.advisory(d)
+        self.assertEqual(adv["weight"], "single")
+        self.assertFalse(adv["launch_workflow"])
+        self.assertIn("Mode: fast", adv["reason"])
+        # the full tier ignores the header, and says so
+        full = copy_fixture(self._tmp / "fast-full")
+        write(full / "spec.md", (full / "spec.md").read_text(encoding="utf-8")
+              .replace("**Status**:", "**Mode**: fast\n**Status**:", 1))
+        st = compute(full)
+        self.assertEqual(st["mode"], "standard")
+        self.assertIn("only at Tier: tiny", st["mode_note"])
+
     def test_wave_weight_for_the_analysis_fan_out(self):
         adv = self.advisory(self.analysis_dir)
         self.assertEqual(adv["weight"], "wave")

@@ -1600,8 +1600,16 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
                  f"{spec_dir} --wave {target}"
                  + (f" --run-id {run_id}" if run_id else ""))
         print(f"   next: {claim}")
-        print("   (claim --wave claims exactly this wave's "
-              "implementer-T### files — run it before spawning them)")
+        if state.get("mode") == "fast":
+            print("   Mode: fast — claim, then implement each "
+                  "implementer-T### payload YOURSELF in this session, in "
+                  "task-id order, exactly as its developer brief says "
+                  "(digest file included); spawn no developer")
+        else:
+            print("   (claim --wave claims exactly this wave's "
+                  "implementer-T### files — run it before spawning them)")
+            if state.get("mode_note"):
+                print(f"   {state['mode_note']}")
     return written
 
 
@@ -1756,6 +1764,12 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
                           "(plan/tech/tasks) authoring plan, tech-spec, "
                           "and task — heavy span, launch "
                           "a dynamic workflow"}
+    if state.get("mode") == "fast" and all(
+            x["node"] == "execute" for x in payloads):
+        return {**advisory, "weight": "single",
+                "reason": f"Mode: fast — {len(payloads)} task payload(s) "
+                          "implemented inline by this session, no "
+                          "developer spawn and no workflow launch"}
     if len(payloads) == 1 and payloads[0]["node"] != "execute":
         return {**advisory, "weight": "single",
                 "reason": "one light doc node ("
@@ -2036,7 +2050,11 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
                       "wave starts")
                 return RUNNER_FAILED_EXIT
         waves_done += 1
-        if runner == PRINT_RUNNER and written:
+        if (runner == PRINT_RUNNER and written and state.get("mode") == "fast"
+                and all(node == "execute" for _, _, node in written)):
+            print("wave emitted — Mode: fast: implement these payloads "
+                  "inline (no spawn), land each, then re-run")
+        elif runner == PRINT_RUNNER and written:
             how = ("as the agent type beside each role" if native else
                    "agent type beside each role — these embed the brief: "
                    "add --native-agents before spawning as that type")
@@ -2120,6 +2138,8 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
     status = specstate.spec_status(spec_text) if spec_text is not None else None
     effort = specstate.spec_effort(spec_text)
     tier = specstate.spec_tier(spec_text) if spec_text is not None else "full"
+    written_mode = specstate.spec_mode(spec_text)
+    mode = "fast" if written_mode == "fast" and tier == "tiny" else "standard"
     markers = spec_text.count("NEEDS CLARIFICATION") if spec_text else 0
     # an unfilled template's markers are its examples, not questions
     template_spec = bool(spec_text and spec_text.strip()
@@ -2590,6 +2610,10 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
         "spec_dir": str(spec_dir),
         "status": status,
         "effort": effort,
+        "mode": mode,
+        **({"mode_note": "Mode: fast is honored only at Tier: tiny — "
+                         "execute spawns developers as usual"}
+           if written_mode == "fast" and mode != "fast" else {}),
         "git": {"available": git_ok, "head": head, "note": git_note},
         "nodes": {name: nodes[name] for name in NODES},
         "edges": edges,

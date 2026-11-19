@@ -110,6 +110,9 @@ the rest. A task with no parseable `Touches:` runs alone. Per round:
    or refuses a wave the frontier has outgrown.
 2. Spawn exactly the emitted payloads in ONE message — one developer
    each; deferred and chained tasks come up on a later emit.
+   **`Mode: fast`** (tiny only, D-065): spawn nothing — implement
+   each payload yourself in task-id order, following its developer
+   brief (digest file included); steps 3–4 are unchanged.
 3. Collect digests. A reported deviation → append the D-### to
    tech-spec.md immediately (append-only; reconcile sibling docs
    quoting the old value in the same pass). A TYPED deviation names
