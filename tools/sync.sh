@@ -184,14 +184,14 @@ extra_commands() {  # <skill-name> -> bare names on stdout
 ledger_entry_matches() {  # <ledger-file> <command-name> <dest-file>
   [ -f "$1" ] || return 1
   local want
-  want="$(shasum -a 256 < "$3" | cut -d' ' -f1)"
+  want="$(shasum -a 256 < "$3")"; want="${want%% *}"
   awk -v n="$2" -v h="$want" '$1 == h && $2 == n {found = 1}
         END {exit found ? 0 : 1}' "$1"
 }
 
 ledger_record() {  # <ledger-file> <command-name> <master-file>
   local h
-  h="$(shasum -a 256 < "$3" | cut -d' ' -f1)"
+  h="$(shasum -a 256 < "$3")"; h="${h%% *}"
   # Rewrite via destination-local scratch renamed over the ledger, so
   # the ledger file itself never holds partial content.
   if [ -f "$1" ]; then
@@ -210,7 +210,9 @@ ledger_forget() {  # <ledger-file> <command-name>
 }
 
 sha() {  # <file> -> sha256 on stdout
-  shasum -a 256 < "$1" | cut -d' ' -f1
+  local h
+  h="$(shasum -a 256 < "$1")"
+  printf '%s\n' "${h%% *}"
 }
 
 LEDGER_NAME=".spec-dev-kit-deployed"
@@ -224,7 +226,7 @@ LEDGER_NAME=".spec-dev-kit-deployed"
 # misclassified as a foreign file.
 atomic_put() {  # <src> <dest>
   local tmp
-  tmp="$(dirname "$2")/$LEDGER_NAME.tmp-$(basename "$2").tmp"
+  tmp="${2%/*}/$LEDGER_NAME.tmp-${2##*/}.tmp"
   rm -f "$tmp"
   # named failures: install_command runs under suspended errexit
   # (`|| fail=1` caller), so a bare cp/mv failure would fall through
@@ -307,7 +309,7 @@ check_stale_commands() {  # <root>
 shipped_def_names() {
   local f
   for f in "$PKG_ROOT"/skills/*/agents/*.md; do
-    [ -e "$f" ] && basename "$f"
+    [ -e "$f" ] && printf '%s\n' "${f##*/}"
   done
   return 0
 }
@@ -553,30 +555,30 @@ prune_empty_parents() {  # <dest-dir> <removed-rel>
 # tree itself is the truth, so this is a full rewrite, not a merge.
 record_tree() {  # <dest-dir>
   local d="$1" tmp="$d/$LEDGER_NAME.tmp"
-  : > "$tmp"
-  while IFS= read -r rel; do
-    rel="${rel#./}"; [ -n "$rel" ] || continue
-    printf '%s %s\n' "$(sha "$d/$rel")" "$rel" >> "$tmp"
-  done < <(cd "$d" && find . -type f ! -name '.DS_Store' \
-      ! -path '*/__pycache__/*' ! -name "$LEDGER_NAME*" | sort)
+  (cd "$d" && find . -type f ! -name '.DS_Store' \
+      ! -path '*/__pycache__/*' ! -name "$LEDGER_NAME*" -print0 \
+      | sort -z | xargs -0 -r shasum -a 256) \
+    | sed 's|^\([0-9a-f]*\)  \./|\1 |' > "$tmp"
   mv "$tmp" "$d/$LEDGER_NAME"
 }
 
 SKILLS=()
 for d in "$PKG_ROOT"/skills/*/; do
   [ -f "${d}SKILL.md" ] || continue
-  SKILLS+=("$(basename "$d")")
+  d="${d%/}"; SKILLS+=("${d##*/}")
 done
 
 install_skill_tree() {  # <skill-dir> <dest-root> — refuses on foreign files
-  local master="$1" dest="$2/$(basename "$1")" rel
+  local master="$1" dest="$2/${1##*/}" rel
   sweep_tree "$master" "$dest" "$dest/$LEDGER_NAME" || return 1
   mkdir -p "$dest"
   # Per-file atomic replacement, not a tree copy: each destination file
   # lands whole or not at all; identical files stay untouched.
   while IFS= read -r rel; do
     rel="${rel#./}"; [ -n "$rel" ] || continue
-    mkdir -p "$dest/$(dirname "$rel")"
+    case "$rel" in
+      */*) [ -d "$dest/${rel%/*}" ] || mkdir -p "$dest/${rel%/*}" ;;
+    esac
     cmp -s "$master/$rel" "$dest/$rel" \
       || atomic_put "$master/$rel" "$dest/$rel" || return 1
   done < <(cd "$master" && find . -type f ! -name '.DS_Store' \
@@ -645,7 +647,7 @@ defs_all_owned() {  # <skill-dir> <skill-name>
   local dir="$1" name="$2" f base rc any_own=0
   for f in "$dir"/agents/*.md; do
     [ -e "$f" ] || continue
-    base="$(basename "$f")"
+    base="${f##*/}"
     def_dedup_gate "$base" "$name" "$f"; rc=$?
     [ "$rc" -eq 0 ] && any_own=1
     [ "$rc" -eq 4 ] && return 4
@@ -694,10 +696,35 @@ preflight_stage="$(mktemp -d)"
 claimed_command_names | sort -u > "$preflight_stage/claimed-commands.txt"
 shipped_def_names | sort -u > "$preflight_stage/shipped-defs.txt"
 
+# One planner process serves the whole run: a python3 start per planned
+# destination would dominate the run time.
+mkfifo "$preflight_stage/plan.req" "$preflight_stage/plan.resp"
+python3 "$PKG_ROOT/tools/ownership.py" serve \
+    < "$preflight_stage/plan.req" > "$preflight_stage/plan.resp" &
+exec 7> "$preflight_stage/plan.req" 8< "$preflight_stage/plan.resp"
+
+plan() {  # <ownership.py argv...> -> its stdout; returns its exit status
+  local line IFS=$'\t'
+  case "$*" in
+    *$'\n'*) python3 "$PKG_ROOT/tools/ownership.py" "$@"; return ;;
+  esac
+  for line in "$@"; do
+    case "$line" in *$'\t'*) python3 "$PKG_ROOT/tools/ownership.py" "$@"; return ;; esac
+  done
+  printf '%s\n' "$*" >&7
+  while IFS= read -r line <&8; do
+    case "$line" in
+      "end "*) return "${line#end }" ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done
+  echo "ERROR ownership planner exited early" >&2
+  return 2
+}
+
 plan_tree_root() {  # <src-dir> <dest-dir> — fail the run on any refusal
   local dest="$2" out rc line
-  out="$(python3 "$PKG_ROOT/tools/ownership.py" plan-tree \
-      --src "$1" --dest "$dest")" && rc=0 || rc=$?
+  out="$(plan plan-tree --src "$1" --dest "$dest")" && rc=0 || rc=$?
   # rc 2 is a planner validation error (missing source, corrupt ledger)
   # — a prerequisite failure, loud on stderr, fatal here either way.
   if [ "$rc" -eq 2 ]; then PREFLIGHT_FAIL=1; return 0; fi
@@ -718,8 +745,7 @@ plan_tree_root() {  # <src-dir> <dest-dir> — fail the run on any refusal
 plan_file_dest() {  # <src-file> <dest-file> [planner args...] — same contract
   local src="$1" dest="$2" out rc
   shift 2
-  out="$(python3 "$PKG_ROOT/tools/ownership.py" plan-file \
-      --src "$src" --dest "$dest" "$@")" && rc=0 || rc=$?
+  out="$(plan plan-file --src "$src" --dest "$dest" "$@")" && rc=0 || rc=$?
   if [ "$rc" -eq 2 ]; then PREFLIGHT_FAIL=1; return 0; fi
   case "$out" in
     refuse\ *)
@@ -781,7 +807,7 @@ for name in "${SKILLS[@]}"; do
     owned_list=""
     for bf in "$skill_dir"/agents/*.md; do
       [ -e "$bf" ] || continue
-      bb="$(basename "$bf")"
+      bb="${bf##*/}"
       drc=0; def_dedup_gate "$bb" "$name" "$bf" || drc=$?
       [ "$drc" -eq 0 ] && owned_list="$owned_list,$bb"
       if [ "$drc" -eq 4 ]; then PREFLIGHT_FAIL=1; fi
@@ -814,7 +840,7 @@ for name in "${SKILLS[@]}"; do
       # first write anywhere).
       for f in "$preflight_stage/$name/opencode"/*.md; do
         [ -e "$f" ] || continue
-        plan_file_dest "$f" "$OPENCODE_AGENTS_ROOT/$(basename "$f")"
+        plan_file_dest "$f" "$OPENCODE_AGENTS_ROOT/${f##*/}"
       done
     fi
     if [ -d "$HOME/.factory" ]; then
@@ -823,7 +849,7 @@ for name in "${SKILLS[@]}"; do
         --out "$preflight_stage/$name/droid" || PREFLIGHT_FAIL=1
       for f in "$preflight_stage/$name/droid"/*.md; do
         [ -e "$f" ] || continue
-        plan_file_dest "$f" "$DROID_AGENTS_ROOT/$(basename "$f")"
+        plan_file_dest "$f" "$DROID_AGENTS_ROOT/${f##*/}"
       done
     fi
     if [ -d "$KILO_HOME" ]; then
@@ -832,7 +858,7 @@ for name in "${SKILLS[@]}"; do
         --out "$preflight_stage/$name/kilo" || PREFLIGHT_FAIL=1
       for f in "$preflight_stage/$name/kilo"/*.md; do
         [ -e "$f" ] || continue
-        plan_file_dest "$f" "$KILO_AGENTS_ROOT/$(basename "$f")"
+        plan_file_dest "$f" "$KILO_AGENTS_ROOT/${f##*/}"
       done
     fi
     fi   # end owned_list guard
@@ -840,7 +866,7 @@ for name in "${SKILLS[@]}"; do
     # Claude agents: plain copies under the agents root's own ledger.
     for f in "$skill_dir"/agents/*.md; do
       [ -e "$f" ] || continue
-      base="$(basename "$f")"
+      base="${f##*/}"
       case ",$(cat "$preflight_stage/$name.owned" 2>/dev/null)," in
         *",$base,"*) plan_file_dest "$f" "$CLAUDE_AGENTS_ROOT/$base" ;;
       esac
@@ -857,7 +883,7 @@ for name in "${SKILLS[@]}"; do
     done
     for f in "$preflight_stage/$name/omp"/*.md; do
       [ -e "$f" ] || continue
-      plan_file_dest "$f" "$OMP_AGENTS_ROOT/$(basename "$f")" \
+      plan_file_dest "$f" "$OMP_AGENTS_ROOT/${f##*/}" \
         "${omp_ledgers[@]}"
      done
   fi
@@ -989,7 +1015,7 @@ if [ "$CHECK" = 0 ]; then
       mkdir -p "$CLAUDE_AGENTS_ROOT"
       agents_ledger="$CLAUDE_AGENTS_ROOT/$LEDGER_NAME"
       for f in "$skill_dir"/agents/*.md; do
-        base="$(basename "$f")"
+        base="${f##*/}"
         case ",$(cat "$preflight_stage/$name.owned" 2>/dev/null)," in
           *",$base,"*) ;;
           *)
@@ -1145,7 +1171,7 @@ for name in "${SKILLS[@]}"; do
 
   if [ -d "$skill_dir/agents" ]; then
     for f in "$skill_dir"/agents/*.md; do
-      base="$(basename "$f")"
+      base="${f##*/}"
       if cmp -s "$f" "$CLAUDE_AGENTS_ROOT/$base"; then
         echo "OK  def $base"
       else
@@ -1164,7 +1190,7 @@ for name in "${SKILLS[@]}"; do
     python3 "$PKG_ROOT/tools/omp-defs.py" --skill-dir "$skill_dir" --out "$tmp" >/dev/null
     for f in "$tmp"/*.md; do
       [ -e "$f" ] || continue
-      base="$(basename "$f")"
+      base="${f##*/}"
       if cmp -s "$f" "$OMP_AGENTS_ROOT/$base"; then
         echo "OK  omp def $base"
       else
@@ -1187,10 +1213,10 @@ for name in "${SKILLS[@]}"; do
         ok=0
         for f in "$t2"/*.md; do
           [ -e "$f" ] || continue
-          if cmp -s "$f" "$aroot/$(basename "$f")"; then
+          if cmp -s "$f" "$aroot/${f##*/}"; then
             ok=$((ok + 1))
           else
-            echo "DRIFT $tgt def $(basename "$f")"; fail=1
+            echo "DRIFT $tgt def ${f##*/}"; fail=1
           fi
         done
         [ "$ok" -gt 0 ] && echo "OK  $tgt defs ($ok)"
@@ -1203,7 +1229,7 @@ for name in "${SKILLS[@]}"; do
     t3="$(mktemp -d)"
     python3 "$PKG_ROOT/tools/agent-defs.py" --target agy --skill-dir "$skill_dir" --out "$t3" >/dev/null
     for f in "$t3"/*.md; do
-      base="$(basename "$f")"
+      base="${f##*/}"
       if cmp -s "$f" "$PKG_ROOT/agents/$base"; then
         echo "OK  agy def $base"
       else
