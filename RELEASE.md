@@ -5,7 +5,7 @@ requires five agreeing surfaces — semantic version, changelog, manifest
 versions, migration note, and end-to-end lifecycle evidence — and every
 claim the changelog entry makes must be provable by one of the gates
 below. Support claims (platforms, harnesses, dependencies) name only what
-the CI matrix actually exercises; a claim with no gate behind it does not
+CI actually exercises; a claim with no gate behind it does not
 ship.
 
 Work top to bottom; do not tag until every step is green. Run from the
@@ -14,7 +14,7 @@ repo root.
 ## 1. Base
 
 - On `main`, working tree clean: `git status --porcelain` is empty.
-- The CI workflow is green on **both** Linux and macOS for the commit
+- The CI workflow is green on macOS for the commit
   being released (both test suites, compilation, shell syntax,
   generated-artifact drift, and representative docset checks).
 

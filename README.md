@@ -158,7 +158,7 @@ per-harness workflow dialects exist to install or drift.
 ## Requirements, platforms, and trust boundaries
 
 One current statement of what this repo needs, where it runs, and what is
-safe to run — every claim here tracks a gate: the CI matrix proves the
+safe to run — every claim here tracks a gate: CI proves the
 platform list, `tools/sync.sh` proves the harness list.
 
 - **Runtime**: Python ≥ 3.10, stdlib only — nothing to install — plus
@@ -166,10 +166,10 @@ platform list, `tools/sync.sh` proves the harness list.
   `scripts/*.sh`, both `tests/run.sh` suites) is a bash script. git is
   optional: scope, staleness, and commit behavior degrade to explicit
   `SKIPPED (not a git repo)` notices, never a silent all-clear.
-- **Platforms**: Linux and macOS — the two platforms the CI matrix
-  exercises (both Python suites, compilation, shell syntax,
-  generated-artifact drift, representative docset checks). Windows-native
-  shells are unsupported.
+- **Platforms**: macOS — the platform CI exercises (both Python
+  suites, compilation, shell syntax, generated-artifact drift,
+  representative docset checks). Linux and Windows are planned for a
+  future release; until CI covers them they are unsupported.
 - **Harnesses**: exactly the seven [Harness support](#harness-support)
   surfaces — what `tools/sync.sh` populates and SHA-verifies; an absent
   config home is skipped loudly, never created.

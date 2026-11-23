@@ -23,9 +23,16 @@ same plan. Exit status: 0 no refusal, 1 the plan contains refusals,
 
     tools/ownership.py plan-tree --src skills/<name> --dest <root>/<name>
     tools/ownership.py plan-file --src <file> --dest <file> [--name KEY]
+    tools/ownership.py serve
+
+serve answers many plans from one process: each stdin line is one
+plan-tree/plan-file argv, tab-separated; the reply is that plan's
+stdout lines followed by `end <exit status>`.
 """
 import argparse
+import contextlib
 import hashlib
+import io
 import os
 import sys
 from collections import namedtuple
@@ -162,7 +169,27 @@ def plan_file(src_file, dest_file, name=None, ledger_file=None):
     return classify(key, sha256_file(src_file), dest_sha, ledger)
 
 
+def serve(stdin, stdout) -> int:
+    for line in stdin:
+        argv = line.rstrip("\n").split("\t")
+        if argv[:1] == ["serve"]:
+            rc = 2
+        else:
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    rc = main(argv)
+            except SystemExit as e:
+                rc = e.code if isinstance(e.code, int) else 2
+            stdout.write(buf.getvalue())
+        stdout.write(f"end {rc}\n")
+        stdout.flush()
+    return 0
+
+
 def main(argv=None) -> int:
+    if argv is None and sys.argv[1:] == ["serve"]:
+        return serve(sys.stdin, sys.stdout)
     ap = argparse.ArgumentParser(
         prog="ownership.py",
         description="Plan destination ownership before any write (read-only).")

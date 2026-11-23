@@ -697,8 +697,8 @@ class RetiredSkillSweepTests(SyncShBase):
         tree.mkdir(parents=True)
         (tree / "SKILL.md").write_text("# monolith deploy\n")
         (tree / LEDGER).write_text(
-            f"{hashlib.sha256(b'# monolith deploy\n').hexdigest()}"
-            " SKILL.md\n")
+            hashlib.sha256(b"# monolith deploy\n").hexdigest()
+            + " SKILL.md\n")
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(
