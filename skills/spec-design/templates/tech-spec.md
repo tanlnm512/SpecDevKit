@@ -1,12 +1,32 @@
 # Tech Spec: <name>
 
 **Spec**: [spec.md](spec.md) | **Created**: YYYY-MM-DD
-**Every file/symbol citation below must come verbatim from [survey.md](survey.md)
+**Baseline**: <version @ commit>
+**Every file/symbol citation below must come verbatim from § Code state
 or a grep run in this session — never from memory.**
+
+## Code state
+<!-- The grounding: one item per spec requirement — where the code stands
+today. Evidence pasted verbatim from grep/read output in the session that
+wrote it; can't find it → `unknown — verify`, never a guess. Status
+derives from evidence, never intent: run every verify command. The
+Baseline above is the HEAD this section was grounded against. -->
+```
+item <id>: "<one-line description>"
+  evidence:   <file:symbol with line — copied verbatim from grep/read output>
+  status:     DONE | PARTIAL | TODO
+  verify:     <the exact command that proves the status>
+  gap:        <if PARTIAL/TODO: the precise missing piece>
+```
+
+### Supporting evidence
+<Load-bearing symbols/counts the sections below cite: machinery,
+couplings, consumer lists, counts. Same verbatim rule.>
 
 ## Architecture
 <Components and data flow for this feature — a mermaid diagram plus one
-paragraph. Show how it sits in the existing system (grounded in survey.md).>
+paragraph. Show how it sits in the existing system (grounded in § Code
+state).>
 
 ## Solution
 ### Chosen approach
@@ -38,7 +58,7 @@ None — <why>
 <!-- Blast radius: what existing code/symbols this touches, who calls them,
 what breaks if the approach is wrong. Use the workspace's graph /
 code-intelligence tool when one is available, else grep. Ground every
-claim in survey evidence. -->
+claim in § Code state evidence. -->
 
 ## Interfaces & data
 <!-- What callers and stored data see change: API shapes (endpoints,
@@ -62,12 +82,12 @@ strategy: the contract review BLOCKs a trigger with none. -->
 | NFR-###     | <...>                                  | <...>                    |
 
 ## Code guide
-<!-- Per area: where work lands, verified to exist by survey. -->
+<!-- Per area: where work lands, verified to exist in § Code state. -->
 ### <Area 1>
-- Touches: `the \`symbol\` function in <file>` (survey.md evidence)
+- Touches: `the \`symbol\` function in <file>` (§ Code state evidence)
 - Approach: <...>
 - Verify before implementing: `<exact command>`
-- Pitfalls: <known traps, from survey or history>
+- Pitfalls: <known traps, from § Code state or history>
 
 ### <Area 2>
 ...

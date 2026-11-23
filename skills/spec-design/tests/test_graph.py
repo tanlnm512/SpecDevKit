@@ -49,8 +49,9 @@ def scaffold(tmp: Path, name: str = "demo") -> Path:
 
 
 def copy_fixture(tmp: Path, name: str = "demo") -> Path:
-    """A mutated-copy fixture: mini-spec docset + the repo it cites, so the
-    survey's file:symbol:line evidence stays real under the tmp repo root."""
+    """A mutated-copy fixture: mini-spec docset + the repo it cites, so
+    § Code state's file:symbol:line evidence stays real under the tmp repo
+    root."""
     (tmp / "specs").mkdir(parents=True, exist_ok=True)
     dst = tmp / "specs" / name
     shutil.copytree(FIXTURE, dst)
@@ -62,8 +63,7 @@ def spec_only(tmp: Path, name: str = "demo") -> Path:
     """A filled spec.md and nothing else."""
     d = scaffold(tmp, name)
     write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
-    for f in ("survey.md", "plan.md", "tech-spec.md",
-              "task.md", "test.md"):
+    for f in ("plan.md", "tech-spec.md", "task.md", "test.md"):
         (d / f).unlink()
     return d
 
@@ -103,6 +103,14 @@ SKIP_SECTION_BODY = ("## Questions & options\n\n### Questions\n"
 
 SKIP_SECTION = f"# Tech Spec: demo\n\n{SKIP_SECTION_BODY}"
 
+# A minimal grounding that passes `check.py --code-state-only`: a Baseline
+# header and one Code state item citing no file:symbol:line.
+GROUNDED_BODY = ("**Baseline**: demo v1 @ 3fa9c21\n\n## Code state\n```\n"
+                 'item S1: "multiply is absent"\n'
+                 "  evidence:   none — greenfield\n"
+                 "  status:     TODO\n"
+                 "  verify:     python3 -c 'print(1)'\n```\n\n")
+
 
 def record_approval(spec_dir: Path) -> None:
     """The approve gate's two records as the orchestrator leaves them: the
@@ -131,7 +139,7 @@ def set_status(spec_dir: Path, word: str) -> None:
 APPROVED_TASKS = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 
 ## Burndown
 | Phase | Total | Done | Verified |
@@ -142,7 +150,9 @@ Status reflects code state per [survey.md](survey.md), not intent.
 ## Phase 1: land the feature (FR-001, FR-002)
 - [ ] T001 [P] implement multiply in `repo/calc.py` (FR-001)
 - [ ] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)
+  - Proves: TC-001
 - [ ] T003 (fix 5/5) rescue the stalled refactor (FR-002)
+  - Proves: TC-002
 
 ## Conventions
 - `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
@@ -200,7 +210,7 @@ CLAIMED_T1_TASKS = APPROVED_TASKS.replace(
 STRUCK_DEP_TASKS = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 
 ## Burndown
 | Phase | Total | Done | Verified |
@@ -211,7 +221,9 @@ Status reflects code state per [survey.md](survey.md), not intent.
 ## Phase 1: land the feature (FR-001, FR-002)
 - [ ] ~~T001~~ [P] implement multiply in `repo/calc.py` (FR-001) — dropped
 - [ ] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)
+  - Proves: TC-001
 - [ ] T003 (after T099) rescue the stalled refactor (FR-002)
+  - Proves: TC-002
 
 ## Conventions
 - `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
@@ -221,7 +233,7 @@ Status reflects code state per [survey.md](survey.md), not intent.
 DONE_TASKS = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 
 ## Burndown
 | Phase | Total | Done | Verified |
@@ -234,6 +246,7 @@ Status reflects code state per [survey.md](survey.md), not intent.
       done 2026-09-08 — python3 -m pytest repo/test_calc.py green
 - [x] T002 [P] add multiply tests to `repo/test_calc.py` (FR-001, FR-002)
       done 2026-09-08 — python3 -m pytest repo/test_calc.py green
+  - Proves: TC-001, TC-002
 
 ## Conventions
 - `- [ ]` todo · `(in-progress)` claimed · `- [x]` done + proof note
@@ -271,8 +284,9 @@ def dir_checksum(root: Path) -> str:
 
 
 class Graph001EmptyScaffoldTests(unittest.TestCase):
-    """Filled spec.md only: survey READY, gate undetermined, downstream blocked,
-    frontier = [survey]."""
+    """Filled spec.md only: qa READY (it reads spec.md alone), the gate
+    undetermined so tech waits on research, downstream blocked, frontier
+    = [qa]."""
 
     @classmethod
     def setUpClass(cls):
@@ -284,8 +298,8 @@ class Graph001EmptyScaffoldTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
-    def test_frontier_is_survey_only(self):
-        self.assertEqual(frontier_of(self.state), ["survey"])
+    def test_frontier_is_qa_only(self):
+        self.assertEqual(frontier_of(self.state), ["qa"])
 
     def test_node_states_match_the_contract(self):
         n = self.state["nodes"]
@@ -293,42 +307,38 @@ class Graph001EmptyScaffoldTests(unittest.TestCase):
         self.assertEqual(n["clarify"]["state"], "done")
         self.assertEqual(n["research-gate"]["state"], "gate:undetermined")
         self.assertEqual(n["research"]["state"], "blocked")
-        self.assertEqual(n["survey"]["state"], "READY")
-        for name in ("plan", "tech", "qa", "tasks", "verify", "approve",
+        self.assertEqual(n["qa"]["state"], "READY")
+        for name in ("tech", "plan", "tasks", "verify", "approve",
                      "execute", "tick-commit", "archive"):
             self.assertEqual(n[name]["state"], "blocked", name)
 
     def test_blocked_reasons_name_the_unmet_predecessor(self):
         n = self.state["nodes"]
-        self.assertIn("survey", n["plan"]["reason"])
-        self.assertIn("survey", n["qa"]["reason"])
-        self.assertIn("survey", n["tech"]["reason"])
-        # tech alone also demands the research resolution.
         self.assertIn("research", n["tech"]["reason"])
+        self.assertIn("tech", n["plan"]["reason"])
         self.assertIn("plan", n["tasks"]["reason"])
+        self.assertIn("qa", n["tasks"]["reason"])
         self.assertIn("verify", n["approve"]["reason"])
 
     def test_default_report_and_gate_pause(self):
         r = run_cli(self.spec_dir)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("gate:undetermined", r.stdout)
-        self.assertIn("survey", r.stdout)
+        self.assertIn("qa", r.stdout)
 
 
-class Graph002SurveyWaveTests(unittest.TestCase):
-    """A valid survey flips survey done; plan ∥ qa go READY while tech stays
-    blocked on the undetermined gate; real research unblocks tech."""
+class Graph002GroundingWaveTests(unittest.TestCase):
+    """qa is READY from spec alone; tech waits on the undetermined gate;
+    real research unblocks tech, and plan waits on tech."""
 
     @classmethod
     def setUpClass(cls):
         cls._tmp = Path(tempfile.mkdtemp(prefix="graph002-"))
         spec_doc = (FIXTURE / "spec.md").read_text(encoding="utf-8")
-        survey_doc = (FIXTURE / "survey.md").read_text(encoding="utf-8")
 
         def filled(tmp, name):
             d = scaffold(tmp, name)
             write(d / "spec.md", spec_doc)
-            write(d / "survey.md", survey_doc)
             return d
 
         # the full-tier draft-from-intent shape: the scaffold strips the
@@ -346,37 +356,35 @@ class Graph002SurveyWaveTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
-    def test_survey_done_plan_qa_ready_tech_blocked(self):
+    def test_qa_ready_tech_blocked_on_research(self):
         n = self.before["nodes"]
-        self.assertEqual(n["survey"]["state"], "done")
-        self.assertEqual(n["plan"]["state"], "READY")
         self.assertEqual(n["qa"]["state"], "READY")
         self.assertEqual(n["tech"]["state"], "blocked")
         self.assertIn("research", n["tech"]["reason"])
-        self.assertEqual(sorted(frontier_of(self.before)), ["plan", "qa"])
+        self.assertEqual(n["plan"]["state"], "blocked")
+        self.assertEqual(sorted(frontier_of(self.before)), ["qa"])
 
-    def test_real_research_unblocks_tech(self):
+    def test_real_research_unblocks_tech_not_plan(self):
         n = self.after["nodes"]
         self.assertEqual(n["research"]["state"], "done")
         self.assertEqual(n["research-gate"]["state"], "done")
         self.assertIn("run", n["research-gate"]["reason"])
         self.assertEqual(n["tech"]["state"], "READY")
-        self.assertEqual(sorted(frontier_of(self.after)),
-                         ["plan", "qa", "tech"])
+        self.assertIn("tech", n["plan"]["reason"])
+        self.assertEqual(sorted(frontier_of(self.after)), ["qa", "tech"])
 
 
-class QuotedEvidenceSurveyTests(unittest.TestCase):
-    """A survey whose verbatim evidence quotes placeholder-shaped source
-    lines stays done — quoted spans carry citations, not template residue."""
+class QuotedEvidenceCodeStateTests(unittest.TestCase):
+    """A Code state whose verbatim evidence quotes placeholder-shaped
+    source lines keeps tech done — quoted spans carry citations, not
+    template residue."""
 
     @classmethod
     def setUpClass(cls):
         cls._tmp = Path(tempfile.mkdtemp(prefix="graph-quote-"))
-        cls.spec_dir = scaffold(cls._tmp)
-        write(cls.spec_dir / "spec.md",
-              (FIXTURE / "spec.md").read_text(encoding="utf-8"))
-        survey = (FIXTURE / "survey.md").read_text(encoding="utf-8")
-        write(cls.spec_dir / "survey.md", survey +
+        cls.spec_dir = copy_fixture(cls._tmp)
+        cls.tech = (FIXTURE / "tech-spec.md").read_text(encoding="utf-8")
+        write(cls.spec_dir / "tech-spec.md", cls.tech +
               '\n  evidence:   templates/design-spec.md:15 '
               '"- Selected: <angle or blend>" :16 "<persona>"\n')
 
@@ -384,21 +392,21 @@ class QuotedEvidenceSurveyTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
-    def test_quoted_placeholder_evidence_keeps_survey_done(self):
+    def test_quoted_placeholder_evidence_keeps_tech_done(self):
         state = compute(self.spec_dir)
-        self.assertEqual(state["nodes"]["survey"]["state"], "done")
+        self.assertEqual(state["nodes"]["tech"]["state"], "done")
 
-    def test_unquoted_placeholder_still_blocks_survey(self):
-        survey = (FIXTURE / "survey.md").read_text(encoding="utf-8")
-        write(self.spec_dir / "survey.md", survey + "\nsee <persona> above\n")
+    def test_unquoted_placeholder_still_blocks_tech(self):
+        write(self.spec_dir / "tech-spec.md",
+              self.tech + "\nsee <persona> above\n")
         state = compute(self.spec_dir)
-        self.assertNotEqual(state["nodes"]["survey"]["state"], "done")
+        self.assertNotEqual(state["nodes"]["tech"]["state"], "done")
 
 
 class Graph003SkipMarkerTests(unittest.TestCase):
     """The em-dash skip marker — shipped pre-filled in the scaffolded
     tech-spec's section — resolves the gate as skip: research reads
-    SKIPPED (not blocked), tech goes READY."""
+    SKIPPED (not blocked), tech goes READY beside qa."""
 
     @classmethod
     def setUpClass(cls):
@@ -406,8 +414,6 @@ class Graph003SkipMarkerTests(unittest.TestCase):
         cls.spec_dir = scaffold(cls._tmp)
         write(cls.spec_dir / "spec.md",
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
-        write(cls.spec_dir / "survey.md",
-              (FIXTURE / "survey.md").read_text(encoding="utf-8"))
         # the shipped skip form IS the marker path: assert it byte-exact
         self_marker = "not applicable — no open questions at Stage 0"
         tech = (cls.spec_dir / "tech-spec.md").read_text(encoding="utf-8")
@@ -426,8 +432,7 @@ class Graph003SkipMarkerTests(unittest.TestCase):
         self.assertEqual(n["research-gate"]["state"], "done")
         self.assertIn("skip", n["research-gate"]["reason"])
         self.assertEqual(n["tech"]["state"], "READY")
-        self.assertEqual(sorted(frontier_of(self.state)),
-                         ["plan", "qa", "tech"])
+        self.assertEqual(sorted(frontier_of(self.state)), ["qa", "tech"])
 
 
 GREEN_INTENT = (
@@ -486,11 +491,12 @@ TINY_SPEC = (
 
 
 class IntentNodeTests(unittest.TestCase):
-    """The intent node between spec and survey: absent reads SKIPPED and the
-    graph is otherwise unchanged (no new blockers; survey readiness and the
-    frontier keep their pre-intent values); present-but-red reads BLOCKED
-    naming the failing check with survey waiting on it; present-and-green
-    reads DONE and survey proceeds; an unfilled intent.md is READY for the scout."""
+    """The intent node between spec and authoring: absent reads SKIPPED and
+    the graph is otherwise unchanged (no new blockers; authoring readiness
+    and the frontier keep their pre-intent values); present-but-red reads
+    BLOCKED naming the failing check with tech and qa waiting on it;
+    present-and-green reads DONE and authoring proceeds; an unfilled
+    intent.md is READY for the scout."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="graphintent-"))
@@ -501,18 +507,19 @@ class IntentNodeTests(unittest.TestCase):
         n = s["nodes"]
         self.assertEqual(n["intent"]["state"], "SKIPPED")
         self.assertIn("legacy path", n["intent"]["reason"])
-        self.assertEqual(n["survey"]["state"], "READY")
-        self.assertEqual(s["frontier"], ["survey"])
+        self.assertEqual(n["qa"]["state"], "READY")
+        self.assertEqual(s["frontier"], ["qa"])
         data = {(e["from"], e["to"]) for e in s["edges"]
                 if e["kind"] == "data"}
         self.assertIn(("spec", "intent"), data)
-        self.assertIn(("intent", "survey"), data)
-        self.assertNotIn(("spec", "survey"), data)
+        self.assertIn(("intent", "tech"), data)
+        self.assertIn(("intent", "qa"), data)
+        self.assertNotIn(("spec", "tech"), data)
 
     def test_green_fixture_docset_unchanged_by_the_skipped_node(self):
         s = compute(copy_fixture(self._tmp))
         self.assertEqual(s["nodes"]["intent"]["state"], "SKIPPED")
-        self.assertEqual(s["nodes"]["survey"]["state"], "done")
+        self.assertEqual(s["nodes"]["tech"]["state"], "done")
         self.assertEqual(s["frontier"], ["approve"])
 
     def test_red_intent_blocks_naming_the_failing_check(self):
@@ -523,19 +530,20 @@ class IntentNodeTests(unittest.TestCase):
         self.assertEqual(n["intent"]["state"], "blocked")
         self.assertIn("check.py --intent-only exits 1",
                       n["intent"]["reason"])
-        self.assertEqual(n["survey"]["state"], "blocked")
-        self.assertIn("waiting on: intent", n["survey"]["reason"])
+        for name in ("tech", "qa"):
+            self.assertEqual(n[name]["state"], "blocked", name)
+            self.assertIn("waiting on: intent", n[name]["reason"])
         self.assertEqual(s["frontier"], [])
 
-    def test_green_intent_done_survey_proceeds(self):
+    def test_green_intent_done_authoring_proceeds(self):
         d = spec_only(self._tmp)
         write(d / "intent.md", GREEN_INTENT)
         s = compute(d)
         n = s["nodes"]
         self.assertEqual(n["intent"]["state"], "done")
         self.assertIn("--intent-only", n["intent"]["reason"])
-        self.assertEqual(n["survey"]["state"], "READY")
-        self.assertEqual(s["frontier"], ["survey"])
+        self.assertEqual(n["qa"]["state"], "READY")
+        self.assertEqual(s["frontier"], ["qa"])
 
     def test_unfilled_intent_ready_and_emits_the_scout_payload(self):
         d = spec_only(self._tmp)
@@ -543,12 +551,12 @@ class IntentNodeTests(unittest.TestCase):
         s = compute(d)
         self.assertEqual(s["nodes"]["intent"]["state"], "READY")
         self.assertEqual(s["frontier"], ["intent"])
-        self.assertEqual(s["nodes"]["survey"]["state"], "blocked")
+        self.assertEqual(s["nodes"]["qa"]["state"], "blocked")
         self.assertEqual(graph.AGENT_BRIEFS["intent"],
-                         ("surveyor", "analyst.md", "intent"))
+                         ("analyst", "analyst.md", "intent"))
         r = run_cli(d, "--emit-spawns")
         self.assertEqual(r.returncode, 0, r.stderr)
-        payload = d / "spawns" / "wave-1" / "surveyor.md"
+        payload = d / "spawns" / "wave-1" / "analyst.md"
         self.assertTrue(payload.exists())
         text = payload.read_text(encoding="utf-8")
         self.assertIn("node intent", text)
@@ -573,7 +581,7 @@ class IntentNodeTests(unittest.TestCase):
         n = s["nodes"]
         self.assertEqual(n["intent"]["state"], "SKIPPED")
         self.assertIn("legacy path", n["intent"]["reason"])
-        for name in ("survey", "plan", "tech", "qa", "tasks"):
+        for name in ("tech", "plan", "qa", "tasks"):
             self.assertEqual(n[name]["state"], "SKIPPED", name)
 
 
@@ -888,10 +896,10 @@ class Graph006ClarifyHoldTests(unittest.TestCase):
         self.assertIn("NEEDS CLARIFICATION", n["spec"]["reason"])
         self.assertEqual(n["clarify"]["state"], "READY")
         self.assertEqual(frontier_of(self.held), ["clarify"])
-        self.assertEqual(n["survey"]["state"], "blocked")
+        self.assertEqual(n["qa"]["state"], "blocked")
 
     def test_no_agent_node_scheduled_while_open(self):
-        for name in ("survey", "plan", "tech", "qa", "tasks"):
+        for name in ("tech", "plan", "qa", "tasks"):
             self.assertEqual(self.held["nodes"][name]["state"], "blocked", name)
 
     def test_a_templates_example_markers_are_never_put_to_the_user(self):
@@ -909,7 +917,7 @@ class Graph006ClarifyHoldTests(unittest.TestCase):
         n = self.cleared["nodes"]
         self.assertEqual(n["spec"]["state"], "done")
         self.assertEqual(n["clarify"]["state"], "done")
-        self.assertEqual(frontier_of(self.cleared), ["survey"])
+        self.assertEqual(frontier_of(self.cleared), ["qa"])
 
 
 class Graph007StateJsonShapeTests(unittest.TestCase):
@@ -1060,10 +1068,10 @@ class Graph011ExplainTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
-    def test_explain_survey_matches_json_reason(self):
-        r = run_cli(self.spec_dir, "--explain", "survey")
+    def test_explain_qa_matches_json_reason(self):
+        r = run_cli(self.spec_dir, "--explain", "qa")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(self.state["nodes"]["survey"]["reason"], r.stdout)
+        self.assertIn(self.state["nodes"]["qa"]["reason"], r.stdout)
 
     def test_explain_tech_names_the_research_requirement(self):
         r = run_cli(self.spec_dir, "--explain", "tech")
@@ -1081,7 +1089,7 @@ class Graph011ExplainTests(unittest.TestCase):
     def test_unknown_node_exits_two_with_valid_names(self):
         r = run_cli(self.spec_dir, "--explain", "bogus")
         self.assertEqual(r.returncode, 2)
-        for name in ("spec", "survey", "execute", "archive"):
+        for name in ("spec", "tech", "execute", "archive"):
             self.assertIn(name, r.stdout + r.stderr)
 
 
@@ -1142,8 +1150,7 @@ class Graph013FixtureIntegrationTests(unittest.TestCase):
         n = json.loads(self.stdout)["nodes"]
         self.assertEqual(n["spec"]["state"], "done")
         self.assertEqual(n["research"]["state"], "SKIPPED")
-        self.assertEqual(n["survey"]["state"], "done")
-        for name in ("plan", "tech", "qa", "tasks", "verify"):
+        for name in ("tech", "plan", "qa", "tasks", "verify"):
             self.assertEqual(n[name]["state"], "done", name)
         self.assertEqual(n["approve"]["state"], "READY")
         self.assertEqual(n["execute"]["state"], "blocked")
@@ -1403,11 +1410,10 @@ def doc_hashes(spec_dir: Path) -> dict:
             for p in sorted(spec_dir.glob("*.md"))}
 
 
-def wave2_fixture(tmp: Path, name: str = "demo") -> Path:
-    """Spec + valid survey + real research: plan ∥ tech ∥ qa all READY (wave 2)."""
+def grounding_fixture(tmp: Path, name: str = "demo") -> Path:
+    """Spec + real research: tech ∥ qa both READY (the grounding wave)."""
     d = scaffold(tmp, name)
     write(d / "spec.md", (FIXTURE / "spec.md").read_text(encoding="utf-8"))
-    write(d / "survey.md", (FIXTURE / "survey.md").read_text(encoding="utf-8"))
     write_research(d)
     return d
 
@@ -1424,7 +1430,7 @@ def approved_fixture(tmp: Path, name: str = "demo") -> Path:
 FIX_ROUND_TASKS = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 
 ## Burndown
 | Phase | Total | Done | Verified |
@@ -1458,7 +1464,7 @@ def fix_round_fixture(tmp: Path, name: str = "demo") -> Path:
 TICKED_ALL_TASKS = """# Tasks: demo
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 
 ## Burndown
 | Phase | Total | Done | Verified |
@@ -1509,23 +1515,22 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = Path(tempfile.mkdtemp(prefix="exec001-"))
-        cls.spec_dir = wave2_fixture(cls._tmp)
+        cls.spec_dir = grounding_fixture(cls._tmp)
         cls.r = run_cli(cls.spec_dir, "--emit-spawns")
-        cls.wave = cls.spec_dir / "spawns" / "wave-2"
+        cls.wave = cls.spec_dir / "spawns" / "wave-1"
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
-    def test_one_payload_per_frontier_agent_in_wave_2(self):
+    def test_one_payload_per_frontier_agent_in_the_grounding_wave(self):
         self.assertEqual(self.r.returncode, 0, self.r.stderr)
         self.assertEqual(sorted(p.name for p in self.wave.glob("*.md")),
-                         ["planner.md", "qa.md", "tech.md"])
-        self.assertIn("wave-2", self.r.stdout)
+                         ["qa.md", "tech.md"])
+        self.assertIn("wave-1", self.r.stdout)
 
     def test_brief_body_is_contiguous_verbatim_frontmatter_stripped(self):
-        for name, brief in (("planner.md", "architect.md"),
-                            ("tech.md", "architect.md"),
+        for name, brief in (("tech.md", "architect.md"),
                             ("qa.md", "tester.md")):
             raw = (SKILL / "agents" / brief).read_text(encoding="utf-8")
             _, frontmatter, body = raw.split("---\n", 2)
@@ -1536,19 +1541,19 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
     def test_shared_protocol_verbatim_for_every_role(self):
         protocol = (SKILL / "protocol" / "shared-protocol.md").read_text(
             encoding="utf-8")
-        for name in ("planner.md", "tech.md", "qa.md"):
+        for name in ("tech.md", "qa.md"):
             payload = (self.wave / name).read_text(encoding="utf-8")
             self.assertIn(protocol, payload, name)
 
     def test_wave_dir_override(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec001b-"))
         try:
-            d = wave2_fixture(tmp)
+            d = grounding_fixture(tmp)
             out = tmp / "custom-wave"
             r = run_cli(d, "--emit-spawns", "--wave-dir", str(out))
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(sorted(p.name for p in out.glob("*.md")),
-                             ["planner.md", "qa.md", "tech.md"])
+                             ["qa.md", "tech.md"])
             self.assertFalse((d / "spawns").exists())
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1556,25 +1561,25 @@ class Exec001EmitSpawnsTests(unittest.TestCase):
     def test_a_wave_emit_replaces_the_kits_earlier_payloads(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec001c-"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        d = wave2_fixture(tmp)
-        wave = d / "spawns" / "wave-2"
+        d = grounding_fixture(tmp)
+        wave = d / "spawns" / "wave-1"
         wave.mkdir(parents=True)
         for stale in ("implementer.md", "implementer-T001.md",
-                      "surveyor.md", "reviewer-diff.patch"):
+                      "planner.md", "reviewer-diff.patch"):
             write(wave / stale, "left by an earlier emit\n")
         write(wave / "notes.txt", "not the kit's file\n")
         self.assertEqual(run_cli(d, "--emit-spawns").returncode, 0)
         self.assertEqual(sorted(p.name for p in wave.iterdir()),
-                         ["notes.txt", "planner.md", "qa.md", "tech.md"])
+                         ["notes.txt", "qa.md", "tech.md"])
         # a repair emit adds its one file beside a wave that may be in flight
         self.assertEqual(
-            run_cli(d, "--emit-spawns", "--repair", "survey").returncode, 0)
+            run_cli(d, "--emit-spawns", "--repair", "plan").returncode, 0)
         self.assertEqual(
             sorted(p.name for p in wave.glob("*.md")),
-            ["planner.md", "qa.md", "surveyor.md", "tech.md"])
+            ["planner.md", "qa.md", "tech.md"])
 
     def test_input_payload_names_spec_dir_frs_and_skill_dir(self):
-        payload = (self.wave / "planner.md").read_text(encoding="utf-8")
+        payload = (self.wave / "tech.md").read_text(encoding="utf-8")
         self.assertIn(str(self.spec_dir), payload)
         self.assertIn("**FR-001**", payload)
         self.assertIn(str(SKILL), payload)
@@ -1587,7 +1592,7 @@ class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec002-"))
-        self.spec_dir = wave2_fixture(self._tmp)
+        self.spec_dir = grounding_fixture(self._tmp)
         run_cli(self.spec_dir, "--emit-spawns")
 
     def tearDown(self):
@@ -1741,7 +1746,7 @@ class Exec006RunnerTemplateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = Path(tempfile.mkdtemp(prefix="exec006-"))
-        cls.spec_dir = wave2_fixture(cls._tmp)
+        cls.spec_dir = grounding_fixture(cls._tmp)
         cls.r = run_cli(
             cls.spec_dir, "--run", "--dry-run", "--runner",
             "agentx spawn --prompt {prompt_file} --as {role} "
@@ -1754,9 +1759,9 @@ class Exec006RunnerTemplateTests(unittest.TestCase):
     def runner_lines(self):
         return [ln for ln in self.r.stdout.splitlines() if "agentx" in ln]
 
-    def test_three_substituted_invocations(self):
+    def test_two_substituted_invocations(self):
         self.assertEqual(self.r.returncode, 0, self.r.stderr)
-        self.assertEqual(len(self.runner_lines()), 3)
+        self.assertEqual(len(self.runner_lines()), 2)
 
     def test_no_residual_placeholders(self):
         for ln in self.runner_lines():
@@ -1764,10 +1769,9 @@ class Exec006RunnerTemplateTests(unittest.TestCase):
 
     def test_each_placeholder_gets_a_real_value(self):
         lines = self.runner_lines()
-        for role, payload in (("planner", "planner.md"), ("tech", "tech.md"),
-                              ("qa", "qa.md")):
+        for role, payload in (("tech", "tech.md"), ("qa", "qa.md")):
             ln = next(l for l in lines if f"--as {role}" in l)
-            self.assertIn(str(self.spec_dir / "spawns" / "wave-2" / payload), ln)
+            self.assertIn(str(self.spec_dir / "spawns" / "wave-1" / payload), ln)
             self.assertIn(f"--cwd {self.spec_dir}", ln)
             self.assertIn(f"--skill {SKILL}", ln)
 
@@ -1782,7 +1786,7 @@ class Exec007MaxWavesTests(unittest.TestCase):
 
     def test_bound_of_one_with_print_runner_changes_nothing(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec007a-"))
-        d = wave2_fixture(self._tmp)
+        d = grounding_fixture(self._tmp)
         before = doc_hashes(d)
         r = run_cli(d, "--run", "--max-waves", "1")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1793,13 +1797,13 @@ class Exec007MaxWavesTests(unittest.TestCase):
 
     def test_print_runner_stops_after_one_wave_naming_the_agent_types(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec007c-"))
-        d = wave2_fixture(self._tmp)
+        d = grounding_fixture(self._tmp)
         r = run_cli(d, "--run")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.count("== wave"), 1)
         self.assertIn("wave emitted — spawn these payloads", r.stdout)
         self.assertNotIn("no doc-state change", r.stdout)
-        self.assertIn("(role: planner, node: plan) — agent type "
+        self.assertIn("(role: tech, node: tech) — agent type "
                       "spec-architect", r.stdout)
         self.assertIn("(role: qa, node: qa) — agent type spec-tester", r.stdout)
 
@@ -1815,14 +1819,15 @@ class Exec007MaxWavesTests(unittest.TestCase):
 
     def test_real_runner_progresses_and_bound_holds_at_one(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec007b-"))
-        d = wave2_fixture(self._tmp)
+        d = grounding_fixture(self._tmp)
         self.seed(d, "planner",
                   "# Plan: demo\n\n## Milestone 1: multiply lands\n"
                   "All FR-001 and FR-002 work lands here; checkpoint: pytest "
                   "green.\n\n## Parallelization map\n- planner area: "
                   "`repo/calc.py` disjoint from `repo/test_calc.py`\n")
         self.seed(d, "tech",
-                  "# Tech spec: demo\n\n## Approach\nA plain function in the "
+                  "# Tech spec: demo\n\n" + GROUNDED_BODY +
+                  "## Approach\nA plain function in the "
                   "arithmetic module (FR-001).\n\n### D-001: plain function\n"
                   "Context: small module. Decision: plain function. "
                   "Consequences: none.\n\n" + SKIP_SECTION_BODY)
@@ -1830,28 +1835,31 @@ class Exec007MaxWavesTests(unittest.TestCase):
                   "# Test cases: demo\n\n## TC-001 — multiply\n"
                   "- **Traces to**: FR-001\n"
                   "- **Pass condition**: `python3 -c 'print(42)'` exits 0\n")
+        plan_before = (d / "plan.md").read_bytes()
         task_before = (d / "task.md").read_bytes()
         r = run_cli(d, "--run", "--max-waves", "1",
                     "--runner", self.progress_runner(d))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.count("== wave"), 1)
         self.assertIn("max-waves", r.stdout)
-        self.assertTrue((d / "plan.md").exists(), "runner really ran")
-        self.assertTrue((d / "tech-spec.md").exists())
-        self.assertTrue((d / "test.md").exists())
-        self.assertEqual((d / "task.md").read_bytes(), task_before,
-                         "wave 2 never ran (no task-breaker seed)")
+        self.assertIn("## Code state", (d / "tech-spec.md").read_text(
+            encoding="utf-8"), "runner really ran")
+        self.assertIn("TC-001", (d / "test.md").read_text(encoding="utf-8"))
+        self.assertEqual((d / "plan.md").read_bytes(), plan_before,
+                         "wave 2 never ran (plan waits on tech)")
+        self.assertEqual((d / "task.md").read_bytes(), task_before)
 
-    def test_max_waves_two_proceeds_one_wave_further(self):
+    def test_max_waves_three_reaches_the_task_list(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec007c-"))
-        d = wave2_fixture(self._tmp)
+        d = grounding_fixture(self._tmp)
         self.seed(d, "planner",
                   "# Plan: demo\n\n## Milestone 1: multiply lands\n"
                   "All FR-001 and FR-002 work lands here; checkpoint: pytest "
                   "green.\n\n## Parallelization map\n- planner area: "
                   "`repo/calc.py` disjoint from `repo/test_calc.py`\n")
         self.seed(d, "tech",
-                  "# Tech spec: demo\n\n## Approach\nA plain function in the "
+                  "# Tech spec: demo\n\n" + GROUNDED_BODY +
+                  "## Approach\nA plain function in the "
                   "arithmetic module (FR-001).\n\n### D-001: plain function\n"
                   "Context: small module. Decision: plain function. "
                   "Consequences: none.\n\n" + SKIP_SECTION_BODY)
@@ -1868,13 +1876,13 @@ class Exec007MaxWavesTests(unittest.TestCase):
             "\n\n## Phase 1: multiply (FR-001)\n"
             "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
         self.seed(d, "task-breaker", task_seed)
-        r = run_cli(d, "--run", "--max-waves", "2",
+        r = run_cli(d, "--run", "--max-waves", "3",
                     "--runner", self.progress_runner(d))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.count("== wave"), 2)
+        self.assertEqual(r.stdout.count("== wave"), 3)
         self.assertIn("max-waves", r.stdout)
         self.assertEqual((d / "task.md").read_text(encoding="utf-8"),
-                         task_seed, "wave 2 ran the task-breaker payload")
+                         task_seed, "wave 3 ran the task-breaker payload")
 
 
 class Exec008VerifyInRunTests(unittest.TestCase):
@@ -1947,7 +1955,7 @@ class ConstitutionCitationTests(unittest.TestCase):
     def test_an_unfilled_constitution_is_never_cited_as_constraints(self):
         tmp = Path(tempfile.mkdtemp(prefix="constitution-"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        d = wave2_fixture(tmp)
+        d = grounding_fixture(tmp)
         constitution = tmp / "specs" / "CONSTITUTION.md"
         cited = f"specs/CONSTITUTION.md at {constitution}"
         self.assertNotIn(cited, graph.input_payload_for("tech", d, tmp, None))
@@ -1967,11 +1975,11 @@ class Exec010CrossModeNamingTests(unittest.TestCase):
     def test_identical_wave_paths_across_modes(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec010-"))
         try:
-            d1 = wave2_fixture(tmp / "a")
+            d1 = grounding_fixture(tmp / "a")
             run_cli(d1, "--emit-spawns")
             emitted = sorted(str(p.relative_to(d1))
                              for p in (d1 / "spawns").rglob("*.md"))
-            d2 = wave2_fixture(tmp / "b")
+            d2 = grounding_fixture(tmp / "b")
             r = run_cli(d2, "--run", "--dry-run")
             self.assertEqual(r.returncode, 0, r.stderr)
             planned = sorted(str(p.relative_to(d2))
@@ -1990,7 +1998,7 @@ class RunWaveDirTests(unittest.TestCase):
     runner sees the overridden path."""
 
     def run_wave(self, tmp: Path) -> tuple[Path, Path, subprocess.CompletedProcess]:
-        d = wave2_fixture(tmp)
+        d = grounding_fixture(tmp)
         out = tmp / "custom-wave"
         r = run_cli(d, "--run", "--max-waves", "1", "--wave-dir", str(out))
         return d, out, r
@@ -2001,7 +2009,7 @@ class RunWaveDirTests(unittest.TestCase):
             d, out, r = self.run_wave(tmp)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(sorted(p.name for p in out.glob("*.md")),
-                             ["planner.md", "qa.md", "tech.md"])
+                             ["qa.md", "tech.md"])
             self.assertFalse((d / "spawns").exists(),
                              "--wave-dir must override the default location")
         finally:
@@ -2012,7 +2020,7 @@ class RunWaveDirTests(unittest.TestCase):
         try:
             _d, out, r = self.run_wave(tmp)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn(str(out / "planner.md"),
+            self.assertIn(str(out / "tech.md"),
                           r.stdout.replace("\\", "/"))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -2020,10 +2028,10 @@ class RunWaveDirTests(unittest.TestCase):
 
 class Exec011RepairDeltaTests(unittest.TestCase):
     """--repair emits one non-frontier agent node's payload
-    (the single-agent repair-run instrument), and a stale survey
-    baseline scopes that payload to a DELTA RE-SURVEY block — the files
-    git says changed since the baseline, so the converge re-survey
-    merges instead of rebuilding. Degradations stay loud: no git, a
+    (the single-agent repair-run instrument), and a stale tech-spec
+    Baseline scopes the tech payload to a DELTA RE-GROUND block — the
+    files git says changed since the baseline, so the converge re-ground
+    merges § Code state instead of rebuilding it. Degradations stay loud: no git, a
     fresh baseline, or a failing diff never reads as an empty delta."""
 
     def payload_for(self, tmp: Path, git=True, head="def5678",
@@ -2042,15 +2050,15 @@ class Exec011RepairDeltaTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         return d, graph.input_payload_for(
-            "survey", d, tmp / "repo", None)
+            "tech", d, tmp / "repo", None)
 
     def test_stale_baseline_carries_delta_block(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec011a-"))
         try:
             _d, payload = self.payload_for(tmp)
-            # copy_fixture's survey baseline is "mini-calc v1 @ 3fa9c21"
+            # copy_fixture's tech-spec Baseline is "mini-calc v1 @ 3fa9c21"
             self.assertIn("baseline: mini-calc v1 @ 3fa9c21", payload)
-            self.assertIn("DELTA RE-SURVEY: baseline 3fa9c21 != HEAD "
+            self.assertIn("DELTA RE-GROUND: baseline 3fa9c21 != HEAD "
                           "def5678", payload)
             self.assertIn("do NOT rebuild", payload)
             self.assertIn("repo/calc.py", payload)
@@ -2062,7 +2070,7 @@ class Exec011RepairDeltaTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="exec011b-"))
         try:
             _d, payload = self.payload_for(tmp, head="3fa9c21")
-            self.assertNotIn("DELTA RE-SURVEY", payload)
+            self.assertNotIn("DELTA RE-GROUND", payload)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2070,16 +2078,16 @@ class Exec011RepairDeltaTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="exec011c-"))
         try:
             _d, payload = self.payload_for(tmp, git=False)
-            self.assertNotIn("DELTA RE-SURVEY", payload)
+            self.assertNotIn("DELTA RE-GROUND", payload)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_failing_diff_degrades_to_explicit_full_resurvey(self):
+    def test_failing_diff_degrades_to_explicit_full_reground(self):
         tmp = Path(tempfile.mkdtemp(prefix="exec011d-"))
         try:
             _d, payload = self.payload_for(tmp, diff=None)
             self.assertIn("delta: unavailable", payload)
-            self.assertIn("re-survey in full", payload)
+            self.assertIn("re-ground § Code state in full", payload)
             self.assertNotIn("do NOT rebuild", payload)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -2095,49 +2103,50 @@ class Exec011RepairDeltaTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_repair_emits_the_named_node_alone(self):
-        """wave2_fixture sits at wave 2 (plan ∥ tech ∥ qa; survey done) —
-        --repair survey writes the surveyor payload and nothing of the
-        frontier wave; the non-git tmp gets the plain full-survey shape."""
+        """The green fixture sits at the approve gate — --repair tech
+        writes the tech payload and nothing of the frontier wave; the
+        non-git tmp gets the plain full-grounding shape."""
         tmp = Path(tempfile.mkdtemp(prefix="exec011f-"))
         try:
-            d = wave2_fixture(tmp)
-            r = run_cli(d, "--emit-spawns", "--repair", "survey")
+            d = copy_fixture(tmp)
+            r = run_cli(d, "--emit-spawns", "--repair", "tech")
             self.assertEqual(r.returncode, 0, r.stderr)
-            wave = d / "spawns" / "wave-2"
-            self.assertEqual(sorted(p.name for p in wave.glob("*.md")),
-                             ["surveyor.md"])
-            payload = (wave / "surveyor.md").read_text(encoding="utf-8")
+            self.assertEqual(sorted(p.name for p in
+                                    (d / "spawns").rglob("*.md")),
+                             ["tech.md"])
+            payload = next((d / "spawns").rglob("tech.md")).read_text(
+                encoding="utf-8")
             self.assertIn("baseline: mini-calc v1 @ 3fa9c21", payload)
-            self.assertNotIn("- DELTA RE-SURVEY:", payload)  # non-git tmp
+            self.assertNotIn("- DELTA RE-GROUND:", payload)  # non-git tmp
             self.assertIn("emitted 1 payload(s)", r.stdout)
-            self.assertIn("repair: survey — single-node emit", r.stdout)
+            self.assertIn("repair: tech — single-node emit", r.stdout)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_docs_only_delta_excludes_the_specs_tree(self):
-        """A commit touching only specs/ (task ticks, survey.md's own
+        """A commit touching only specs/ (task ticks, tech-spec.md's own
         refresh) can't invalidate a code citation — the delta filters
         the specs tree and reads 'no code files changed', never a
-        forced re-survey (the cost this block exists to save)."""
+        forced re-ground (the cost this block exists to save)."""
         tmp = Path(tempfile.mkdtemp(prefix="exec011h-"))
         try:
             repo = tmp / "repo"
             d = repo / "specs" / "demo"
             d.mkdir(parents=True)
-            write(d / "survey.md",
-                  "# Survey: demo\n\n**Created**: 2026-09-13 | "
+            write(d / "tech-spec.md",
+                  "# Tech Spec: demo\n\n**Created**: 2026-09-13\n"
                   "**Baseline**: v1 @ 3fa9c21\n")
             for fn, f in (
                 ("git_available", lambda repo: True),
                 ("head_sha", lambda repo: "def5678"),
                 ("diff_paths", lambda repo, b, h: [
-                    "specs/CONSTITUTION.md", "specs/demo/survey.md",
+                    "specs/CONSTITUTION.md", "specs/demo/tech-spec.md",
                     "specs/demo/task.md"]),
             ):
                 p = unittest.mock.patch.object(graph.specstate, fn, f)
                 p.start()
                 self.addCleanup(p.stop)
-            payload = graph.input_payload_for("survey", d, repo, None)
+            payload = graph.input_payload_for("tech", d, repo, None)
             self.assertIn("no code files changed", payload)
             self.assertIn("only the kit's doc trees", payload)
             self.assertNotIn("do NOT rebuild", payload)
@@ -2150,7 +2159,7 @@ class Exec011RepairDeltaTests(unittest.TestCase):
         # frontier wave riding along with it
         tmp = Path(tempfile.mkdtemp(prefix="exec011g-"))
         try:
-            d = spec_only(tmp)  # survey READY, research-gate undetermined
+            d = spec_only(tmp)  # qa READY, research-gate undetermined
             r = run_cli(d, "--emit-spawns", "--repair", "research")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(
@@ -2162,11 +2171,11 @@ class Exec011RepairDeltaTests(unittest.TestCase):
             # a repair wave stays single-payload even where the frontier
             # would emit a fix-round implementer payload
             fix = fix_round_fixture(tmp / "fixround")
-            r = run_cli(fix, "--emit-spawns", "--repair", "survey")
+            r = run_cli(fix, "--emit-spawns", "--repair", "tech")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(
                 sorted(p.name for p in (fix / "spawns").rglob("*.md")),
-                ["surveyor.md"])
+                ["tech.md"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2233,20 +2242,20 @@ class Exec012RunnerFailureTests(unittest.TestCase):
 
     def test_nonzero_runner_exits_three_and_stops_everything(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec012a-"))
-        d = wave2_fixture(self._tmp)  # wave 2: planner ∥ tech ∥ qa
+        d = grounding_fixture(self._tmp)  # wave 1: tech ∥ qa
         r = run_cli(d, "--run", "--runner", "exit 7")
         self.assertEqual(r.returncode, graph.RUNNER_FAILED_EXIT, r.stderr)
         self.assertEqual(r.stdout.count("== wave"), 1, "no later wave")
         self.assertEqual(r.stdout.count("→ exit"), 1,
                          "the wave's remaining payloads are not invoked")
-        self.assertIn("role planner", r.stdout)
-        self.assertIn("node plan", r.stdout)
+        self.assertIn("role tech", r.stdout)
+        self.assertIn("node tech", r.stdout)
         self.assertIn("exited 7", r.stdout)
         self.assertNotIn("no doc-state change", r.stdout)
 
     def test_raised_runner_exits_three_with_diagnostic(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec012b-"))
-        d = wave2_fixture(self._tmp)
+        d = grounding_fixture(self._tmp)
         real_run = subprocess.run
         shell_calls = []
 
@@ -2266,17 +2275,17 @@ class Exec012RunnerFailureTests(unittest.TestCase):
                                 None)
         self.assertEqual(rc, graph.RUNNER_FAILED_EXIT)
         self.assertEqual(len(shell_calls), 1, "fail-fast: one attempt only")
-        self.assertIn("role planner", buf.getvalue())
-        self.assertIn("node plan", buf.getvalue())
+        self.assertIn("role tech", buf.getvalue())
+        self.assertIn("node tech", buf.getvalue())
         self.assertIn("raised", buf.getvalue())
         self.assertNotIn("Traceback", buf.getvalue())
 
     def test_failing_runner_progresses_then_stops_at_later_wave(self):
-        """A multi-wave run: wave 2's runners really land
-        plan/tech/qa, wave 3's task-breaker fails — wave 3 is the last one
+        """A multi-wave run: wave 1's runners really land tech/qa, wave 2
+        lands plan, wave 3's task-breaker fails — wave 3 is the last one
         started and the exit is nonzero."""
         self._tmp = Path(tempfile.mkdtemp(prefix="exec012c-"))
-        d = wave2_fixture(self._tmp)
+        d = grounding_fixture(self._tmp)
         self.seed_ok_outputs(d)
         task_seed = (
             "# Tasks: demo\n\n"
@@ -2297,10 +2306,11 @@ class Exec012RunnerFailureTests(unittest.TestCase):
                   f'{{role}} {{spec_dir}}')
         r = run_cli(d, "--run", "--runner", runner)
         self.assertEqual(r.returncode, graph.RUNNER_FAILED_EXIT, r.stderr)
-        self.assertEqual(r.stdout.count("== wave"), 2)
+        self.assertEqual(r.stdout.count("== wave"), 3)
         self.assertIn("role task-breaker", r.stdout)
         self.assertIn("node tasks", r.stdout)
-        self.assertTrue((d / "plan.md").exists(), "wave 2 really ran")
+        self.assertIn("Milestone 1", (d / "plan.md").read_text(
+            encoding="utf-8"), "wave 2 really ran")
         self.assertEqual((d / "task.md").read_bytes(), task_before,
                          "the failing runner wrote nothing")
 
@@ -2312,7 +2322,8 @@ class Exec012RunnerFailureTests(unittest.TestCase):
              "green.\n\n## Parallelization map\n- planner area: "
              "`repo/calc.py` disjoint from `repo/test_calc.py`\n"),
             ("tech",
-             "# Tech spec: demo\n\n## Approach\nA plain function in the "
+             "# Tech spec: demo\n\n" + GROUNDED_BODY +
+             "## Approach\nA plain function in the "
              "arithmetic module (FR-001).\n\n### D-001: plain function\n"
              "Context: small module. Decision: plain function. "
              "Consequences: none.\n\n" + SKIP_SECTION_BODY),
@@ -2325,7 +2336,7 @@ class Exec012RunnerFailureTests(unittest.TestCase):
 
     def test_dry_run_with_failing_template_stays_exit_zero(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="exec012d-"))
-        d = wave2_fixture(self._tmp)
+        d = grounding_fixture(self._tmp)
         r = run_cli(d, "--run", "--dry-run", "--runner", "exit 7")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("stopping: runner", r.stdout)
@@ -2367,9 +2378,9 @@ class ExecutorCliValidationTests(unittest.TestCase):
 
     def test_repair_requires_emit_spawns(self):
         self.assertEqual(
-            run_cli(self.spec_dir, "--repair", "survey").returncode, 2)
+            run_cli(self.spec_dir, "--repair", "tech").returncode, 2)
         self.assertEqual(
-            run_cli(self.spec_dir, "--repair", "survey", "--run").returncode,
+            run_cli(self.spec_dir, "--repair", "tech", "--run").returncode,
             2)
 
     def test_repair_rejects_unknown_and_non_repairable_nodes(self):
@@ -2406,20 +2417,18 @@ class Graph019LaunchCheckTests(unittest.TestCase):
         cls.gate_tick = implemented_fixture(cls._tmp / "d")
         # complete: every task ticked + Status done → archive-ready
         cls.archive_ready = done_fixture(cls._tmp / "h")
-        # single: the shipped skip form resolves the gate, survey is the
-        # whole frontier — one light doc node
-        cls.single_dir = spec_only(cls._tmp / "e")
-        write(cls.single_dir / "tech-spec.md", SKIP_SECTION)
+        # single: tech and qa done, plan the whole frontier — one light
+        # doc node
+        cls.single_dir = copy_fixture(cls._tmp / "e")
+        for f in ("plan.md", "task.md"):
+            (cls.single_dir / f).unlink()
         # wave (execute span): approved + crafted tasks, execute
         # is the frontier (T001 runnable; T002 dep-chained; T003 at cap)
         cls.execute_dir = approved_fixture(cls._tmp / "f", "demo")
-        # wave (analysis fan-out): survey done + real research →
-        # plan ∥ qa ∥ tech all READY
+        # wave (grounding fan-out): real research → tech ∥ qa READY
         cls.analysis_dir = scaffold(cls._tmp / "g", "demo")
         write(cls.analysis_dir / "spec.md",
               (FIXTURE / "spec.md").read_text(encoding="utf-8"))
-        write(cls.analysis_dir / "survey.md",
-              (FIXTURE / "survey.md").read_text(encoding="utf-8"))
         write_research(cls.analysis_dir)
 
     @classmethod
@@ -2454,7 +2463,7 @@ class Graph019LaunchCheckTests(unittest.TestCase):
         adv = self.advisory(self.single_dir)
         self.assertEqual(adv["weight"], "single")
         self.assertFalse(adv["launch_workflow"])
-        self.assertEqual(adv["frontier_agents"], ["survey"])
+        self.assertEqual(adv["frontier_agents"], ["plan"])
         self.assertEqual(adv["payloads"], 1)
         self.assertIn("--emit-spawns", adv["reason"])
 
@@ -2466,13 +2475,12 @@ class Graph019LaunchCheckTests(unittest.TestCase):
         # one runnable task (T001) — execute is heavy even as one payload
         self.assertEqual(adv["payloads"], 1)
 
-    def test_wave_weight_for_the_analysis_fan_out(self):
+    def test_wave_weight_for_the_grounding_fan_out(self):
         adv = self.advisory(self.analysis_dir)
         self.assertEqual(adv["weight"], "wave")
         self.assertTrue(adv["launch_workflow"])
-        self.assertEqual(sorted(adv["frontier_agents"]),
-                         ["plan", "qa", "tech"])
-        self.assertEqual(adv["payloads"], 3)
+        self.assertEqual(sorted(adv["frontier_agents"]), ["qa", "tech"])
+        self.assertEqual(adv["payloads"], 2)
 
     def test_held_and_complete_map_inline(self):
         st = compute(self.single_dir)
@@ -2523,8 +2531,6 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
             write(d / "spec.md",
                   (FIXTURE / "spec.md").read_text(encoding="utf-8")
                   + f"\n**Effort**: {effort}\n")
-            write(d / "survey.md",
-                  (FIXTURE / "survey.md").read_text(encoding="utf-8"))
             write_research(d)
             return d
 
@@ -2557,9 +2563,9 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
             graph.specstate.spec_effort("**Effort**: tiny\n"), "standard")
 
     def test_standard_collapses_the_design_wave_to_designer_plus_qa(self):
-        # the standard tier's plan ∥ tech wave (plus the tasks wave it feeds)
-        # collapses into ONE merged designer payload; qa stays separate: test.md
-        # always comes from an implementation-blind qa spawn riding the same wave
+        # the standard tier's tech → plan stretch collapses into ONE merged
+        # designer payload; qa stays separate: test.md always comes from an
+        # implementation-blind qa spawn riding the same wave
         lines = self.payload_lines(self.standard)
         self.assertEqual(len(lines), 2, lines)
         self.assertIn("designer.md", lines[0])
@@ -2570,10 +2576,12 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertIn("node: qa", lines[1])
         text = next(self.standard.glob("spawns/*/designer.md")).read_text(
             encoding="utf-8")
-        # three briefs in authoring order, the protocol exactly once
+        # two lenses in authoring order, the protocol exactly once; tasks
+        # waits for test.md and is never merged
         self.assertEqual(text.count("### agents/"), 1)  # architect once
-        for lens in ("plan", "tech", "tasks"):
-            self.assertIn(f"## Carried lens — {lens} ", text)
+        self.assertLess(text.index("## Carried lens — tech "),
+                        text.index("## Carried lens — plan "))
+        self.assertNotIn("## Carried lens — tasks ", text)
         self.assertEqual(text.count("## Shared protocol"), 1)
         self.assertIn("## Briefs — the architect archetype", text)
         self.assertIn("Effort: standard", text)
@@ -2582,7 +2590,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         # qa's own payload keeps the implementation-blindness contract
         qa_text = next(self.standard.glob("spawns/*/qa.md")).read_text(
             encoding="utf-8")
-        self.assertIn("never tech-spec.md or plan.md", qa_text)
+        self.assertIn("Read spec.md ONLY", qa_text)
 
     def test_merged_missing_brief_skip_names_the_real_file(self):
         # the merged designer item's brief field is None (it carries
@@ -2607,10 +2615,10 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
                       buf.getvalue())
         self.assertNotIn("agents/None", buf.getvalue())
 
-    def test_large_keeps_the_three_payload_design_wave(self):
+    def test_large_keeps_tech_and_qa_as_their_own_payloads(self):
         roles = sorted(ln.split("role: ")[1].split(",")[0]
                        for ln in self.payload_lines(self.large))
-        self.assertEqual(roles, ["planner", "qa", "tech"])
+        self.assertEqual(roles, ["qa", "tech"])
 
     def test_repair_stays_single_role_at_standard_tier(self):
         # --repair always emits single-role payloads, never the merged designer one
@@ -2631,8 +2639,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertEqual(adv["weight"], "wave")
         self.assertTrue(adv["launch_workflow"])
         self.assertEqual(adv["payloads"], 2)
-        self.assertEqual(sorted(adv["frontier_agents"]),
-                         ["plan", "qa", "tech"])
+        self.assertEqual(sorted(adv["frontier_agents"]), ["qa", "tech"])
         self.assertIn("2 payload(s)", adv["reason"])
         self.assertIn("heavy span", adv["reason"])
 
@@ -2640,7 +2647,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         # launch-check's single-design-payload branch: even
         # when qa has already ridden ahead and only the merged designer
         # remains, the design stretch launches — and its reason names the
-        # three briefs, never the old single-brief blindness trade-off
+        # two lenses, never the old single-brief blindness trade-off
         with unittest.mock.patch.object(
                 graph, "frontier_payloads",
                 return_value=[{"node": "design", "role": "designer"}]):
@@ -2649,7 +2656,7 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         self.assertEqual(adv["weight"], "wave")
         self.assertTrue(adv["launch_workflow"])
         self.assertEqual(adv["payloads"], 1)
-        self.assertIn("three briefs (plan/tech/tasks)", adv["reason"])
+        self.assertIn("two lenses (tech/plan)", adv["reason"])
         self.assertNotIn("blindness", adv["reason"])
 
     def test_delivery_pending_prepares_the_reviewer_payload(self):
@@ -2731,10 +2738,10 @@ class Graph020PipelineShorteningTests(unittest.TestCase):
         st = compute(fresh)
         self.assertEqual(st["nodes"]["research-gate"]["state"], "done")
         self.assertIn("skip", st["nodes"]["research-gate"]["reason"])
-        # no undetermined pause on a fresh authored spec: survey is the
-        # frontier immediately
+        # no undetermined pause on a fresh authored spec: tech ∥ qa are
+        # the frontier immediately
         self.assertIsNone(graph.find_pause(st))
-        self.assertEqual(st["frontier"], ["survey"])
+        self.assertEqual(sorted(st["frontier"]), ["qa", "tech"])
 
     def test_drafting_from_an_intent_leaves_the_research_gate_open(self):
         root = self._tmp / "g"
@@ -2800,7 +2807,7 @@ class SpanPhaseTests(unittest.TestCase):
         return [r for r in rows if event is None or r["event"] == event]
 
     def test_default_full_is_byte_identical_to_bare_invocation(self):
-        d = wave2_fixture(self._tmp / "full")
+        d = grounding_fixture(self._tmp / "full")
         for argv in (("--emit-spawns",), ("--run", "--dry-run")):
             bare = self.run_span_cli(d, *argv)
             shutil.rmtree(d / "spawns", ignore_errors=True)
@@ -2843,7 +2850,7 @@ class SpanPhaseTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(
             sorted(p.name for p in (d / "spawns" / "wave-1").glob("*.md")),
-            ["surveyor.md"])
+            ["analyst.md"])
 
     def test_shape_span_emits_authoring_never_implementer(self):
         approved = approved_fixture(self._tmp / "approved")
@@ -2851,12 +2858,12 @@ class SpanPhaseTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("no shape-span agent payloads", r.stdout)
         self.assertFalse((approved / "spawns").exists())
-        mid = wave2_fixture(self._tmp / "mid")
+        mid = grounding_fixture(self._tmp / "mid")
         r2 = self.run_span_cli(mid, "--emit-spawns", "--span", "shape")
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertEqual(
-            sorted(p.name for p in (mid / "spawns" / "wave-2").glob("*.md")),
-            ["planner.md", "qa.md", "tech.md"])
+            sorted(p.name for p in (mid / "spawns" / "wave-1").glob("*.md")),
+            ["qa.md", "tech.md"])
 
     def test_shape_span_with_no_spec_awaits_intake_never_a_handoff(self):
         empty = self._tmp / "specs" / "raw-idea"
@@ -2873,9 +2880,9 @@ class SpanPhaseTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("span drained — execute handoff", r.stdout)
         self.assertIn("/spec-build demo", r.stdout)
-        # a red survey holds the span: nothing to hand off
+        # a red Code state holds the span: nothing to hand off
         held = copy_fixture(self._tmp / "held")
-        write(held / "survey.md", (held / "survey.md").read_text(
+        write(held / "tech-spec.md", (held / "tech-spec.md").read_text(
             encoding="utf-8").replace("calc.py:add", "calc.py:absent_symbol"))
         r = self.run_span_cli(held, "--run", "--span", "shape")
         self.assertEqual(r.returncode, 1, r.stdout)
@@ -2883,11 +2890,11 @@ class SpanPhaseTests(unittest.TestCase):
         self.assertNotIn("span drained", r.stdout)
 
     def test_drained_intent_span_hands_off_to_shape(self):
-        d = spec_only(self._tmp / "drain-intent")  # intent SKIPPED, survey READY
+        d = spec_only(self._tmp / "drain-intent")  # intent SKIPPED, qa READY
         r = self.run_span_cli(d, "--run", "--span", "intent")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("span drained — shape handoff", r.stdout)
-        self.assertIn("(frontier: survey)", r.stdout)
+        self.assertIn("(frontier: qa)", r.stdout)
         self.assertFalse((d / "spawns").exists())
         # the intent span never decides research: the undetermined gate is
         # not its pause, and its researcher payload is not prepared

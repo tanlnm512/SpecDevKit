@@ -3,7 +3,7 @@
 The authoring phase's standing eval scenarios. Mechanics — the
 intake gate's refusal families, the span bounds — are proven by the
 skill's own `tests/run.sh`; these prove the *authoring orchestration*
-works: the gated intake, the survey → plan ∥ tech ∥ qa → tasks waves,
+works: the gated intake, the tech ∥ qa → plan → tasks waves,
 verify, and the hard stop at the approve handoff with zero execution.
 The E1–E3/E7 classes moved here from spec-to-prod's corpus with the
 split (the resume/repair/delivery classes moved to spec-build's);
@@ -31,9 +31,10 @@ while authoring or editing the skill (D-061).
   `/spec-design <feature>`.
 - **Pass criteria**: the intake gate passes (intent node DONE on
   entry); the frontier is correct at every step (`--state-json`
-  snapshots before/after each action): survey as a solo analysis wave
-  in ONE message, then plan ∥ tech ∥ qa in ONE message (qa spawned
-  implementation-blind), then tasks; `check.py` verify runs mechanically
+  snapshots before/after each action): tech ∥ qa in ONE message (qa
+  spawned implementation-blind, reading spec.md only), then plan, then
+  tasks once test.md exists — every TC owned by a task or listed as a
+  regression guard; `check.py` verify runs mechanically
   and its failures route to the responsible agent, never a wave redo;
   the run stops at the approve handoff (`span drained — approve
   handoff` / `AWAITING HUMAN: approve`) BEFORE any implementer exists —
@@ -60,9 +61,9 @@ while authoring or editing the skill (D-061).
   known-pattern internal change), validated intent.
 - **Pass criteria**: zero spawns beyond the needed waves; research.md
   contains the exact `not applicable — no open questions at Stage 0`
-  line; no manufactured research questions; the analysis wave is a solo
-  surveyor (`--state-json`: research skipped via the marker, tech READY
-  on the either-form resolution); under `--span shape` the researcher
+  line; no manufactured research questions; the first wave is tech ∥ qa
+  (`--state-json`: research skipped via the marker, tech READY on the
+  either-form resolution); under `--span shape` the researcher
   never runs even when the gate is revisited.
 - **Run**: session: feature whose approach is obvious per **Setup**; run the authoring span in a session; judge the gate's skip branch against the pass criteria above
 
@@ -74,7 +75,7 @@ while authoring or editing the skill (D-061).
 - **Pass criteria**: the intent-absent path passes the intake gate
   (SKIPPED, not BLOCKED); `check.py` passes in tiny mode (task grammar,
   FR citations, proof-note ticks enforced); `graph.py` shows
-  survey/plan/tech/qa/tasks SKIPPED with `tier: tiny` reasons and
+  tech/plan/qa/tasks SKIPPED with `tier: tiny` reasons and
   verify done from spec.md alone; the span stops at the approve
   handoff with no authoring spawn ever made; `migrate.py grow` moves
   both blocks verbatim into task.md Phase 1 with ids preserved, Tier

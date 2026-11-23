@@ -75,7 +75,7 @@ dod    — the Definition-of-Done scorecard (every gate must pass): runs
          section. Gate 14 reads the burndown Verified column: `pass`
          needs the `Delivered:` record, and a `Delivered:` record needs
          every attributable phase row `pass`. Gate 5 counts the frozen
-         survey's drift WARNs (a citation's line moved, the baseline
+         Code state's drift WARNs (a citation's line moved, the Baseline
          behind HEAD) as expected — implementation causes them and the
          freeze forbids fixing them. Like proofs --run, dod
          executes the TC commands embedded in test.md. Every checker
@@ -85,11 +85,11 @@ dod    — the Definition-of-Done scorecard (every gate must pass): runs
          the gate table. --dry-run keeps the scorecard inert: auto TCs
          are classified, gate 1 reads DRY, and no test.md command
          executes — the state-inspection path.
-converge — diffs specs/<name>/survey.md against its last committed
-         version (default: HEAD; --base overrides) to surface what a
-         fresh re-survey found that the previous one didn't: run this
-         AFTER re-running the surveyor in place (single-agent repair run,
-         SKILL.md § Run modes), never before. Reports each item id that is
+converge — diffs specs/<name>/tech-spec.md § Code state against its
+         last committed version (default: HEAD; --base overrides) to
+         surface what a fresh re-ground found that the previous one
+         didn't: run this AFTER re-grounding in place (`graph.py
+         --emit-spawns --repair tech`), never before. Reports each item id that is
          new (NEW GAP) or whose status regressed (DONE -> PARTIAL/TODO,
          REGRESSED) since the committed baseline — the mechanical half of
          "the codebase drifted past the spec"; the orchestrator turns each
@@ -184,7 +184,7 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     coverage_floor,
     delivery_state,
     spec_tier,
-    survey_items,
+    state_items,
     task_entries,
     task_touches,
     tiny_task_text,
@@ -219,11 +219,11 @@ ACCEPT_LINE = re.compile(r"^\s*(?:-\s*)?Accept:\s*(.*)$", re.M)
 EXPECTS_NONZERO = re.compile(r"\bexits?\s+non-?zero\b", re.I)
 PROOF_TAIL_LINES = 40
 
-# check.py WARNs a frozen survey.md raises once implementation moves the
+# check.py WARNs a frozen § Code state raises once implementation moves the
 # code it cites: unfixable without re-approval, so expected, not open.
-SURVEY_DRIFT_WARN = re.compile(
-    r"^  WARN  survey (evidence: \S+ cited at line \d+, actually at"
-    r"|baseline \S+, HEAD )", re.M)
+STATE_DRIFT_WARN = re.compile(
+    r"^  WARN  (?:code state evidence: \S+ cited at line \d+, actually at"
+    r"|tech-spec baseline \S+, HEAD )", re.M)
 
 GATE_SH = Path(__file__).resolve().parent / "gate.sh"
 REGRESSION_NONE = 3
@@ -1457,7 +1457,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
         else:
             nfail = len(re.findall(r"^  FAIL  ", cp.stdout, flags=re.M))
             nwarn = int(mw.group(2))
-            ndrift = len(SURVEY_DRIFT_WARN.findall(cp.stdout))
+            ndrift = len(STATE_DRIFT_WARN.findall(cp.stdout))
     # gates 1-2 — proofs. --dry-run classifies only: no test.md command
     # executes on that path; the live run stays the explicit default.
     verdict_lines: dict[str, str] = {}
@@ -1520,7 +1520,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
          f"{done}/{total} ticked, {landed}/{total} landed, {inprog} in-progress"),
         (5, "CONTRACT", "FAIL" if nfail or check_err else "PASS",
          check_err or (f"check.py: {nfail} fail, {nwarn} warn"
-                       + (f" — {ndrift} frozen-survey drift, expected after "
+                       + (f" — {ndrift} frozen Code state drift, expected after "
                           "implementation and ruled here" if ndrift else "")
                        + ("; each other WARN fixed or ruled"
                           if nwarn > ndrift else ""))),
@@ -1563,32 +1563,32 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
 STATUS_RANK = {"DONE": 2, "PARTIAL": 1, "TODO": 0}
 
 
-def parse_survey_items(text: str) -> dict[str, tuple[str, str]]:
-    """{item id: (description, status)} — specstate.survey_items adapted to
-    the dict shape converge diffs with (same `item <id>: "..."` / `status:`
-    shape as check.py's survey-item template). Malformed/missing status
+def parse_state_items(text: str) -> dict[str, tuple[str, str]]:
+    """{item id: (description, status)} — specstate.state_items adapted to
+    the dict shape converge diffs with (tech-spec.md's text in, § Code
+    state's `item <id>: "..."` / `status:` shape read). Malformed/missing status
     reads as "unknown" rather than raising, since converge's job is to
     diff two possibly-messy snapshots, not to validate either one (that's
     check.py's job)."""
-    return {i.id: (i.description, i.status) for i in survey_items(text)}
+    return {i.id: (i.description, i.status) for i in state_items(text)}
 
 
 def mode_converge(spec_dir: Path, repo: Path, base: str | None) -> int:
     if is_tiny(spec_dir):
-        print(f"converge: {spec_dir} — n/a at Tier: tiny (no survey.md; "
+        print(f"converge: {spec_dir} — n/a at Tier: tiny (no tech-spec.md; "
               "grow to full when the change needs one)")
         return 0
-    survey_p = spec_dir / "survey.md"
-    new_text = survey_p.read_text(encoding="utf-8", errors="replace") if survey_p.exists() else ""
+    tech_p = spec_dir / "tech-spec.md"
+    new_text = tech_p.read_text(encoding="utf-8", errors="replace") if tech_p.exists() else ""
     if not git_available(repo):
         # Distinct from the no-committed-baseline case below: without a
         # repository there is nothing to converge against at all — listing
         # every item as a NEW GAP would be diff noise, not a finding.
-        print(f"converge: {survey_p} vs {base or 'HEAD'} — SKIPPED (not a git repo): "
-              "no git repository, so the survey has no committed history to converge against")
+        print(f"converge: {tech_p} vs {base or 'HEAD'} — SKIPPED (not a git repo): "
+              "no git repository, so § Code state has no committed history to converge against")
         return 0
     try:
-        rel = str(survey_p.resolve().relative_to(repo.resolve()))
+        rel = str(tech_p.resolve().relative_to(repo.resolve()))
     except ValueError:
         rel = None
     old_text = ""
@@ -1596,24 +1596,24 @@ def mode_converge(spec_dir: Path, repo: Path, base: str | None) -> int:
         r = git(repo, "show", f"{base or 'HEAD'}:{rel}")
         if r.returncode == 0:
             old_text = r.stdout
-    old_items = parse_survey_items(old_text)
-    new_items = parse_survey_items(new_text)
+    old_items = parse_state_items(old_text)
+    new_items = parse_state_items(new_text)
     added = sorted(i for i in new_items if i not in old_items)
     regressed = sorted(
         i for i in new_items if i in old_items
         and STATUS_RANK.get(new_items[i][1], -1) < STATUS_RANK.get(old_items[i][1], -1)
     )
     suffix = "" if rel and old_text else " (no committed baseline found — every item reads as new)"
-    print(f"converge: {survey_p} vs {base or 'HEAD'}{suffix}")
+    print(f"converge: {tech_p} vs {base or 'HEAD'}{suffix}")
     for i in added:
         desc, status = new_items[i]
-        print(f"  NEW GAP    item {i}: \"{desc}\" — status {status} (not in previous survey)")
+        print(f"  NEW GAP    item {i}: \"{desc}\" — status {status} (not in the previous Code state)")
     for i in regressed:
         old_status, new_status = old_items[i][1], new_items[i][1]
         print(f"  REGRESSED  item {i}: \"{new_items[i][0]}\" — {old_status} -> {new_status} "
               "(re-check before trusting downstream docs)")
     if not added and not regressed:
-        print("  no new gaps or regressions vs the previous survey")
+        print("  no new gaps or regressions vs the previous Code state")
     else:
         print(f"  {len(added) + len(regressed)} item(s) need a task appended "
               "(next free T-ID: check.py --next-ids), citing the FR each evidences")

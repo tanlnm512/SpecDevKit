@@ -142,8 +142,8 @@ is the contract — spec-design's span gate refuses a red intent.
 ## Hard stops
 
 1. **Never author the docset.** intent.md is the only file this skill
-   writes under `specs/`. spec.md, survey.md, plan.md, tech-spec.md,
-   task.md, test.md — all spec-design's; "continue into the spec" hands
+   writes under `specs/`. spec.md, plan.md, tech-spec.md, task.md,
+   test.md — all spec-design's; "continue into the spec" hands
    off to `/spec-design`.
 2. **Never adopt an unanswered round** (the non-answer rule).
 3. **Never execute** — implementation and fixes are `/spec-build`'s.

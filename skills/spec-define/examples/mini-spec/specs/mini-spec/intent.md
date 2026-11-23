@@ -45,5 +45,5 @@ adjustments.
 
 ## Handoff
 Next: `/spec-design mini-calc-multiply` — the docset (spec.md onward) is
-authored there, never here. The Baseline above is what shape's survey
-re-baselines against.
+authored there, never here. The Baseline above is what spec-design's
+tech step re-baselines against.

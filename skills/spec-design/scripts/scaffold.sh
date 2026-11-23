@@ -45,7 +45,7 @@ fresh_tech=0
 if [ "$tier" = tiny ]; then
   copy_new "$skill_dir/templates/spec-tiny.md" "$target/spec.md"
 else
-  for f in spec plan tech-spec task test survey; do
+  for f in spec plan tech-spec task test; do
     if [ "$f" = tech-spec ] && [ ! -e "$target/tech-spec.md" ]; then
       fresh_tech=1
     fi

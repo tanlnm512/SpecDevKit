@@ -87,8 +87,8 @@ sums computed by hand and checked by eye.
 
 ## Handoff
 Next: `/spec-design demo` — the docset (spec.md onward) is authored
-there, never here. The Baseline above is what shape's survey
-re-baselines against.
+there, never here. The Baseline above is what spec-design's tech
+step re-baselines against.
 """
 
 
@@ -167,9 +167,9 @@ class IntentFlowTests(unittest.TestCase):
         r = run_cli(GRAPH, str(self.spec_dir), "--span", "intent",
                     "--emit-spawns")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("role: surveyor, node: intent", r.stdout)
+        self.assertIn("role: analyst, node: intent", r.stdout)
         self.assertIn("emitted 1 payload(s)", r.stdout)
-        payloads = sorted((self.spec_dir / "spawns").glob("*/surveyor.md"))
+        payloads = sorted((self.spec_dir / "spawns").glob("*/analyst.md"))
         self.assertEqual(len(payloads), 1)
         text = payloads[0].read_text(encoding="utf-8")
         self.assertIn("## Carried lens — intent ", text)
@@ -183,7 +183,7 @@ class IntentFlowTests(unittest.TestCase):
         r = run_cli(GRAPH, str(self.spec_dir), "--span", "intent",
                     "--emit-spawns")
         self.assertEqual(r.returncode, 0, r.stderr)
-        text = next((self.spec_dir / "spawns").glob("*/surveyor.md")) \
+        text = next((self.spec_dir / "spawns").glob("*/analyst.md")) \
             .read_text(encoding="utf-8")
         payload = text.split("## Brief")[0]
         self.assertIn("The idea (intent.md § Problem, verbatim):", payload)
@@ -201,11 +201,11 @@ class IntentFlowTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(
             sorted(p.name for p in (self.spec_dir / "spawns").rglob("*.md")),
-            ["surveyor.md"])
+            ["analyst.md"])
         r = run_cli(GRAPH, str(self.spec_dir), "--emit-spawns",
-                    "--repair", "survey")
+                    "--repair", "tech")
         self.assertEqual(r.returncode, 2, r.stdout)
-        self.assertIn("does not ship the survey lens", r.stderr)
+        self.assertIn("does not ship agents/architect.md", r.stderr)
 
     def test_filled_intent_gates_green_and_reads_done(self):
         write(self.spec_dir / "intent.md",

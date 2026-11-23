@@ -586,11 +586,11 @@ class KiloCommandsTests(SyncShBase):
                 (self.home / ".config" / "kilo" / "skills" / skill
                  / "SKILL.md").is_file(), skill)
         # agent dialect: subagent mode + derived permission map
-        surveyor = (self.home / ".config" / "kilo" / "agent"
-                    / "review-fixer.md").read_text()
-        self.assertIn("mode: subagent", surveyor)
-        self.assertIn("  task: deny", surveyor)
-        self.assertIn("  edit: allow", surveyor)
+        fixer = (self.home / ".config" / "kilo" / "agent"
+                 / "review-fixer.md").read_text()
+        self.assertIn("mode: subagent", fixer)
+        self.assertIn("  task: deny", fixer)
+        self.assertIn("  edit: allow", fixer)
         r2 = self.run_sync()
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
 

@@ -43,8 +43,8 @@ separate gates:
    directly on the diff, each finding verified by reading its cited
    lines before it is reported — say in the summary that this form ran
    and what it did not cover (no independent confirmation stage).
-   Resolve every BLOCK; own or rule every WARN/NIT. A frozen survey's
-   drift WARNs (a citation's line moved, the baseline behind HEAD)
+   Resolve every BLOCK; own or rule every WARN/NIT. A frozen Code
+   state's drift WARNs (a citation's line moved, the Baseline behind HEAD)
    are expected once code lands — dod counts them as ruled. Draft
    the delivery block (below) into the status holder before dod:
    gates 11–13 read it there; C2 lands it.

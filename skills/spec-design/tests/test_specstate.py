@@ -390,33 +390,36 @@ class CoverageFloorTests(unittest.TestCase):
         self.assertEqual(specstate.coverage_floor("**Coverage**: 100\n"), 100)
 
 
-class SurveyBaselineTests(unittest.TestCase):
+class DocBaselineTests(unittest.TestCase):
     def test_fixture_baseline_parses_to_version_and_sha(self):
-        survey = (FIXTURE / "survey.md").read_text(encoding="utf-8")
-        self.assertEqual(specstate.survey_baseline(survey), ("mini-calc v1", "3fa9c21"))
+        tech = (FIXTURE / "tech-spec.md").read_text(encoding="utf-8")
+        self.assertEqual(specstate.doc_baseline(tech), ("mini-calc v1", "3fa9c21"))
 
     def test_backticked_sha_and_bold_header(self):
         self.assertEqual(
-            specstate.survey_baseline("**Baseline**: v2 @ `abc1234`\n"),
+            specstate.doc_baseline("**Baseline**: v2 @ `abc1234`\n"),
             ("v2", "abc1234"))
 
     def test_placeholder_header_and_missing_header_read_none(self):
         self.assertIsNone(
-            specstate.survey_baseline("**Baseline**: <version @ commit>\n"))
-        self.assertIsNone(specstate.survey_baseline("# Survey, no baseline\n"))
-        self.assertIsNone(specstate.survey_baseline(""))
+            specstate.doc_baseline("**Baseline**: <version @ commit>\n"))
+        self.assertIsNone(specstate.doc_baseline("# Tech Spec, no baseline\n"))
+        self.assertIsNone(specstate.doc_baseline(""))
 
 
-class SurveyItemsTests(unittest.TestCase):
+class StateItemsTests(unittest.TestCase):
     SAMPLE = (
+        "# Tech Spec: demo\n\n## Code state\n"
         'item S1: "add exists"\n  status:     DONE\n'
         'item S2: "multiply missing"\n  status:     TODO\n'
         'item S3: "no status line"\n'
         'item this line has no quoted description\n'
+        "\n## Architecture\n"
+        'item S9: "outside the section"\n  status:     DONE\n'
     )
 
-    def test_items_extracted_with_statuses(self):
-        items = specstate.survey_items(self.SAMPLE)
+    def test_items_extracted_with_statuses_from_the_section_only(self):
+        items = specstate.state_items(self.SAMPLE)
         self.assertEqual([(i.id, i.description, i.status) for i in items], [
             ("S1", "add exists", "DONE"),
             ("S2", "multiply missing", "TODO"),
@@ -424,16 +427,18 @@ class SurveyItemsTests(unittest.TestCase):
         ])
 
     def test_malformed_blocks_skipped_not_raised(self):
-        items = specstate.survey_items('garbage\nitem S4: "fine"\nstatus: PARTIAL\n')
+        items = specstate.state_items(
+            '## Code state\ngarbage\nitem S4: "fine"\nstatus: PARTIAL\n')
         self.assertEqual([(i.id, i.status) for i in items], [("S4", "PARTIAL")])
 
-    def test_empty_survey_yields_no_items(self):
-        self.assertEqual(specstate.survey_items(""), [])
-        self.assertEqual(specstate.survey_items("# Survey\n## Items\n"), [])
+    def test_absent_or_empty_section_yields_no_items(self):
+        self.assertEqual(specstate.state_items(""), [])
+        self.assertEqual(specstate.state_items("# Tech Spec\n## Code state\n"), [])
+        self.assertEqual(specstate.state_items('item S1: "x"\nstatus: DONE\n'), [])
 
     def test_fixture_items_parse(self):
-        items = specstate.survey_items(
-            (FIXTURE / "survey.md").read_text(encoding="utf-8"))
+        items = specstate.state_items(
+            (FIXTURE / "tech-spec.md").read_text(encoding="utf-8"))
         self.assertEqual([i.id for i in items], ["S1", "S2", "S3"])
         self.assertEqual([i.status for i in items], ["DONE", "TODO", "DONE"])
 
@@ -607,16 +612,16 @@ class GitHelperTests(unittest.TestCase):
             self.assertIsNone(specstate.head_sha(Path("/some/repo")))
 
     def test_diff_paths_reads_sorted_unique_paths(self):
-        out = "repo/calc.py\nspecs/demo/survey.md\nrepo/calc.py\n"
+        out = "repo/calc.py\nspecs/demo/tech-spec.md\nrepo/calc.py\n"
         with unittest.mock.patch.object(specstate.subprocess, "run",
                                         fake_git_run(stdout=out)):
             self.assertEqual(
                 specstate.diff_paths(Path("/some/repo"), "abc1234", "def5678"),
-                ["repo/calc.py", "specs/demo/survey.md"])
+                ["repo/calc.py", "specs/demo/tech-spec.md"])
 
     def test_diff_paths_none_on_git_failure(self):
         """rc != 0 (unknown sha, not a repo) is None — callers degrade to
-        a full re-survey, never an empty-delta verdict."""
+        a full re-ground, never an empty-delta verdict."""
         with unittest.mock.patch.object(specstate.subprocess, "run",
                                         fake_git_run(returncode=128)):
             self.assertIsNone(

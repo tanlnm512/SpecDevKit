@@ -11,7 +11,6 @@ execution and delivery:
               status markers inside § Tasks — the task list itself is
               frozen)
   plan.md     exact hash
-  survey.md   exact hash
   test.md     exact hash
   tech-spec.md prefix hash/length (only appended decisions may drift)
 
@@ -42,7 +41,7 @@ fingerprint, so the freeze refuses until it is re-reviewed.
 records its delivery: a squash-merge or rebase rewrites the anchor, and
 the delivery record owns the proof from there. It re-checks the folded
 review section's shape but never re-hashes the record — the manifest
-covers the five frozen files only — and never re-compares the
+covers the four frozen files only — and never re-compares the
 fingerprint to the live docset, whose legal post-approval drift
 (tech-spec appends, task.md status) changes it.
 
@@ -70,7 +69,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import specstate
 
-FROZEN_FILES = ("spec.md", "plan.md", "survey.md", "test.md", "tech-spec.md")
+FROZEN_FILES = ("spec.md", "plan.md", "test.md", "tech-spec.md")
 TINY_EVIDENCE_HEADING = "## Evidence"
 TASK_STATUS_LINE = re.compile(
     r"^\s*(?:-\s*)?(?:done \d{4}-\d{2}-\d{2} \u2014|fix(?:ed)? \d+ \u2014"

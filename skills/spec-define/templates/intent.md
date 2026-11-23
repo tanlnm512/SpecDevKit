@@ -8,7 +8,7 @@
                                 spec-design scaffolds spec.md) -->
 **Created**: YYYY-MM-DD
 **Baseline**: <version @ commit>
-<!-- survey.md's baseline shape — version @ HEAD sha of the repo this
+<!-- tech-spec.md's baseline shape — version @ HEAD sha of the repo this
      intent was scouted against; the staleness diagnosis reads it
      unchanged, so it stays at the scouted HEAD -->
 
@@ -67,5 +67,5 @@ nothing in `specs/<name>/` beyond this file is intent's to write.
 
 ## Handoff
 Next: `/spec-design <name>` — the docset (spec.md onward) is authored
-there, never here. The Baseline above is what spec-design's survey
+there, never here. The Baseline above is what spec-design's tech step
 re-baselines against.

@@ -6,7 +6,7 @@
                                 are ticked and `check.py` re-runs green. `approved`
                                 covers execution; nothing needs to write `active` -->
 **Tier**: tiny             <!-- ONE-FILE contract (D-037): the task list lives in
-                                § Tasks below; survey/plan/tech-spec/test/task docs
+                                § Tasks below; plan/tech-spec/test/task docs
                                 do not exist at this tier. Grow to the full docset
                                 with `migrate.py grow <spec-dir>` when risk appears
                                 (multi-area, auth, persistence, migration, research)

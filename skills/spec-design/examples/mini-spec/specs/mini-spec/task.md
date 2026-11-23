@@ -1,7 +1,7 @@
 # Tasks: mini-calc
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 
 ## Burndown
 | Phase | Total | Done | Verified |
@@ -15,6 +15,7 @@ Status reflects code state per [survey.md](survey.md), not intent.
 <!-- Checkpoint: pytest green with the two multiply tests included -->
 - [ ] T001 [P] Implement multiply in `repo/calc.py` (FR-001, FR-002)
 - [ ] T002 [P] Add multiply tests to `repo/test_calc.py` (FR-001, FR-002)
+  - Proves: TC-001, TC-002
 
 ## Conventions
 - todo as written; claimed reads (in-progress); done flips to checked with

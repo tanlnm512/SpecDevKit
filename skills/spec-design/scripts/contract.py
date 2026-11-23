@@ -42,23 +42,21 @@ NODE_TABLE = [
      "intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 — "
      "or, once spec.md is filled, fails on its baseline alone (lost or "
      "stale: an intake-time gate)"),
-    ("survey", "agent",
-     "spec.md done",
-     "survey.md filled AND `check.py <spec-dir> --survey-only` exits 0"),
-    ("plan", "agent",
-     "spec + survey done",
-     "plan.md exists, non-empty, filled"),
     ("tech", "agent",
-     "spec + survey done AND research resolved (either form)",
-     "tech-spec.md exists, non-empty, filled"),
+     "spec done AND research resolved (either form)",
+     "tech-spec.md filled AND `check.py <spec-dir> --code-state-only` "
+     "exits 0"),
+    ("plan", "agent",
+     "spec + tech done",
+     "plan.md exists, non-empty, filled"),
     ("qa", "agent",
-     "spec + survey done (never reads plan/tech — parallel-safe)",
+     "spec done (reads spec.md only — blind to tech/plan, parallel-safe)",
      "test.md exists, non-empty, filled"),
     ("tasks", "agent",
-     "plan + tech + survey done",
+     "plan + tech + qa done",
      "task.md exists, non-empty, filled"),
     ("verify", "mechanical",
-     "plan, tech, qa, tasks, survey all done",
+     "tech, plan, qa, tasks all done",
      "`check.py <spec-dir>` exits 0"),
     ("approve", "human",
      "verify done (HUMAN gate)",
@@ -83,7 +81,7 @@ NODE_TABLE = [
 
 # Nodes `**Tier**: tiny` SKIPPEDs — the one-file contract has no
 # authoring docs to wait on and no research artifact to judge.
-TINY_SKIPPED = ("survey", "plan", "tech", "qa", "tasks",
+TINY_SKIPPED = ("tech", "plan", "qa", "tasks",
                 "research-gate", "research")
 
 READY_WHEN = {n: r for n, _, r, _ in NODE_TABLE}

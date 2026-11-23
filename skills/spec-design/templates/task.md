@@ -1,7 +1,7 @@
 # Tasks: <name>
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 **Delivered**: pending — delivery evidence; the orchestrator writes `commit @ <sha>` here
 
 ## Burndown
@@ -16,12 +16,18 @@ Status reflects code state per [survey.md](survey.md), not intent.
 - [ ] T001 <verb phrase — files touched> (FR-###)
   - Touches:
     - `<file or glob>`
+  - Proves: TC-###
 - [ ] T002 [P] <...> (FR-###)
   - Touches:
     - `<file or glob>`
 - [ ] T003 <...> (FR-###)
   - Touches:
     - `<file or glob>`
+
+## Regression guards
+<!-- TCs whose requirement § Code state already reads DONE: an existing
+     test proves them, so no task writes one. One line each:
+     `- TC-### — <requirement> DONE (Code state item <id>)`. -->
 
 ## Conventions
 - `- [ ]` todo · `(in-progress)` claimed · `(implemented)` landed —
@@ -42,6 +48,9 @@ Status reflects code state per [survey.md](survey.md), not intent.
   write under specs/, never read by check.py, never counted as status
 - Every task cites FR-### or an applicable NFR-###; a task with neither is
   scope creep — fix the spec first
+- Every TC is owned: a `Proves: TC-###, …` sub-line on the task that
+  creates its test, or a line under `## Regression guards` — `check.py`
+  fails a case with neither
 - Every code task carries a `Touches:` block (repo-relative files,
   directories, or globs); `[P]` tasks whose touches overlap are chained, not
   spawned together

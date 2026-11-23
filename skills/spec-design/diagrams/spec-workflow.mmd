@@ -8,20 +8,19 @@ flowchart TD
     Spec["spec<br/>scaffold → draft spec.md WITH the user<br/>(human intent, never generated)"]
     Clarify["clarify<br/>grilling loop: batch the frontier of the<br/>draft's gaps into one round, recompute<br/>from the answers, repeat until empty"]
 
-    Intent["intent<br/>/spec-define → intent.md (optional evidence):<br/>absent → SKIPPED (legacy path),<br/>present-but-red → BLOCKED, green → spec drafted, survey proceeds"]
+    Intent["intent<br/>/spec-define → intent.md (optional evidence):<br/>absent → SKIPPED (legacy path),<br/>present-but-red → BLOCKED, green → spec drafted, authoring proceeds"]
 
-    Survey["survey<br/>analyst → survey.md<br/>(self-checks --survey-only)"]
     Research["research<br/>researcher → tech-spec.md § Questions & options, out-of-band<br/>(or skip: not-applicable marker)"]
 
     Gate{{"research-gate<br/>orchestrator judgment:<br/>≥1 real open technical question?<br/>never auto-decided"}}
 
-    subgraph W2["wave 2 · authoring — one message"]
-        Plan["plan<br/>architect → plan.md"]
-        Tech["tech<br/>architect → tech-spec.md"]
-        QA["qa<br/>tester → test.md<br/>(blind to plan/tech)"]
+    subgraph W1["wave 1 · grounding — one message"]
+        Tech["tech<br/>architect → tech-spec.md<br/>(§ Code state first, self-checks --code-state-only)"]
+        QA["qa<br/>tester → test.md<br/>(reads spec.md only)"]
     end
 
-    Tasks["tasks<br/>architect → task.md<br/>(the only status holder)"]
+    Plan["plan<br/>architect → plan.md"]
+    Tasks["tasks<br/>architect → task.md<br/>(the only status holder; every TC owned)"]
     Verify["verify<br/>mechanical: check.py on the spec dir,<br/>exit 0 = done"]
     Approve["approve<br/>HUMAN GATE<br/>spec.md Status: approved<br/>(never auto-satisfied)"]
     Exec["execute<br/>per-task frontier: deps ticked/struck,<br/>files disjoint from wave-mates,<br/>below the fix-round cap"]
@@ -29,16 +28,14 @@ flowchart TD
     Archive["archive<br/>specs/archive/ · dated · INDEX repointed"]
 
     Spec --> Intent
-    Intent --> Survey
-    Survey --> Plan
-    Survey --> Tech
-    Survey --> QA
+    Intent --> Tech
+    Intent --> QA
+    Tech --> Plan
     Plan --> Tasks
     Tech --> Tasks
-    Survey --> Tasks
-    Survey --> Verify
-    Plan --> Verify
+    QA --> Tasks
     Tech --> Verify
+    Plan --> Verify
     QA --> Verify
     Tasks --> Verify
     Verify --> Approve
@@ -52,4 +49,4 @@ flowchart TD
     Gate -.->|run| Research
     Gate -.->|resolved either way| Tech
     Exec -.->|fix rounds, cap 5 per task| Exec
-    Survey -.->|converge: survey staleness<br/>→ re-survey → audit.py converge<br/>→ appended tasks| Tasks
+    Tech -.->|converge: Code state staleness<br/>→ delta re-ground → audit.py converge<br/>→ appended tasks| Tasks

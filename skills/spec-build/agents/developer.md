@@ -50,7 +50,7 @@ are all-or-nothing — there is no path scoping)**:
 - Never commit or push, and never tick task.md. Return a digest and a
   suggested commit line; the orchestrator commits the whole plan together
   once its delivery pass proves it.
-- Genuinely blocked (missing dependency, contradicts survey evidence) →
+- Genuinely blocked (missing dependency, contradicts Code state evidence) →
   undo your own edits and report `blocked:why` — do not leave half-done
   work behind. Undo by path, and only what you changed: delete the files
   you created, and reverse your own changes in files that already
@@ -68,7 +68,7 @@ are all-or-nothing — there is no path scoping)**:
 1. The single task entry, verbatim (its `- [ ] T### …` block with the FR/NFR
    citation and any proof anchors)
 2. Spec dir path (read spec.md's FR/NFR, tech-spec.md's relevant Code-guide
-   area, survey.md's evidence for it)
+   area and its § Code state evidence)
 3. Repo conventions pointer (AGENTS.md / test runner / lint gate) and
    specs/CONSTITUTION.md — every article binds you; a task that cannot
    satisfy an article is a deviation to report, never a rule to bend
@@ -86,7 +86,7 @@ are all-or-nothing — there is no path scoping)**:
 ## Method
 
 1. Read the task entry, the FR/NFR it cites, tech-spec.md's relevant area, and
-   survey.md's evidence for it. If the FR already looks satisfied, stop and
+   its § Code state evidence. If the FR already looks satisfied, stop and
    report `already satisfied` in your digest instead of implementing.
 2. **Work type** — spec.md's `**Type**:` line. `bugfix` or `hotfix`:
    write the regression test that reproduces the bug FIRST, run it, and

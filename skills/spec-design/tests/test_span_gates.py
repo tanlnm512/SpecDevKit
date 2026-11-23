@@ -62,7 +62,7 @@ def write(path: Path, text: str) -> Path:
 
 def scaffold_spec(tmp: Path, name: str = "demo") -> Path:
     """Full-tier scaffold with a filled spec.md and nothing else authored:
-    survey/plan/tech/qa/tasks stay unfilled templates, so the frontier is
+    tech/plan/qa/tasks stay unfilled templates, so the frontier is
     exactly the intent gate's to decide."""
     r = subprocess.run(["bash", str(SCAFFOLD), "--tier", "full", name,
                         str(tmp)], capture_output=True, text=True)
@@ -234,7 +234,7 @@ class ShapeIntakeRefusalTests(TelemetryStoreTestCase):
 
 class ShapeValidIntentRunTests(TelemetryStoreTestCase):
     """A green intent admits the authoring waves — the payloads are the
-    authoring wave's (the surveyor; never an implementer); and a docset at
+    authoring wave's (tech and qa; never an implementer); and a docset at
     the approve boundary drains the shape span at its named handoff without
     ever emitting an execute payload."""
 
@@ -243,15 +243,14 @@ class ShapeValidIntentRunTests(TelemetryStoreTestCase):
         # note, never fatal), so the filled artifact checks green
         d = scaffold_spec(self._tmp / "valid")
         write(d / "intent.md", GOOD_INTENT.format(sha="3fa9c21"))
-        for f in ("survey.md", "plan.md", "tech-spec.md", "test.md",
-                  "task.md"):
+        for f in ("plan.md", "tech-spec.md", "test.md", "task.md"):
             self.assertTrue((d / f).exists(), f)
         r = self.run_cli(d, "--emit-spawns", "--span", "shape")
         self.assertNotEqual(r.returncode, 4, r.stdout)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("span entry refused", r.stdout)
         payloads = sorted(p.name for p in (d / "spawns").rglob("*.md"))
-        self.assertEqual(payloads, ["surveyor.md"],
+        self.assertEqual(payloads, ["qa.md", "tech.md"],
                          "the authoring wave's own payload set")
         self.assertEqual(self.telemetry_rows("intake_refusal"), [])
 
@@ -282,7 +281,7 @@ class ShapeValidIntentRunTests(TelemetryStoreTestCase):
                     self.run_cli(d, "--state-json").stdout)["nodes"]
                 self.assertEqual(nodes["intent"]["state"], "done")
                 self.assertIn(note, nodes["intent"]["reason"])
-                self.assertEqual(nodes["survey"]["state"], "READY")
+                self.assertEqual(nodes["tech"]["state"], "READY")
         self.assertEqual(self.telemetry_rows("intake_refusal"), [])
 
     def test_green_intent_without_spec_md_is_admitted_and_asks_for_a_draft(self):
@@ -358,7 +357,7 @@ class LegacyDirCompatTests(TelemetryStoreTestCase):
         successor = self.run_cli(d)
         self.assertEqual(successor.returncode, 0, successor.stderr)
         for marker in ("workflow graph:", "Status: draft", "frontier",
-                       "approve", "survey", "verify", "execute",
+                       "approve", "tech", "verify", "execute",
                        "tick-commit", "archive",
                        "git: SKIPPED (not a git repo)"):
             self.assertIn(marker, successor.stdout, marker)

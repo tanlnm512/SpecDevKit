@@ -21,16 +21,16 @@ digest: write it as your final action, so it survives whatever happens
 to the session that spawned you.
 
 ## Universal rules (canonical — your brief does not repeat these)
-1. **Citations verbatim** from survey.md, or from your own session's grep
+1. **Citations verbatim** from tech-spec.md § Code state, or from your own session's grep
    output — never from memory. A number in an existing doc is a claim;
    re-count it.
 2. **Symbols over line numbers**; unknown → `unknown — verify`.
-3. **Status lives only in task.md**, derived only from survey evidence — no
+3. **Status lives only in task.md**, derived only from § Code state evidence — no
    checkboxes or status words in any other file.
 4. **IDs (US/FR/AC/T/TC/D) are assigned once and never renumbered.** Dropped
    items are struck through with the `D-###` that killed them, never deleted.
 5. **One artifact per doc author.** A doc-authoring agent writes exactly
-   the artifact its brief names — nothing else (the survey lens's
+   the artifact its brief names — nothing else (the tech lens's
    `specs/context/` files are the one named exception). An implementer
    writes its task's `Touches:` set and the tests for it — nothing under
    `specs/` beyond the note its brief allows. Your payload's digest

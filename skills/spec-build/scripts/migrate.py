@@ -20,7 +20,10 @@ one-time re-approval steps.
 `upgrade` converts a pre-change-grammar docset (the grammar check.py's
 migration detector warns about) to the current one, in place, in order:
 the burndown grows the Verified column; research.md folds into
-tech-spec.md's `## Questions & options` section; the approval record
+tech-spec.md's `## Questions & options` section; survey.md folds into
+tech-spec.md's `## Code state` section (its Baseline header and items
+carried verbatim, appended so a recorded prefix freeze still verifies);
+the approval record
 folds into one approval.md (`## Contract review` + `## Freeze`, manifest
 entry lines transplanted byte-identically); a notes/delivery.md record
 transplants into the status holder's delivery block; the per-spec-dir
@@ -182,7 +185,7 @@ def grow(spec_dir: Path) -> int:
                               f"| **Σ** | {n_tasks}     | 0    |          |")
 
     (spec_dir / "task.md").write_text(task_md, encoding="utf-8")
-    for f in ("plan", "tech-spec", "test", "survey"):
+    for f in ("plan", "tech-spec", "test"):
         src = skill_dir / "templates" / f"{f}.md"
         if not (spec_dir / f"{f}.md").exists():
             (spec_dir / f"{f}.md").write_text(
@@ -196,7 +199,7 @@ def grow(spec_dir: Path) -> int:
     grown = grown.replace("**Tier**: tiny", "**Tier**: full", 1)
     spec_path.write_text(grown.rstrip("\n") + "\n", encoding="utf-8")
     print(f"grown: {n_tasks} task(s) moved to task.md (Phase 1, ids "
-          f"preserved); plan/tech-spec/test/survey scaffolded from "
+          f"preserved); plan/tech-spec/test scaffolded from "
           f"templates; Tier: full")
     print("next: the authoring nodes are READY — re-run the graph; "
           "check.py fails on the fresh templates by design")
@@ -297,6 +300,18 @@ def questions_section(research_text: str | None) -> str:
             continue
         carried.append("#" + line if line.startswith("## ") else line)
     return "## Questions & options\n\n" + "\n".join(carried).strip("\n") + "\n"
+
+
+def code_state_section(survey_text: str) -> str:
+    """The `## Code state` section for tech-spec.md: survey.md's content
+    carried verbatim, its title dropped and its H2 subsections demoted
+    one level so the section parser reads them inside this section."""
+    carried = []
+    for line in survey_text.splitlines():
+        if line.startswith("# "):
+            continue
+        carried.append("#" + line if line.startswith("## ") else line)
+    return "## Code state\n\n" + "\n".join(carried).strip("\n") + "\n"
 
 
 def append_section(text: str, section: str) -> str:
@@ -404,12 +419,14 @@ def upgrade(spec_dir: Path, apply: bool) -> int:
 
     research_path = spec_dir / "research.md"
     tech_path = spec_dir / "tech-spec.md"
+    research_fold: str | None = None
     if not tiny and tech_path.is_file() and research_path.is_file():
         tech_text = tech_path.read_text(encoding="utf-8")
         if specstate.QUESTIONS_SECTION.search(tech_text) is None:
             research_text = research_path.read_text(encoding="utf-8")
             candidate = append_section(tech_text,
                                        questions_section(research_text))
+            research_fold = candidate
 
             def run_research(tech_text=tech_text, candidate=candidate):
                 err = _write_fold(tech_path, tech_text, candidate)
@@ -429,6 +446,7 @@ def upgrade(spec_dir: Path, apply: bool) -> int:
         tech_text = tech_path.read_text(encoding="utf-8")
         if specstate.QUESTIONS_SECTION.search(tech_text) is None:
             candidate = append_section(tech_text, questions_section(None))
+            research_fold = candidate
 
             def run_research(tech_text=tech_text, candidate=candidate):
                 return _write_fold(tech_path, tech_text, candidate) or print(
@@ -439,6 +457,34 @@ def upgrade(spec_dir: Path, apply: bool) -> int:
             plan.append(("research: append the `## Questions & options` "
                          "section (unfilled — never a fabricated skip "
                          "record)", run_research))
+
+    survey_path = spec_dir / "survey.md"
+    if not tiny and tech_path.is_file() and survey_path.is_file():
+        base_text = (research_fold if research_fold is not None
+                     else tech_path.read_text(encoding="utf-8"))
+        if specstate.CODE_STATE_SECTION.search(base_text) is None:
+            candidate = append_section(
+                base_text, code_state_section(
+                    survey_path.read_text(encoding="utf-8")))
+
+            def run_survey(base_text=base_text, candidate=candidate):
+                err = _write_fold(tech_path, base_text, candidate)
+                if err:
+                    return err
+                err = _unlink(survey_path)
+                if err:
+                    return err
+                print("survey: folded survey.md into tech-spec.md's "
+                      "`## Code state`; deleted survey.md")
+                return None
+
+            plan.append(("survey: fold survey.md into tech-spec.md's "
+                         "`## Code state`, delete survey.md", run_survey))
+            if (spec_dir / "approvals" / "approval.md").is_file():
+                notes.append(
+                    "the folded § Code state rides tech-spec.md's append "
+                    "zone, so the freeze no longer pins it — re-approve at "
+                    "the next contract change to freeze it again")
 
     approval_path = spec_dir / "approvals" / "approval.md"
     review_path = spec_dir / "approvals" / "review.md"

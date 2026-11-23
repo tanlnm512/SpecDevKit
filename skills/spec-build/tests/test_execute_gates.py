@@ -60,9 +60,9 @@ LIFECYCLE_VERBS = ("implement", "test", "audit", "ship")
 # Payload vocabulary the execute span may never emit: the authoring
 # nodes live in spec-design's span, so their appearance here would mean
 # the span filter (or its gate) leaked authoring into execution.
-AUTHORING_NODES = {"intent", "survey", "plan", "tech", "qa", "tasks",
+AUTHORING_NODES = {"intent", "plan", "tech", "qa", "tasks",
                    "design", "research"}
-AUTHORING_FILES = {"surveyor.md", "planner.md", "tech.md", "qa.md",
+AUTHORING_FILES = {"analyst.md", "planner.md", "tech.md", "qa.md",
                    "task-breaker.md", "designer.md", "researcher.md"}
 
 
@@ -73,7 +73,7 @@ def write(path: Path, text: str) -> Path:
 
 def copy_fixture(tmp: Path, name: str = "demo") -> Path:
     """A mutated-copy fixture: the mini-spec docset plus the repo its
-    survey cites, so the evidence stays real under the tmp root."""
+    § Code state cites, so the evidence stays real under the tmp root."""
     (tmp / "specs").mkdir(parents=True, exist_ok=True)
     dst = tmp / "specs" / name
     shutil.copytree(FIXTURE, dst)
@@ -119,7 +119,7 @@ def land_all_tasks(spec_dir: Path) -> None:
 def break_task_entry(spec_dir: Path) -> None:
     """A broken task entry shape: the burndown table disagrees with the
     actual entries (5 claimed, 2 present) — a deterministic check.py
-    FAIL that never touches the survey evidence."""
+    FAIL that never touches the Code state evidence."""
     p = spec_dir / "task.md"
     t = p.read_text(encoding="utf-8")
     t = re.sub(r"^(\|\s*1\s*\|\s*)2(\s*\|\s*)0(\s*\|.*)$",
@@ -427,28 +427,6 @@ can read it.
   boundary, stored data, I/O, or interface beyond its argument.
 """
 
-HAND_SURVEY = """---
-# Survey: handbuilt
-
-**Created**: 2026-10-11 | **Baseline**: handbuilt v3 @ 1a2b3c4
-Phase-A output for a hand-authored fixture: no surveyor agent ran, the
-prose exists to satisfy the survey contract shape with real content.
-
-## Items
-
-```
-item S1: "greetings module exposes whisper only"
-  evidence:   none recorded — hand-authored fixture, no session grep
-  status:     DONE
-  verify:     none
-item S2: "no shout counterpart exists anywhere in the module"
-  evidence:   none recorded — hand-authored fixture, no session grep
-  status:     TODO
-  verify:     none
-  gap:        shout is absent from the module surface
-```
-"""
-
 HAND_RESEARCH = """# Research: handbuilt
 
 not applicable — no open questions at Stage 0
@@ -482,6 +460,20 @@ commit is the rollback.
 HAND_TECH = """# Tech spec: handbuilt
 
 **Spec**: [spec.md](spec.md) | **Created**: 2026-10-11
+**Baseline**: handbuilt v3 @ 1a2b3c4
+
+## Code state
+```
+item S1: "greetings module exposes whisper only"
+  evidence:   none recorded — hand-authored fixture, no session grep
+  status:     DONE
+  verify:     none
+item S2: "no shout counterpart exists anywhere in the module"
+  evidence:   none recorded — hand-authored fixture, no session grep
+  status:     TODO
+  verify:     none
+  gap:        shout is absent from the module surface
+```
 
 ## Approach
 Mirror the existing whisper helper: one pure function, string in,
@@ -512,7 +504,9 @@ Status reflects code state, not intent.
 
 ## Phase 1: shout lands (FR-001, FR-002)
 - [ ] T001 implement the shout helper in the module (FR-001)
+  - Proves: TC-001
 - [ ] T002 (after T001) pin punctuation behavior with a test (FR-002)
+  - Proves: TC-002
 
 ## Conventions
 - todo as written; done flips to checked with a proof note
@@ -554,8 +548,7 @@ def hand_docset(tmp: Path, status: str = "approved") -> Path:
     d = tmp / "specs" / "handbuilt"
     d.mkdir(parents=True)
     write(d / "spec.md", HAND_SPEC.format(status=status))
-    for name, text in (("survey.md", HAND_SURVEY),
-                       ("research.md", HAND_RESEARCH),
+    for name, text in (("research.md", HAND_RESEARCH),
                        ("plan.md", HAND_PLAN),
                        ("tech-spec.md", HAND_TECH),
                        ("task.md", HAND_TASKS),
