@@ -26,15 +26,11 @@ confirmed, with every fix re-verified.
 
 ## When to use
 
-The user asks to review a change: "review the diff", "review this
-change", "review the last commit", "look over my working tree before I
-commit" — a pull request: "review PR 12", "review this pull request" —
-a branch's recent changes: "review what's on this branch", "review the
-recent changes on this branch" — the whole codebase: "review the
-project" — or to review AND fix any of these:
-"review and fix the findings". The default change scope is a diff base:
-the working tree (default), `HEAD~1` for the last commit, or any
-ref/branch.
+The user asks to review a change ("review the diff", "review the last
+commit", "look over my working tree before I commit"), a pull request
+("review PR 12"), a branch ("review what's on this branch"), the whole
+codebase ("review the project") — or to review AND fix any of these
+("review and fix the findings").
 
 ## Principles
 
@@ -44,18 +40,14 @@ change is wrong — not the rule.
 
 1. **Machine-decidable before human attention.** Everything a
    deterministic check can decide (tests, syntax, secret shapes) is
-   decided by the gate before a reviewer spends a turn; reviewers own
-   only what requires reading.
+   decided by the gate; reviewers own only what requires reading.
 2. **Evidence or it does not exist.** Every finding carries `path:line`
-   and the quoted lines that demonstrate it. A finding a reader cannot
-   re-derive from its evidence is not a finding.
+   and the quoted lines a reader can re-derive it from.
 3. **Independence beats volume.** The reviewer, the confirmer, the
-   fixer and the fresh-eyes fix reviewer are different agents. One
-   verified finding is worth five unverified ones: precision, not
-   recall, is what makes an AI reviewer trustworthy.
-4. **Zero findings is success.** Clean targets get empty lists; noise
-   is never manufactured to seem busy, and style/formatting is never a
-   finding (the repo's checks own it).
+   fixer and the fresh-eyes fix reviewer are different agents;
+   precision over recall.
+4. **Zero findings is success.** Clean targets get empty lists, and
+   style/formatting is never a finding (the repo's checks own it).
 5. **Stated intent is context, not a waiver.** The author's words steer
    triage of deliberate choices; they never excuse a demonstrable
    defect.
@@ -67,8 +59,7 @@ change is wrong — not the rule.
    dropped; triage drops come with reasons.
 8. **The repo owns its standards.** The gate runs the repo's OWN
    checks; rules live in `AGENTS.md`/`CLAUDE.md`; fixes follow the
-   repo's style. The panel imposes nothing of its own beyond this
-   contract.
+   repo's style.
 
 ## Review targets
 
@@ -112,19 +103,20 @@ audit the repo's config names — `source: repo`), plus built-in
 hygiene (`source: builtin`): `bash -n` on changed `*.sh`, a
 secret-shape scan of the change (hits name `path:line` and the
 pattern, never the token), and an informational row listing changed
-dependency-manifest lines — name every new dependency in the
-report. In pr mode the PR's CI checks join as `source: ci` rows when
-`gh` is available: red CI is a gate finding, never a silent pass. It prints a JSON array
-— one `{name, source, status, exit_code, tail}` per check, `status`
-pass/fail/timed_out (each repo check is killed after
-`GATE_CHECK_TIMEOUT`, default 600 s). Rules: a red gate ends a fresh
-review — report the failing checks with their tails as the findings,
-and stop; no `repo` row is NOT a green light, whatever the built-in
-rows say (ask the repo for its documented check command and run that
-instead; say "no repo checks detected" if none exists); reviewers
-never re-run the suites. The one exception — a project audit continues past a red gate,
-each failing check becoming a high-severity gate finding (panel.md
-§ The mechanical gate).
+dependency-manifest lines — name every new dependency in the report.
+In pr mode the PR's CI checks join as `source: ci` rows when `gh` is
+available: red CI is a gate finding, never a silent pass. It prints a
+JSON array — one `{name, source, status, exit_code, tail}` per check,
+`status` pass/fail/timed_out (each repo check is killed after
+`GATE_CHECK_TIMEOUT`, default 600 s).
+
+Rules: a red gate ends a fresh review — report the failing checks with
+their tails as the findings, and stop (exception: a project audit
+continues, each failing check a high-severity gate finding — panel.md
+§ The mechanical gate). No `repo` row is NOT a green light, whatever
+the built-in rows say: ask the repo for its documented check command
+and run that, or say "no repo checks detected". Reviewers never re-run
+the suites.
 
 ### Whole-project mode (target: project)
 
@@ -164,17 +156,13 @@ can:
   overriding), and tests: changed behavior with no covering test,
   tests that cannot fail.
 
-Each side of this rubric is materialized as an agent brief inside the
-skill — `agents/review-correctness.md`, `-security.md`,
-`-quality.md` (each carrying the full checklist for its side) over the
-shared `protocol/panel-protocol.md`; the fix loop's author role is
-`agents/review-fixer.md`. Where the harness supports subagent
-dispatch, spawn one brief per lens instead of simulating a lens
-yourself: same rubric, same bar, real independence. Where it does not,
-cover the lenses inline — the briefs' rubric sections are the
-checklist, so a lens is never covered from memory alone. `mode`
-(§ Run sequence) picks between one general reviewer and the full
-three-lens panel.
+Each lens is an agent brief carrying its full checklist —
+`agents/review-correctness.md`, `-security.md`, `-quality.md` — over the
+shared `protocol/panel-protocol.md`. With subagent dispatch, spawn one
+brief per lens rather than simulating a lens yourself; without it,
+cover the lenses inline from the briefs' rubric sections, never from
+memory. `mode` (§ Run sequence) picks between one general reviewer and
+the full three-lens panel.
 
 Every reviewer follows the panel contract (`protocol/panel-protocol.md` is
 canonical): read the FULL target and the surrounding files, following
@@ -250,7 +238,7 @@ prints one JSON object, and `status: error` stops the run.
 `contracts/run-sequence.md` is canonical — commands, ask ctx keys,
 report data, role table, order: read it before the first `O` call.
 Phases: `O scope … --include-gate` → `O run-init` (the checkpoint
-starts; D-020) → `O systems` → the scout ask → the review wave
+starts) → `O systems` → the scout ask → the review wave
 (`O ask`) → triage per lens → cross-lens → confirm each kept finding →
 the final ask → `O report --kind review`; when fixing, per round
 `O fix-snapshot` → fixer → `O fix-check` → `O gate` → verify →
@@ -273,20 +261,16 @@ kept finding confirmed independently. `fast` findings are self-checked.
 ## Launch discipline
 
 - **Any harness** (one shape): the `/spec-review` router command
-  (`commands/spec-review.md`) routes review/fix/gate/plan asks
-  into this skill, and the session executes the stages inline as
-  written — the shared review oracle
-  (`scripts/review_orchestrator.py`) resolves targets, runs the gate
-  plan, parses findings and assembles the report for any caller
-  (args: `base`, `target`, `pr`, `intent`, `fix_from`, `paths`,
-  `mode`, `fix_rounds`). A repo may keep its own project-scoped copy
-  tuned to its exact CI set; the project copy wins there. Harnesses
-  with subagent dispatch spawn the panel briefs; harnesses without
-  run the lenses inline from the same briefs' rubric sections.
-- **Long foreground calls** (this skill runs none itself, but a fix
-  loop may) may be auto-backgrounded by the harness; NEVER poll a
-  backgrounded job — do other work or end your reply; you will be
-  woken with its output.
+  (`commands/spec-review.md`) routes review/fix/gate/plan asks into
+  this skill; the session executes the stages as written, and the
+  shared review oracle (`scripts/review_orchestrator.py`) resolves
+  targets, runs the gate plan, parses findings and assembles the report
+  (args: `base`, `target`, `pr`, `intent`, `fix_from`, `paths`, `mode`,
+  `fix_rounds`). A repo's own project-scoped copy, tuned to its CI set,
+  wins there.
+- **Long foreground calls** (a fix loop may run them) may be
+  auto-backgrounded by the harness; NEVER poll a backgrounded job — do
+  other work or end your reply; you will be woken with its output.
 
 ## Reading the result
 

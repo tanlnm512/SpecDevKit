@@ -21,19 +21,15 @@ metadata:
 
 # spec-discover — five-stage idea pressure-testing (before the spec exists)
 
-Take a raw idea from "I have an idea" to a durable idea brief
-the user owns. Three independent lenses argue where
-the idea could go, why it might die, and what the smallest honest
-version is; the user — never the panel — picks the direction; the
-run ends with `brainstorms/<name>.md` on disk and `/spec-define <name>`
-named as the next step.
+Take a raw idea to a durable idea brief the user owns. Three
+independent lenses argue where the idea could go, why it might die,
+and what the smallest honest version is; the user — never the panel
+— picks the direction; the run ends with `brainstorms/<name>.md` on
+disk and `/spec-define <name>` named as the next step.
 
-The five stages are rigid: they always run in order, none is
-skippable (the compile-only `handoff` entry, under Continuity, is
-the one defined exception: it begins at stage 5), and each one's
-shape is pinned below. The rigidity is
-the product — a brainstorm that improvises its structure collapses
-into a chat. The canonical statement of the run — stage shapes,
+The five stages are rigid: always in order, none skippable (the one
+exception is the compile-only `handoff` entry under Continuity, which
+begins at stage 5), each one's shape pinned below. The canonical statement of the run — stage shapes,
 the stage-2 payload, the digest grammar, the artifact rules — is
 `contracts/run.md` (this file summarizes; that one arbitrates);
 `gates/handoff.md` arbitrates the run's ending.
@@ -56,36 +52,26 @@ The panel's contract, in priority order. When two rules collide,
 the higher number wins; when a change would violate any of them,
 the change is wrong — not the rule.
 
-1. **One question at a time.** The user's attention is the
-   scarcest resource in a brainstorm. Stage 1 asks exactly one
-   question; stage 4 asks single questions sequentially. Never a
-   batch, never a form — each answer reshapes what the
-   next question should be, and a batch forces premature
-   commitment.
+1. **One question at a time.** Stage 1 asks exactly one question;
+   stage 4 asks single questions sequentially. Never a batch, never
+   a form — each answer reshapes the next question.
 2. **Lenses argue; the orchestrator balances.** Each panel agent
-   argues only its own side, at full conviction. A lens that
-   hedges toward the middle is a wasted seat; synthesis belongs to
-   the main session and the user, never to a spawn.
+   argues only its own side, at full conviction; synthesis belongs
+   to the main session and the user, never to a spawn.
 3. **Independence beats anchoring.** The three lenses spawn fresh,
-   in parallel, from the same payload — none sees another's
-   output. A single context playing three roles anchors its cynic
-   pass with its visionary framing.
+   in parallel, from the same payload — none sees another's output.
 4. **The user selects or blends.** The panel never picks a winner
-   and the trade-off matrix carries no recommendation. The
-   direction is whatever the user confirms at the end of stage 4,
-   and the idea brief records it — not the panel's favorite.
-5. **A weak idea is told it's weak.** The Cynic's job is real
-   criticism, not theater. If the strongest honest reading is
-   "don't build this", the handoff says exactly that, with the
+   and the trade-off matrix carries no recommendation; the brief
+   records the direction the user confirms at the end of stage 4.
+5. **A weak idea is told it's weak.** If the strongest honest
+   reading is "don't build this", the handoff says so, with the
    kill criterion that would prove it.
-6. **The artifact is the deliverable.** Chat is the medium;
-   `brainstorms/<name>.md` is the product. Every completed run
-   ends with the idea brief on disk, pinned to the template's
-   shape — never a summary left scrolling away in the transcript.
+6. **The artifact is the deliverable.** Every completed run ends
+   with `brainstorms/<name>.md` on disk, pinned to the template's
+   shape — never a summary left in the transcript.
 7. **Nothing is written under `specs/`.** This skill writes only
-   `brainstorms/<name>.md`. Scaffolding a spec dir is `/spec-define`'s
-   move — writing here first would block it and skew spec-design's
-   constitution gate.
+   `brainstorms/<name>.md`; scaffolding a spec dir is
+   `/spec-define`'s move, and writing there first would block it.
 
 ## The five stages
 
@@ -95,12 +81,9 @@ Restate the ask in one or two sentences so the user can correct
 your reading immediately. Then ask exactly ONE clarifying question
 — no lists, no numbered options, no multi-part forms — aimed at
 whichever of problem / audience / constraints is fuzziest in the
-restatement.
-
-If the answer still leaves the core fuzzy, ask at most ONE
-follow-up, then proceed on what is known and say plainly what you
-assumed. An interview is not the goal; enough ground for three
-lenses to argue is.
+restatement. If the answer still leaves the core fuzzy, ask at most
+ONE follow-up, then proceed on what is known and say plainly what
+you assumed.
 
 Derive a kebab-case name for the artifact from the idea itself and
 state it in passing — "I'll file this as `<name>` — say the word
@@ -131,12 +114,7 @@ spawn per lens:
 - **minimalist** — the smallest honest cut: the one core value,
   the thinnest delivery, what NOT to build on day one.
 
-Spawn agent type `spec-panelist` where the harness registers
-it; the payload then carries inputs only (see Spawn mechanics), not
-the brief body again. On a harness without registered agents, use a
-generic spawn whose payload also carries the brief body
-(`agents/panelist.md`, frontmatter stripped). Each spawn returns
-only its digest. Present the three angles distinctly labeled —
+Spawn per Spawn mechanics below; each spawn returns only its digest. Present the three angles distinctly labeled —
 `### The Visionary`, `### The Cynic`, `### The Minimalist` —
 faithful to the digests, with at most a sentence of framing each.
 No synthesis yet.
@@ -169,8 +147,6 @@ Soft cap: five questions. After the fifth — or the moment a
 direction is clearly emerging — stop asking and summarize the
 selection or blend in two or three sentences, naming what was
 rejected and why, and ask for confirmation as the final question.
-A refine loop that grinds past its evidence is an interrogation,
-not a refinement.
 
 ### Stage 5 — handoff
 
@@ -216,8 +192,7 @@ python3 <skill_dir>/scripts/check.py ARTIFACT
 path under `specs/` is refused. `<skill_dir>` is the directory this
 SKILL.md loaded from; `scripts/skill-dir.sh` prints it when the
 harness does not say. On exit 1, fix each named failure and rerun
-until exit 0. The checker is
-mechanical: judge yourself the dealbreaker mapping (every Cynic
+until exit 0. The checker is mechanical: judge yourself the dealbreaker mapping (every Cynic
 `points:` line, or in `handoff` mode every risk raised in the
 discussion), whether the rationale is genuinely the user's, and
 whether the kill evidence is observable.
@@ -261,12 +236,10 @@ logged — never a skipped lens.
 
 ## Operator rules
 
-The panel writes no code and runs no commands — its only deliverables
-are digests and the stage-5 artifact — so the kit-wide engineering
-rules (the spec suite's developer brief § Engineering rules, mirrored
-in the code-review fixer brief) bind downstream, when the chosen
-direction becomes a spec and then code. One rule binds here, for the
-session running this skill: a long foreground call may be
+The panel writes no code and runs no commands, so the kit-wide
+engineering rules (the developer brief's § Engineering rules) bind
+downstream, once the direction becomes a spec and code. One rule
+binds this session: a long foreground call may be
 auto-backgrounded by the harness; NEVER poll a backgrounded job
 (`sleep`, `ps`, `pgrep`, `top`) — do other work or end your reply;
 you will be woken with its output.

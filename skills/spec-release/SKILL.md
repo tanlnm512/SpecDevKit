@@ -23,19 +23,12 @@ metadata:
 
 # spec-release — merged, delivered work → a tagged, published release
 
-The release node spec-build's D-014 left for later: a HUMAN node
-whose done-signal is a `Released:` record on each spec it carries.
-It starts where the delivery flow stops — specs delivered by
+A HUMAN node whose done-signal is a `Released:` record on each spec
+it carries. It starts where delivery stops — specs delivered by
 `/spec-build`, their branches merged (`/spec-ship` owns the pull
 request) — and ends at a published tag plus a checklist a human runs
 against the live system. It never deploys and never watches
 production.
-
-`contracts/run.md` is the canonical statement of the run (this file
-summarizes; that one arbitrates). `gates/preflight.md` arbitrates
-whether a release may be cut; `gates/cut.md` arbitrates the two yeses
-and what each one covers. The shared rules every role follows are
-`protocol/release-protocol.md`.
 
 ## When to use
 
@@ -100,7 +93,7 @@ A harness without subagents runs the same brief inline.
 **The record**: `Released: <tag> @ <sha>` lands in each included
 spec's status holder — task.md's header at full tier, spec.md
 § Evidence at tiny tier, archived specs alike — in a record commit
-right after the tagged release commit (D-002). The post-release
+right after the tagged release commit. The post-release
 outcome lands beside it as `Post-release check: <tag> pass|fail
 <date> — <note>`.
 
@@ -109,11 +102,12 @@ alone and says so — nothing is traced, and no record is written.
 
 ## Resource map
 
-`contracts/run.md` — the run, the script interface, the facts JSON,
-the section format, the bump rules, the record grammar.
-`gates/preflight.md` and `gates/cut.md` — the gates.
-`protocol/release-protocol.md` — the shared rules.
-`templates/changelog-section.md`, `templates/changelog.md`,
-`templates/release-notes.md` — what the script renders.
-`decisions/` — this skill's ADRs; `evals/cases.md` — the live-eval
-cases; `observations/open-items.md` — known gaps.
+`contracts/run.md` — canonical statement of the run (this file
+summarizes; it arbitrates): script interface, facts JSON, section
+format, bump rules, record grammar. `gates/preflight.md` — whether a
+release may be cut; `gates/cut.md` — the two yeses and what each
+covers. `protocol/release-protocol.md` — the shared rules every role
+follows. `templates/changelog-section.md`, `templates/changelog.md`,
+`templates/release-notes.md` — what the script renders. `decisions/` —
+ADRs; `evals/cases.md` — live-eval cases; `observations/open-items.md`
+— known gaps.
