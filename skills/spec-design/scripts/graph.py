@@ -10,14 +10,16 @@ the mechanical truth about what is done, what is ready, and what is blocked.
 The node model (names and ready/done conditions) is contractual — see
 architecture.md §2.1/§2.2 and the READY_WHEN/DONE_WHEN tables below. In sum:
 
-  spec → clarify? → research-gate? → (research) → intent? → survey →
-  plan ∥ tech ∥ qa → tasks → verify → approve(HUMAN) → execute
-  (per-task frontier, fix-round loops ≤5) → tick-commit → archive,
-  with loop edges: clarify, fix-round, re-brief, converge (survey staleness).
+  spec → clarify? → research-gate? → (research) → intent? →
+  tech → plan, with qa ∥ beside them from spec → tasks → verify →
+  approve(HUMAN) → execute (per-task frontier, fix-round loops ≤5) →
+  tick-commit → archive, with loop edges: clarify, fix-round, re-brief,
+  converge (Code state staleness).
   intent? is the optional evidence node: intent.md absent → SKIPPED,
-  present-but-red → BLOCKED, green → survey proceeds. It is an
+  present-but-red → BLOCKED, green → authoring proceeds. It is an
   intake-time gate: once spec.md is filled, a lost or stale intent
-  baseline is a note on a DONE node and survey.md owns freshness.
+  baseline is a note on a DONE node and tech-spec.md's Baseline owns
+  freshness.
 
 Modes:
   default        human-readable report: per-node state + reason, the frontier
@@ -79,14 +81,15 @@ Modes:
                  user to confirm); it
                  is refused when this package ships no brief or lens for
                  the node. The
-                 surveyor's repair payload carries a DELTA RE-SURVEY block
-                 (files changed since the survey's stale baseline) so a
-                 converge re-survey merges instead of rebuilding. At effort
-                 tier `standard` (spec.md `**Effort**: standard`) the
-                 plan ∥ tech wave (plus the tasks wave it feeds) collapses
+                 tech repair payload carries a DELTA RE-GROUND block
+                 (files changed since tech-spec.md's stale Baseline) so a
+                 converge re-ground merges § Code state instead of
+                 rebuilding it. At effort tier `standard` (spec.md
+                 `**Effort**: standard`) the tech → plan stretch collapses
                  into ONE merged architect payload authoring
-                 plan/tech-spec/task in a single spawn, with qa as its own
-                 implementation-blind spawn alongside;
+                 tech-spec/plan in a single spawn, with qa as its own
+                 implementation-blind spawn alongside; tasks stays its
+                 own spawn, after qa;
                  while delivery is pending (execute done,
                  delivery not yet recorded), the reviewer-diff.md payload
                  (implementation-diff mode) is prepared the same way the
@@ -119,7 +122,7 @@ Modes:
   --span PHASE   with --run/--emit-spawns: bound the wave to one phase's
                  frontier — `intent` (the analyst node; spec/clarify
                  mechanics unchanged), `shape` (intent + the authoring wave
-                 survey/plan/tech/qa/tasks + verify + the approve display;
+                 tech/plan/qa/tasks + verify + the approve display;
                  a drained shape span stops at the approve handoff; a
                  shape span with no spec to author prints AWAITING and
                  routes to intake; one held on blocked nodes exits 1),
@@ -133,7 +136,7 @@ Modes:
                  the derived skill name): shape when the intent node is
                  BLOCKED; execute unless approve AND verify are DONE.
 
-Mechanical probes: the survey node runs `check.py <spec-dir> --survey-only`
+Mechanical probes: the tech node runs `check.py <spec-dir> --code-state-only`
 and the verify node runs `check.py <spec-dir>` — skill-owned contract
 checkers, each only once its inputs are in place; the intent node probes
 `check.py <spec-dir> --intent-only` only when intent.md is present (absent
@@ -192,12 +195,12 @@ import specstate  # noqa: E402
 # The workflow graph's nodes, in canonical (dependency) order. Names must
 # match SKILL.md's table.
 NODES = [
-    "spec", "clarify", "research-gate", "research", "intent", "survey",
-    "plan", "tech", "qa", "tasks", "verify", "approve", "execute",
+    "spec", "clarify", "research-gate", "research", "intent", "tech",
+    "plan", "qa", "tasks", "verify", "approve", "execute",
     "tick-commit", "archive",
 ]
 
-DOC_FILES = ["spec.md", "intent.md", "survey.md",
+DOC_FILES = ["spec.md", "intent.md",
              "plan.md", "tech-spec.md", "task.md", "test.md"]
 
 # Fix-round cap: `(fix n/5)` — the cap lives in the task.md annotation, so a
@@ -208,9 +211,9 @@ FIX_CAP = 5
 # appended last, so the tail is what the developer needs.
 FIX_NOTE_LINE_CAP = 200
 
-# Payload cap for the DELTA RE-SURVEY file list: a mass refactor's delta
+# Payload cap for the DELTA RE-GROUND file list: a mass refactor's delta
 # is the whole repo — the payload says so instead of listing thousands of
-# paths the surveyor would re-read one grep at a time anyway.
+# paths the architect would re-read one grep at a time anyway.
 DELTA_FILE_CAP = 200
 
 # Lifecycle words that mean the approval gate is behind us (approve's done
@@ -220,10 +223,10 @@ APPROVED_AND_LATER = ("approved", "active", "done")
 # Data edges: node B ready ⟺ all in-neighbors done (§2.2).
 DATA_EDGES = [
     ("spec", "intent"),
-    ("intent", "survey"),
-    ("survey", "plan"), ("survey", "tech"), ("survey", "qa"),
-    ("plan", "tasks"), ("tech", "tasks"), ("survey", "tasks"),
-    ("survey", "verify"), ("plan", "verify"), ("tech", "verify"),
+    ("intent", "tech"), ("intent", "qa"),
+    ("tech", "plan"),
+    ("plan", "tasks"), ("tech", "tasks"), ("qa", "tasks"),
+    ("tech", "verify"), ("plan", "verify"),
     ("qa", "verify"), ("tasks", "verify"),
     ("verify", "approve"), ("approve", "execute"),
     ("execute", "tick-commit"),
@@ -242,7 +245,7 @@ CONDITIONAL_EDGES = [
 LOOP_EDGES = [
     ("clarify", "spec", "clarify loop"),
     ("execute", "execute", "fix-round cap 5"),
-    ("survey", "tasks", "converge staleness"),
+    ("tech", "tasks", "converge staleness"),
 ]
 
 # The node/ready/done contract (architecture §2.1), kept as data so --explain
@@ -264,10 +267,9 @@ DONE, READY, BLOCKED, UNDETERMINED, SKIPPED = (
 AGENT_BRIEFS = {
     # node -> (role, archetype brief, lens); five archetypes,
     # lens specializations ride the payload from protocol/lenses.md
-    "intent": ("surveyor", "analyst.md", "intent"),
-    "survey": ("surveyor", "analyst.md", "survey"),
-    "plan": ("planner", "architect.md", "plan"),
+    "intent": ("analyst", "analyst.md", "intent"),
     "tech": ("tech", "architect.md", "tech"),
+    "plan": ("planner", "architect.md", "plan"),
     "qa": ("qa", "tester.md", "qa"),
     "tasks": ("task-breaker", "architect.md", "tasks"),
     "execute": ("implementer", "developer.md", "build"),
@@ -328,14 +330,13 @@ SPAN_REFUSED_EXIT = 4
 # Phase spans: a span bounds which frontier/payload nodes a run may
 # touch — a filter on the frontier, never a node's ready/done vocabulary
 # (states compute identically under every span). `design` is the collapsed
-# plan∥tech∥tasks wave, admitted wherever its tasks constituent is;
+# tech → plan stretch, admitted wherever its tech constituent is;
 # `research` rides the full span alone (the intent phase never decides it,
 # and shape's authoring resolves the gate out-of-band); the auditor's
 # tick-commit mechanics belong to execute.
 SPAN_AGENT_NODES = {
     "intent": frozenset({"intent"}),
-    "shape": frozenset({"survey", "plan", "tech", "qa", "tasks",
-                        "approve"}),
+    "shape": frozenset({"tech", "plan", "qa", "tasks", "approve"}),
     "execute": frozenset({"execute", "tick-commit"}),
 }
 
@@ -353,7 +354,7 @@ def span_allows(span: str, node: str) -> bool:
     if span == "full":
         return True
     if node == "design":
-        node = "tasks"
+        node = "tech"
     return node in SPAN_AGENT_NODES[span]
 
 
@@ -643,14 +644,14 @@ def wave_number(state: dict) -> int:
     """The wave number for the current doc state — derived, so --emit-spawns
     and --run --dry-run always name the same spawns/wave-<N>/ directory for
     the same state. Waves advance as milestone groups complete:
-    analysis (survey + research), authoring (plan ∥ tech ∥ qa), the task
-    list, then one per executed task batch (ticked/struck count)."""
+    grounding (research + tech ∥ qa), the plan, the task list, then one
+    per executed task batch (ticked/struck count)."""
     n = state["nodes"]
     settled = lambda name: n[name]["state"] in (DONE, SKIPPED)
     wave = 1
-    if settled("survey") and settled("research"):
+    if all(settled(x) for x in ("research", "tech", "qa")):
         wave += 1
-    if all(settled(x) for x in ("plan", "tech", "qa")):
+    if settled("plan"):
         wave += 1
     if settled("tasks"):
         wave += 1
@@ -752,14 +753,18 @@ def tc_conditions(test_text: str) -> dict[str, dict]:
 
 
 def acceptance_for(entry_block: str, test_text: str) -> list[str]:
-    """The TC pass-condition command(s) for the requirements a task entry cites — the
-    implementer's acceptance list (always for code tasks). MANUAL TCs are
-    named; a missing test.md says so instead of inventing a command."""
+    """The TC pass-condition command(s) a task entry answers for — the
+    implementer's acceptance list (always for code tasks): the cases its
+    `Proves:` line names, else those tracing to the requirements it
+    cites. MANUAL TCs are named; a missing test.md says so instead of
+    inventing a command."""
     if not test_text.strip():
         return ["(test.md not written yet — no TC pass conditions)"]
     frs = set(re.findall(r"\b(?:FR|NFR)-\d{3}\b", entry_block))
     tcs = tc_conditions(test_text)
-    matched = [tc for tc in sorted(tcs) if not frs or tcs[tc]["frs"] & frs]
+    proves = set(specstate.task_proves(entry_block))
+    matched = ([tc for tc in sorted(tcs) if tc in proves] if proves else
+               [tc for tc in sorted(tcs) if not frs or tcs[tc]["frs"] & frs])
     lines: list[str] = []
     for tc in matched:
         info = tcs[tc]
@@ -786,16 +791,16 @@ def code_delta(repo: Path, spec_dir: Path, base_sha: str,
         raw, specstate.doc_tree_prefixes(repo, spec_dir.parent))
 
 
-def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
-                        spec_dir: Path) -> list[str]:
-    """The DELTA RE-SURVEY block for a stale survey baseline (the
+def _reground_delta_lines(base: tuple[str, str] | None, repo: Path,
+                          spec_dir: Path) -> list[str]:
+    """The DELTA RE-GROUND block for a stale tech-spec Baseline (the
     converge loop's cost fix): the files git says changed since the
-    survey's baseline commit, so the surveyor MERGES into the existing
-    survey.md instead of rebuilding — a citation in an unchanged file
+    baseline commit, so the architect MERGES into the existing § Code
+    state instead of rebuilding it — a citation in an unchanged file
     cannot have moved. The kit's doc trees are excluded: a docs-only
-    commit (task ticks, survey.md's own refresh) can't invalidate a code
-    citation, and a delta that lists it would force the exact re-survey
-    this block exists to save. Fresh/absent baseline, or a git that
+    commit (task ticks, tech-spec.md's own refresh) can't invalidate a
+    code citation, and a delta that lists it would force the exact
+    re-ground this block exists to save. Fresh/absent baseline, or a git that
     cannot scope the delta, yields either nothing or an explicit degrade
     line — never a silent empty-delta verdict read as 'nothing to
     re-check'."""
@@ -807,28 +812,28 @@ def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
     raw, paths = code_delta(repo, spec_dir, base[1], head)
     if raw is None:
         return [f"- delta: unavailable (git diff {base[1]}..{head} "
-                "failed) — re-survey in full and merge into the "
-                "existing survey.md yourself"]
+                "failed) — re-ground § Code state in full and merge it "
+                "yourself"]
     if not paths:
-        return [f"- DELTA RE-SURVEY: baseline {base[1]} != HEAD {head} "
+        return [f"- DELTA RE-GROUND: baseline {base[1]} != HEAD {head} "
                 "but no code files changed "
                 + ("(the diff touches only the kit's doc trees) "
                    if raw else "(no files changed) ")
-                + "— refresh the survey's Baseline "
+                + "— refresh tech-spec.md's Baseline "
                 f"header to HEAD {head} and re-run the self-check; no "
                 "item needs re-grepping"]
     shown = paths[:DELTA_FILE_CAP]
     more = len(paths) - len(shown)
     out = [
-        f"- DELTA RE-SURVEY: baseline {base[1]} != HEAD {head} — merge "
-        "into the existing survey.md, do NOT rebuild it:",
+        f"- DELTA RE-GROUND: baseline {base[1]} != HEAD {head} — merge "
+        "into the existing § Code state, do NOT rebuild it:",
         "  - re-grep ONLY items whose evidence cites a changed file "
         "below (a citation in an unchanged file cannot have moved);",
         "  - re-run the re-checked items' verify commands;",
         "  - keep every untouched item byte-identical; refresh the "
         f"Baseline header to HEAD {head};",
-        "  - the --survey-only self-check stays full-strength over the "
-        "merged file.",
+        "  - the --code-state-only self-check stays full-strength over "
+        "the merged section.",
         f"  Files changed since the baseline ({len(paths)}):",
     ]
     out += [f"     {p}" for p in shown]
@@ -836,6 +841,19 @@ def _survey_delta_lines(base: tuple[str, str] | None, repo: Path,
         out.append(f"     … +{more} more (payload cap {DELTA_FILE_CAP}) "
                    "— the delta is effectively the whole repo")
     return out
+
+
+def grounding_lines(spec_dir: Path, repo: Path) -> list[str]:
+    """The tech payload's grounding facts: repo root, tech-spec.md's
+    recorded Baseline, and the DELTA RE-GROUND block when it is stale."""
+    tech_text = read_doc(spec_dir / "tech-spec.md")
+    base = specstate.doc_baseline(tech_text) if tech_text else None
+    return [
+        f"- repo root: {repo}",
+        "- baseline: " + (f"{base[0]} @ {base[1]}" if base
+                          else "none recorded yet (first grounding)"),
+        *_reground_delta_lines(base, repo, spec_dir),
+    ]
 
 
 def input_payload_for(node: str, spec_dir: Path, repo: Path,
@@ -904,22 +922,6 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
                          "§ Constraints")
         return "\n".join(lines)
 
-    if node == "survey":
-        survey_text = read_doc(spec_dir / "survey.md")
-        base = (specstate.survey_baseline(survey_text)
-                if survey_text else None)
-        lines = [
-            f"- spec_dir: {spec_dir}",
-            f"- repo root: {repo}",
-            "- baseline: " + (f"{base[0]} @ {base[1]}" if base
-                              else "none recorded yet (first survey)"),
-        ]
-        lines += _survey_delta_lines(base, repo, spec_dir)
-        lines += [work_type_line,
-                  "- The spec's proposed items (FR/NFR list, verbatim):",
-                  *fr_lines]
-        return "\n".join(lines)
-
     if node == "research":
         what = spec_section(spec_text, "What")
         why = spec_section(spec_text, "Why")
@@ -949,15 +951,17 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
 
     if node == "plan":
         lines = [
-            f"- spec_dir: {spec_dir} (read spec.md and survey.md yourself)",
+            f"- spec_dir: {spec_dir} (read spec.md and tech-spec.md "
+            "yourself — § Code state is the code-state truth)",
             "- Team context: none recorded — assume solo, PR-per-milestone "
             "unless the spawn digest says otherwise",
         ]
     elif node == "tech":
         lines = [
-            f"- spec_dir: {spec_dir} (read spec.md, survey.md, and your "
-            "file's own § Questions & options — the research record — "
-            "yourself)",
+            f"- spec_dir: {spec_dir} (read spec.md and your file's own "
+            "§ Questions & options — the research record — yourself; "
+            "intent.md § Constraints when present)",
+            *grounding_lines(spec_dir, repo),
             "- Architecture constraints: "
             + (f"specs/CONSTITUTION.md at {constitution}"
                if constitution_filled
@@ -967,12 +971,14 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
     elif node == "qa":
         lines = [
             f"- spec_dir: {spec_dir}",
-            "- Read spec.md and survey.md ONLY — never tech-spec.md or "
-            "plan.md (implementation blindness)",
+            "- Read spec.md ONLY — never tech-spec.md, plan.md, or the "
+            "code (implementation blindness)",
         ]
     elif node == "tasks":
         lines = [f"- spec_dir: {spec_dir} (read spec.md, plan.md, "
-                 "tech-spec.md, survey.md yourself)"]
+                 "tech-spec.md, test.md yourself — every TC gets an "
+                 "owning task's `Proves:` line or a regression-guard "
+                 "line)"]
     elif node == "execute" and entry is not None:
         agents_md = repo / "AGENTS.md"
         lines = [
@@ -1001,13 +1007,15 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
             lines += fix_evidence_lines(spec_dir, entry)
     elif node == "design":
         lines = [
-            f"- spec_dir: {spec_dir} (read spec.md, survey.md, and "
-            "tech-spec.md § Questions & options — the research record — "
-            "yourself)",
+            f"- spec_dir: {spec_dir} (read spec.md and tech-spec.md "
+            "§ Questions & options — the research record — yourself; "
+            "intent.md § Constraints when present)",
+            *grounding_lines(spec_dir, repo),
             "- Effort: standard — ONE spawn authors "
-            "plan.md → tech-spec.md → task.md in that order. The plan/tech "
-            "wave is collapsed at this effort; check.py, the approve gate, "
-            "and qa independence are not.",
+            "tech-spec.md → plan.md in that order. task.md is NOT yours "
+            "here: it waits for test.md and comes as its own spawn. The "
+            "tech → plan stretch is collapsed at this effort; check.py, "
+            "the approve gate, and qa independence are not.",
             "- Team context: none recorded — assume solo, PR-per-milestone "
             "unless the spawn digest says otherwise",
             "- Architecture constraints: "
@@ -1015,9 +1023,8 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
                if constitution_filled
                else "none recorded (specs/CONSTITUTION.md is absent or "
                     "unfilled)"),
-            "- test.md belongs to the parallel qa spawn — NEVER write, "
-            "read, or reference it; qa stays implementation-blind at "
-            "every tier",
+            "- test.md belongs to the parallel qa spawn — NEVER write "
+            "it; qa stays implementation-blind at every tier",
         ]
     elif node == "approve":
         lines = [
@@ -1033,16 +1040,16 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
                 + (f" plus {constitution_read}" if constitution_read
                    else "")
                 + ". No plan.md, tech-spec.md, "
-                "task.md, test.md, or survey.md exists at this tier — "
+                "task.md, or test.md exists at this tier — "
                 "their absence is never a finding")
             lines += constitution_gap
         else:
             lines += [
-                "- Read spec.md, plan.md, tech-spec.md, task.md, test.md, "
-                "and survey.md under the spec dir"
+                "- Read spec.md, plan.md, tech-spec.md, task.md, and "
+                "test.md under the spec dir"
                 + (f", plus {constitution_read}" if constitution_read
                    else "")
-                + "; survey.md is the evidence baseline",
+                + "; tech-spec.md § Code state is the evidence baseline",
                 *constitution_gap,
                 f"- Docset fingerprint: {freeze.docset_fingerprint(spec_dir)}"
                 " — save this payload and pass it to `freeze.py <spec-dir> --record "
@@ -1082,8 +1089,8 @@ def input_payload_for(node: str, spec_dir: Path, repo: Path,
                 "and anchor the review on every task's intended-files "
                 "union instead")
         lines += [
-            "- Plan-side truth: read task.md, tech-spec.md, test.md, and "
-            "survey.md"
+            "- Plan-side truth: read task.md, tech-spec.md (its § Code "
+            "state included), and test.md"
             + (f", and {constitution_read}" if constitution_read else ""),
             *constitution_gap,
             "- Review for semantic/security/rollback issues and wording "
@@ -1156,18 +1163,20 @@ def frontier_payloads(state: dict, spec_dir: Path,
     (execute done, delivery not yet recorded) — the implementation-diff
     reviewer payload (the instruments of a `run` decision and of the
     pre-tick review; --run still pauses at the tick-commit gate and never
-    spawns them). At effort tier `standard` the
-    plan ∥ tech wave (plus the tasks wave it feeds) collapses into ONE
-    merged design payload — one spawn writes plan.md, tech-spec.md, and
-    task.md; qa stays its own implementation-blind spawn in the same
-    wave, so test.md always comes from qa alone. Docset, check.py, and
-    the gates are unchanged.
+    spawns them). At effort tier `standard` the tech → plan stretch
+    collapses into ONE merged design payload — one spawn writes
+    tech-spec.md then plan.md; qa stays its own implementation-blind
+    spawn in the same wave, so test.md always comes from qa alone, and
+    tasks follows as its own spawn once test.md exists. Docset,
+    check.py, and the gates are unchanged.
     `span` filters the emitted payloads to the phase's nodes —
     a filter on payloads only, never on node states."""
     items: list[dict] = []
     merge_design = (
         state.get("effort") == "standard"
-        and all(x in state["frontier"] for x in ("plan", "tech", "qa")))
+        and "tech" in state["frontier"]
+        and state["nodes"]["plan"]["state"] != DONE
+        and span_allows(span, "design"))
     for node in state["frontier"]:
         if node not in AGENT_BRIEFS:
             continue
@@ -1197,8 +1206,7 @@ def frontier_payloads(state: dict, spec_dir: Path,
         items.insert(0, {
             "node": "design", "role": "designer", "brief": None,
             "briefs": ["architect.md"],
-            "lenses": [AGENT_BRIEFS[n][2]
-                       for n in ("plan", "tech", "tasks")],
+            "lenses": [AGENT_BRIEFS[n][2] for n in ("tech", "plan")],
             "filename": "designer.md", "entry": None,
         })
     if (state["nodes"]["research-gate"]["state"] == UNDETERMINED
@@ -1351,7 +1359,7 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int,
     byte-verbatim + the carried lens sections from `protocol/lenses.md` +
     `protocol/shared-protocol.md` — except the auditor, the one
     exempt role (its brief states it needs no shared protocol). A merged-design
-    item carries the architect archetype once with its three lens
+    item carries the architect archetype once with its two lens
     sections in authoring order and the protocol once. `native` is for a
     harness that registers this package's agents: the brief is already
     that agent type's system prompt, so the payload names the type and
@@ -1460,8 +1468,8 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     """Write the wave's payloads; returns (path, role, node) per file.
     `repair` names one agent node and emits that node's payload ALONE,
     whether or not it is in the frontier (--emit-spawns --repair NODE,
-    the single-agent repair-run instrument — e.g. a stale-survey
-    converge re-survey, whose payload carries the DELTA RE-SURVEY
+    the single-agent repair-run instrument — e.g. a stale-Baseline
+    converge re-ground, whose payload carries the DELTA RE-GROUND
     block). `span` rides through to frontier_payloads; the repair item
     is the orchestrator's explicit instrument, so it bypasses the span
     filter. A wave emit first clears the kit's earlier payloads from the
@@ -1664,16 +1672,14 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
                           "settle the claimed, blocked, or at-cap tasks "
                           "inline first (--explain execute)"}
     if len(payloads) == 1 and payloads[0]["node"] == "design":
-        # the merged architect is one payload but not a
-        # light node: three briefs + protocol authoring plan, tech-spec,
-        # and task — the design stretch stays a workflow wave, only
-        # collapsed to one spawn (qa already done — its own payload rides
-        # alongside when it isn't)
+        # the merged architect is one payload but not a light node: two
+        # lenses + protocol authoring tech-spec and plan — the design
+        # stretch stays a workflow wave, only collapsed to one spawn (qa
+        # already done — its own payload rides alongside when it isn't)
         return {**advisory, "weight": "wave", "launch_workflow": True,
-                "reason": "one merged design payload — three briefs "
-                          "(plan/tech/tasks) authoring plan, tech-spec, "
-                          "and task — heavy span, launch "
-                          "a dynamic workflow"}
+                "reason": "one merged design payload — two lenses "
+                          "(tech/plan) authoring tech-spec and plan — "
+                          "heavy span, launch a dynamic workflow"}
     if len(payloads) == 1 and payloads[0]["node"] != "execute":
         return {**advisory, "weight": "single",
                 "reason": "one light doc node ("
@@ -2050,7 +2056,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
 
     # -- intent (optional evidence node) -----------------------------------
     # Absent intent.md reads SKIPPED: docsets without it keep the existing
-    # graph (no new blockers, survey readiness unchanged); present-but-red
+    # graph (no new blockers, authoring readiness unchanged); present-but-red
     # is the ungated artifact the shape span gate refuses; present-and-green
     # reads DONE. Computed first: a missing spec.md is drafted only from a
     # green intent. The baseline gates that handoff alone: under a filled
@@ -2189,48 +2195,16 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
     nodes["intent"] = intent_node
     intent_settled = nodes["intent"]["state"] in (DONE, SKIPPED)
 
-    # -- survey ------------------------------------------------------------
-    if tier == "tiny":
-        nodes["survey"] = {"state": SKIPPED, "reason":
-                           "tier: tiny — no survey doc; evidence lives in "
-                           "the spec's task Accept lines (grow to full "
-                           "when the change outgrows one file)"}
-    elif not spec_done:
-        nodes["survey"] = {"state": BLOCKED,
-                           "reason": "waiting on: spec"}
-    elif not intent_settled:
-        nodes["survey"] = {"state": BLOCKED,
-                           "reason": "waiting on: intent"}
-    elif docs["survey.md"] is None:
-        nodes["survey"] = {"state": READY, "reason":
-                           "no survey.md — the surveyor writes it from the "
-                           "spec's requirement list"}
-    elif not filled["survey.md"]:
-        nodes["survey"] = {"state": READY, "reason":
-                           "survey.md is still the unfilled template — the "
-                           "surveyor rewrites it from the spec's requirement list "
-                           f"(residue: {unfilled_hits(docs['survey.md']) or 'none'})"}
-    else:
-        rc = run_check(spec_dir, repo_override, ["--survey-only"])
-        if rc == 0:
-            nodes["survey"] = {"state": DONE, "reason":
-                               "survey.md filled and `check.py --survey-only` "
-                               "exits 0"}
-        elif rc is None:
-            nodes["survey"] = {"state": BLOCKED, "reason":
-                               "check.py could not run — survey unverified"}
-        else:
-            nodes["survey"] = {"state": BLOCKED, "reason":
-                               f"check.py --survey-only exits {rc} — fix the "
-                               "survey evidence it names"}
-    survey_done = nodes["survey"]["state"] == DONE
+
+    entry_unmet = ([] if spec_done else ["spec"]) + (
+        [] if intent_settled else ["intent"])
 
     def authored(node: str, filename: str, deps: list[str],
                  unmet_extra: list[str] | None = None) -> None:
         """Shared shape for the authoring nodes: blocked on unmet deps, READY
         while the output is missing/unfilled, done once it is filled."""
-        unmet = [d for d in deps
-                 if nodes[d]["state"] not in (DONE, SKIPPED)]
+        unmet = entry_unmet + [d for d in deps
+                               if nodes[d]["state"] not in (DONE, SKIPPED)]
         if unmet_extra:
             unmet += unmet_extra
         if unmet:
@@ -2254,16 +2228,30 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
                            f"tier: tiny — no {doc}; the one-file contract "
                            "holds tasks in spec.md § Tasks"}
     else:
-        authored("plan", "plan.md", ["survey"])
-        authored("tech", "tech-spec.md", ["survey"],
+        authored("tech", "tech-spec.md", [],
                  None if research_done or rstate == "skip"
                  else ["research (research-gate undetermined — decide run or "
                        "skip)"])
-        authored("qa", "test.md", ["survey"])
-        authored("tasks", "task.md", ["plan", "tech", "survey"])
+        if nodes["tech"]["state"] == DONE:
+            rc = run_check(spec_dir, repo_override, ["--code-state-only"])
+            if rc is None:
+                nodes["tech"] = {"state": BLOCKED, "reason":
+                                 "check.py could not run — Code state "
+                                 "unverified"}
+            elif rc:
+                nodes["tech"] = {"state": BLOCKED, "reason":
+                                 f"check.py --code-state-only exits {rc} — "
+                                 "fix the § Code state evidence it names"}
+            else:
+                nodes["tech"]["reason"] = (
+                    "tech-spec.md filled and `check.py --code-state-only` "
+                    "exits 0")
+        authored("plan", "plan.md", ["tech"])
+        authored("qa", "test.md", [])
+        authored("tasks", "task.md", ["plan", "tech", "qa"])
 
     # -- verify (mechanical: runs check.py) --------------------------------
-    verify_deps = [d for d in ("plan", "tech", "qa", "tasks", "survey")
+    verify_deps = [d for d in ("tech", "plan", "qa", "tasks")
                    if nodes[d]["state"] not in (DONE, SKIPPED)]
     if verify_deps:
         nodes["verify"] = {"state": BLOCKED,
@@ -2441,25 +2429,25 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
                                 "INDEX.md"}
 
     # -- loops -----------------------------------------------------------------
-    if docs["survey.md"] and git_ok:
-        base = specstate.survey_baseline(docs["survey.md"])
+    if docs["tech-spec.md"] and git_ok:
+        base = specstate.doc_baseline(docs["tech-spec.md"])
         if base is None:
-            converge = "no survey baseline recorded — nothing to converge yet"
+            converge = "no tech-spec Baseline recorded — nothing to converge yet"
         elif head and base[1] == head:
-            converge = f"fresh — survey baseline {base[1]} == HEAD {head}"
+            converge = f"fresh — tech-spec Baseline {base[1]} == HEAD {head}"
         elif head and code_delta(repo, spec_dir, base[1], head)[1] == []:
             converge = ("fresh — only the kit's doc trees changed since "
-                        f"survey baseline {base[1]} (HEAD {head})")
+                        f"tech-spec Baseline {base[1]} (HEAD {head})")
         else:
-            converge = (f"stale — survey baseline {base[1]} != HEAD {head} — "
-                        "re-run the survey delta-scoped (--emit-spawns "
-                        "--repair survey), then audit.py converge, and "
+            converge = (f"stale — tech-spec Baseline {base[1]} != HEAD {head} "
+                        "— re-ground § Code state delta-scoped (--emit-spawns "
+                        "--repair tech), then audit.py converge, and "
                         "append tasks")
     elif not git_ok:
-        converge = ("SKIPPED (not a git repo) — no HEAD to diff the survey "
+        converge = ("SKIPPED (not a git repo) — no HEAD to diff the tech-spec "
                     "baseline against")
     else:
-        converge = "no survey.md — nothing to converge yet"
+        converge = "no tech-spec.md — nothing to converge yet"
 
     n_fix = sum(1 for e in entries if e.fix_round is not None
                 and not e.done and not e.struck and not e.implemented)
@@ -2602,8 +2590,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="with --emit-spawns: emit ONLY this agent node's "
                         "payload, in or out of the frontier — the "
                         "single-agent repair-run instrument (a stale-"
-                        "survey converge re-survey: --repair survey "
-                        "emits a DELTA-scoped surveyor payload; --repair "
+                        "Baseline converge re-ground: --repair tech "
+                        "emits a DELTA-scoped tech payload; --repair "
                         "research emits the researcher alone; --repair "
                         "approve re-emits the contract review; --repair "
                         "constitution emits the analyst's article "

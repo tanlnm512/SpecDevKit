@@ -9,9 +9,9 @@ one the agent spawns archetype agents (analyst · architect · tester ·
 developer · auditor, plus integrator and release-manager for the
 outward phases) that produce a grounded, execution-ready doc set per
 feature under `specs/<name>/` — ONE file by default (`Tier: tiny`,
-D-037) or the full seven-file docset (`spec.md`, `plan.md`, `task.md`
-(the status holder), `tech-spec.md`, `test.md`, with `survey.md` and
-`research.md` as evidence) — with FR/NFR → task → test traceability, an
+D-037) or the full five-file docset (`spec.md`, `plan.md`, `task.md`
+(the status holder), `tech-spec.md` — its § Code state the code-state
+evidence — and `test.md`) — with FR/NFR → task → test traceability, an
 approval freeze, durable tick/delivery evidence, and an
 implementation-diff review. Every artifact is mechanically verified by
 `scripts/check.py` and scheduled by a **dynamic state graph**
@@ -34,7 +34,7 @@ or step ledger is consulted.
 |---|---|---|
 | discover | `/spec-discover` *(optional)* | five-stage idea pressure-test — one clarifying question, a three-lens panel (Visionary / Cynic / Minimalist), a trade-off matrix, socratic refinement → an idea brief at `brainstorms/<name>.md` |
 | define | `/spec-define <name>` | requirements intake — probes the repo, grills the user until the question frontier is empty, lands a validated `intent.md` (a bug takes the bugfix deltas) |
-| design | `/spec-design <spec>` | gated authoring — drafts spec.md from the intent, then survey → plan ∥ tech ∥ qa → tasks → verify, stopping at the human approve gate |
+| design | `/spec-design <spec>` | gated authoring — drafts spec.md from the intent, then tech ∥ qa → plan → tasks → verify, stopping at the human approve gate |
 | build | `/spec-build <spec>` | implementation — developer waves over the open tasks, then the ONE delivery pass: proofs + regression, review instruments, ticks with proof notes, the two commits |
 | review | `/spec-review` | portable three-stage code review — a diff, a PR, a branch, or the whole repo: the repo's own checks as a mechanical gate, specialist lenses with independent confirmation, synthesis + merge recommendation; any time, no spec required |
 | ship | `/spec-ship <spec>` | integration — push, a PR drafted from the spec's records, CI read, review comments → fix-round evidence, re-pointing the delivery record after a squash-merge; never force-pushes or merges |
@@ -77,28 +77,29 @@ The authoring playbook and the workflow graph's node table live in
 
 ## How the workflow works
 
-Scheduling is a frontier computation over a graph of fifteen nodes
-(six role-spawn nodes — survey, research, plan, tech, qa, tasks —
-plus orchestrator/mechanical nodes: spec, clarify, research-gate,
-intent, execute, verify, approve, tick-commit, archive; at `Tier:
-tiny` the five authoring nodes are SKIPPED and the spec's own § Tasks
-drive execute — D-037):
+Scheduling is a frontier computation over a graph of fourteen nodes
+(five role-spawn nodes — research, tech, plan, qa, tasks — plus
+orchestrator/mechanical nodes: spec, clarify, research-gate, intent,
+execute, verify, approve, tick-commit, archive; at `Tier: tiny` the
+four authoring nodes are SKIPPED and the spec's own § Tasks drive
+execute — D-037):
 
 1. **Compute the frontier** — `python3 scripts/graph.py specs/<name>`
    prints every node's state (`done` / `READY` / `blocked(reason)` /
    `gate:undetermined` / `SKIPPED`) with reasons, derived from doc state
    alone.
 2. **Run the ready frontier as one wave** — every ready agent node
-   spawns in a single message (analyst survey ∥ research, then architect
-   plan ∥ tech with the tester, then architect tasks, then developer batches).
+   spawns in a single message (architect tech ∥ the tester, then
+   architect plan, then architect tasks once test.md exists, then
+   developer batches; the research analyst runs out-of-band).
    Each agent writes its artifact to disk and returns only a short
    digest.
 3. **Recompute and repeat** until the graph completes (archive).
 
 Loop edges are first-class: the clarify loop (open `NEEDS CLARIFICATION`
 markers hold the spec), fix rounds capped at 5 per task (`(fix n/5)` open in
-task.md, `(fixed n/5)` once the round lands), re-briefs on gap digests, and converge (survey staleness →
-re-survey → `audit.py converge` → appended tasks re-enter execute).
+task.md, `(fixed n/5)` once the round lands), re-briefs on gap digests, and converge (Code state staleness →
+delta re-ground → `audit.py converge` → appended tasks re-enter execute).
 
 **Human gates are never auto-satisfied** — by any script: clarify, the
 research run/skip gate (an orchestrator judgment), user approval
@@ -127,7 +128,7 @@ delivery record C2. Nothing is committed before it.
 
 Right-sizing is explicit at two axes: the CONTRACT tier (`Tier: tiny`
 — one file with § Tasks inside, the scaffold default; `full` — the
-seven-file docset; `migrate.py grow` promotes between them with ids
+five-file docset; `migrate.py grow` promotes between them with ids
 preserved — D-037) and the effort tier (standard merges the design
 wave; large/high-risk changes add threat modeling, rollback design,
 and both auditor modes). Every full-tier spec triages the six NFR
@@ -380,7 +381,7 @@ pointed at as intent input for `/spec-define <name>`, not parsed.
 | Command | Lands on |
 |---|---|
 | `/spec-define <name>` | intake: analyst + grill until the question frontier is empty, producing a validated `intent.md` (a bug takes the bugfix deltas) |
-| `/spec-design <spec>` | the authoring waves: draft spec.md from the intent, then survey → plan ∥ tech ∥ qa → tasks → verify, to the approve gate |
+| `/spec-design <spec>` | the authoring waves: draft spec.md from the intent, then tech ∥ qa → plan → tasks → verify, to the approve gate |
 | `/spec-build implement <spec> [T###]` | spec-build's developer waves; nothing ticked or committed |
 | `/spec-build test <spec>` | the proof pass: every TC pass condition green + regression gate |
 | `/spec-build audit <spec>` | review instruments: scope diff, cleanliness sweep, implementation-diff review, DoD scorecard |
@@ -400,7 +401,7 @@ entries are `/skill:spec-define`, `/skill:spec-design`,
 
 `/spec-define`, `/spec-design`, `/spec-build` each take
 `<verb> <spec-name>` — single nodes and repair runs (or naturally:
-"re-survey the auth spec"):
+"re-ground the auth spec"):
 
 | Verb | Does |
 |---|---|
@@ -408,15 +409,15 @@ entries are `/skill:spec-define`, `/skill:spec-design`,
 | `graph <spec>` | the workflow graph's live picture: `scripts/graph.py specs/<spec>` (`--state-json`, `--mermaid`, `--explain <node>`) |
 | `run <spec>` | continue the pipeline from current doc state: `scripts/graph.py specs/<spec> --run --span intent\|shape\|execute\|full` — waves run, `AWAITING HUMAN` at every judgment node; `--runner` template for real spawns, `--dry-run`, `--max-waves N` |
 | `resume <spec>` | the same continuation, worked manually per SKILL.md (orchestrator judgment at every step) |
-| `survey` `research` `plan` `tech` `qa` `tasks` `review` | single-agent runs of one node (repair/refresh; `check.py` after) |
+| `research` `tech` `plan` `qa` `tasks` `review` | single-agent runs of one node (repair/refresh; `check.py` after) |
 | `check <spec>` | `scripts/check.py specs/<spec>` and triage the output |
 | `freeze <spec>` | after an explicit user yes only: `scripts/freeze.py <spec> --record` writes the approval hash manifest |
-| `converge <spec>` | re-survey, then `scripts/audit.py converge specs/<spec> --repo <path>` (`--repo` defaults to the spec dir's grandparent); append a task per NEW GAP/REGRESSED |
+| `converge <spec>` | re-ground (`--repair tech`), then `scripts/audit.py converge specs/<spec> --repo <path>` (`--repo` defaults to the spec dir's grandparent); append a task per NEW GAP/REGRESSED |
 | `implement <spec> [T###]` | the execute node: waves of developer agents; nothing commits until the plan-wide delivery pass proves every task |
 | `archive <spec>` | after `Status: done`: `scripts/archive.sh <spec>` moves the dir to `specs/archive/<date>-<name>/` and repoints INDEX |
 
 A typical pass: `scaffold` → author spec.md with the user → research
-gate → survey ∥ research → plan ∥ tech ∥ qa → tasks → verify
+gate → tech ∥ qa → plan → tasks → verify
 (`check.py` green) → pre-flight (baseline green) → contract review +
 `approvals/review.md` → user approval → `freeze.py --record` → execute
 (developer waves) → delivery pass → ticks → C1 → C2 → `archive`.
@@ -434,7 +435,7 @@ alternates the two —
 | Step | Surface | What happens |
 |---|---|---|
 | 1 | session — `/spec-define <name>`, then `/spec-design <name>` | intake grills the idea into a validated intent.md; spec-design drafts spec.md from it (clarify loop) and decides the research gate: `skip` → keep the not-applicable marker; `run` → replace research.md with the template and spawn the research analyst out-of-band |
-| 2 | engine — `graph.py --run --span shape` | survey ∥ research → plan ∥ tech ∥ qa → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
+| 2 | engine — `graph.py --run --span shape` | tech ∥ qa → plan → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
 | 3 | session | pre-flight (baseline green on the spec's branch), contract review recorded in `approvals/review.md` (full tier), present the docset, get the explicit yes → `freeze.py --record`, then `Status: approved` |
 | 4 | engine — rerun `--run --span execute` | execute waves hands-off: one developer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
 | 5 | session — `/spec-build test/audit/ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
@@ -459,14 +460,14 @@ root:
 
 | Script | Purpose |
 |---|---|
-| `scaffold.sh [--tier tiny\|full] <name> [root]` | create `specs/<name>/` (`tiny`: spec.md only, the default; `full`: the seven templates), register in INDEX; refuses overwrite, requires kebab-case |
-| `check.py <spec-dir>` | the doc-set validator: 7 files, FR/NFR→T→TC traceability, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze integrity, constitution; `--survey-only`, `--intent-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
+| `scaffold.sh [--tier tiny\|full] <name> [root]` | create `specs/<name>/` (`tiny`: spec.md only, the default; `full`: the five contract templates), register in INDEX; refuses overwrite, requires kebab-case |
+| `check.py <spec-dir>` | the doc-set validator: 5 contract files, FR/NFR→T→TC traceability and TC ownership, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze integrity, constitution; `--code-state-only`, `--intent-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
 | `freeze.py <spec-dir>` | approval freeze: `--record` writes the approved-doc hash manifest after explicit sign-off (existing manifests refuse overwrite; `--record --force` represents a fresh approval; `--by "<name>"` records each approver); `--verify` is read-only |
 | `index.py <spec-dir>` | render the spec's `specs/INDEX.md` line (status · type · tier · depends on) — the INDEX's only writer; `--all <specs-root>` renders every spec |
 | `audit.py <sub> <spec-dir>` | review instruments: `scope` (defaults to the approval-freeze SHA), `clean`, `proofs --run`, `mutate` (mutation testing over the changed files), `coverage` (line-coverage floor over the tasks' intended files), `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
 | `graph.py <spec-dir>` | the workflow engine: frontier report, `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads; `--native-agents` names the registered agent type and omits the brief it already carries), `--run [--runner] [--dry-run] [--max-waves N]`, `--span intent\|shape\|execute\|full` |
 | `tick.py` | the atomic task tick with its proof note (spec-build) |
-| `migrate.py grow <spec-dir>` | promote a tiny-tier docset to the full seven-file contract, ids preserved (spec-build) |
+| `migrate.py grow <spec-dir>` | promote a tiny-tier docset to the full five-file contract, ids preserved (spec-build) |
 | `archive.sh <name> [root]` | move a `Status: done` spec to `specs/archive/<date>-<name>/`, repoint INDEX |
 | `skill-dir.sh` | print the active skill directory (spawn-payload `skill_dir`) |
 

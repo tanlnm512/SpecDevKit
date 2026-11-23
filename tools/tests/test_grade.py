@@ -69,7 +69,7 @@ class HelperTests(unittest.TestCase):
 
     def test_composite_text_carries_lens_sections(self):
         composite = grade.skill_protocol_text("spec-design")
-        self.assertIn("## Lens: survey", composite)
+        self.assertIn("## Lens: tech", composite)
         self.assertIn("digest:", composite)
 
     def test_bucket_boundaries(self):

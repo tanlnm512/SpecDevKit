@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Mechanical Phase-C checks for a spec folder under specs/<name>/.
 
-Verifies what a script can: file presence (5 contract files + survey.md
-as an optional input; intent.md a second optional input,
-checked only when present), ID traceability graph (FR/NFR/AC/US/TC/D;
-FR, applicable NFR, and AC test coverage enforced, US stays WARN),
+Verifies what a script can: file presence (5 contract files; intent.md
+an optional input, checked only when present; a retired survey.md FAILs
+with the migrate command), ID traceability graph (FR/NFR/AC/US/TC/D;
+FR, applicable NFR, and AC test coverage enforced, US stays WARN; every
+TC owned by a task's `Proves:` line or listed as a regression guard),
 task-dependency and coverage-matrix consistency (including cross-phase
 `(after T###)` chains and FR→milestone coverage in plan.md), D-###
 structural completeness, burndown arithmetic (incl. the Σ total row),
@@ -13,7 +14,7 @@ round's resolution and proof), checkbox hygiene, NEEDS CLARIFICATION
 markers, unfilled template
 placeholders, vague plan phrases (TBD, "handle edge cases"…),
 citation-path reality (heuristic, any known source extension — not just
-.py), survey-baseline staleness, survey.md evidence reality (every
+.py), tech-spec Baseline staleness, § Code state evidence reality (every
 file:symbol:line citation names a real def/class — FAIL on a fabricated
 symbol, WARN on line drift), verify-command path reality (a pytest path/glob
 argument, in any contract/input file, must match a real file — WARN on
@@ -43,14 +44,15 @@ approved WARNs, an in-flight spec whose pending Touches overlap this
 spec's WARNs, and the specs/INDEX.md line must match index.py's render.
 --fix-burndown repairs the burndown table from the actual task entries
 before checking; --next-ids prints the next free ID per family
-(append-scope helper) and exits; --survey-only runs just the evidence-
-reality and verify-command checks against survey.md alone (the other four
-contract files need not exist yet) — the surveyor agent's own self-check,
-meant to be run right after writing survey.md and before returning its
-digest, so a bad survey fails here instead of flowing into tech/plan/qa.
+(append-scope helper) and exits; --code-state-only runs just the
+evidence-reality and verify-command checks against tech-spec.md § Code
+state alone (the other contract files need not exist yet) — the tech
+architect's own self-check, run right after grounding and before
+returning its digest, so bad evidence fails here instead of flowing into
+plan and tasks.
 --intent-only runs just the intent artifact's own refusal families against
 specs/<name>/intent.md (the analyst+grill front end's output, an optional
-input like survey.md): unfilled/empty artifact, surviving template
+input): unfilled/empty artifact, surviving template
 placeholders, open NEEDS CLARIFICATION markers (the grilling vocabulary),
 an empty required section (Problem, Audience, Constraints, FR seeds) or
 no FR seed, a baseline sha the repo cannot resolve, and baseline
@@ -62,8 +64,8 @@ fail red — except the baseline pair, which only --intent-only fails:
 intent.md is intake-time evidence, so under a docset the full check
 notes a baseline the repo cannot resolve as SKIPPED and code changed
 since the baseline as stale (a squash, rebase, shallow clone, or a
-teammate's commit must not strand an in-flight docset; survey.md's
-baseline owns freshness there).
+teammate's commit must not strand an in-flight docset; tech-spec.md's
+Baseline owns freshness there).
 --constitution runs only the repo-level specs/CONSTITUTION.md presence/fill
 check and exits — a scriptable form of the constitution-presence gate,
 usable standalone (no spec dir contract files needed) as a pre-flight or CI
@@ -75,12 +77,12 @@ the *first* one. --checklist additionally writes specs/<name>/checklist.md
 (regenerate-only, never hand-edited; task.md stays the only status holder).
 
 Usage: check.py <spec-dir> [--repo <path>] [--fix-burndown] [--next-ids] [--checklist]
-       check.py <spec-dir> [--repo <path>] --survey-only
+       check.py <spec-dir> [--repo <path>] --code-state-only
        check.py <spec-dir> [--repo <path>] --intent-only
        check.py <spec-dir> [--repo <path>] --constitution
        check.py -h | --help        (prints this text, exit 0)
        e.g. check.py specs/postgres-backend --repo ../.. --fix-burndown
-       e.g. check.py specs/postgres-backend --repo ../.. --survey-only
+       e.g. check.py specs/postgres-backend --repo ../.. --code-state-only
        e.g. check.py specs/postgres-backend --repo ../.. --intent-only
        e.g. check.py specs/postgres-backend --repo ../.. --constitution
 Exit:  0 = pass (warnings allowed) · 1 = at least one FAIL · 2 = usage error
@@ -115,6 +117,8 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     TaskEntry,
     WORK_TYPES,
     code_paths,
+    code_state,
+    doc_baseline,
     defined_ids,
     delivery_state,
     diff_paths,
@@ -127,10 +131,11 @@ from specstate import (  # noqa: E402 - the sys.path setup above runs first
     spec_status,
     spec_tier,
     spec_type,
-    survey_baseline,
     research_state,
     task_touches,
     task_entries,
+    task_proves,
+    regression_guards,
     tiny_task_text,
 )
 import freeze  # noqa: E402 - sibling module, loaded through scripts/
@@ -151,9 +156,10 @@ REQUIRED_SECTIONS = (
 PRESERVES_LINE = re.compile(r"^\s*-\s+\*\*Preserves\*\*:\s*\S", re.M)
 APPROVED_STATUSES = ("approved", "active", "done")
 IN_FLIGHT_STATUSES = ("approved", "active")
-# Stage-1 inputs: created by scaffold.sh, optional (WARN not FAIL) here.
-INPUT_FILES = ["survey.md"]
-ALL_FILES = CONTRACT_FILES + INPUT_FILES
+ALL_FILES = CONTRACT_FILES
+RETIRED_SURVEY = "survey.md"
+MIGRATE_STEP = ("fold it into tech-spec.md § Code state: spec-build's "
+                "`scripts/migrate.py <spec-dir> upgrade --apply`")
 
 # Zero-width/invisible/bidi-control characters. A zero-width space inserted between an ID's digits and its closing
 # `**` (e.g. "FR-001" + ZWSP + "**") silently breaks the DEFINITIONS regex,
@@ -178,7 +184,7 @@ INVISIBLE = re.compile(
 
 # Vague plan phrases — writing-plans calls these "plan failures": a step
 # that describes what to do without pinning it down. WARN-only, and bare
-# "TODO" is deliberately absent (it is survey-status vocabulary, not a
+# "TODO" is deliberately absent (it is Code state status vocabulary, not a
 # placeholder); the auditor agent judges the real thing.
 VAGUE = re.compile(
     r"\bTBD\b|\bFIXME\b|implement later|fill in details|"
@@ -234,10 +240,10 @@ CODE_EXT = {
 # Characters that mark a backtick span as prose / glob / code, not a path.
 NON_PATH = set("*?$<>()[]{}|\"'!;,")
 
-# survey.md evidence citation shape: `<path with extension>:<symbol>:<line>`,
+# § Code state evidence citation shape: `<path with extension>:<symbol>:<line>`,
 # e.g. `agent_runtime/app/adk/runner.py:_run_workflow_async:214`. Matches the
-# surveyor's own template ("file:symbol with line — copied verbatim from
-# grep/read output"). Surveyors have written plausible but nonexistent symbol
+# template's own item shape ("file:symbol with line — copied verbatim from
+# grep/read output"). Authors have written plausible but nonexistent symbol
 # names and far-off line numbers; this check catches both mechanically.
 EVIDENCE_CITATION = re.compile(r"([\w./-]+\.\w+):([A-Za-z_]\w*):(\d+)\b")
 
@@ -272,7 +278,7 @@ def _baseline_head_probe(
 ) -> tuple[Path | None, str, bool]:
     """(repo containing the baseline commit, its short HEAD, whether any
     candidate .git was seen) — the probe behind every baseline-staleness
-    diagnosis (survey.md's and intent.md's).
+    diagnosis (tech-spec.md's and intent.md's).
 
     The baseline commit may live in repo_root itself (single-repo
     layout) or in one of its immediate subdirectories (a multi-repo
@@ -328,10 +334,10 @@ def _baseline_head_probe(
 # glob argument. A wrong path matches zero files and pytest silently reports
 # nothing to run, instead of failing loudly.
 PYTEST_CMD = re.compile(r"`([^`\n]*\bpytest\b[^`\n]*)`")
-# survey.md's own `verify:` lines sit inside the item list's ``` fence, not
-# wrapped in single backticks like tech-spec.md/plan.md/test.md, so a plain
+# § Code state's own `verify:` lines sit inside the item list's ``` fence,
+# not wrapped in single backticks like the rest of the docset, so a plain
 # PYTEST_CMD scan would skip them. Matched separately, backticks optional.
-SURVEY_VERIFY_LINE = re.compile(r"^\s*verify:\s*(.+)$", re.M)
+STATE_VERIFY_LINE = re.compile(r"^\s*verify:\s*(.+)$", re.M)
 
 
 def _pytest_target_exists(repo_root: Path, tok: str) -> bool:
@@ -385,11 +391,11 @@ def defined(text: str, kind: str) -> set[str]:
 def parse_args(
     argv: list[str],
 ) -> tuple[str, str | None, bool, bool, bool, bool, bool, bool] | None:
-    """Return (spec_dir, repo_override, fix_burndown, next_ids, survey_only,
-    intent_only, constitution_only, checklist) or None."""
+    """Return (spec_dir, repo_override, fix_burndown, next_ids,
+    code_state_only, intent_only, constitution_only, checklist) or None."""
     fix = "--fix-burndown" in argv
     ids = "--next-ids" in argv
-    survey_only = "--survey-only" in argv
+    code_state_only = "--code-state-only" in argv
     intent_only = "--intent-only" in argv
     constitution_only = "--constitution" in argv
     checklist = "--checklist" in argv
@@ -399,7 +405,7 @@ def parse_args(
     while i < len(argv):
         a = argv[i]
         if a in (
-            "--fix-burndown", "--next-ids", "--survey-only",
+            "--fix-burndown", "--next-ids", "--code-state-only",
             "--intent-only", "--constitution", "--checklist",
         ):
             i += 1
@@ -413,33 +419,21 @@ def parse_args(
             i += 1
     if len(rest) != 1:
         return None
-    return rest[0], repo, fix, ids, survey_only, intent_only, constitution_only, checklist
+    return rest[0], repo, fix, ids, code_state_only, intent_only, constitution_only, checklist
 
 
-def survey_only_check(spec_dir: Path, repo_root: Path) -> int:
-    """Check just survey.md's own evidence citations and verify-command
-    paths — the two checks a surveyor agent can and should run on itself
-    right after writing survey.md, before returning its digest. Deliberately
-    skips everything that needs the other four contract files (they don't
-    exist yet at Stage 1) so this catches a bad survey BEFORE tech/plan/qa
-    build on it, rather than only at the full check.py.
-    """
-    p = spec_dir / "survey.md"
-    if not p.exists():
-        print("FAIL: survey.md missing")
-        return 1
-    survey = INVISIBLE.sub("", p.read_text(encoding="utf-8", errors="replace"))
-    if not survey:
-        print("FAIL: survey.md is empty")
-        return 1
-
+def evidence_findings(state: str, repo_root: Path) -> tuple[list[str], list[str]]:
+    """(fails, warns) for § Code state's `file:symbol:line` citations: a
+    symbol that is no def/class in a real file FAILs (a fabricated
+    citation); a real symbol at another line WARNs (drift since the
+    grounding, already flagged in aggregate by Baseline staleness)."""
     fails: list[str] = []
     warns: list[str] = []
-
-    for path_s, symbol, line_s in sorted(set(EVIDENCE_CITATION.findall(survey))):
+    for path_s, symbol, line_s in sorted(set(EVIDENCE_CITATION.findall(state))):
         target = repo_root / path_s
         if not target.exists():
-            warns.append(f"file not found: {path_s} (cited for {symbol})")
+            warns.append(f"code state evidence: file not found: {path_s} "
+                         f"(cited for {symbol})")
             continue
         try:
             target_text = target.read_text(encoding="utf-8", errors="replace")
@@ -448,16 +442,42 @@ def survey_only_check(spec_dir: Path, repo_root: Path) -> int:
         def_lines = _symbol_def_lines(target_text, symbol)
         if not def_lines:
             fails.append(
-                f"{symbol!r} not found (def/class) in {path_s} (cited at line {line_s})"
-            )
+                f"code state evidence: {symbol!r} not found (def/class) in "
+                f"{path_s} (cited at line {line_s})")
         elif int(line_s) not in def_lines:
             warns.append(
-                f"{path_s}:{symbol} cited at line {line_s}, actually at {def_lines} "
-                "— fix the citation"
-            )
+                f"code state evidence: {path_s}:{symbol} cited at line "
+                f"{line_s}, actually at {def_lines} — re-ground or fix the "
+                "citation")
+    return fails, warns
 
+
+def code_state_only_check(spec_dir: Path, repo_root: Path) -> int:
+    """Check just tech-spec.md § Code state's evidence citations and
+    verify-command paths — the tech architect's self-check right after
+    grounding, before plan and tasks build on it. Needs no other
+    contract file."""
+    p = spec_dir / "tech-spec.md"
+    tech = (INVISIBLE.sub("", p.read_text(encoding="utf-8", errors="replace"))
+            if p.exists() else "")
+    state = code_state(tech)
+    fails: list[str] = []
+    warns: list[str] = []
+    if (spec_dir / RETIRED_SURVEY).exists():
+        fails.append(f"retired {RETIRED_SURVEY} present — {MIGRATE_STEP}")
+    if not tech:
+        fails.append("tech-spec.md missing or empty")
+    elif not state.strip():
+        fails.append("tech-spec.md has no `## Code state` section (or it is "
+                     "empty) — ground every requirement there")
+    elif doc_baseline(tech) is None:
+        fails.append("tech-spec.md has no filled `**Baseline**: <version> @ "
+                     "<sha>` header — record the HEAD you grounded against")
+    ev_fails, ev_warns = evidence_findings(state, repo_root)
+    fails += ev_fails
+    warns += ev_warns
     seen: set[str] = set()
-    for m in SURVEY_VERIFY_LINE.finditer(survey):
+    for m in STATE_VERIFY_LINE.finditer(state):
         cmd = m.group(1).strip()
         if "pytest" not in cmd:
             continue
@@ -469,7 +489,7 @@ def survey_only_check(spec_dir: Path, repo_root: Path) -> int:
             if not _pytest_target_exists(repo_root, tok_clean):
                 warns.append(f"verify command path matches no file: `{tok_clean}` (in `{cmd}`)")
 
-    print(f"survey-only check: {p}")
+    print(f"code-state-only check: {p}")
     for w in warns:
         print(f"  WARN  {w}")
     for f_ in fails:
@@ -528,7 +548,7 @@ def intent_failures(intent: str, repo_root: Path, delivered: bool = False,
     intake-time evidence, and a squash, rebase, shallow clone, or a
     teammate's commit moves the repo under an in-flight docset whose
     intake already passed, so off the gate both are notes and
-    survey.md's baseline owns freshness."""
+    tech-spec.md's Baseline owns freshness."""
     if not intent.strip():
         return ["intent.md is unfilled or empty"], []
     fails: list[str] = []
@@ -554,7 +574,7 @@ def intent_failures(intent: str, repo_root: Path, delivered: bool = False,
         fails.append(
             "intent.md: `## FR seeds` holds no `- **FR-###**:` seed"
         )
-    bl = survey_baseline(intent)
+    bl = doc_baseline(intent)
     if bl is None:
         if re.search(r"Baseline\*\*[^\n]*<[^>\n]*>", intent):
             fails.append(
@@ -609,7 +629,7 @@ def intent_failures(intent: str, repo_root: Path, delivered: bool = False,
             notes.append(
                 f"intent staleness: stale — code changed since baseline "
                 f"{sha} (HEAD {head}{where}); intake-time evidence, "
-                "survey.md owns freshness"
+                "tech-spec.md's Baseline owns freshness"
             )
     return fails, notes
 
@@ -1194,7 +1214,7 @@ def cross_spec_findings(spec_dir: Path,
             warns.append(
                 f"overlap: in-flight spec {name} ({other_status}) also "
                 f"touches `{hit}` — order the two with a `**Depends on**` "
-                "header, or re-survey once it lands")
+                "header, or re-ground once it lands")
     return fails, warns
 
 
@@ -1441,7 +1461,7 @@ def main(argv: list[str] | None = None) -> int:
     if parsed is None:
         print(__doc__)
         return 2
-    spec_dir_s, repo_arg, do_fix, do_ids, survey_only, intent_only, constitution_only, do_checklist = parsed
+    spec_dir_s, repo_arg, do_fix, do_ids, code_state_only, intent_only, constitution_only, do_checklist = parsed
     spec_dir = Path(spec_dir_s)
     if not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory")
@@ -1449,8 +1469,8 @@ def main(argv: list[str] | None = None) -> int:
     # specs/<name>/ is two levels below the repo root.
     repo_root = Path(repo_arg) if repo_arg else spec_dir.parent.parent
 
-    if survey_only:
-        return survey_only_check(spec_dir, repo_root)
+    if code_state_only:
+        return code_state_only_check(spec_dir, repo_root)
     if intent_only:
         return intent_only_check(spec_dir, repo_root)
     if constitution_only:
@@ -1467,20 +1487,25 @@ def main(argv: list[str] | None = None) -> int:
     notes: list[str] = []  # informational lines — visible, never warn/fail
     texts = {}
 
-    # 1. contract files exist and are non-trivial; survey.md is an
-    # optional input (WARN not FAIL)
+    # 1. contract files exist and are non-trivial; the retired survey.md
+    # is migrate.py's to fold, never read here
     for f in ALL_FILES:
         p = spec_dir / f
         t = p.read_text(encoding="utf-8") if p.exists() else ""
         t = INVISIBLE.sub("", t)
         texts[f] = t
         if not t:
-            if f in CONTRACT_FILES:
-                fails.append(f"missing/empty: {f}")
-            else:
-                warns.append("missing/empty: survey.md (input, optional)")
-        elif f in CONTRACT_FILES and len(t) < 200:
+            fails.append(f"missing/empty: {f}")
+        elif len(t) < 200:
             warns.append(f"suspiciously short (<200 chars): {f}")
+    if (spec_dir / RETIRED_SURVEY).exists():
+        # a done docset is a record migrate.py refuses to touch
+        (warns if spec_status(texts["spec.md"]) == "done" else fails).append(
+            f"retired {RETIRED_SURVEY} present — {MIGRATE_STEP}")
+    state = code_state(texts["tech-spec.md"])
+    if texts["tech-spec.md"] and not state.strip():
+        warns.append("tech-spec.md has no `## Code state` section — the "
+                     "grounding every task status cites")
 
     # 1a. the research gate's artifact: `## Questions & options` in
     # tech-spec.md (full tier). Unresolved sections warn the way the old
@@ -1503,7 +1528,7 @@ def main(argv: list[str] | None = None) -> int:
         print_next_ids(texts)
         return 0
 
-    # 1b. intent.md — optional input beside survey.md, but
+    # 1b. intent.md — an optional input, but
     # with FAIL teeth: absent → not checked, no warn (specs shaped without
     # an analyst pass must stay green); present → the --intent-only refusal
     # families run here too, less the baseline pair (notes off the gate).
@@ -1520,7 +1545,7 @@ def main(argv: list[str] | None = None) -> int:
     # 1c. repo-level baselines, checked once against the repo root (both
     # are cross-spec, not members of any one spec folder): the shared
     # constitution — scaffold.sh creates it on the repo's first scaffold —
-    # and the surveyor's context baseline. WARN-only: process inputs, not
+    # and the tech architect's context baseline. WARN-only: process inputs, not
     # per-spec contract files.
     constitution_filled, constitution_msg = constitution_status(repo_root)
     if not constitution_filled:
@@ -1533,7 +1558,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"constitution: {constitution_msg} — {CONSTITUTION_STEP}")
     if not (repo_root / "specs" / "context").is_dir():
         warns.append(
-            "no specs/context/ baseline (surveyor writes it "
+            "no specs/context/ baseline (the tech architect writes it "
             "on the repo's first spec)"
         )
 
@@ -1752,6 +1777,17 @@ def main(argv: list[str] | None = None) -> int:
     for ac in sorted(acs):
         if not any(re.search(rf"\b{ac}\b", blk) for blk in tc_blocks.values()):
             fails.append(f"traceability: {ac} has no test case")
+    # TC ownership: every case is proven by the task that writes its test
+    # (a `Proves:` line) or listed as a regression guard — a case nobody
+    # owns lands every task on a proof that ran nothing.
+    owned = {tc for e in entries for tc in task_proves(e.block)}
+    guards = regression_guards(task)
+    by_approval(
+        [f"traceability: {tc} has no owning task (`Proves: {tc}`) and is "
+         "not a listed regression guard" for tc in sorted(tcs - owned - guards)],
+        spec_status(spec), fails, warns)
+    for ref in sorted((owned | guards) - tcs):
+        fails.append(f"dangling: {ref} owned in task.md but not defined in test.md")
     # FR/NFR → milestone coverage: planner's "every requirement in exactly one
     # milestone" rule, enforced against the ## Milestones table rows.
     # No milestone is FAIL (same severity as FR-has-no-task); membership
@@ -1906,26 +1942,25 @@ def main(argv: list[str] | None = None) -> int:
         if first in SRC_ROOTS or (repo_root / first).is_dir():
             warns.append(f"citation path not found: {span}")
 
-    # 8. survey staleness: baseline hash vs the repo's HEAD (the header
-    # parse itself is specstate.survey_baseline; the diagnosis branches
-    # below only decide how to word an unusable header)
-    survey = texts["survey.md"]
-    bl = survey_baseline(survey)
+    # 8. Code state staleness: tech-spec.md's Baseline vs the repo's HEAD
+    # (the header parse itself is specstate.doc_baseline; the diagnosis
+    # branches below only decide how to word an unusable header)
+    bl = doc_baseline(tech)
     if bl is None:
-        if not survey:
-            pass  # already reported by check 1 (missing/empty: survey.md)
-        elif re.search(r"Baseline\*\*[^\n]*<[^>\n]*>", survey):
+        if not tech:
+            pass  # already reported by check 1 (missing/empty: tech-spec.md)
+        elif re.search(r"Baseline\*\*[^\n]*<[^>\n]*>", tech):
             warns.append(
-                "survey.md baseline is an unfilled placeholder "
-                "(<version @ commit>) — fill it from the survey run"
+                "tech-spec.md baseline is an unfilled placeholder "
+                "(<version @ commit>) — fill it from the grounding run"
             )
-        elif "Baseline" in survey:
+        elif "Baseline" in tech:
             warns.append(
-                "survey.md baseline header has no commit hash "
+                "tech-spec.md baseline header has no commit hash "
                 "(expected `**Baseline**: <version> @ <sha>`)"
             )
         else:
-            warns.append("survey.md has no baseline header")
+            warns.append("tech-spec.md has no baseline header")
     else:
         sha = bl[1]
         repo_hit, head, saw_git_dir = _baseline_head_probe(repo_root, sha)
@@ -1948,8 +1983,8 @@ def main(argv: list[str] | None = None) -> int:
                 where = (f" (repo: {repo_hit.name})"
                          if repo_hit != repo_root else "")
                 warns.append(
-                    f"survey baseline {sha}, HEAD {head}{where} — "
-                    "re-survey before trusting statuses"
+                    f"tech-spec baseline {sha}, HEAD {head}{where} — "
+                    "re-ground § Code state before trusting statuses"
                 )
             else:
                 notes.append(
@@ -1957,38 +1992,14 @@ def main(argv: list[str] | None = None) -> int:
                     f"brainstorms/) changed since baseline {sha} (HEAD {head})"
                 )
 
-    # 9. survey.md evidence reality: every `file:symbol:line` citation must
-    # name a real file and a real def/class in it. FAIL when the symbol
-    # doesn't exist anywhere in the file — that's a fabricated citation, the
-    # exact defect class this check exists to catch, and confirming it is
-    # cheap once the path itself is known to exist. WARN when the symbol is
-    # real but at a different line — ordinary drift since the survey was
-    # written (already flagged in aggregate by check 8's baseline-staleness
-    # check) is a softer, more forgivable defect than an invented name.
-    for path_s, symbol, line_s in sorted(set(EVIDENCE_CITATION.findall(survey))):
-        target = repo_root / path_s
-        if not target.exists():
-            warns.append(f"survey evidence: file not found: {path_s} (cited for {symbol})")
-            continue
-        try:
-            target_text = target.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        def_lines = _symbol_def_lines(target_text, symbol)
-        if not def_lines:
-            fails.append(
-                f"survey evidence: {symbol!r} not found (def/class) in {path_s} "
-                f"(cited at line {line_s})"
-            )
-        elif int(line_s) not in def_lines:
-            warns.append(
-                f"survey evidence: {path_s}:{symbol} cited at line {line_s}, "
-                f"actually at {def_lines} — re-survey or fix the citation"
-            )
+    # 9. § Code state evidence reality (fabricated symbol FAIL, drift WARN)
+    ev_fails, ev_warns = evidence_findings(state, repo_root)
+    fails += ev_fails
+    warns += ev_warns
 
     # 10. verify-command path reality: a pytest invocation's path/glob
-    # arguments (across every contract/input file, not just survey.md —
-    # tech-spec.md/plan.md/test.md/task.md all copy verify commands forward)
+    # arguments (across every contract file — tech-spec.md/plan.md/test.md/
+    # task.md all copy verify commands forward)
     # must match at least one real file. WARN: a glob matching zero files
     # today could legitimately be a not-yet-written test, but silently
     # matching nothing hides a wrong path.
@@ -2009,9 +2020,9 @@ def main(argv: list[str] | None = None) -> int:
     for f in ALL_FILES:
         for m in PYTEST_CMD.finditer(texts[f]):
             _check_pytest_cmd(f, m.group(1))
-    for m in SURVEY_VERIFY_LINE.finditer(survey):
+    for m in STATE_VERIFY_LINE.finditer(state):
         if "pytest" in m.group(1):
-            _check_pytest_cmd("survey.md", m.group(1).strip())
+            _check_pytest_cmd("tech-spec.md", m.group(1).strip())
 
     print(f"check: {spec_dir}")
     print(

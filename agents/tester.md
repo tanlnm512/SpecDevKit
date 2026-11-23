@@ -5,8 +5,9 @@ description: >-
   — TC-### Given/When/Then cases with observable pass conditions, traced to
   every FR and AC, the Given/When/Then in business language with no file
   paths or symbols.
-  Blind to the implementation: reads spec.md and survey.md only, never
-  tech-spec.md or plan.md. Spawned only by the spec-design orchestrator.
+  Blind to the implementation: of the docset it reads spec.md only,
+  never tech-spec.md, plan.md, or task.md. Spawned only by the
+  spec-design orchestrator.
 model: inherit
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill
 disallowedTools:
@@ -24,7 +25,7 @@ disallowedTools:
 requirements, blind to implementation.
 **Type**: general-purpose · **Def**: this file — the frontmatter above is
 harness-enforced where the harness honors agent defs
-**Readiness**: spec + survey done (never reads plan/tech — parallel-safe) → the qa node · **Parallel with**: the design lenses
+**Readiness**: spec done (reads spec.md only — parallel-safe) → the qa node · **Parallel with**: the tech and plan lenses; the tasks lens waits for your test.md
 **Writes**: `specs/<name>/test.md`
 
 **Shared rules**: your payload's `skill_dir` names this skill's real
@@ -32,14 +33,15 @@ directory (never guess it); `<skill_dir>/protocol/shared-protocol.md`
 § Universal rules apply — already in your payload.
 
 ## Input payload (orchestrator embeds)
-1. Spec dir path (read spec.md and survey.md yourself — NOT tech-spec.md)
+1. Spec dir path (read spec.md yourself — NOT tech-spec.md, plan.md, or task.md)
 
 ## Method
 1. Read spec.md for intent: user stories + acceptance criteria +
    FRs/NFRs. Never tech-spec.md or plan.md (see Guardrails).
-2. Read survey.md for one thing only: which FRs/NFRs are already DONE/PARTIAL —
-   those cases are regression guards, and their pass condition can cite the
-   existing verify command.
+2. Write a case for every requirement whether or not the code may
+   already satisfy it — which cases are regression guards over existing
+   behavior is the tasks lens's call, made from tech-spec.md § Code
+   state; you never mark one.
 3. Per FR and applicable NFR write ≥1 TC: Given/When/Then + an observable pass condition
    (exact command or human observation). Given/When/Then in business
    language — no file paths, no symbols, no stack. The `**Pass
@@ -77,11 +79,12 @@ directory (never guess it); `<skill_dir>/protocol/shared-protocol.md`
     stories and ACs may be absent — write behavior-preservation TCs
     instead. Each pins one existing observable behavior that must
     survive, adds a `- **Preserves**: <the behavior>` line beside its
-    trace line, and takes its pass condition from a command that is
-    green today (survey.md's verify commands are the source); check.py
+    trace line, and takes its pass condition from a command meant to be
+    green today (the repo's own test runner on that behavior); check.py
     FAILs such a spec with no `**Preserves**:` TC. `bugfix | hotfix`:
-    the first TC is the regression case — its pass condition is the
-    survey's repro, red on today's code and green once fixed.
+    the first TC is the regression case — its pass condition reproduces
+    the failure spec.md describes, red on today's code and green once
+    fixed.
 
 ## Parser-exact formats (what the tooling actually parses)
 
@@ -119,9 +122,9 @@ condition, check.py enforces traceability. Three shapes are load-bearing:
 ## Before you return
 Run `python3 <skill_dir>/scripts/check.py <spec-dir> --repo <repo-root>`
 and clear every FAIL on test.md — missing Given/When/Then, no pass
-condition, missing trace line, requirement without a TC. While the
-design lenses run in parallel, FAILs on plan.md, tech-spec.md, and
-task.md are not yours — ignore them.
+condition, missing trace line, requirement without a TC. FAILs on
+plan.md, tech-spec.md, and task.md — TC ownership included — are not
+yours: the tasks lens runs after you.
 
 ## Done when
 - Every AC, FR, and applicable NFR traced; every TC has an observable pass condition; the
@@ -130,9 +133,10 @@ task.md are not yours — ignore them.
   `digest: TCs <n> · requirement coverage <n>/<total FRs+NFRs> · untestable <requirement ids or none>`
 
 ## Guardrails
-- **Never read tech-spec.md or plan.md** — in a wave or a repair run
-  alike (it already exists on disk in a repair). Nothing enforces this
-  but you; test cases derive from requirements, never from the solution.
+- **Never read tech-spec.md, plan.md, or task.md** — in a wave or a
+  repair run alike (they may already exist on disk). Nothing enforces
+  this but you; test cases derive from requirements, never from the
+  solution or the code state.
 - No implementation details leak into Given/When/Then — a case naming a
   function or file there is wrong even if convenient
 - An untestable FR is reported, not papered over with a vague case

@@ -24,17 +24,9 @@ spec-build ends at a verified commit: C1, the delivery record C2,
 `Status: done`. This skill carries that commit the rest of the way —
 branch pushed, PR opened from the spec's own facts, CI read, review
 comments answered — and stops when the PR is merged and the delivery
-record points at a commit on the default branch.
-
-Push, PR, and comments stay human gates (spec-build D-014). What
-changes here is who does the typing: on the user's yes to a shown
-preview, the session runs the command (D-001).
-
-`contracts/run.md` is the canonical statement of the run — stages,
-the script's JSON, the integrator's payload and digest; this file
-summarizes, that one arbitrates. `gates/preflight.md` arbitrates what
-may ship; `gates/outward-actions.md` arbitrates every action that
-leaves the workspace.
+record points at a commit on the default branch. Push, PR, and
+comments stay human gates; on the user's yes to a shown preview, the
+session runs the command.
 
 ## When to use
 
@@ -146,11 +138,9 @@ preview, CI again.
 
 ## The integrator (payload from agents/)
 
-`agents/integrator.md` (`spec-integrator`) — read-only, two modes:
-`pr-text` tightens the drafted title and body without touching a
-fact; `threads` classifies review threads and drafts replies. It
-runs no command and posts nothing; its digest is its whole
-deliverable. `protocol/ship-protocol.md` is the shared text its
+`agents/integrator.md` (`spec-integrator`) — read-only, modes
+`pr-text` and `threads` (steps 3 and 5); its digest is its whole
+deliverable, and `protocol/ship-protocol.md` is the shared text its
 payload carries. On a harness with registered agents, spawn the
 `spec-integrator` type with the inputs only; otherwise lead a
 general-purpose spawn with the brief body. With no subagent dispatch,
@@ -160,23 +150,22 @@ do the integrator's work inline under the same brief.
 
 | Fact | Home |
 |---|---|
-| `Shipped: PR <url>` | the status holder, beside `Delivered:` — task.md's header at full tier, spec.md § Evidence at tiny (D-002) |
+| `Shipped: PR <url>` | the status holder, beside `Delivered:` — task.md's header at full tier, spec.md § Evidence at tiny |
 | Fix-round evidence traced to a task | `specs/<name>/notes/T###.md`, under `## Fix round n` — the note spec-build's fix payload embeds |
 | Evidence no task covers | `specs/<name>/notes/ship.md` — a change outside the approved contract routes to `/spec-design` |
 | Re-pointed delivery record | written by spec-build's `tick.py --redeliver`, never by this skill |
 
-## Commands and neighbors
+## Command
 
-- `/spec-ship [verb] <name>` — this skill's router
-  (`commands/spec-ship.md`): `preflight`, `pr`, `checks`, `comments`,
-  `continue`, `status`; no verb runs from the current stage.
-- `/spec-build` — everything up to the delivery commit, and every
-  fix round; `/spec-review` — an independent review of the branch or
-  the PR; `/spec-release` — what follows the merge.
+`/spec-ship [verb] <name>` (`commands/spec-ship.md`): `preflight`,
+`pr`, `checks`, `comments`, `continue`, `status`; no verb runs from
+the current stage.
 
 ## Resource map
 
-`contracts/run.md` (canonical run contract) · `gates/preflight.md`
+`contracts/run.md` (canonical run contract — stages, script JSON,
+integrator payload and digest; this file summarizes, it arbitrates) ·
+`gates/preflight.md`
 and `gates/outward-actions.md` (what may ship, what may leave) ·
 `protocol/ship-protocol.md` (the integrator's shared rules) ·
 `templates/pr-body.md` (the PR body's shape) · `scripts/ship.py`

@@ -2,7 +2,7 @@
 name: spec-auditor
 description: >-
   Adversarial review agent in two modes. Contract mode (spec-design, before
-  the approve gate) reads the docset against survey.md; implementation-diff
+  the approve gate) reads the docset against tech-spec.md § Code state; implementation-diff
   mode (spec-build, before tick/delivery) reads the final diff against the
   recorded contract. Reports what check.py structurally cannot see — vacuous
   or over-promised test cases, untestable requirements, over-build,
@@ -43,7 +43,7 @@ never copy a credential value out of them.
 
 ## Input payload (orchestrator embeds)
 1. Spec dir path and the files to read — the payload lists them: at
-   full tier spec/plan/tech-spec/task/test and survey.md; at
+   full tier spec/plan/tech-spec/task/test; at
    `Tier: tiny` spec.md alone (the one-file contract — no other docset
    file exists, so none is missing)
 2. Mode: `contract` or `implementation-diff`; for the latter, the
@@ -51,15 +51,16 @@ never copy a credential value out of them.
    diff written beside your payload — you hold no shell and run no
    git. Its header lists the untracked files the diff omits: Read
    each in full, with the task/tech-spec/test docs needed to judge it
-3. At full tier survey.md is the evidence baseline — judge every
-   status and claim against it, never against the docs' own say-so;
+3. At full tier tech-spec.md § Code state is the evidence baseline —
+   judge every status and claim against it, never against the docs'
+   own say-so;
    at tiny tier there is none, so judge claims against what the repo
    shows you through Read/Grep
 
 ## Method
 
 **Contract mode** — review the docset (spec.md alone at tiny tier)
-against survey.md and specs/CONSTITUTION.md for checks 3–6 of the
+against tech-spec.md § Code state and specs/CONSTITUTION.md for checks 3–6 of the
 numbered list below (as they apply to the docs), plus:
 
 - **Untestable FRs/NFRs** — no observable behavior named.
@@ -105,8 +106,8 @@ implementation-diff mode all seven.
    behavior from an implementation shortcut; pass conditions true
    regardless of implementation; goldens that could pass with the same
    wrong behavior in two places.
-4. **Over-promised acceptance** — AC/FR wording stronger than the survey
-   evidence supports; PARTIALs whose gap is vague or whose verify command
+4. **Over-promised acceptance** — AC/FR wording stronger than the Code
+   state evidence supports; PARTIALs whose gap is vague or whose verify command
    does not exercise the claim.
 5. **Scope-creep or over-build** — work exceeding its cited FR:
    speculative abstractions (layers with a single caller), premature

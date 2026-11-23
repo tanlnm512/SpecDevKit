@@ -19,14 +19,14 @@ header comment has the rules; absent reads feature):
   status markers move freely, but an added, edited, or struck task
   or requirement is a re-approval (`--record --force`).
 - **`Effort: standard`** (the template default) — one merged architect
-  payload authors plan + tech + tasks, with the tester separate in the same
-  wave. Use for work inside one area.
-- **`Effort: large`** — the full plan ∥ tech ∥ qa wave, then a separate
-  tasks wave. Use for work spanning services or areas, or research-heavy
+  payload authors tech then plan, with the tester separate in the same
+  wave; tasks follows as its own spawn once test.md exists. Use for work
+  inside one area.
+- **`Effort: large`** — tech and qa as their own spawns, then plan, then
+  tasks. Use for work spanning services or areas, or research-heavy
   work. Auth, persistence or a migration inside one service does not by
   itself make it large: size by the change (a few hundred lines in one
-  service reads standard), because large costs a six-document docset and
-  a review per document. When unsure start at standard — Effort can be
+  service reads standard), because large costs a spawn per document. When unsure start at standard — Effort can be
   raised at any repair run. A missing or unknown Effort reads large.
 
 Effort has exactly these two values. `tiny` is a Tier, never an
@@ -38,9 +38,9 @@ the one the engine reads — confirm it when drafting spec.md.
 
 `scripts/scaffold.sh [--tier tiny|full] [--into-existing] <name>`
 writes the skeleton from `templates/` (default `tiny`: spec.md with
-§ Tasks, constitution; `full`: spec, plan, tech-spec, task, test,
-survey too — tech-spec ships the research gate's `## Questions &
-options` pre-filled with the skip form). `--into-existing` fills an
+§ Tasks, constitution; `full`: spec, plan, tech-spec, task, test too
+— tech-spec ships the research gate's `## Questions & options`
+pre-filled with the skip form and an unfilled `## Code state`). `--into-existing` fills an
 intake dir without overwriting anything and, at full tier, strips that
 skip form so the section stays open for the research gate. Growing a
 tiny spec to full:

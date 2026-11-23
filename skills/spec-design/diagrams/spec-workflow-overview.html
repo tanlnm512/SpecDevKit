@@ -55,7 +55,7 @@
 
     <svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="s2c-overview-title s2c-overview-desc">
       <title id="s2c-overview-title">Spec-to-Prod Workflow Graph</title>
-      <desc id="s2c-overview-desc">Flowchart of the dynamic state graph: doc state under specs/&lt;name&gt;/ drives a frontier computation — ready nodes run as one wave, then recompute — through the optional intent artifact gating survey (analyst and grill: absent → skipped as the FR-008 legacy path, present but failing → blocked), the analysis wave (survey parallel research), the authoring wave (plan, tech, qa), task breakdown, mechanical verification, human approval, implementer waves with capped fix rounds, the one proof-and-delivery pass, one tick-and-commit, and archive. Solid arrows are data edges, dotted arrows are conditional or loop edges.</desc>
+      <desc id="s2c-overview-desc">Flowchart of the dynamic state graph: doc state under specs/&lt;name&gt;/ drives a frontier computation — ready nodes run as one wave, then recompute — through the optional intent artifact gating authoring (analyst and grill: absent → skipped as the FR-008 legacy path, present but failing → blocked), the grounding wave (tech, its Code state first, parallel to a spec-only qa), the plan, task breakdown once the test cases exist, mechanical verification, human approval, implementer waves with capped fix rounds, the one proof-and-delivery pass, one tick-and-commit, and archive. Solid arrows are data edges, dotted arrows are conditional or loop edges.</desc>
       <defs>
         <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
         <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
@@ -65,7 +65,7 @@
 
       <!-- ===== Arrows (drawn first, behind nodes) ===== -->
 
-      <!-- Row 1 chain: spec/clarify -> analysis wave -> authoring wave -> tasks/verify -> approve -->
+      <!-- Row 1 chain: spec/clarify -> grounding wave -> plan -> tasks/verify -> approve -->
       <line x1="184" y1="76" x2="224" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
       <line x1="368" y1="76" x2="408" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
       <line x1="552" y1="76" x2="592" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
@@ -76,11 +76,11 @@
       <line x1="592" y1="212" x2="552" y2="212" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
       <line x1="408" y1="212" x2="184" y2="212" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
 
-      <!-- Loop edge: converge — verify/survey staleness feeds back into the analysis wave -->
+      <!-- Loop edge: converge — Code state staleness feeds back into the grounding wave -->
       <path d="M664,112 L664,140 L296,140 L296,116"
             fill="none" stroke="#eb6c36" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#arrow-accent)"/>
       <rect x="336" y="128" width="288" height="12" rx="2" fill="#f5f5f5"/>
-      <text x="480" y="137" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">converge: staleness → re-survey → appended tasks</text>
+      <text x="480" y="137" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">converge: staleness → re-ground → appended tasks</text>
 
       <!-- Loop edge: fix rounds — execute re-runs a task, capped at 5 -->
       <path d="M712,248 C712,278 688,278 664,278 C640,278 616,278 616,254"
@@ -96,17 +96,17 @@
       <text x="112" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">scaffold→draft WITH user</text>
       <text x="112" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">markers hold the frontier</text>
 
-      <!-- 2. Analysis wave -->
+      <!-- 2. Grounding wave -->
       <rect x="224" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
-      <text x="296" y="66" fill="#2d3142" font-size="11.5" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">intent → survey ∥ research</text>
+      <text x="296" y="66" fill="#2d3142" font-size="11.5" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">intent → tech ∥ qa</text>
       <text x="296" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">wave 1 · one message</text>
-      <text x="296" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">research-gate: run ∥ skip</text>
+      <text x="296" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">tech waits on the research gate</text>
 
-      <!-- 3. Authoring wave -->
+      <!-- 3. Plan -->
       <rect x="408" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
-      <text x="480" y="66" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">plan ∥ tech ∥ qa</text>
-      <text x="480" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">wave 2 · one message</text>
-      <text x="480" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">qa blind to plan/tech</text>
+      <text x="480" y="66" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">plan</text>
+      <text x="480" y="84" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">wave 2 · after tech</text>
+      <text x="480" y="98" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">milestones from the design</text>
 
       <!-- 4. Tasks -> verify -->
       <rect x="592" y="40" width="144" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>

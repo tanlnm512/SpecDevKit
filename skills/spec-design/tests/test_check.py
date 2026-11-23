@@ -67,7 +67,7 @@ class ParseArgsTests(unittest.TestCase):
             check.parse_args(["specs/x", "--fix-burndown", "--repo", "r", "--next-ids"]),
             ("specs/x", "r", True, True, False, False, False, False),
         )
-        self.assertEqual(check.parse_args(["specs/x", "--survey-only"]),
+        self.assertEqual(check.parse_args(["specs/x", "--code-state-only"]),
                          ("specs/x", None, False, False, True, False, False, False))
         self.assertEqual(check.parse_args(["specs/x", "--intent-only"]),
                          ("specs/x", None, False, False, False, True, False, False))
@@ -397,7 +397,7 @@ class SdlcCoverageTests(unittest.TestCase):
     def test_tiny_refactor_needs_an_accept_command(self):
         spec = self.copy()
         for name in ("plan.md", "tech-spec.md", "task.md", "test.md",
-                     "survey.md", "research.md"):
+                     "research.md"):
             (spec / name).unlink()
         (spec / "spec.md").write_text(TINY_REFACTOR, encoding="utf-8")
         code, out = run_check(str(spec))
@@ -840,8 +840,8 @@ class GreenFixtureTests(unittest.TestCase):
             os.chmod(hostile, 0o700)
             shutil.rmtree(hostile, ignore_errors=True)
 
-    def test_survey_only_passes(self):
-        code, out = run_check(str(FIXTURE), "--survey-only")
+    def test_code_state_only_passes(self):
+        code, out = run_check(str(FIXTURE), "--code-state-only")
         self.assertEqual(code, 0, out)
 
     def test_next_ids(self):
@@ -1352,11 +1352,47 @@ class IntentOnlyTests(unittest.TestCase):
         self.assertIn("delivery recorded", out)
 
 
-class SurveyStalenessTests(unittest.TestCase):
-    """A survey baseline goes stale when code moved under it, never when
-    only the specs tree was committed."""
+class TcOwnershipTests(unittest.TestCase):
+    """Every TC is owned — a task's `Proves:` line or a regression-guard
+    line — and a docset still holding the retired survey.md fails with
+    the migrate command."""
 
-    def test_only_a_code_change_stales_the_survey_baseline(self):
+    def test_an_unowned_case_fails_until_a_task_or_guard_owns_it(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[2], ignore_errors=True)
+        task = spec / "task.md"
+        owned = task.read_text(encoding="utf-8")
+        task.write_text(owned.replace("  - Proves: TC-001, TC-002\n",
+                                      "  - Proves: TC-002\n"),
+                        encoding="utf-8")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 1, out)
+        self.assertIn("TC-001 has no owning task", out)
+        self.assertNotIn("TC-002 has no owning task", out)
+        task.write_text(
+            task.read_text(encoding="utf-8").replace(
+                "## Conventions",
+                "## Regression guards\n- TC-001 — FR-001 DONE (Code state "
+                "item S1)\n\n## Conventions"),
+            encoding="utf-8")
+        code, out = run_check(str(spec))
+        self.assertEqual(code, 0, out)
+
+    def test_a_retired_survey_md_fails_naming_the_migration(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[2], ignore_errors=True)
+        (spec / "survey.md").write_text("# Survey: legacy\n", encoding="utf-8")
+        for argv in ((), ("--code-state-only",)):
+            code, out = run_check(str(spec), *argv)
+            self.assertEqual(code, 1, out)
+            self.assertIn("migrate.py <spec-dir> upgrade --apply", out)
+
+
+class CodeStateStalenessTests(unittest.TestCase):
+    """tech-spec.md's Baseline goes stale when code moved under it, never
+    when only the specs tree was committed."""
+
+    def test_only_a_code_change_stales_the_baseline(self):
         spec = fixture_copy()
         root = spec.parents[1]
         self.addCleanup(shutil.rmtree, root.parent, ignore_errors=True)
@@ -1377,11 +1413,11 @@ class SurveyStalenessTests(unittest.TestCase):
             ).stdout.strip()
 
         base = commit("seed.txt")
-        survey = spec / "survey.md"
-        survey.write_text(
-            survey.read_text(encoding="utf-8").replace("3fa9c21", base),
+        tech = spec / "tech-spec.md"
+        tech.write_text(
+            tech.read_text(encoding="utf-8").replace("3fa9c21", base),
             encoding="utf-8")
-        stale = "re-survey before trusting statuses"
+        stale = "re-ground § Code state before trusting statuses"
 
         commit("specs/mini-spec/notes.md")
         code, out = run_check(str(spec))

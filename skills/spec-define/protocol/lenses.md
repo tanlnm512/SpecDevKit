@@ -2,7 +2,8 @@
 
 One `## Lens: <name>` section per lens, byte-verbatim into the spawn
 payload of the archetype that carries it — here the analyst's intent
-lens (the survey · research lenses belong to the shape phase's analyst).
+lens (the research lens belongs to the shape phase's analyst; the
+shape phase's grounding is the tech lens's).
 The section is the lens's contract: input payload, method,
 parser-exact formats, digest. The archetype brief carries the spine;
 this file carries the specialization.
@@ -22,7 +23,7 @@ is the session's.
 **Method**:
 1. Scope the idea's touched areas from § Problem: the modules, files,
    and concepts the idea names or plainly touches.
-2. Survey-lens probing, scoped to those areas only: grep/read (`rg`)
+2. Probe those areas only: grep/read (`rg`)
    the codebase for each (see the spine's tool preference); paste
    evidence verbatim. For each area record: what exists, what's
    PARTIAL (the precise missing piece), and the constraints that bind
@@ -35,7 +36,7 @@ is the session's.
    § Questions in the checker's open-marker vocabulary — `[NEEDS
    CLARIFICATION: <the open question>]` — so the marker scan reads it;
    the `**Baseline**:` header, version @ the commit the facts were
-   probed at (survey.md's header shape).
+   probed at (tech-spec.md's header shape).
 
 **Exit**: run `check.py <spec-dir> --intent-only` and fix every FAIL
 on your own writes (the baseline, a line you wrote). It will not exit

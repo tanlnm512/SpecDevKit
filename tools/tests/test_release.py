@@ -188,13 +188,27 @@ it yet, and reverting that commit is the rollback.
 TECH_SPEC_MD = f'''# Tech Spec: {SPEC_NAME}
 
 **Spec**: [spec.md](spec.md) | **Created**: {TODAY}
-**Every file/symbol citation below must come verbatim from [survey.md](survey.md)
+**Baseline**: v1 @ {BASELINE_SHA}
+**Every file/symbol citation below must come verbatim from § Code state
 or a grep run in this session — never from memory.**
+
+## Code state
+```
+item 1: "calculator module lacks multiplication; add and subtract exist"
+  evidence:   calc.py:multiply:9
+  status:     DONE
+  verify:     python3 test_calc.py
+  gap:        none — both multiply tests green at delivery
+```
+
+### Supporting evidence
+The module carries exactly three public operations at delivery: add,
+subtract, multiply; the test module is its only consumer.
 
 ## Architecture
 A single module exposes pure arithmetic; a unittest module pins the public
-surface. survey.md's baseline pins the pre-multiply module at two
-operations (add, subtract).
+surface. The Baseline pins the pre-multiply module at two operations (add,
+subtract).
 
 ## Solution
 ### Chosen approach
@@ -210,7 +224,7 @@ Stage 0.
 | CLI flag before module surface | The module API is the demoable unit. |
 
 ## Impact analysis
-The module gains one function; no existing caller changes — the survey
+The module gains one function; no existing caller changes — § Code state
 lists the test module as its only consumer.
 
 ## Interfaces & data
@@ -221,19 +235,18 @@ lists the test module as its only consumer.
 
 ## Code guide
 ### Arithmetic module
-- Touches: `multiply` in `calc.py` (survey.md evidence)
+- Touches: `multiply` in `calc.py` (§ Code state evidence)
 - Approach: one pure function next to the existing operations
 - Verify before implementing: `python3 test_calc.py`
 - Pitfalls: keep it total — a zero operand returns 0 by the ordinary rule
 
 ### Lifecycle records
-- Touches: the seven files under `specs/{SPEC_NAME}/`
+- Touches: the contract files under `specs/{SPEC_NAME}/`
 - Approach: fill each contract file, run the proofs, then tick once
 - Verify before implementing: `check.py` green on the docset
 - Pitfalls: never tick without its `done <date> — <proof>` note
 
 ## References
-- [survey.md](survey.md) — module baseline and evidence.
 - The lifecycle contract: this repo consumes the spec suite's
   templates verbatim via scaffold.sh (mastered at spec-design).
 
@@ -249,7 +262,7 @@ TASK_MD = f'''# Tasks: {SPEC_NAME}
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 **Lifecycle**: v2
-Status reflects code state per [survey.md](survey.md), not intent.
+Status reflects code state per [tech-spec.md](tech-spec.md) § Code state, not intent.
 **Delivered**: commit @ - — the fixture repo keeps no git; the skip form records it
 
 ## Burndown
@@ -265,6 +278,7 @@ Status reflects code state per [survey.md](survey.md), not intent.
   - done {TODAY} — python3 test_calc.py exits 0
 - [x] T002 [P] Pin the multiply surface in `test_calc.py` (implemented) (FR-001, FR-002)
   - done {TODAY} — python3 test_calc.py exits 0
+  - Proves: TC-001, TC-002
 
 ## Phase 2: Lifecycle records
 <!-- Checkpoint: the Delivered record is written and check.py reads green -->
@@ -308,34 +322,6 @@ has an observable pass condition. No implementation details.
 | FR-002      | TC-002     | auto               |
 '''
 
-SURVEY_MD = f'''# Survey: {SPEC_NAME}
-
-**Created**: {TODAY} | **Baseline**: v1 @ {BASELINE_SHA}
-The survey node's output — the single source of truth for code state. Every
-citation in the other four docs traces to a line here. Evidence is pasted
-verbatim from grep/read output in the session that wrote it.
-
-## Items
-
-```
-item 1: "calculator module lacks multiplication; add and subtract exist"
-  evidence:   calc.py:multiply:9
-  status:     DONE
-  verify:     python3 test_calc.py
-  gap:        none — both multiply tests green at delivery
-```
-
-## Supporting evidence
-The module carries exactly three public operations at delivery: add,
-subtract, multiply; the test module is its only consumer.
-
-## Rules
-- Every `file:line` pasted from grep/read in this survey — never from memory.
-  Can't find it → write `unknown — verify`, don't guess.
-- Status derives from evidence, not intent. Run every verify command.
-- A number in an old doc is a claim, not evidence — re-count it.
-'''
-
 RESEARCH_MD = f'''# Research: {SPEC_NAME}
 
 **Spec**: [spec.md](spec.md) | **Created**: {TODAY}
@@ -347,7 +333,7 @@ not applicable — no open questions at Stage 0
 ## Options summary
 
 None — the spec's single technical choice (one pure function beside the
-existing operations) was settled by the survey evidence.
+existing operations) was settled by the Code state evidence.
 '''
 
 CONSTITUTION_MD = '''# Constitution: calc-fixture
@@ -383,7 +369,6 @@ def build_docset() -> tuple[Path, Path]:
         for name, text in (("spec.md", SPEC_MD), ("plan.md", PLAN_MD),
                            ("tech-spec.md", TECH_SPEC_MD),
                            ("task.md", TASK_MD), ("test.md", TEST_MD),
-                           ("survey.md", SURVEY_MD),
                            ("research.md", RESEARCH_MD)):
             (spec_dir / name).write_text(text, encoding="utf-8")
         (repo / "specs" / "CONSTITUTION.md").write_text(
@@ -446,13 +431,13 @@ class DeliveredLifecycleTests(unittest.TestCase):
         self.assertEqual(ticks.unticked, [])
         self.assertEqual(ticks.noteless, [])
 
-    def test_research_and_survey_records_parse(self):
+    def test_research_and_code_state_records_parse(self):
         self.assertEqual(
             specstate.research_state(self.spec_dir), "skip")
         self.assertEqual(
-            specstate.survey_baseline(self.read("survey.md")),
+            specstate.doc_baseline(self.read("tech-spec.md")),
             ("v1", BASELINE_SHA))
-        items = specstate.survey_items(self.read("survey.md"))
+        items = specstate.state_items(self.read("tech-spec.md"))
         self.assertEqual([(i.id, i.status) for i in items], [("1", "DONE")])
 
 

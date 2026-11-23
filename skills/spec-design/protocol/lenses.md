@@ -2,58 +2,12 @@
 
 One `## Lens: <name>` section per lens, byte-verbatim into the spawn
 payload of the archetype that carries it — here the shape span's
-authoring lenses: analyst (survey), architect (plan · tech · tasks), plus
-the two lenses the analyst archetype carries out-of-band: research (the
+authoring lenses: architect (tech · plan · tasks), plus the two lenses
+the analyst archetype carries out-of-band: research (the
 research-gate's run resolution) and constitution (the constitution
 step's article proposals). The section is the lens's contract:
 input payload, method, parser-exact formats, digest. The archetype
 brief carries the spine; this file carries the specialization.
-
-## Lens: survey (analyst → survey.md)
-
-**Input payload**: the spec's proposed items (FR/NFR list or raw
-goals, verbatim); the spec dir path; repo root; baseline version/
-commit — and, on a delta re-survey, the `DELTA RE-SURVEY` block (the
-files git says changed since the survey's baseline commit, plus the
-current HEAD).
-
-**Method**:
-1. If the repo keeps a domain glossary (GLOSSARY.md, CONTEXT.md, or
-   docs/glossary*), read it first and word items, statuses, and the
-   context files in the project's own terms. No glossary
-   exists? The domain terms you meet while surveying are worth a line
-   in specs/context/tech.md's conventions for the later docs to reuse.
-2. For each item: grep/read (`rg`) the codebase for it (see the spine's
-   tool preference); paste evidence verbatim.
-3. If `specs/context/` does not yet exist (repo's first spec), also
-   write it: `structure.md` (module map, entry points, per-area
-   ownership) and `tech.md` (stack, build/test runners, conventions)
-   stamped with the baseline commit. Later surveys read it first and
-   re-survey only the delta. In a large repo, tag each entry with its
-   area (`## area: <name>`).
-4. **Delta re-survey** (only with a DELTA block): the existing
-   survey.md is your starting point, not a blank template — merge, do
-   not rebuild. Re-grep ONLY the items whose evidence cites a changed
-   file, re-run those items' verify commands, re-paste their evidence;
-   keep every untouched item byte-identical; refresh the Baseline
-   header to the block's HEAD sha. The self-check stays full-strength
-   over the merged file.
-5. Produce per item the exact survey shape (evidence / status / verify
-   / gap) from the survey template — no prose, no recommendations.
-6. `**Type**: bugfix | hotfix` specs survey the bug itself: location
-   (file:symbol, verbatim), suspected cause evidence, existing
-   regression coverage (usually none — that is the finding); "bug
-   exists" is proven by the repro command failing — run it and paste
-   the red output. `**Type**: refactor | upgrade` specs survey the
-   behavior to preserve: the existing tests and commands that pin it,
-   each run green and pasted, and every observable behavior nothing
-   pins yet (a gap item).
-
-**Digest**: `digest: statuses <n> DONE / <n> PARTIAL / <n> TODO ·
-unknowns <n> · surprises <one line>`
-
-**Guardrails**: no recommendations, no solutioning; every unknown is
-`unknown — verify`.
 
 ## Lens: research (analyst → tech-spec § Questions & options)
 
@@ -122,57 +76,49 @@ evidence> · contradicted <existing articles or none> · unknowns <n>`
 **Guardrails**: observed conventions only — never an aspiration,
 never a rule borrowed from another project; you ask the user nothing.
 
-## Lens: plan (architect → plan.md)
-
-**Input payload**: spec dir path (read spec.md and survey.md yourself —
-they are the source); one line on team context if any.
-
-**Method**:
-1. Read spec.md (FRs/NFRs, scope, risks) and survey.md (what exists,
-   what's PARTIAL). Statuses come ONLY from survey.md.
-2. Group FRs/applicable NFRs into milestones — each demoable at its
-   checkpoint, smallest-first, risky things pulled early enough to
-   de-risk.
-3. Derive the dependency graph: what blocks what. Use a workspace
-   graph / code-intelligence tool if the repo has one to check real
-   coupling between the areas the requirements touch.
-4. Write the **parallelization map** — the user-critical part.
-   Parallel is the DEFAULT; the map proves where it must yield:
-   independent areas are assumed concurrent (list which files each
-   touches so the disjointness is checkable); strictly ordered areas
-   justify serialization (what one produces that the next consumes, or
-   which files they share). The tasks lens translates this into `[P]`
-   markers and `(after T###)` chains.
-5. Define per-phase checkpoints as observable conditions + verify
-   commands (reuse survey.md's verify commands where they fit).
-6. Size each milestone S, M, or L in the table's Size column —
-   relative effort, never hours or dates.
-7. Write § Delivery's `### Rollout`: exposure (flag or gradual),
-   migration order, the rollback trigger, the post-release check — or
-   `none — <reason>` when the change ships whole and reverting the
-   delivery commit is the rollback. Never invent a flag the
-   requirements do not need.
-
-**Digest**: `digest: milestones <n>: <names> · parallel groups
-<groups> · serial spine <one line>`
-
-**Guardrails**: no task-level detail (that is the tasks lens's);
-milestones and ordering only; no inventing code state — a survey gap
-becomes an explicit plan assumption.
-
 ## Lens: tech (architect → tech-spec.md)
 
-**Input payload**: spec dir path (read spec.md, survey.md, tech-spec.md § Questions & options
-yourself); any architecture constraints from the user (positioning,
-hard nos).
+**Input payload**: spec dir path (read spec.md and tech-spec.md
+§ Questions & options yourself; intent.md § Constraints when present);
+repo root; the Baseline tech-spec.md records — and, on a converge
+re-ground, the `DELTA RE-GROUND` block (the files git says changed since
+that baseline, plus the current HEAD); any architecture constraints from
+the user (positioning, hard nos).
 
 **Method**:
-1. Read spec.md (what must be true, including applicable NFR-###
-   quality requirements), survey.md (every citation you make comes from
-   it), tech-spec.md § Questions & options (candidates + trade-offs for the open choices).
-2. **Audit current architecture**: how the touched areas actually work
-   today, from survey evidence; map the blast radius of the symbols
-   the spec touches into § Impact analysis (what breaks, who depends
+1. **Ground first — § Code state.** One item per FR/applicable NFR:
+   grep/read (`rg`) the codebase for it and paste the evidence verbatim
+   (evidence / status / verify / gap, the template's item shape); run
+   every verify command — status derives from evidence, never intent;
+   can't find it → `unknown — verify`, never a guess. Record the HEAD
+   you grounded against in the `**Baseline**:` header. Intake's facts in
+   intent.md § Constraints are leads to re-grep, not citations.
+   - If the repo keeps a domain glossary (GLOSSARY.md, CONTEXT.md, or
+     docs/glossary*), word items in the project's own terms.
+   - On the repo's first spec (`specs/context/` absent), also write
+     `structure.md` (module map, entry points, per-area ownership) and
+     `tech.md` (stack, build/test runners, conventions) stamped with the
+     baseline commit; later specs read it first and ground only the
+     delta. In a large repo, tag each entry with its area.
+   - **Delta re-ground** (only with a DELTA block): the existing
+     § Code state is your starting point — merge, do not rebuild.
+     Re-grep ONLY the items whose evidence cites a changed file, re-run
+     their verify commands; keep every untouched item byte-identical;
+     refresh the Baseline to the block's HEAD.
+   - `**Type**: bugfix | hotfix`: ground the bug itself — location
+     (file:symbol, verbatim), suspected-cause evidence, existing
+     regression coverage; run the repro command and paste the red
+     output. `**Type**: refactor | upgrade`: ground the behavior to
+     preserve — the tests and commands that pin it, each run green, and
+     every observable behavior nothing pins yet (a gap item).
+   - Self-check: `check.py <spec-dir> --code-state-only` exits 0 before
+     you write another section.
+2. Read spec.md (what must be true, including applicable NFR-###
+   quality requirements) and § Questions & options (candidates +
+   trade-offs for the open choices). **Audit current architecture**:
+   how the touched areas actually work today, from § Code state; map
+   the blast radius of the symbols the spec touches into § Impact
+   analysis (what breaks, who depends
    on it; for a common name, say when a grep match may be a different
    symbol). WHERE any
    decision flips a default (flag, keyword, return shape), the impact
@@ -182,7 +128,7 @@ hard nos).
    file and name.
 3. Choose the solution against the research options; write rejected
    alternatives with one-line whys (each traces to a § Questions & options
-   finding or a survey constraint — not taste).
+   finding or a § Code state constraint — not taste).
 4. Apply the spine's design screens; a red flag you keep ships as a
    D-### with its why.
 5. Draw the architecture diagram as an inline mermaid block (the
@@ -203,7 +149,7 @@ hard nos).
    record why an inapplicable NFR does not apply instead of adding
    speculative machinery.
 8. Write § Code guide per area (touches/approach/verify command/
-   pitfalls) using ONLY survey.md citations. Log decisions as D-###
+   pitfalls) using ONLY § Code state citations. Log decisions as D-###
    (context/decision/consequences). `**Type**: bugfix | hotfix` specs
    insert § Root-cause analysis before § Solution: ranked falsifiable
    causes with predictions, the confirmed cause carrying its proof, a
@@ -213,16 +159,58 @@ hard nos).
 bullet-form decision never defines its ID and check.py FAILs every
 reference to it as dangling.
 
-**Digest**: `digest: approach <one line> · rejected <top alternative +
-one-word why> · blast radius <biggest symbol + direct-caller count>`
+**Digest**: `digest: statuses <n> DONE / <n> PARTIAL / <n> TODO ·
+approach <one line> · rejected <top alternative + one-word why> · blast
+radius <biggest symbol + direct-caller count>`
 
-**Guardrails**: no citation that isn't in survey.md — report the gap
-and STOP that section.
+**Guardrails**: no citation that isn't in § Code state — ground it
+there first or report the gap and STOP that section; § Code state holds
+evidence only, never recommendations.
+
+## Lens: plan (architect → plan.md)
+
+**Input payload**: spec dir path (read spec.md and tech-spec.md
+yourself — they are the source); one line on team context if any.
+
+**Method**:
+1. Read spec.md (FRs/NFRs, scope, risks) and tech-spec.md (§ Code
+   state: what exists, what's PARTIAL; the design that shapes the
+   milestones). Statuses come ONLY from § Code state.
+2. Group FRs/applicable NFRs into milestones — each demoable at its
+   checkpoint, smallest-first, risky things pulled early enough to
+   de-risk.
+3. Derive the dependency graph: what blocks what. Use a workspace
+   graph / code-intelligence tool if the repo has one to check real
+   coupling between the areas the requirements touch.
+4. Write the **parallelization map** — the user-critical part.
+   Parallel is the DEFAULT; the map proves where it must yield:
+   independent areas are assumed concurrent (list which files each
+   touches so the disjointness is checkable); strictly ordered areas
+   justify serialization (what one produces that the next consumes, or
+   which files they share). The tasks lens translates this into `[P]`
+   markers and `(after T###)` chains.
+5. Define per-phase checkpoints as observable conditions + verify
+   commands (reuse § Code state's verify commands where they fit).
+6. Size each milestone S, M, or L in the table's Size column —
+   relative effort, never hours or dates.
+7. Write § Delivery's `### Rollout`: exposure (flag or gradual),
+   migration order, the rollback trigger, the post-release check — or
+   `none — <reason>` when the change ships whole and reverting the
+   delivery commit is the rollback. Never invent a flag the
+   requirements do not need.
+
+**Digest**: `digest: milestones <n>: <names> · parallel groups
+<groups> · serial spine <one line>`
+
+**Guardrails**: no task-level detail (that is the tasks lens's);
+milestones and ordering only; no inventing code state — a Code state
+gap becomes an explicit plan assumption.
 
 ## Lens: tasks (architect → task.md)
 
 **Input payload**: spec dir path (read spec.md, plan.md,
-tech-spec.md, survey.md yourself).
+tech-spec.md, test.md yourself — test.md is final before this lens
+runs).
 
 **Method**:
 1. Read plan.md → phases/milestones become your `## Phase N` sections,
@@ -233,14 +221,21 @@ tech-spec.md, survey.md yourself).
 3. Enumerate tasks: verb-phrase + a `Touches:` block + `(FR-### or
    applicable NFR-###)`. One task = one commit-sized unit; a task too
    big to commit alone is two tasks.
-3a. **A task owns the tests that prove it.** Name, in the task's own
-   entry, the test class or method that makes each of its TCs pass and
-   create it in that task — never a closing "write the tests" task
+3a. **A task owns the tests that prove it.** Every TC in test.md gets
+   exactly one owner. Its owner is the task that creates its test: a
+   `Proves: TC-###, …` sub-line on that entry, plus the test class or
+   method the entry names — never a closing "write the tests" task
    alone: every task before it would land proving nothing, and a proof
    of a test that does not exist reads PENDING (spec-build D-042). A
    test task is right only for tests that need the whole plan (an
    end-to-end suite); say so on the earlier tasks (`proofs land later:
-   T009`) so landing them unproven is deliberate.
+   T009`) so landing them unproven is deliberate. A TC whose
+   requirement § Code state already reads DONE is a regression guard
+   instead: list it under `## Regression guards`
+   (`- TC-### — <requirement> DONE (Code state item <id>)`) and give it
+   no task. When a TC's pass condition names a test path the § Code
+   guide places elsewhere, the owning task's entry names the real path
+   — test.md is the tester's to fix, never yours.
 3b. **Chain what must compile together.** A task that adds a type,
    signature or constructor another task's code calls is `(after
    T###)`, not `[P]`: parallel tasks share one working tree, and a
@@ -255,9 +250,10 @@ tech-spec.md, survey.md yourself).
    interface it consumes from its upstream — symbol names, signatures,
    file formats — implementers see only their own task entry, so the
    entry is the only place the contract can live.
-5. Set status ONLY from survey.md: DONE → `- [x]` with done-note
-   citing the passing verify command; PARTIAL → `- [ ]` with the
-   survey's gap named; TODO → `- [ ]`. Never infer from the plan.
+5. Set status ONLY from tech-spec.md § Code state: DONE → `- [x]`
+   with done-note citing the passing verify command; PARTIAL → `- [ ]`
+   with the Code state gap named; TODO → `- [ ]`. Never infer from the
+   plan.
 6. Compute the burndown table from the actual checkboxes (check.py
    verifies the arithmetic — make it correct).
 
@@ -265,11 +261,16 @@ tech-spec.md, survey.md yourself).
 checkbox (`- [ ] T001 <verb> (FR-###)`; `(in-progress)` after the ID);
 the burndown table keeps the template's three columns exactly; every
 code task carries a `Touches:` sub-block with backticked repo-relative
-paths, directories, or globs.
+paths, directories, or globs; a `Proves:` sub-line lists TC ids only,
+comma-separated; a guard line opens `- TC-###` under `## Regression
+guards`.
 
 **Digest**: `digest: tasks <n> in <n> phases · status split
-<done>/<partial>/<todo> · ungrounded <task ids or none>`
+<done>/<partial>/<todo> · TCs owned <n> / guards <n> · ungrounded
+<task ids or none>`
 
 **Guardrails**: never delete dropped tasks (strike them with a D-###
-reference); run `check.py <spec-dir>` and clear the task-related
-FAILs before you return (test.md and TC-coverage FAILs belong to the tester).
+reference); never edit test.md; run `check.py <spec-dir>` and clear
+every FAIL task.md can fix — TC ownership included — before you
+return. A FAIL only test.md can fix goes in your digest for the
+orchestrator to re-brief the tester.

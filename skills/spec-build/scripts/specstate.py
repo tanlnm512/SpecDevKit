@@ -4,7 +4,7 @@ Every scheduling-relevant signal the tooling layer reads out of the docset
 lives here as a pure function: spec Status, task entries (checkboxes,
 phases, parallel markers, dependency chains, fix rounds, implemented
 markers), the Delivered header line and the approval-freeze anchor, the
-survey baseline header and item list, the hotfix lineage headers, the
+baseline header and tech-spec Code state item list, the hotfix lineage headers, the
 researcher-skip marker, next-free-ID allocation, ID definitions, and the
 git availability probes.
 check.py, audit.py, and graph.py import from this module instead
@@ -160,19 +160,28 @@ LIFECYCLE_VALUES = {
 COVERAGE_FLOOR = re.compile(
     r"^\*\*Coverage\*\*\s*:\s*(\d{1,3})\s*%?", re.M)
 
-# survey.md baseline header: `**Baseline**: <version> @ <sha>`, backticks on
-# the sha tolerated; the second shape matches a bare angle-bracketed baseline
-# header carrying a real hash (e.g. `<v2 @ abc1234>`). The unfilled
-# template's `<version @ commit>` placeholder has no hex chars and cannot
-# match either shape — it reads None (see survey_baseline).
+# Baseline header (tech-spec.md, intent.md): `**Baseline**: <version> @ <sha>`,
+# backticks on the sha tolerated; the second shape matches a bare
+# angle-bracketed baseline header carrying a real hash (e.g. `<v2 @ abc1234>`).
+# The unfilled template's `<version @ commit>` placeholder has no hex chars
+# and cannot match either shape — it reads None (see doc_baseline).
 BASELINE_HEADER = re.compile(r"Baseline\*\*([^@\n]*)@\s*`?([0-9a-f]{7,40})`?")
 BASELINE_PLACEHOLDER = re.compile(r"<\s*([^<>@\n]{1,40})\s*@\s*([0-9a-f]{7,40})\s*>")
 
-# survey.md item list shape (the surveyor's template): `item <id>: "<desc>"`
-# with a following `status:` line. Malformed/missing status reads "unknown"
-# rather than raising — converge diffs two possibly-messy snapshots.
-SURVEY_ITEM = re.compile(r'^item\s+(\S+):\s*"([^"]*)"', re.M)
-SURVEY_ITEM_STATUS = re.compile(r"^\s*status:\s*(DONE|PARTIAL|TODO)", re.M)
+# tech-spec.md § Code state item shape: `item <id>: "<desc>"` with a
+# following `status:` line. Malformed/missing status reads "unknown" rather
+# than raising — converge diffs two possibly-messy snapshots.
+CODE_STATE_SECTION = re.compile(r"^##\s+Code state\s*$", re.M)
+
+# TC ownership in task.md: a task entry's `Proves: TC-###, …` sub-line
+# names the test cases whose tests that task writes; a `- TC-### — <why>`
+# line under `## Regression guards` names a case whose requirement Code
+# state already reads DONE (an existing test guards it).
+PROVES_LINE = re.compile(r"^\s*-\s*Proves:\s*(.+)$", re.M)
+GUARDS_SECTION = re.compile(r"^##\s+Regression guards\s*$", re.M)
+GUARD_LINE = re.compile(r"^-\s+(TC-\d{3})\b", re.M)
+STATE_ITEM = re.compile(r'^item\s+(\S+):\s*"([^"]*)"', re.M)
+STATE_ITEM_STATUS = re.compile(r"^\s*status:\s*(DONE|PARTIAL|TODO)", re.M)
 
 # The researcher-gate skip record (byte-exact, em dash U+2014). Canonical
 # home: tech-spec.md `## Questions & options` (a pre-migration research.md
@@ -249,8 +258,8 @@ class TaskEntry(NamedTuple):
     claim: ClaimStamp | None = None
 
 
-class SurveyItem(NamedTuple):
-    """One `item <id>: "…"` block from survey.md's item list."""
+class StateItem(NamedTuple):
+    """One `item <id>: "…"` block from tech-spec.md § Code state."""
 
     id: str
     description: str
@@ -555,32 +564,61 @@ def latest_digest(spec_dir: Path | str, task_id: str) -> dict | None:
     return best
 
 
-def survey_baseline(survey_md: str) -> tuple[str, str] | None:
-    """(version, sha) from survey.md's baseline header, or None.
+def doc_baseline(text: str) -> tuple[str, str] | None:
+    """(version, sha) from a doc's baseline header, or None.
 
     Handles the filled `**Baseline**: <version> @ <sha>` form (backticked
     sha tolerated) and the template's `<version @ commit>` placeholder
     shape — the placeholder carries no real hash, so it reads None and the
     caller decides how to report an unfilled header."""
-    m = BASELINE_HEADER.search(survey_md) or BASELINE_PLACEHOLDER.search(survey_md)
+    m = BASELINE_HEADER.search(text) or BASELINE_PLACEHOLDER.search(text)
     if not m:
         return None
     ver = m.group(1).strip().lstrip(":").strip()
     return ver, m.group(2)
 
 
-def survey_items(survey_md: str) -> list[SurveyItem]:
-    """survey.md's item list: id, quoted description, and status (unknown
-    when the status line is absent or malformed). Blocks that don't open
-    with the `item <id>: "…"` shape are skipped, not raised."""
-    items: list[SurveyItem] = []
-    for block in re.split(r'(?=^item\s+\S+:)', survey_md, flags=re.M):
-        m = SURVEY_ITEM.match(block)
+def task_proves(entry_block: str) -> list[str]:
+    """The TC ids a task entry's `Proves:` sub-line names, in order."""
+    return [tc for m in PROVES_LINE.finditer(entry_block)
+            for tc in re.findall(r"\bTC-\d{3}\b", m.group(1))]
+
+
+def regression_guards(task_md: str) -> set[str]:
+    """TC ids listed under task.md's `## Regression guards` section."""
+    m = GUARDS_SECTION.search(task_md)
+    if not m:
+        return set()
+    rest = task_md[m.end():]
+    end = re.search(r"^## ", rest, re.M)
+    return set(GUARD_LINE.findall(rest[:end.start()] if end else rest))
+
+
+def code_state(tech_md: str) -> str:
+    """The body of tech-spec.md's `## Code state` section, up to the next
+    H2 — empty when the section is absent."""
+    m = CODE_STATE_SECTION.search(tech_md)
+    if not m:
+        return ""
+    rest = tech_md[m.end():]
+    end = re.search(r"^## ", rest, re.M)
+    return rest[:end.start()] if end else rest
+
+
+def state_items(tech_md: str) -> list[StateItem]:
+    """tech-spec.md § Code state's item list: id, quoted description, and
+    status (unknown when the status line is absent or malformed). Blocks
+    that don't open with the `item <id>: "…"` shape are skipped, not
+    raised."""
+    items: list[StateItem] = []
+    for block in re.split(r'(?=^item\s+\S+:)', code_state(tech_md),
+                          flags=re.M):
+        m = STATE_ITEM.match(block)
         if not m:
             continue
-        sm = SURVEY_ITEM_STATUS.search(block)
+        sm = STATE_ITEM_STATUS.search(block)
         items.append(
-            SurveyItem(m.group(1), m.group(2), sm.group(1) if sm else "unknown"))
+            StateItem(m.group(1), m.group(2), sm.group(1) if sm else "unknown"))
     return items
 
 
@@ -810,13 +848,13 @@ def head_sha(repo: Path | str) -> str | None:
 
 def diff_paths(repo: Path | str, base: str, head: str) -> list[str] | None:
     """Paths changed between two commits (`base..head`), sorted — the
-    delta scope for a stale-baseline re-survey (graph.py's DELTA
-    RE-SURVEY payload). None when git cannot answer (no repository,
-    unknown sha, git unavailable): callers degrade to a full re-survey,
+    delta scope for a stale-baseline re-ground (graph.py's DELTA
+    RE-GROUND payload). None when git cannot answer (no repository,
+    unknown sha, git unavailable): callers degrade to a full re-ground,
     never to an empty-delta verdict. Committed range only, matching the
     converge staleness comparison (baseline sha vs HEAD); uncommitted
     work is the audits' business (audit.py changed_paths), not the
-    survey's."""
+    Code state's."""
     try:
         r = subprocess.run(
             ["git", "-C", str(repo), "diff", "--name-only", base, head],

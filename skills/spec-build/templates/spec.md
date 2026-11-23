@@ -7,8 +7,8 @@
                                 covers execution; nothing needs to write `active` -->
 **Type**: feature          <!-- feature | bugfix | hotfix | refactor | upgrade —
                                 the work type; absent reads feature. bugfix:
-                                the survey reproduces the bug red, tech-spec
-                                adds § Root-cause analysis, the first TC is the
+                                tech-spec's § Code state reproduces the bug
+                                red and it adds § Root-cause analysis, the first TC is the
                                 regression case. hotfix is a bugfix at
                                 `Tier: tiny`; it alone may carry the lineage
                                 headers — uncommented header lines beside this
@@ -18,8 +18,9 @@
                                 behavior: user stories and ACs are optional, a
                                 `**Preserves**:` test case is not. -->
 **Effort**: standard       <!-- standard = one merged design spawn authors
-                                plan/tech-spec/task, qa separate; large = the full
-                                plan ∥ tech ∥ qa wave + a separate tasks wave.
+                                tech-spec then plan, qa separate; large = tech
+                                and plan as their own spawns. Tasks is its own
+                                spawn at both, once test.md exists.
                                 Gates are identical at every effort. Bump to
                                 large for multi-area, auth, persistence,
                                 migration, or research-heavy work. -->

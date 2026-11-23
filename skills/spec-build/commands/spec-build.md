@@ -42,6 +42,6 @@ itself named like a verb is addressed with the `spec` keyword —
 - `continue <spec>` / `resume <spec>` → the same run, resumed from
   doc state: settle orphaned `(in-progress)` claims first (SKILL.md
   § Resume); `(fix n/5)` counts survive the resume.
-- authoring asks (plan/tech/qa/tasks waves, re-survey, doc repair,
+- authoring asks (plan/tech/qa/tasks waves, re-ground, doc repair,
   approve) → not here; route to `/spec-design` (intake →
   `/spec-define`) — this skill never authors or approves anything.

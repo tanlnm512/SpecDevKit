@@ -60,9 +60,8 @@ Anything less, the span entry **exits 4** printing the blocking
 gate and its reason (`--run|--emit-spawns --span execute` alike),
 writes zero implementation files, and records an `intake_refusal`
 telemetry event under this skill's own name. Route the failure,
-never wave it through: not approved → `/spec-design` (the approve
-gate is the user's; the freeze rides with it); verify red → the
-named node's repair (shape's too).
+never wave it through: not approved or verify red → `/spec-design`
+(the approve gate and node repairs are its own).
 
 ## The run (one engine, one span)
 
@@ -75,15 +74,15 @@ recompute, repeat — bounded to the execute span's nodes (execute,
 tick-commit). `--explain execute` prints every task's state and why.
 Unattended runs are safe only on this span (no gate ahead until
 tick-commit); the run parks there by design. A custom `--runner`
-DRIVES execute headlessly (D-041): per wave, `mark.py claim` → the
+DRIVES execute headlessly: per wave, `mark.py claim` → the
 runner runs the payloads (batched `--parallel N`) → `mark.py land` for
 each task whose digest reports implemented → the loop continues to the
 tick-commit gate and parks `AWAITING HUMAN`. Anything else — a blocked
 or missing digest, red proofs, a failed runner — leaves the tasks
 CLAIMED and stops `AWAITING ORCHESTRATOR: execute` for you to settle.
-Where mark.py does not ship (the other packages' graph.py copies), the
-old refusal stands (D-038): use the default print runner and spawn the
-payloads yourself.
+Where mark.py does not ship (other packages' graph.py copies), a custom
+runner is refused: use the default print runner and spawn the payloads
+yourself.
 
 ### Preflight (before the first wave)
 
@@ -93,7 +92,7 @@ resolves, a Docker engine answers when the docset leans on
 Docker/Testcontainers, and which proofs are still PENDING because the
 tests they name do not exist. A NO-GO is the user's to settle (start the
 engine, export the variables the docset names) before any developer is
-spawned — a prerequisite found mid-wave costs every wave-mate's build.
+spawned.
 
 ### Implementation — per-task frontier waves
 
@@ -119,10 +118,9 @@ the rest. A task with no parseable `Touches:` runs alone. Per round:
    reporter's: re-run the command once the wave has landed.
 4. `mark.py land` the task only after the digest plus the scoped
    proofs gate prove the landing — the marker releases chained
-   dependents; one without verified landing is a fabricated tick in
-   cheaper clothing. A proof whose named tests do not exist is PENDING,
-   never a pass (D-042): `land` refuses a task none of whose proofs ran —
-   the tests belong with the task. Only when a later task owns them is
+   dependents. A proof whose named tests do not exist is PENDING, never
+   a pass: `land` refuses a task none of whose proofs ran — the tests
+   belong with the task. Only when a later task owns them is
    `mark.py land <spec> T### --allow-pending` right: the landing is
    `(implemented)` and unproven, printed as such, and the delivery pass
    stays red until the pending proofs run.
@@ -137,10 +135,9 @@ a plan broken enough that every path is a guess.
 ### Task markers — written only through `mark.py` / `tick.py`
 
 You are the sole status writer; developers return digests and never
-touch task.md. One marker change per event — every transition is one
-`scripts/mark.py` verb (D-039), which checks the current marker, takes
-the spec's `.task.lock`, and refuses anything else. The verbs, not
-hand edits, are the sanctioned writer:
+touch task.md. Every transition is one `scripts/mark.py` verb — never
+a hand edit — which checks the current marker, takes the spec's
+`.task.lock`, and refuses anything else:
 
 | Entry reads | Event | The mark.py verb |
 |-------------|-------|------------------|
@@ -174,8 +171,8 @@ acceptance commands is red, a delivery-pass proof failure traces to
 it, or the auditor BLOCKs its change. `blocked:why` is not a
 failure and consumes no round. To open round n (n = the times this
 task has come back wrong), run
-`mark.py fail <spec> T### --evidence <file> --digest "<line>"`
-(D-039) — mark.py refuses a digest that is not copied verbatim from
+`mark.py fail <spec> T### --evidence <file> --digest "<line>"` —
+mark.py refuses a digest that is not copied verbatim from
 the evidence file, so:
 
 1. Put the evidence in a file first — the failing command and its
@@ -267,8 +264,8 @@ round and re-run the ENTIRE pass from its proof step.
   mode is spec-design's); writes NOTHING, and is the one role exempt from
   `protocol/shared-protocol.md`.
 
-Analyst, architect, and tester ship with spec-design, not here — this span
-never spawns them (D-031).
+Analyst, architect, and tester ship with spec-design; this span never
+spawns them.
 
 `graph.py --emit-spawns --span execute` builds each payload from doc
 state: the task entry verbatim, its TC acceptance commands, a fix
@@ -293,10 +290,9 @@ of the payload.
 
 ## Execution-only machinery (single-copy here)
 
-These scripts are NOT part of the parity closure (the shared core
-ships here as byte-identical views; these are spec-build's own;
-`scripts/gate.sh` and `scripts/gate_helpers.py` are spec-review's,
-copied byte-identical and pinned by `tools/tests/test_parity.py`):
+spec-build's own scripts, outside the parity closure (`scripts/gate.sh`
+and `scripts/gate_helpers.py` are spec-review's byte-identical copies,
+pinned by `tools/tests/test_parity.py`):
 
 - `scripts/tick.py` — the mechanical tick: validated in full, applied
   atomically, refuses partial writes.
@@ -310,9 +306,9 @@ copied byte-identical and pinned by `tools/tests/test_parity.py`):
 
 ## The lifecycle verbs (on this skill's one router)
 
-One command per skill (D-033): this package's single command is
-`/spec-build`, and the lifecycle landings are its verbs — each a
-thin landing into the graph:
+The single command `/spec-build` (`commands/spec-build.md`) routes
+execute and resume/continue asks; the lifecycle steps are its verbs,
+each a thin landing into the graph:
 
 | Verb | Landing |
 |---------|---------|
@@ -336,11 +332,3 @@ stays a human/CI action.
 Local, content-free (counts and node names) under
 `~/.spec-dev-kit/telemetry/spec-build.jsonl`; `KIT_TELEMETRY=off`
 disables.
-
-## Commands and neighbors
-
-- `/spec-build [verb] <name>` — this skill's router
-  (`commands/spec-build.md`): execute, implement/test/audit/ship
-  steps, resume/continue asks land here.
-- `/spec-design` — everything before approval: authoring waves, doc
-  repair, the approve gate and its freeze; `/spec-define` — intake.

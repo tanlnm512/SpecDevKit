@@ -2,7 +2,9 @@
 
 **Spec**: [spec.md](spec.md) | **Created**: YYYY-MM-DD
 Black-box, business-language verification traced to requirements. Each case
-has an observable pass condition. No implementation details.
+has an observable pass condition. No implementation details. Written from
+spec.md alone; task.md assigns each case its owner (a task's `Proves:` line
+or a regression guard).
 <!-- A refactor or upgrade needs a behavior-preservation case: the TC adds
      a `- **Preserves**: <existing behavior>` line, and its pass condition
      is green before the change. -->
