@@ -31,6 +31,20 @@ job (`sleep`, `ps`, `pgrep`, `top`) — do other work or end your reply;
 you will be woken with its output. A job's timeout sets its deadline;
 it does not extend foreground waiting.
 
+### Refusals and failed calls
+Every refusal or failed call is one of three kinds. Name the kind before you act on it.
+- **Fix and run again**: the refusal is about your own output. A failing test, proof or lint command, a
+  contract or schema check, a gate that says what to change. Fix what it names and run the same command
+  again. This refusal is not final; do not stop on it.
+- **Wait, then retry**: the tool itself did not answer. A rate limit, a timeout, a dropped connection, a
+  prompt nobody answered. Nothing in your work is wrong. Run the same call again up to three times, pausing
+  between tries; if it still does not answer, stop and report `blocked: <tool> did not answer: <error>`. Never
+  turn it into a result.
+- **Stop and report**: a refusal by policy. Permission denied, a guard, a hook, the boundary of your scope.
+  Never work around it; report its exact text and stop.
+A failed call is never a failed check. Report a check only when you saw it run; otherwise say
+`not run: <why>`. Never report a failure, a pass or a verdict you did not observe.
+
 ### Strict code commenting
 1. Do not comment on the obvious: never narrate what a line does or
    summarize loops, conditionals, or standard-library usage.

@@ -199,9 +199,17 @@ class GateTests(unittest.TestCase):
         holder, repo = make_repo()
         with holder, tempfile.TemporaryDirectory() as bindir:
             gh = Path(bindir) / "gh"
-            gh.write_text("#!/bin/sh\n"
-                          "echo '[{\"name\":\"build\",\"bucket\":\"pass\",\"link\":\"\"},"
-                          "{\"name\":\"lint\",\"bucket\":\"fail\",\"link\":\"\"}]'\n")
+            gh.write_text(
+                "#!/bin/sh\n"
+                'if [ "$1 $2" = "run view" ]; then\n'
+                "  echo '{\"jobs\": [{\"name\": \"lint\", \"conclusion\": \"failure\", "
+                "\"steps\": [{\"name\": \"Set up job\", \"number\": 1, \"conclusion\": \"success\"}, "
+                "{\"name\": \"Run lint\", \"number\": 2, \"conclusion\": \"failure\"}]}]}'\n"
+                "  exit 0\n"
+                "fi\n"
+                "echo '[{\"name\":\"build\",\"bucket\":\"pass\",\"link\":\"\"},"
+                "{\"name\":\"lint\",\"bucket\":\"fail\","
+                "\"link\":\"https://github.com/acme/widget/actions/runs/4123\"}]'\n")
             gh.chmod(0o755)
             env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
             r = subprocess.run([sys.executable, str(SCRIPT), "gate", "--repo", str(repo),
@@ -210,8 +218,79 @@ class GateTests(unittest.TestCase):
             d = json.loads(r.stdout)
             ci = {g["name"]: g["status"] for g in d["rows"] if g["source"] == "ci"}
             self.assertEqual(ci, {"CI: build": "pass", "CI: lint": "fail"})
+            lint = next(g for g in d["rows"] if g["name"] == "CI: lint")
+            self.assertEqual(lint["class"], "code")
+            self.assertEqual(lint["failedStep"], "Run lint")
             self.assertFalse(d["green"])
             self.assertIn("CI did NOT pass — failing: CI: lint", d["note"])
+
+    def test_pr_ci_cancelled_run_is_infrastructure_and_stands(self):
+        holder, repo = make_repo()
+        with holder, tempfile.TemporaryDirectory() as bindir:
+            gh = Path(bindir) / "gh"
+            # no run view behind it either — the class comes from the bucket
+            gh.write_text(
+                "#!/bin/sh\n"
+                "echo '[{\"name\":\"build\",\"bucket\":\"cancel\","
+                "\"link\":\"https://github.com/acme/widget/actions/runs/4123\"},"
+                "{\"name\":\"lint\",\"bucket\":\"fail\",\"link\":\"\"}]'\n")
+            gh.chmod(0o755)
+            env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+            r = subprocess.run([sys.executable, str(SCRIPT), "gate", "--repo", str(repo),
+                                "--base", "HEAD", "--pr", "7"],
+                               capture_output=True, text=True, env=env)
+            d = json.loads(r.stdout)
+            by_name = {g["name"]: g for g in d["rows"] if g["source"] == "ci"}
+            build = by_name["CI: build"]
+            self.assertEqual(build["status"], "infrastructure")
+            self.assertEqual(build["class"], "infrastructure")
+            self.assertEqual(build["exit_code"], 0)
+            self.assertEqual(build["rerun"], "gh run rerun 4123 --failed")
+            lint = by_name["CI: lint"]
+            self.assertEqual(lint["class"], "unknown")
+            self.assertEqual(lint["status"], "unknown")
+            self.assertIsNone(lint.get("rerun"))
+            # neither row fails the gate — but neither is green-washed
+            self.assertTrue(d["green"])
+            self.assertIn("standing red, not failing the gate: "
+                          "CI: build; CI: lint", d["note"])
+            self.assertIn("merge floors at human", d["note"])
+
+    def test_pr_ci_setup_failure_is_infrastructure_test_failure_is_code(self):
+        holder, repo = make_repo()
+
+        def stub_with(steps_json):
+            return ("#!/bin/sh\n"
+                    'if [ "$1 $2" = "run view" ]; then\n'
+                    "  echo '{\"jobs\": [{\"name\": \"ci\", \"conclusion\": \"failure\", "
+                    "\"steps\": [" + steps_json + "]}]}'\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "echo '[{\"name\":\"ci\",\"bucket\":\"fail\","
+                    "\"link\":\"https://github.com/acme/widget/actions/runs/4123\"}]'\n")
+
+        setup = ('{"name": "Set up job", "number": 1, "conclusion": "failure"}, '
+                 '{"name": "Run tests", "number": 2, "conclusion": "skipped"}')
+        tests = ('{"name": "Set up job", "number": 1, "conclusion": "success"}, '
+                 '{"name": "Run tests", "number": 2, "conclusion": "failure"}')
+        for steps_json, want in ((setup, "infrastructure"), (tests, "code")):
+            with self.subTest(first_failure=want), \
+                 tempfile.TemporaryDirectory() as bindir:
+                gh = Path(bindir) / "gh"
+                gh.write_text(stub_with(steps_json))
+                gh.chmod(0o755)
+                env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+                r = subprocess.run([sys.executable, str(SCRIPT), "gate",
+                                    "--repo", str(repo), "--base", "HEAD",
+                                    "--pr", "7"],
+                                   capture_output=True, text=True, env=env)
+                d = json.loads(r.stdout)
+                ci = next(g for g in d["rows"] if g["source"] == "ci")
+                self.assertEqual(ci["class"], want)
+                self.assertEqual(ci["failedStep"],
+                                 "Set up job" if want == "infrastructure"
+                                 else "Run tests")
+                self.assertEqual(d["green"], want == "infrastructure")
 
     def test_gate_on_this_kit_repo_detects_its_checks(self):
         kit_root = SCRIPT.parents[2]  # CWD-independent: run.sh cds into the skill
@@ -431,6 +510,59 @@ class ReportTests(unittest.TestCase):
     def test_bad_report_data_fails_loudly(self):
         msg = err(["report", "--kind", "review", "--data", "@/no/such/file.json"])
         self.assertIn("report data invalid", msg)
+
+    def test_report_carries_standing_ci_rows_and_floors_merge_at_human(self):
+        def tracked(fid, fix="fixed"):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "w",
+                                "evidence": "e", "severity": "medium",
+                                "lens": "general",
+                                "confirmation": {"status": "verified",
+                                                 "note": ""}},
+                    "fix": fix}
+        base = {"tracked": [tracked("F-1")],
+                "gate_rows": [
+                    {"name": "make test", "exit_code": 0, "source": "repo",
+                     "status": "pass", "tail": ""},
+                    {"name": "CI: build", "exit_code": 0,
+                     "status": "infrastructure", "source": "ci",
+                     "class": "infrastructure", "failedStep": "Set up job",
+                     "reason": "the job 'build' failed in the runner step "
+                               "'Set up job'",
+                     "rerun": "gh run rerun 4123 --failed",
+                     "tail": "https://github.com/acme/widget/actions/runs/4123"}],
+                "assessment": {"verdict": "v", "testGaps": [],
+                               "residualRisks": []},
+                "rounds_used": 2}
+        # every finding is fixed and the gate is green, but a standing CI
+        # row blocks merge: the rerun is the user's call, not an edit
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "conclusion": "merge"})])
+        self.assertIn("below the derived floor 'human'", msg)
+        self.assertIn("1 CI row(s) standing infrastructure-or-unknown", msg)
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "conclusion": "human"})])
+        self.assertEqual(d["derived_conclusion"], "human")
+        md = d["markdown"]
+        self.assertIn("- infrastructure — CI: build — the job 'build' failed "
+                      "in the runner step 'Set up job'", md)
+        self.assertIn("first failed step: Set up job", md)
+        self.assertIn("rerun (an outward action, never run here): "
+                      "`gh run rerun 4123 --failed`", md)
+        self.assertIn("green after the final fix round, with 1 CI row(s) "
+                      "standing (infrastructure-or-unknown — see below)", md)
+        self.assertNotIn("all passed", md)
+        self.assertNotIn("- pass — CI: build", md)
+        # with the row resolved (rerun turned it green), merge floors again
+        clear = [{**base["gate_rows"][0]},
+                 {**base["gate_rows"][1], "status": "pass", "class": None,
+                  "failedStep": None, "reason": None}]
+        del clear[1]["rerun"]
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True, "gate_rows": clear,
+                            "conclusion": "merge"})])
+        self.assertEqual(d["derived_conclusion"], "merge")
 
     def test_fix_report_derives_the_floor_and_rejects_a_claim_below_it(self):
         def tracked(fid, fix="fixed", status="verified"):

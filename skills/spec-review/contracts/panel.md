@@ -51,7 +51,7 @@ a JSON array, one row per detected check:
 
 ```json
 { "name": "<family label>", "source": "repo|builtin|ci",
-  "status": "pass|fail|timed_out|planned|info|pending|skipped",
+  "status": "pass|fail|timed_out|planned|info|pending|skipped|infrastructure|unknown",
   "exit_code": 0, "tail": "<last 8 lines>" }
 ```
 
@@ -71,9 +71,31 @@ the token), and in diff mode the dependency-manifest row (`status:
 info`, never red: the added/removed lines of each changed
 package.json, pyproject.toml, requirements*.txt, go.mod, Cargo.toml —
 the report names every new dependency). In pr mode, with `gh` on
-PATH, the PR's CI checks join as `source: ci` rows (`gh pr checks`):
-red CI fails the gate like any check, pending CI is shown, never
-green-washed. Each repo check is killed after `GATE_CHECK_TIMEOUT`
+PATH, the PR's CI checks join as `source: ci` rows (`gh pr checks`).
+Each red CI row is triaged before it counts (D-005): the row's run
+step evidence (`gh run view <id> --json jobs`, each job carrying
+`steps[]` with `name`, `conclusion`, `number` — the shape of the
+GitHub Actions "List jobs for a workflow run" API `gh` calls) classes
+it `code` — a project step failed — `infrastructure` — the run was
+cancelled, never started, or its first failed step (lowest-numbered
+step that neither succeeded nor was skipped) is the runner's own
+setup or wrap-up (`Set up job`, `Complete job`, `actions/checkout@…`,
+post-run `Post …` steps; a deliberately narrow list, `Set up Node` is
+a project step) — or `unknown` — no step data behind the status (no
+run behind the check, gh could not be read, or the check is a status
+context from a CI outside Actions). Never how fast the job failed and
+never log text: a real test can print `connection reset` or `context
+deadline exceeded`, and a failed project step is a code failure
+however fast it ran. A `code` row carries `exit_code: 1` and fails
+the gate like any check; an `infrastructure` or `unknown` row carries
+`class`, `failedStep`, `reason` (plus `rerun`, the exact `gh run
+rerun <id> --failed` command, for an infrastructure row), keeps
+`exit_code: 0` so the gate and the reviewers stay green, and is never
+green-washed: it stands in the gate note and the report's gate
+section with its class and reason — the rerun is an outward action
+the user owns — and the fix loop cannot recommend `merge` while such
+a row stands. Pending CI is shown, never green-washed. Each repo
+check is killed after `GATE_CHECK_TIMEOUT`
 seconds (default 600) and reported `timed_out`. A family is skipped
 when its tool is absent; nothing is silently invented. Built-in rows
 are hygiene, not a floor (D-018): with no `repo` row the gate's note
@@ -81,7 +103,9 @@ and the report header say no repo checks were detected, and the
 documented check command (README/CI) runs instead.
 
 Contract rules: a red gate ends a FRESH review — failing checks are
-the findings, reviewers are never spent. One exception: a project
+the findings, reviewers are never spent; in pr mode "red" now means a
+`code`-class CI failure (D-023), since an infrastructure or unknown
+row does not fail the gate. One exception: a project
 AUDIT does not stop at a red gate — each failing check becomes a
 high-severity gate finding and the panel still reads the code,
 because for an audit the failures are themselves findings. A fix_from
@@ -192,13 +216,41 @@ residual risk, `- <label> — <risk> (source: spec-review residual
 risk)` — for the user to park; nothing is appended without their
 yes. In pr mode the header names the PR
 (number, title, author, base, URL — markdown-escaped); "merge" reads
-PR-ready (pr), branch-ready (branch), ready-as-is (project).
-Recommendation semantics are canonical in `gates/recommendation.md`.
+PR-ready (pr), branch-ready (branch), ready-as-is (project) — and
+names a standing infrastructure-or-unknown CI row in the header
+rather than a plain pass (D-023). Recommendation semantics are
+canonical in `gates/recommendation.md`, read with D-023: a standing
+CI row floors the recommendation at `human`.
 A change over the split bounds (`SUGGEST_SPLIT_LINES` 1000 added
 lines / `SUGGEST_SPLIT_FILES` 20 files) also earns a one-line
 recommendation to split into smaller, independently reviewable
 chunks — reviewers read whole targets, and coverage thins as size
 grows.
+
+A fix-kind report derives `stopAsk` beside that verdict (D-024,
+`gates/recommendation.md` § Consequential stops): `whatStops` (one
+line naming the gate and the finding/check ids with their evidence),
+`whyItMatters` (a risk level — low, medium, high, derived from the
+finding severities and what stands — and its reason), `options` (two
+to four, each a label and a consequence: what the owner will have to
+do later because of it), a `recommendation` — an offered option's
+label, only when a criterion in `gates/recommendation.md` picks one,
+naming that criterion (`recommendationReason`) — or null with
+`noRecommendationReason` (why this is the owner's call). The
+derivation reads the report's own state, never a claim: the
+`unconfirmed` findings, the overruled skips, the `out-of-scope`
+findings, the standing CI rows, and the findings left once the fix
+rounds are spent — another round is an option only when the report
+names what changed since the last attempt (`changed_since`), never on
+an unchanged state. A report with nothing to judge — a `merge`
+verdict, an ordinary `fix-first` with rounds left, every review-only
+run — carries no stop ask (`stopAsk: null`). The markdown renders the
+ask in the contract's order (what stopped, why it matters, options,
+recommendation or no-recommendation, what the answer covers) under
+the `## Recommendation` heading; the session puts it to the user as
+the harness's structured question where one exists, otherwise prints
+it, and stops — an unanswered ask is not an answer (spec-define
+D-018).
 
 ## Versioning
 

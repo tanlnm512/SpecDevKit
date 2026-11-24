@@ -89,10 +89,14 @@ yourself.
 `python3 <skill_dir>/scripts/audit.py preflight specs/<name>` says
 whether the proofs can run at all: every proof command's program
 resolves, a Docker engine answers when the docset leans on
-Docker/Testcontainers, and which proofs are still PENDING because the
-tests they name do not exist. A NO-GO is the user's to settle (start the
-engine, export the variables the docset names) before any developer is
-spawned.
+Docker/Testcontainers, which proofs would run ENV-BLOCKED — the
+outcome names what is missing (a program, the Docker engine, a
+variable the docset names) — and which proofs are still PENDING
+because the tests they name do not exist. A NO-GO is the user's to
+settle (start the engine, export the variables the docset names)
+before any developer is spawned; when the environment cannot be
+supplied, the owner's recorded ruling is the way to proceed —
+`- Proof: TC-### — <ruling>` in the delivery block (D-047).
 
 ### Implementation — per-task frontier waves
 
@@ -139,7 +143,16 @@ No per-task gate, no per-phase stop, no commit while implementing.
 ruling (what, why, cost if wrong) and the wave keeps moving; stop
 and ask only for an irreversible or destructive operation, a
 security-sensitive action, a side effect outside the workspace, or
-a plan broken enough that every path is a guess.
+a plan broken enough that every path is a guess. **A spawn that did
+not answer is not a failed implementation**: when a developer
+session is lost, rate-limited or times out, the task's acceptance
+commands did not fail — nothing ran. Release the claim
+(`mark.py release <spec> T### --reason "blocked: <tool> did not answer: <what>"`),
+spawn the task again, and count the retries: three per task, then
+stop and tell the owner which task, which error and how many times.
+A fix round opens only on failed implementation, a red acceptance
+command or proof that ran, or an auditor BLOCK — never on a call
+that did not answer or a refusal by policy.
 
 ### Task markers — written only through `mark.py` / `tick.py`
 
@@ -204,8 +217,25 @@ suspects the plan: repair the area's tech/tasks docs through
 `/spec-design` before round 4, which goes to a fresh developer one
 tier up. Round 4 failing writes `(fix 5/5)` with its
 `fix 5 — <digest>` sub-line, the cap — the engine never re-spawns it.
-Adjudicate with the user: wrong (park with a
-D-###), isolated (defer), or load-bearing (`/spec-design` re-plans).
+The cap is a consequential stop (`contracts/delivery-pass.md` §
+Consequential stops): adjudicate with the user, each option carrying
+its consequence — what the owner will have to do later because of it:
+
+- **wrong** — the task does the wrong thing as planned: park it with
+  a D-###; the behavior does not land in this delivery, and the owner
+  re-plans it at `/spec-design` before it can come back.
+- **isolated** — the failure stays inside the task's own area: defer
+  the task; the rest of the plan delivers now and the owner brings
+  the task back as a follow-up.
+- **load-bearing** — tasks downstream depend on it: `/spec-design`
+  re-plans; nothing commits until the owner approves the new plan and
+  the run re-enters this skill.
+
+The recommendation is only ever the evidence's: when the engine's
+same-failure-signature evidence is present (D-044 — the same failing
+command three rounds running suspects the plan), the ask names
+**load-bearing**, re-plan, and that as the reason; otherwise it reads
+`No recommendation: <why this is the owner's call>`.
 
 **Same-signature (D-044)**: each round's evidence names its failing
 command; when the SAME command fails 3 consecutive rounds, `mark.py
@@ -213,7 +243,9 @@ fail` says so and the task's line carries a `[watch: …]` suffix from
 the second repeat on — a repeated signature means another round, or a
 stronger tier, re-runs the same failing command. Treat it as the
 round-3 plan suspicion the moment it fires: repair the docs or
-adjudicate; don't spend round 4's stronger tier on it.
+adjudicate; don't spend round 4's stronger tier on it. At the cap
+this evidence is the recommendation rule above: the ask names
+**load-bearing**, re-plan.
 
 ### Resume (a session killed mid-run)
 
@@ -245,16 +277,36 @@ HUMAN gate: `--run` parks at `AWAITING HUMAN: tick-commit`. You run
 the pass and present it; the user decides. `contracts/delivery-pass.md`
 is canonical — each step's commands and rules, the delivery block,
 the work-type, tiny-tier, and rewritten-history rules: read it in
-full before starting the pass. One pass over the whole plan — the
+full before starting the pass. Its § Consequential stops governs
+every stop whose next move is the owner's judgment — a task at the
+fix cap, a ruling a gate waits on, an orphaned claim, this gate
+itself. One pass over the whole plan — the
 lifecycle verbs below are its steps, never separate gates:
 
 1. **Proofs** — `scripts/audit.py proofs <spec-dir> --run`, fresh. A
-   PENDING proof (its named tests do not exist) fails the pass. `dod`'s
+   PENDING proof (its named tests do not exist) fails the pass. An
+   ENV-BLOCKED proof (D-047) — the environment it needs is missing —
+   is not a pass and not a failure, and the pass stays red while it
+   stands unruled: supply what is missing, or the owner rules it with
+   a `- Proof: TC-### — <ruling>` line in the delivery block (a FAIL
+   is never rulable this way). `dod`'s
    gate 1 is itself a live proofs run: read failures from `proofs`, take
    the verdict from `dod`, and run neither again until code changed.
 2. **Regression gate** — `audit.py regression`: NONE is never a pass.
-3. **Review instruments** — `audit.py scope`, `clean`, `mutate`,
-   `block` (drafts the delivery block the gates 11–13 read), `dod`, and
+   A red repo check is charged to the change only when the base passes
+   (D-048): that check re-runs against the approved base in a detached
+   temporary worktree and reads FAIL (charged), PREEXISTING (the base
+   fails the same way — listed, not charged, red until ruled), or
+   UNKNOWN (the base could not be checked). A
+   `- Regression: <check> — <ruling>` line in the delivery block rules
+   a PREEXISTING or UNKNOWN check; a charged FAIL is never rulable.
+3. **Review instruments** — `audit.py scope`, `clean`, `verifiers`
+   (a change to the files that define what the checks check — a make
+   recipe, a CI workflow, test-runner or lint configuration, a
+   `[tool.*]` test/lint table or package.json's scripts — reads RULED
+   only under a `- Verifier: <path> — <ruling>` line in the delivery
+   block), `mutate`,
+   `block` (drafts the delivery block the gates 11–14 read), `dod`, and
    the read-only auditor in implementation-diff mode.
    Resolve every BLOCK; own or rule every WARN/NIT.
 4. **Delivery summary → the user's yes** — tick and commit only on
@@ -316,8 +368,8 @@ pinned by `tools/tests/test_parity.py`):
 - `scripts/tick.py` — the mechanical tick: validated in full, applied
   atomically, refuses partial writes.
 - `scripts/audit.py` — the review instruments: scope, regression,
-  clean, proofs, mutate, coverage, dod, converge, block, preflight,
-  archived.
+  clean, verifiers, proofs, mutate, coverage, dod, converge, block,
+  preflight, archived.
 - `scripts/archive.sh` — moves a delivered spec to
   `specs/archive/<date>-<name>/`; commits nothing.
 - `scripts/migrate.py` — brings a v1 docset's task.md headers to the

@@ -7,6 +7,7 @@ their own; findings are adjudicated by the orchestrator).
 Usage: audit.py scope    <spec-dir> [--repo <path>] [--base <rev>]
        audit.py regression <spec-dir> [--repo <path>] [--base <rev>] [--dry-run]
        audit.py clean    [<spec-dir>] [--repo <path>] [--base <rev>]
+       audit.py verifiers <spec-dir> [--repo <path>] [--base <rev>]
        audit.py proofs   <spec-dir> [--repo <path>] [--run] [--task T###]
        audit.py mutate   <spec-dir> [--repo <path>] [--base <rev>] [--max-mutants N]
        audit.py coverage <spec-dir> [--repo <path>] [--threshold N]
@@ -37,8 +38,19 @@ regression — the repo's own checks, run by scripts/gate.sh (spec-review's
          gate, a byte-identical copy) against the same base: PASS, FAIL,
          or NONE (no repo checks detected — an explicit state, never a
          pass); the gate's dependency-manifest row prints as `deps:`
-         lines. --dry-run prints the detection plan only. Exit 0 PASS
-         (or dry) · 1 FAIL · 3 NONE.
+         lines. A red repo check is charged to the change only when the
+         base passes (D-048): that same check re-runs against the
+         approved base in a detached temporary worktree — always
+         removed, the working tree and index never touched — and reads
+         FAIL (charged: green at the base, or a failure the base did
+         not have), PREEXISTING (the same failures at the base — not
+         charged, listed, red while unruled), or UNKNOWN (no checkout of
+         the base, or the check cannot run there). Failures compare by
+         signature, never by exit codes; without a signature on either
+         side the outputs compare with timings, dates, absolute paths
+         and line numbers stripped. --dry-run prints the detection plan
+         only. Exit 0 PASS (or dry, or every red repo check ruled) ·
+         1 FAIL or an unruled red-not-charged check · 3 NONE.
 clean  — the diff's ADDED lines (plus untracked files' contents) scanned
          for debug prints, TODO/FIXME/XXX/HACK markers, commented-out
          calls, essay comments (one comment line ≥120 chars), and
@@ -48,31 +60,60 @@ clean  — the diff's ADDED lines (plus untracked files' contents) scanned
          output or spec-mandated logging is ruled by a `Hygiene: <path>
          [<kind>] — <ruling>` line in the delivery block, which the
          spec-dir positional lets clean and dod read (RULED, not SUSPECT).
+verifiers — the changed paths that define what the checks check — what
+         the regression gate trusts: the make recipes (Makefile,
+         makefile, GNUmakefile, justfile), CI definitions
+         (.github/workflows/*.yml|yaml, .forgejo/workflows/*,
+         .gitlab-ci.yml, .circleci/, Jenkinsfile, azure-pipelines.yml,
+         .buildkite/), test-runner and lint configuration (pytest.ini,
+         tox.ini, setup.cfg, any conftest.py, jest.config.*,
+         vitest.config.*, .mocharc*, karma.conf.*, phpunit.xml*,
+         .eslintrc*, .flake8, ruff.toml, .pre-commit-config.yaml,
+         .coveragerc), and pyproject.toml / package.json only when the
+         diff touches a [tool.*] table for pytest, coverage, ruff,
+         mypy or tox, or package.json's scripts block (a
+         dependency-only change is not a verifier change — the `deps:`
+         lines own dependencies). Each row prints the path, what it
+         is, lines added and removed, and RULED once a `Verifier:
+         <path> — <ruling>` line in the delivery block covers it.
+         Exit 0 when nothing is listed or everything is ruled, 1 while
+         an unruled verifier change stands.
 proofs — each TC's Pass condition in test.md is classified auto (a
          runnable command) or manual (human observation) and listed; with
          --run, auto commands execute (cwd = repo root, 120s timeout
          each) and report PASS/FAIL with the command line for pasting
          into the tick evidence; a failed one prints its exit code and
          the tail of its combined stdout+stderr — the verbatim evidence
-         a fix round's notes/T###.md records. At Tier: tiny the proofs
-         are each § Tasks entry's `Accept:` commands (no test.md exists);
-         an Accept line saying the command "exits nonzero" passes only
-         on a nonzero exit. --run executes commands embedded in the
-         docs — opt-in for the same reason you'd read a command before
-         pasting it into a shell.
+         a fix round's notes/T###.md records. The fifth outcome,
+         ENV-BLOCKED, names what the environment is missing — decided
+         from evidence, never a guess (the program does not resolve, the
+         Docker engine does not answer, a variable the command names is
+         unset, or the run ends exit 126/127 with `command not found`):
+         the proof never ran, so it is not a pass and not charged as a
+         failure — the run exits 1 while it stands unruled, and the
+         owner's `- Proof: TC-### — <ruling>` line in the delivery block
+         turns the row RULED (a FAIL is never rulable this way; PENDING
+         — the named tests do not exist — keeps its meaning). At Tier:
+         tiny the proofs are each § Tasks entry's `Accept:` commands (no
+         test.md exists); an Accept line saying the command "exits
+         nonzero" passes only on a nonzero exit. --run executes commands
+         embedded in the docs — opt-in for the same reason you'd read a
+         command before pasting it into a shell.
 dod    — the Definition-of-Done scorecard (every gate must pass): runs
          check.py, live TC proofs, the regression gate, and the
          scope/hygiene counts in one pass; mechanical gates print
          PASS/FAIL, judgment gates print MANUAL (NONE: no repo checks
          detected) for the orchestrator to satisfy, and gates that do
-         not apply print N/A. Gates 11-13 read the status holder's
+         not apply print N/A. Gates 11-14 read the status holder's
          delivery block (notes/delivery.md serves archived history):
          `Docs impact: <files> | none — <reason>`, `Rollback: <row key>
          — <ruling>` for a rollback row no TC proves, `Hygiene: <path>
-         [<kind>] — <ruling>` for each gate-7 suspect that is not debris, and `Behavior
+         [<kind>] — <ruling>` for each gate-7 suspect that is not
+         debris, `Verifier: <path> — <ruling>` for each gate-14
+         verifier change that stands, and `Behavior
          preserved: ...` at Type refactor/upgrade; a bugfix or hotfix
          needs a notes/T###.md `## Regression test (red before fix)`
-         section. Gate 14 reads the burndown Verified column: `pass`
+         section. Gate 15 reads the burndown Verified column: `pass`
          needs the `Delivered:` record, and a `Delivered:` record needs
          every attributable phase row `pass`. Gate 5 counts the frozen
          Code state's drift WARNs (a citation's line moved, the Baseline
@@ -82,7 +123,10 @@ dod    — the Definition-of-Done scorecard (every gate must pass): runs
          subprocess fails closed: one that cannot start, times out, or
          delivers no verdict line fails its gate with a diagnostic
          instead of reading as green, and failed proofs are named under
-         the gate table. --dry-run keeps the scorecard inert: auto TCs
+         the gate table. Gate 1 stays red while an environment-blocked
+         proof stands unruled — `- Proof: TC-### — <ruling>` in the
+         delivery block lets it pass with the ruling in view (D-047).
+         --dry-run keeps the scorecard inert: auto TCs
          are classified, gate 1 reads DRY, and no test.md command
          executes — the state-inspection path.
 converge — diffs specs/<name>/tech-spec.md § Code state against its
@@ -125,15 +169,25 @@ coverage — line-coverage floor over the tasks' intended files:
          Exit 0 = every touched file at/above the floor · 1 = below,
          unmeasured, or the suite is red.
 
-block  — drafts the delivery block the dod gates 11-13 read: the docs and
-         schemas the diff touched as `Docs impact:`, a `Rollback: <row>
+block  — drafts the delivery block the dod gates 1 and 11-14 read: the docs
+         and schemas the diff touched as `Docs impact:`, a `Rollback: <row>
          — <ruling>` placeholder for every rollback row no TC proves,
-         a `Hygiene:` line per unruled suspect. Prints; writes nothing.
+         a `Hygiene:` line per unruled suspect, a `Verifier: <path>
+         — <ruling>` line per unruled verifier change, a
+         `Proof: TC-### — <ruling>` line per proof whose environment is
+         missing (the pre-run evidence preflight names; a PENDING proof —
+         tests not written — is not drafted), and a `Regression: <check>
+         — <ruling>` line per red repo check the approved base is red on
+         too or could not confirm (the regression gate runs for this
+         verdict; a charged FAIL is never drafted). Prints; writes nothing.
 
-preflight — run before the first wave: every proof command's program is
-         on PATH, a Docker engine answers when the docset's proofs lean
-         on Docker/Testcontainers, and which proofs are PENDING because
-         the tests they name are not written yet. Exit 1 on NO-GO.
+preflight — run before the first wave: which proofs would be ENV-BLOCKED
+         (the program, Docker engine, or named variable the environment
+         lacks — the owner's recorded `- Proof: TC-### — <ruling>` ruling
+         is the way to proceed when the environment cannot be supplied),
+         a Docker engine answering when the docset's proofs lean on
+         Docker/Testcontainers, and which proofs are PENDING because the
+         tests they name are not written yet. Exit 1 on NO-GO.
 
 archived — the archive gate (OpenSpec validate --archived semantics):
          every dir under specs/archive/ must hold its task list (task.md,
@@ -145,12 +199,15 @@ archived — the archive gate (OpenSpec validate --archived semantics):
          enough for a pre-push or pre-archive hook.
 
 Exit:  0 = report produced (scope/clean/converge always; proofs without
-      --run) · regression: 0 PASS · 1 FAIL · 3 NONE (no repo checks
-      detected) · proofs --run / dod / archived: 0 = every mechanical gate
-      green, 1 = any FAILED, errored or PENDING (a proof whose named tests
-      do not exist never reads PASS; dod --dry-run: gate 1 reads DRY —
-      classified, not executed — and is not a failure) · preflight: 1 =
-      NO-GO · 2 = usage error.
+      --run) · regression: 0 PASS (or dry, or every red repo check
+      ruled) · 1 FAIL or an unruled red-not-charged check · 3 NONE (no
+      repo checks detected) · verifiers: 0 = nothing unruled, 1 = an unruled
+      verifier change stands · proofs --run / dod / archived:
+      0 = every mechanical gate green, 1 = any FAILED, errored, PENDING or
+      unruled ENV-BLOCKED (a proof whose named tests do not exist never
+      reads PASS; an environment-blocked one never counts as a failure;
+      dod --dry-run: gate 1 reads DRY — classified, not executed — and is
+      not a failure) · preflight: 1 = NO-GO · 2 = usage error.
 
 Non-git repos: git-derived output degrades explicitly, never silently —
 scope/clean print `SKIPPED (not a git repo)` instead of a false all-clear
@@ -168,6 +225,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -229,12 +287,24 @@ GATE_SH = Path(__file__).resolve().parent / "gate.sh"
 REGRESSION_NONE = 3
 DELIVERY_NOTE = ("notes", "delivery.md")
 DELIVERED_FIELD = re.compile(r"^[ \t]*\*{0,2}Delivered\*{0,2}[ \t]*:.*$", re.M)
-RECORD_LINE = re.compile(r"^[ \t]*\*{0,2}(?:Released|Post-release check)\*{0,2}[ \t]*:")
+# RECORD_LINE also steps over the `Shipped:` record ship.py's `record`
+# writes directly under `Delivered:` — the same read as ship.py's block,
+# so one doc state answers identically in both skills.
+RECORD_LINE = re.compile(r"^[ \t]*\*{0,2}(?:Shipped|Released|Post-release check)\*{0,2}[ \t]*:")
 FACT_BULLET = re.compile(r"^[ \t]*-[ \t]")
 DOCS_IMPACT = re.compile(r"^Docs impact:[ \t]*(.*)$", re.M)
 ROLLBACK_RULING = re.compile(r"^Rollback:[ \t]*(.+)[ \t]+—[ \t]+\S", re.M)
 BEHAVIOR_PRESERVED = re.compile(r"^Behavior preserved:[ \t]*\S", re.M)
 HYGIENE_RULING = re.compile(r"^Hygiene:[ \t]*(\S+)[ \t]+\[([^\]]+)\][ \t]+—[ \t]+\S", re.M)
+VERIFIER_RULING = re.compile(r"^Verifier:[ \t]*(\S+)[ \t]+—[ \t]+\S", re.M)
+# The check name may carry spaces ("make test"), so the name is whatever
+# sits before the em-dash, not one token.
+REGRESSION_RULING = re.compile(r"^Regression:[ \t]*(.+?)[ \t]+—[ \t]+\S", re.M)
+# The ruling line's id is the proof's own label: TC-### at full tier,
+# the task id (T###, or T###.n for a second Accept line) the tiny tier
+# keys its proofs under — either reads back as a ruling (D-047).
+PROOF_RULING = re.compile(
+    r"^Proof:[ \t]*((?:TC-\d{3}|T\d{3}(?:\.\d+)?))[ \t]+—[ \t]+\S", re.M)
 REGRESSION_FIRST = re.compile(r"^## Regression test \(red before fix\)", re.M)
 TYPE_LINE = re.compile(r"^\*\*Type\*\*:[ \t]*([A-Za-z-]+)", re.M)
 TC_ID = re.compile(r"\bTC-\d{3}\b")
@@ -492,31 +562,47 @@ def mode_scope(spec_dir: Path, repo: Path, base: str | None) -> int:
     return 0
 
 
-def regression_data(spec_dir: Path, repo: Path, base: str | None,
-                    plan: bool = False) -> dict:
-    """The repo's own checks via gate.sh against the approved base:
-    {state: PASS | FAIL | NONE | DRY, detail, rows, deps}."""
-    cmd = ["bash", str(GATE_SH), "--repo", str(repo),
-           "--base", effective_base(spec_dir, base) or "HEAD"]
+def _run_gate(repo: Path, base: str | None, plan: bool = False):
+    """(rows, error) from one gate.sh run against `repo` at diff base
+    `base` — the single invocation shape behind the head run and the
+    base-fairness run below."""
+    cmd = ["bash", str(GATE_SH), "--repo", str(repo), "--base", base or "HEAD"]
     env = {**os.environ, "GATE_TELEMETRY_SKILL": "spec-build"}
     try:
         cp = subprocess.run(cmd + (["--plan"] if plan else []), capture_output=True,
                             text=True, errors="replace", env=env)
         rows = json.loads(cp.stdout)
     except (OSError, ValueError) as e:
-        rows, err = None, str(e)
+        return None, str(e)
     if not isinstance(rows, list):
+        return None, "not a list"
+    return rows, None
+
+
+def regression_data(spec_dir: Path, repo: Path, base: str | None,
+                    plan: bool = False) -> dict:
+    """The repo's own checks via gate.sh against the approved base:
+    {state: PASS | FAIL | NONE | DRY, detail, rows, deps, failures}.
+    `failures` maps each red check's name to its base-fairness outcome
+    (D-048): the change is charged only where the base is green or
+    fails differently — the base's verdict comes from a detached
+    temporary worktree, removed before this returns."""
+    base_ref = effective_base(spec_dir, base)
+    rows, err = _run_gate(repo, base_ref, plan=plan)
+    if rows is None:
         return {"state": "FAIL", "rows": [], "deps": [],
-                "detail": f"gate.sh produced no JSON report ({err if rows is None else 'not a list'})"}
+                "detail": f"gate.sh produced no JSON report ({err})",
+                "failures": {}}
     info = [r for r in rows if r.get("status") == "info"]
     deps = [line for r in info for line in r.get("tail", "").splitlines()[1:]]
     checks = [r for r in rows if r not in info]
     repo_rows = [r for r in checks if r.get("source") == "repo"]
-    failed = [r["name"] + (" (timed out)" if r.get("status") == "timed_out" else "")
-              for r in checks if r.get("exit_code") not in (0, None)]
+    failing = [r for r in checks if r.get("exit_code") not in (0, None)]
     names = "; ".join(r["name"] for r in repo_rows)
-    if failed:
-        state, detail = "FAIL", "failing: " + "; ".join(failed)
+    failures: dict = {}
+    if failing:
+        failures = base_fairness(spec_dir, repo, failing, base_ref)
+        state, detail = failure_state(failures)
     elif not repo_rows:
         state, detail = "NONE", ("no repo checks detected — run the repo's documented "
                                  "check command and record its exit-0 output")
@@ -524,7 +610,228 @@ def regression_data(spec_dir: Path, repo: Path, base: str | None,
         state, detail = "DRY", f"would run: {names}"
     else:
         state, detail = "PASS", f"{len(repo_rows)} repo check(s) green: {names}"
-    return {"state": state, "detail": detail, "rows": checks, "deps": deps}
+    return {"state": state, "detail": detail, "rows": checks, "deps": deps,
+            "failures": failures}
+
+
+# --- base fairness (D-048) -------------------------------------------
+# A red repository check is charged to the change only when the base
+# passes. The comparison reads failures, never exit codes: the runner
+# dialects the gate already detects give failure signatures; without a
+# signature on either side, the whole outputs compare once stripped of
+# what differs between two runs of the same failure (timings, dates,
+# absolute paths — the base checkout lives in a temporary directory —
+# and line numbers).
+
+SIG_RES = (
+    # pytest short-summary line: FAILED tests/test_a.py::test_a - msg
+    (re.compile(r"FAILED\s+(\S+::\S+?)(?:\s+-\s.*)?$"), "FAILED {}"),
+    # unittest: FAIL: test_a (tests.test_math.MathTest)
+    (re.compile(r"(FAIL|ERROR):\s+(\S+)\s+\(([^)]+)\)"),
+     lambda m: f"{m.group(1)} {m.group(3)}.{m.group(2)}"),
+    (re.compile(r"--- FAIL:\s+(\S+)"), "--- FAIL: {}"),          # go
+    (re.compile(r"FAIL\s+(\S+)"), "FAIL {}"),                    # jest/vitest suite
+    (re.compile(r"\s*[❯>]*\s*[✕✗×]\s*(.+?)(?:\s*\(?\d+(?:\.\d+)?\s*m?s\)?)?\s*$"),
+     "✕ {}"),                                                    # jest/vitest test
+    (re.compile(r"\[ERROR\]\s+(\S+?)(?::\d+)+(?:\s|$)"),         # maven/gradle
+     "[ERROR] {}"),
+    (re.compile(r"test\s+(\S+)\s+\.\.\.\s+FAILED$"), "test {}"),  # cargo
+    (re.compile(r"not ok(?:\s+\d+)?\s+-?\s*(.+)$"), "not ok - {}"),  # TAP
+)
+
+
+def _sig_line(line: str) -> str | None:
+    for rx, fmt in SIG_RES:
+        m = rx.match(line)
+        if m:
+            return fmt.format(m.group(1)) if isinstance(fmt, str) else fmt(m)
+    return None
+
+
+def failure_signatures(output: str) -> list[str]:
+    """The failing tests an output names — the units the base comparison
+    subset-tests. [] when nothing readable: the caller then compares the
+    whole outputs instead of guessing at a failure."""
+    sigs: list[str] = []
+    for line in output.splitlines():
+        sig = _sig_line(line)
+        if sig and sig not in sigs:
+            sigs.append(sig)
+    return sigs
+
+
+VOLATILE = (
+    (re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?"),
+     "<date>"),
+    (re.compile(r"\b\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?\b"), "<time>"),
+    (re.compile(r"\(\d+(?:\.\d+)?\s*(?:ms|µs|ns|s)\)"), "(<dur>)"),
+    (re.compile(r"\b(?:in|after|took)\s+\d+(?:\.\d+)?\s*(?:ms|µs|ns|s)\b"),
+     "<dur>"),
+    (re.compile(r"(?<![\w.])/[^\s:]+/"), ""),
+    (re.compile(r"(?<=\w):\d+(?::\d+)?"), ":<ln>"),
+    (re.compile(r"\bline\s+\d+\b"), "line <ln>"),
+)
+
+
+def strip_volatile(text: str) -> str:
+    """The output comparison's normal form: what two runs of the same
+    failure may not differ in is stripped before the fallback compare."""
+    for rx, repl in VOLATILE:
+        text = rx.sub(repl, text)
+    return text
+
+
+def regression_rulings(spec_dir: Path | None) -> set[str]:
+    """The check names an owner's `- Regression: <check> — <ruling>` line
+    rules — the D-037 shape for the failing checks the base shares
+    (D-048). A charged FAIL never reads from this."""
+    if spec_dir is None:
+        return set()
+    return {n.strip().strip("`")
+            for n in REGRESSION_RULING.findall(delivery_note(spec_dir)[0])}
+
+
+def _base_worktree(repo: Path, base_ref: str | None) -> tuple[Path | None, str]:
+    """(worktree, "") — a detached checkout of the approved base, the
+    delivery-pass pattern for a behavior-preserved run — or (None, git's
+    complaint). The checkout sits under a fresh temporary parent so the
+    path never pre-exists; the caller removes it with _drop_worktree,
+    which is also why no exception may escape past it."""
+    parent = Path(tempfile.mkdtemp(prefix="audit-base-"))
+    wt = parent / "wt"
+    r = git(repo, "worktree", "add", "--detach", str(wt), base_ref or "HEAD")
+    if r.returncode != 0:
+        shutil.rmtree(parent, ignore_errors=True)
+        return None, (r.stderr.strip() or r.stdout.strip()
+                      or "git worktree add failed")
+    return wt, ""
+
+
+def _drop_worktree(repo: Path, wt: Path) -> None:
+    """Remove the base checkout on every path out — success, failure,
+    interruption: the worktree entry first (its metadata lives under the
+    main repo's .git), then the directory, then a prune so a remove that
+    failed still leaves no stale entry. The main working tree and index
+    are never touched by any of this."""
+    git(repo, "worktree", "remove", "--force", str(wt))
+    shutil.rmtree(wt.parent, ignore_errors=True)
+    git(repo, "worktree", "prune")
+
+
+def _unknown_outcome(row: dict, reason: str, ruled: set[str]) -> dict:
+    return {"outcome": "UNKNOWN", "ruled": row["name"] in ruled,
+            "detail": f"the base could not be checked ({reason})",
+            "base_failures": [],
+            "head_failures": failure_signatures(row.get("tail", ""))}
+
+
+def _outcome_vs_base(row: dict, brow: dict | None, base_ref: str | None,
+                     ruled: set[str]) -> dict:
+    """One red head check's outcome against its base row: FAIL when the
+    base is green or fails where this did not, PREEXISTING when the same
+    failures stand at the base, UNKNOWN when the comparison cannot
+    decide. Decided from the outputs, never the exit codes alone."""
+    name = row["name"]
+    head_sigs = failure_signatures(row.get("tail", ""))
+    where = base_ref or "HEAD"
+    if brow is None:
+        return {"outcome": "UNKNOWN", "ruled": name in ruled,
+                "detail": f"this check does not exist at {where} — no such row in the base checkout",
+                "base_failures": [], "head_failures": head_sigs}
+    if brow.get("exit_code") == 0:
+        return {"outcome": "FAIL", "ruled": False,
+                "detail": f"green at {where}",
+                "base_failures": [], "head_failures": head_sigs}
+    base_sigs = failure_signatures(brow.get("tail", ""))
+    new = [s for s in head_sigs if s not in base_sigs]
+    if head_sigs and base_sigs:
+        if new:
+            return {"outcome": "FAIL", "ruled": False,
+                    "detail": "new failure(s) the base did not have: "
+                              + "; ".join(new),
+                    "base_failures": base_sigs, "head_failures": head_sigs}
+        return {"outcome": "PREEXISTING", "ruled": name in ruled,
+                "detail": f"red at {where} on the same failures",
+                "base_failures": base_sigs, "head_failures": head_sigs}
+    if head_sigs or base_sigs:
+        # exactly one output carries a readable failure — deciding would
+        # be a guess, and a guess is neither a pass nor a charge
+        return {"outcome": "UNKNOWN", "ruled": name in ruled,
+                "detail": "only one output carries a readable failure",
+                "base_failures": base_sigs, "head_failures": head_sigs}
+    if strip_volatile(row.get("tail", "")) == strip_volatile(brow.get("tail", "")):
+        return {"outcome": "PREEXISTING", "ruled": name in ruled,
+                "detail": f"red at {where} with the same output",
+                "base_failures": [], "head_failures": []}
+    return {"outcome": "FAIL", "ruled": False,
+            "detail": "the output differs from the base's",
+            "base_failures": [], "head_failures": []}
+
+
+def base_fairness(spec_dir: Path | None, repo: Path, failing: list[dict],
+                  base_ref: str | None) -> dict:
+    """{check name: outcome} per red check, decided against the approved
+    base: the base's own run of each failing repo check comes from one
+    detached temporary worktree (created only because a check is red,
+    removed before this returns on every path). A builtin row — secrets,
+    shell syntax — scans the change itself, which does not exist at the
+    base, so it stays charged without a base run."""
+    ruled = regression_rulings(spec_dir)
+    outcomes: dict = {}
+    repo_red = []
+    for row in failing:
+        if row.get("source") == "repo":
+            repo_red.append(row)
+        else:
+            outcomes[row["name"]] = {
+                "outcome": "FAIL", "ruled": False,
+                "detail": "the base has no change to scan — charged",
+                "base_failures": [], "head_failures": []}
+    if not repo_red:
+        return outcomes
+    wt, why = _base_worktree(repo, base_ref)
+    if wt is None:
+        for row in repo_red:
+            outcomes[row["name"]] = _unknown_outcome(
+                row, f"no checkout of {base_ref or 'HEAD'} could be made ({why})",
+                ruled)
+        return outcomes
+    try:
+        rows, err = _run_gate(wt, None)
+        if rows is None:
+            for row in repo_red:
+                outcomes[row["name"]] = _unknown_outcome(
+                    row, "the base gate produced no JSON report", ruled)
+            return outcomes
+        base_rows = {r["name"]: r for r in rows if r.get("source") == "repo"}
+        for row in repo_red:
+            outcomes[row["name"]] = _outcome_vs_base(
+                row, base_rows.get(row["name"]), base_ref, ruled)
+    finally:
+        _drop_worktree(repo, wt)
+    return outcomes
+
+
+def failure_state(failures: dict) -> tuple[str, str]:
+    """(state, detail) over the failing checks' outcomes: a charged FAIL
+    or an unruled PREEXISTING/UNKNOWN keeps the gate red; a red only the
+    base shares passes once the owner's ruling records it."""
+    bits: list[str] = []
+    ruled: list[str] = []
+    for name, oc in sorted(failures.items()):
+        if oc["outcome"] == "FAIL":
+            bits.append(f"{name} (charged: {oc['detail']})")
+        elif oc["ruled"]:
+            ruled.append(name)
+        else:
+            word = ("preexisting — the base fails too"
+                    if oc["outcome"] == "PREEXISTING"
+                    else "unknown — the base could not be checked")
+            bits.append(f"{name} ({word}; unruled)")
+    if bits:
+        return "FAIL", "failing: " + "; ".join(bits)
+    return ("PASS", "red only where the base is red — ruled in the delivery "
+            "block: " + ", ".join(ruled))
 
 
 def print_deps(deps: list[str]) -> None:
@@ -534,11 +841,20 @@ def print_deps(deps: list[str]) -> None:
 
 def mode_regression(spec_dir: Path, repo: Path, base: str | None, dry: bool) -> int:
     data = regression_data(spec_dir, repo, base, plan=dry)
+    failures = data.get("failures", {})
     for r in data["rows"]:
-        print(f"  {r.get('status', '?').upper():<9} {r['name']}")
-        if r.get("exit_code") not in (0, None):
+        red = r.get("exit_code") not in (0, None)
+        oc = failures.get(r["name"]) if red else None
+        label = ("RULED" if oc and oc["ruled"] and oc["outcome"] != "FAIL"
+                 else r.get("status", "?").upper())
+        print(f"  {label:<9} {r['name']}")
+        if red:
             for line in r.get("tail", "").splitlines():
                 print(f"      {line}")
+            if oc:
+                print(f"      base: {oc['outcome']} — {oc['detail']}")
+                for sig in oc["base_failures"]:
+                    print(f"        base failure: {sig}")
     print_deps(data["deps"])
     print(f"regression: {data['state']} — {data['detail']}")
     return {"FAIL": 1, "NONE": REGRESSION_NONE}.get(data["state"], 0)
@@ -601,6 +917,269 @@ def mode_clean(repo: Path, base: str | None, spec_dir: Path | None = None) -> in
     if not finds:
         print("  no debug prints, markers, commented-out calls, essay "
               "comments, or comment walls in added lines")
+    return 0
+
+
+# --- verifier definitions -------------------------------------------
+# The files that say what the repo's checks check. gate.sh runs those
+# checks from the working tree, so an implementation that edits one
+# changed what later greens mean — such a change is surfaced for a
+# ruling (the D-037 shape), never read as quiet. Conservative tables:
+# exact names and the directories CI runners actually read; a
+# dependency-only manifest change is not here (`deps:` owns
+# dependencies), and pyproject.toml/package.json are judged from their
+# diff, not from their presence.
+VERIFIER_BASENAMES = {
+    "Makefile": "make recipe",
+    "makefile": "make recipe",
+    "GNUmakefile": "make recipe",
+    "justfile": "just recipe",
+    "Jenkinsfile": "Jenkins pipeline",
+    "azure-pipelines.yml": "Azure Pipelines config",
+    ".gitlab-ci.yml": "GitLab CI config",
+    "pytest.ini": "pytest config",
+    "tox.ini": "tox config",
+    "setup.cfg": "ini tool config",
+    "conftest.py": "pytest fixtures/hooks",
+    ".flake8": "flake8 config",
+    "ruff.toml": "ruff config",
+    ".pre-commit-config.yaml": "pre-commit hooks",
+    ".coveragerc": "coverage config",
+}
+VERIFIER_NAME_GLOBS = {
+    "jest.config.*": "Jest config",
+    "vitest.config.*": "Vitest config",
+    ".mocharc*": "Mocha config",
+    "karma.conf.*": "Karma config",
+    "phpunit.xml*": "PHPUnit config",
+    ".eslintrc*": "ESLint config",
+}
+# Directories whose whole content is CI definition.
+VERIFIER_DIRS = {
+    ".github/workflows": "GitHub Actions workflow",
+    ".forgejo/workflows": "Forgejo workflow",
+    ".circleci": "CircleCI config",
+    ".buildkite": "Buildkite pipeline",
+}
+# The [tool.*] tables that configure the checks themselves — a table for
+# any other tool is packaging or app config, not a verifier.
+TOOL_TABLE = re.compile(r"^\[tool\.(?:pytest|coverage|ruff|mypy|tox)\b")
+VERIFIER_MANIFESTS = ("pyproject.toml", "package.json")
+
+
+def verifier_kind(path: str) -> str | None:
+    """What the path defines about the repo's checks, or None — the one
+    classifier behind `verifiers`. A workflows file no runner reads
+    (not .yml/.yaml) defines nothing."""
+    name = Path(path).name
+    if name in VERIFIER_BASENAMES:
+        return VERIFIER_BASENAMES[name]
+    for tok, kind in VERIFIER_NAME_GLOBS.items():
+        if fnmatch.fnmatch(name, tok):
+            return kind
+    parent = str(Path(path).parent)
+    if parent in VERIFIER_DIRS:
+        if parent == ".github/workflows" and not name.endswith((".yml", ".yaml")):
+            return None
+        return VERIFIER_DIRS[parent]
+    return None
+
+
+def _toml_tool_tables(text: str) -> dict[int, str]:
+    """{line: table} for the lines a pytest/coverage/ruff/mypy/tox table
+    spans (header included) — the verifier lines inside a manifest
+    that is otherwise dependencies and packaging."""
+    out: dict[int, str] = {}
+    table = None
+    for i, line in enumerate(text.splitlines(), 1):
+        m = re.match(r"^\[([^][#]+)\]", line)
+        if m:
+            table = m.group(1).strip() if TOOL_TABLE.match(line) else None
+        if table:
+            out[i] = table
+    return out
+
+
+def _json_scripts_lines(text: str) -> set[int]:
+    """The lines of package.json's top-level `scripts` object. Brace
+    counting is naive on purpose: package.json is machine-formatted
+    JSON, and requiring depth 1 keeps a nested `scripts` (a tool's own
+    config block) from counting."""
+    out: set[int] = set()
+    depth = 0
+    inside = False
+    for i, line in enumerate(text.splitlines(), 1):
+        opens = line.count("{")
+        closes = line.count("}")
+        if inside:
+            out.add(i)
+            depth += opens - closes
+            if depth <= 1:
+                inside = False
+            continue
+        if depth == 1 and re.match(r'^\s*"scripts"\s*:', line):
+            out.add(i)
+            depth += opens - closes
+            inside = depth > 1  # the object opened here; a one-liner closes too
+            continue
+        depth += opens - closes
+    return out
+
+
+def _diff_line_numbers(repo: Path, path: str,
+                       base: str | None) -> tuple[set[int], set[int]]:
+    """(added, removed) diff line numbers vs base for one path — the
+    +/- hunks, which is what "the diff touches" means for the two
+    manifest files. An untracked manifest has no diff: its whole
+    content counts as added."""
+    added: set[int] = set()
+    removed: set[int] = set()
+    new_ln = old_ln = None
+    for line in git(repo, "diff", "-U0", base or "HEAD", "--", path).stdout.splitlines():
+        m = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+        if m:
+            old_ln, new_ln = int(m.group(1)), int(m.group(2))
+            continue
+        if line.startswith(("+++", "---")):
+            continue
+        if line.startswith("+") and new_ln is not None:
+            added.add(new_ln)
+            new_ln += 1
+        elif line.startswith("-") and old_ln is not None:
+            removed.add(old_ln)
+            old_ln += 1
+        else:
+            if new_ln is not None:
+                new_ln += 1
+            if old_ln is not None:
+                old_ln += 1
+    if not added and not removed and (repo / path).is_file():
+        st = git(repo, "status", "--porcelain", "--untracked-files=all",
+                 "--", path)
+        if st.stdout.startswith("??"):
+            try:
+                data = (repo / path).read_bytes()
+            except OSError:
+                return added, removed
+            if b"\0" not in data[:8192]:
+                text = data.decode("utf-8", errors="replace")
+                added = set(range(1, len(text.splitlines()) + 1))
+    return added, removed
+
+
+def manifest_verifier_kind(repo: Path, path: str,
+                           base: str | None) -> str | None:
+    """What a pyproject.toml/package.json diff touched that defines the
+    checks — None (not a verifier change) when only dependencies or
+    metadata moved. pyproject counts a diff line inside a
+    pytest/coverage/ruff/mypy/tox table, the removed side judged
+    against the base content; package.json counts its scripts block."""
+    added, removed = _diff_line_numbers(repo, path, base)
+    if Path(path).name == "pyproject.toml":
+        new_tables = _toml_tool_tables(_read(repo / path))
+        old_tables = _toml_tool_tables(
+            git(repo, "show", f"{base or 'HEAD'}:{path}").stdout)
+        tables = sorted({new_tables[n] for n in added if n in new_tables}
+                        | {old_tables[n] for n in removed if n in old_tables})
+        if tables:
+            return f"{', '.join(tables)} table"
+        return None
+    new_scripts = _json_scripts_lines(_read(repo / path))
+    old_scripts = _json_scripts_lines(
+        git(repo, "show", f"{base or 'HEAD'}:{path}").stdout)
+    if (any(n in new_scripts for n in added)
+            or any(n in old_scripts for n in removed)):
+        return "scripts block"
+    return None
+
+
+def diff_counts(repo: Path, base: str | None) -> dict[str, tuple[int, int]]:
+    """{path: (added, removed)} vs base — the sizes the verifiers rows
+    print. Untracked files count their whole content as added, like
+    added_lines does; numstat's `-` cells (a binary diff) read 0, and
+    rename shapes skip the count but never the row."""
+    counts: dict[str, tuple[int, int]] = {}
+    for line in git(repo, "diff", "--numstat", base or "HEAD").stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3 or " => " in parts[2]:
+            continue
+        added, removed, path = parts
+        counts[path] = (int(added) if added.isdigit() else 0,
+                        int(removed) if removed.isdigit() else 0)
+    r = git(repo, "status", "--porcelain", "--untracked-files=all")
+    for line in r.stdout.splitlines():
+        if not line.startswith("??"):
+            continue
+        p = line[3:].strip().strip('"')
+        f = repo / p
+        if CACHE_PATH.search(p) or not f.is_file():
+            continue
+        try:
+            data = f.read_bytes()
+        except OSError:
+            continue
+        if b"\0" in data[:8192]:
+            continue
+        counts[p] = (len(data.decode("utf-8", errors="replace").splitlines()), 0)
+    return counts
+
+
+def verifier_changes(spec_dir: Path, repo: Path, base: str | None
+                     ) -> list[tuple[str, str, int, int]]:
+    """(path, what, added, removed) per changed verifier-definition file
+    vs base — the rows `verifiers` prints, `block` drafts and dod gate
+    14 counts. The surface is the changed-path set `scope` computes;
+    outside paths (another change's work since approval) are not
+    judged, like scope's, and specs/ paths are delivery surface, not
+    check definitions."""
+    paths, _unmentioned, outside = scope_data(spec_dir, repo, base)
+    # one base for the whole verdict — a manifest's kind is judged
+    # against the same Approved-at anchor its counts and the path set
+    # use, never against HEAD (commits land since approval)
+    eff = effective_base(spec_dir, base)
+    counts = diff_counts(repo, eff)
+    ruled_out = set(outside)
+    rows: list[tuple[str, str, int, int]] = []
+    for p in paths:
+        if p in ruled_out or p.startswith("specs/"):
+            continue
+        kind = verifier_kind(p)
+        if kind is None and Path(p).name in VERIFIER_MANIFESTS:
+            kind = manifest_verifier_kind(repo, p, eff)
+        if kind:
+            added, removed = counts.get(p, (0, 0))
+            rows.append((p, kind, added, removed))
+    return rows
+
+
+def verifier_rulings(spec_dir: Path | None) -> set[str]:
+    if spec_dir is None:
+        return set()
+    return {p.strip("`")
+            for p in VERIFIER_RULING.findall(delivery_note(spec_dir)[0])}
+
+
+def mode_verifiers(spec_dir: Path, repo: Path, base: str | None) -> int:
+    if not git_available(repo):
+        print("verifiers: SKIPPED (not a git repo) — no verifier verdict")
+        return 0
+    rows = verifier_changes(spec_dir, repo, base)
+    ruled = verifier_rulings(spec_dir)
+    print(f"verifiers: {len(rows)} verifier-definition file(s) changed vs "
+          f"{effective_base(spec_dir, base) or 'working tree'}")
+    for path, kind, added, removed in rows:
+        label = "RULED  " if path in ruled else "UNRULED"
+        print(f"  {label}  {path}  [{kind}]  +{added} -{removed}")
+    if not rows:
+        print("  no change to the files that define what the checks check")
+    open_paths = [p for p, _k, _a, _r in rows if p not in ruled]
+    if open_paths:
+        print(f"verifiers: {len(open_paths)} unruled verifier change(s) — "
+              "the gate judging this change moved; rule each in the "
+              "delivery block (`Verifier: <path> — <ruling>`)")
+        return 1
+    if rows:
+        print("  every verifier change carries a ruling")
     return 0
 
 
@@ -720,6 +1299,101 @@ def missing_named_tests(cmd: str, repo: Path) -> list[str]:
     return missing
 
 
+# --- environment-blocked proofs (D-047) ------------------------------
+# A proof that cannot run for a reason outside the change is neither a
+# pass nor a failure of it. The outcome is decided from evidence only —
+# what the environment demonstrably lacks — never from a guess about
+# whether the command would have passed.
+VAR_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+BRACED_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)([:+=?][^}]*)?\}")
+BARE_VAR = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+DOCKER_LEAN = re.compile(r"docker|testcontainers", re.I)
+
+_DOCKER_UP: bool | None = None
+
+
+def docker_engine_up() -> bool:
+    """Whether a Docker engine answers — `docker info`, probed once per
+    process so a proofs run, land and preflight all read the same
+    answer (the probe preflight has always run, now shared)."""
+    global _DOCKER_UP
+    if _DOCKER_UP is None:
+        try:
+            _DOCKER_UP = subprocess.run(
+                ["docker", "info"], capture_output=True, timeout=30
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            _DOCKER_UP = False
+    return _DOCKER_UP
+
+
+def _unset_vars(cmd: str) -> list[str]:
+    """Variables the command references with no fallback expansion
+    (`$NAME`, `${NAME}`) that the shell does not set; `${NAME:-default}`
+    carries its own fallback and is never missing. Positional and
+    special shell parameters ($1, $?, $@) are not variable names."""
+    names = [m.group(1) for m in BARE_VAR.finditer(cmd)]
+    names += [m.group(1) for m in BRACED_VAR.finditer(cmd) if not m.group(2)]
+    missing: list[str] = []
+    for name in names:
+        if name not in os.environ and name not in missing:
+            missing.append(name)
+    return missing
+
+
+def env_block_reason(cmd: str, repo: Path) -> str | None:
+    """What the command's environment is missing, or None — the pre-run
+    evidence behind ENV-BLOCKED, shared by proofs, block and preflight:
+    the command's program does not resolve, a variable the command
+    names is unset, or the command leans on Docker/Testcontainers and
+    no engine answers. Whether the command is any good is not judged
+    here — only whether its environment exists."""
+    words = [w for w in cmd.split() if not VAR_ASSIGN.match(w)]
+    first = words[0] if words else ""
+    if first.startswith("/"):
+        target = Path(first)
+    elif first.startswith("./"):
+        target = repo / first
+    else:
+        target = None
+    if target is not None:
+        if not target.exists():
+            return f"program `{first}`"
+    elif first and not shutil.which(first):
+        return f"program `{first}`"
+    missing = _unset_vars(cmd)
+    if missing:
+        return ", ".join(f"env var {n}" for n in missing)
+    if DOCKER_LEAN.search(cmd) and not docker_engine_up():
+        return "docker engine"
+    return None
+
+
+def run_env_block(returncode: int, output: str) -> str | None:
+    """The finished run's own evidence that its program never started:
+    the shell's exit code — 126 (found, not executable) or 127 (not
+    found). Wording in the output is not evidence: a wrapper that
+    continues past a missing sub-command exits nonzero with
+    `command not found` in its output, and that red is the change
+    under proof, not an environment gap."""
+    if returncode not in (126, 127):
+        return None
+    if "command not found" in output:
+        return f"program (exit {returncode}: command not found)"
+    return (f"program (exit {returncode}: "
+            + ("not executable" if returncode == 126 else "not found") + ")")
+
+
+def proof_rulings(spec_dir: Path | None) -> set[str]:
+    """The proof labels an owner's `- Proof: <label> — <ruling>` line in
+    the delivery block rules — TC-### at full tier, the task id (T###,
+    T###.n) the tiny tier keys its Accept proofs under (D-047). A FAIL
+    never reads from this: rulings turn only ENV-BLOCKED rows RULED."""
+    if spec_dir is None:
+        return set()
+    return set(PROOF_RULING.findall(delivery_note(spec_dir)[0]))
+
+
 def classify_accepts(spec_dir: Path) -> dict:
     """The tiny tier's proofs: each open-or-ticked § Tasks entry's
     `Accept:` commands, labelled by task id (T001, or T001.2 for a
@@ -809,12 +1483,15 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool,
                 task: str | None = None) -> dict:
     """classify_proofs plus, only when run, execution of the auto commands:
     {"auto": [(tc, cmd)], "manual": [(tc, note)], "ok": {tc: (passed,
-    summary)}, "errors": [(tc, cmd, err)], "failed": n} — ok/errors/failed
-    stay empty/zero on a dry run. `task` (proofs --task T###) scopes the
-    run to that entry's proofs. Shared by proofs and dod's live path;
-    callers that must stay inert use classify_proofs itself."""
+    summary)}, "errors": [(tc, cmd, err)], "failed": n,
+    "env_blocked": {tc: what is missing}, "env_ruled": {tc ruled in the
+    delivery block}} — ok/errors/failed/env_blocked stay empty/zero on a
+    dry run. `task` (proofs --task T###) scopes the run to that entry's
+    proofs. Shared by proofs and dod's live path; callers that must stay
+    inert use classify_proofs itself."""
     data: dict = {"ok": {}, "errors": [], "failed": 0, "timeouts": set(),
-                  "tails": {}, "pending": {}}
+                  "tails": {}, "pending": {}, "env_blocked": {},
+                  "env_ruled": set()}
     data.update(classify_proofs(spec_dir))
     if task is not None:
         keep = _task_proof_labels(spec_dir, task)
@@ -823,10 +1500,17 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool,
                           if tc in keep]
     if not run:
         return data
+    ruled = proof_rulings(spec_dir)
     for tc, cmd in data["auto"]:
         missing = missing_named_tests(cmd, repo)
         if missing:
             data["pending"][tc] = missing
+            continue
+        reason = env_block_reason(cmd, repo)
+        if reason:
+            data["env_blocked"][tc] = reason
+            if tc in ruled:
+                data["env_ruled"].add(tc)
             continue
         expect_fail = tc in data["expect_fail"]
         try:
@@ -835,6 +1519,14 @@ def proofs_data(spec_dir: Path, repo: Path, run: bool,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, errors="replace",
             )
+            # the program never started (the shell's exit 126/127): an
+            # environment gap, never the change under proof
+            run_reason = run_env_block(r.returncode, r.stdout)
+            if run_reason:
+                data["env_blocked"][tc] = run_reason
+                if tc in ruled:
+                    data["env_ruled"].add(tc)
+                continue
             ok = (r.returncode != 0) if expect_fail else (r.returncode == 0)
             out = r.stdout.rstrip().splitlines()
             summary = next((l for l in reversed(out) if l.strip()), "")
@@ -861,6 +1553,7 @@ def proof_verdict_lines(data: dict) -> dict[str, str]:
     """{tc: verdict line} for a run proofs_data returned — the one
     formatter behind proofs' full listing and dod's failed-proof naming."""
     errs = {tc: e for tc, _, e in data["errors"]}
+    ruled = data.get("env_ruled", set())
     lines: dict[str, str] = {}
     for tc, cmd in data["auto"]:
         if tc in data["expect_fail"]:
@@ -868,6 +1561,14 @@ def proof_verdict_lines(data: dict) -> dict[str, str]:
         if tc in data["pending"]:
             lines[tc] = (f"  PENDING  {tc}  {cmd}  ->  not run: no source "
                          f"defines {', '.join(data['pending'][tc])}")
+        elif tc in data["env_blocked"]:
+            if tc in ruled:
+                lines[tc] = (f"  RULED    {tc}  {cmd}  ->  not run — "
+                             f"missing: {data['env_blocked'][tc]} "
+                             "(ruled in the delivery block)")
+            else:
+                lines[tc] = (f"  ENV-BLOCKED  {tc}  {cmd}  ->  not run — "
+                             f"missing: {data['env_blocked'][tc]}")
         elif tc in data["ok"]:
             ok, summary = data["ok"][tc]
             verdict = "TIMEOUT" if (not ok and tc in data["timeouts"]) else ("PASS" if ok else "FAIL")
@@ -915,7 +1616,20 @@ def mode_proofs(spec_dir: Path, repo: Path, run: bool,
         print(f"proofs: {len(d['pending'])} pending — the tests they name "
               "do not exist yet, so nothing ran; a pending proof is never a "
               "pass: write the tests, then re-run")
-    return 1 if d["failed"] or d["pending"] else 0
+    unruled = {tc: r for tc, r in d["env_blocked"].items()
+               if tc not in d["env_ruled"]}
+    if unruled:
+        missing = "; ".join(f"{tc} — missing: {r}"
+                            for tc, r in sorted(unruled.items()))
+        shape = ("- Proof: T### — <ruling>" if is_tiny(spec_dir)
+                 else "- Proof: TC-### — <ruling>")
+        print(f"proofs: {len(unruled)} environment-blocked ({missing}); "
+              "the proof never ran, so it is not a pass and not charged as "
+              "a failure: supply what is missing and re-run, or, when the "
+              "environment cannot be supplied, the owner rules it — "
+              f"`{shape}` in the delivery block — and "
+              "the row reads RULED")
+    return 1 if d["failed"] or d["pending"] or unruled else 0
 
 
 # --- mutation testing ----------------------------------------------
@@ -1333,9 +2047,11 @@ def docs_impact_files(value: str) -> list[str]:
 
 
 def delivery_gates(spec_dir: Path, repo: Path, changed: list[str],
-                   git_ok: bool) -> list[tuple[str, str, str]]:
+                   git_ok: bool, base: str | None = None
+                   ) -> list[tuple[str, str, str]]:
     """(name, status, detail) for the delivery note's gates: docs impact,
-    rollback, and the spec's work type."""
+    rollback, the spec's work type, and the verifier count — rows from
+    the diff, rulings from the delivery block."""
     note, where = delivery_note(spec_dir)
     m = DOCS_IMPACT.search(note)
     if not m or not m.group(1).strip():
@@ -1373,7 +2089,19 @@ def delivery_gates(spec_dir: Path, repo: Path, changed: list[str],
                 else ("FAIL", f"no `Behavior preserved:` line in {where}"))
     else:
         work = ("N/A", f"Type: {kind or 'unset'}")
-    return [("DOCS IMPACT", *docs), ("ROLLBACK", *rollback), ("WORK TYPE", *work)]
+
+    if git_ok:
+        vrows = verifier_changes(spec_dir, repo, base)
+        vruled = verifier_rulings(spec_dir)
+        vopen = [p for p, _k, _a, _r in vrows if p not in vruled]
+        ver = ("FAIL" if vopen else "PASS",
+               f"{len(vopen)} unruled verifier change(s)"
+               + (f" ({len(vrows) - len(vopen)} ruled in the delivery block)"
+                  if len(vrows) > len(vopen) else ""))
+    else:
+        ver = ("SKIPPED", "(not a git repo) — no verifier verdict")
+    return [("DOCS IMPACT", *docs), ("ROLLBACK", *rollback),
+            ("WORK TYPE", *work), ("VERIFIERS", *ver)]
 
 
 def verified_gate(spec_dir: Path) -> tuple[str, str, str]:
@@ -1462,16 +2190,21 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
     # executes on that path; the live run stays the explicit default.
     verdict_lines: dict[str, str] = {}
     bad_tcs: list[str] = []
+    failed_tcs: list[str] = []
+    unruled_env: list[str] = []
+    ruled_env: set[str] = set()
     if dry:
         pr = classify_proofs(spec_dir)
     else:
         pr = proofs_data(spec_dir, repo, True)
         verdict_lines = proof_verdict_lines(pr)
-        bad_tcs = sorted(
+        failed_tcs = sorted(
             {tc for tc, (ok, _) in pr["ok"].items() if not ok}
-            | {tc for tc, _, _ in pr["errors"]}
-            | set(pr["pending"])
-        )
+            | {tc for tc, _, _ in pr["errors"]})
+        unruled_env = sorted(set(pr["env_blocked"]) - pr["env_ruled"])
+        ruled_env = set(pr["env_blocked"]) & pr["env_ruled"]
+        bad_tcs = sorted(set(failed_tcs) | set(pr["pending"])
+                         | set(unruled_env))
     nauto = len(pr["auto"])
     regression = regression_data(spec_dir, repo, base, plan=dry)
     # gates 6-7 — scope + hygiene. Git-derived: without a repository they
@@ -1500,15 +2233,23 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
         proof_dt = (f"{nauto} auto TC(s) classified, not executed — drop "
                     "--dry-run to prove them")
     else:
-        proof_st = ("PASS" if pr["failed"] == 0 and not pr["pending"]
-                    else "FAIL")
-        proof_dt = (f"{nauto - pr['failed'] - len(pr['pending'])}/{nauto} "
-                    "proofs green" if nauto else "no auto proofs (n/a)")
-        if bad_tcs:
-            proof_dt += f" — failed: {', '.join(bad_tcs)}"
+        proof_st = ("PASS" if not (pr["failed"] or pr["pending"]
+                                   or unruled_env) else "FAIL")
+        green = nauto - pr["failed"] - len(pr["pending"]) \
+            - len(pr["env_blocked"])
+        proof_dt = (f"{green}/{nauto} proofs green"
+                    if nauto else "no auto proofs (n/a)")
+        if failed_tcs:
+            proof_dt += f" — failed: {', '.join(failed_tcs)}"
         if pr["pending"]:
             proof_dt += (f" ({len(pr['pending'])} pending: the tests they "
                          "name do not exist)")
+        if unruled_env:
+            proof_dt += (f" ({len(unruled_env)} environment-blocked: the "
+                         "environment they need is missing)")
+        if ruled_env:
+            proof_dt += (f" ({len(ruled_env)} env-blocked, ruled in the "
+                         "delivery block)")
 
     gates = [
         (1, "PROOF auto", proof_st, proof_dt),
@@ -1533,7 +2274,7 @@ def mode_dod(spec_dir: Path, repo: Path, base: str | None,
         (10, "SIGN-OFF", "MANUAL", "explicit yes on the summary"),
     ]
     gates += [(n, name, st, dt) for n, (name, st, dt) in
-              enumerate(delivery_gates(spec_dir, repo, paths, git_ok), 11)]
+              enumerate(delivery_gates(spec_dir, repo, paths, git_ok, base), 11)]
     gates.append((len(gates) + 1, *verified_gate(spec_dir)))
     print(f"dod: {spec_dir} — {len(gates)} gates, all must pass or read N/A"
           + (" (dry run)" if dry else ""))
@@ -1668,7 +2409,8 @@ def parse_args(argv: list[str]):
         return None
     mode = argv[0]
     if mode not in ("scope", "regression", "clean", "proofs", "mutate", "coverage",
-                    "dod", "converge", "archived", "block", "preflight"):
+                    "dod", "converge", "archived", "block", "preflight",
+                    "verifiers"):
         print(__doc__)
         return None
     repo = None
@@ -1715,7 +2457,7 @@ def parse_args(argv: list[str]):
             rest.append(a)
             i += 1
     if mode in ("scope", "regression", "proofs", "mutate", "coverage", "dod",
-                "converge", "block", "preflight") and len(rest) != 1:
+                "converge", "block", "preflight", "verifiers") and len(rest) != 1:
         print(__doc__)
         return None
     if task is not None and mode != "proofs":
@@ -1739,10 +2481,13 @@ DOC_SURFACE = re.compile(
 
 
 def mode_block(spec_dir: Path, repo: Path, base: str | None) -> int:
-    """A draft of the delivery block the dod gates 11-13 read — the lines a
-    run would otherwise discover by trial and error: the docs and schemas
-    the diff touched, every rollback row no TC proves or a ruling covers,
-    every hygiene suspect without a ruling. Each ruling is a placeholder
+    """A draft of the delivery block the dod gates 1 and 11-14 read — the
+    lines a run would otherwise discover by trial and error: the docs and
+    schemas the diff touched, every rollback row no TC proves or a ruling
+    covers, every hygiene suspect without a ruling, every unruled
+    verifier change, and a `Proof: TC-### — <ruling>` line per proof the
+    environment cannot run (PENDING proofs — tests not written — are not
+    environment-blocked and are not drafted). Each ruling is a placeholder
     for the orchestrator to fill; nothing is written."""
     if not git_available(repo):
         print("block: SKIPPED (not a git repo) — no delivery block drafted")
@@ -1767,6 +2512,24 @@ def mode_block(spec_dir: Path, repo: Path, base: str | None) -> int:
         if (path, kind) not in hygiene and (path, kind) not in seen:
             seen.add((path, kind))
             print(f"- Hygiene: {path} [{kind}] — <ruling>")
+    vruled = verifier_rulings(spec_dir)
+    for path, _kind, _added, _removed in verifier_changes(spec_dir, repo, base):
+        if path not in vruled:
+            print(f"- Verifier: {path} — <ruling>")
+    # the regression gate runs here so a base-red repository drafts its
+    # ruling lines; a charged FAIL is never rulable, so never drafted
+    for name, oc in regression_data(spec_dir, repo, base).get(
+            "failures", {}).items():
+        if oc["outcome"] != "FAIL" and not oc["ruled"]:
+            print(f"- Regression: {name} — <ruling>")
+    pruled = proof_rulings(spec_dir)
+    for tc, cmd in classify_proofs(spec_dir)["auto"]:
+        # a proof whose named tests do not exist is PENDING, not
+        # environment-blocked: no draft line for it
+        if missing_named_tests(cmd, repo):
+            continue
+        if env_block_reason(cmd, repo) and tc not in pruled:
+            print(f"- Proof: {tc} — <ruling>")
     tm = TYPE_LINE.search(_read(spec_dir / "spec.md"))
     if tm and tm.group(1).lower() in ("refactor", "upgrade"):
         print("- Behavior preserved: <TCs> green at <Approved-at> and now")
@@ -1774,36 +2537,33 @@ def mode_block(spec_dir: Path, repo: Path, base: str | None) -> int:
 
 
 def mode_preflight(spec_dir: Path, repo: Path) -> int:
-    """Whether the proofs can run at all, before any wave is spawned: every
-    proof command's program resolves on PATH, a Docker engine answers when
-    the docset leans on Docker, and which proofs are still pending because
-    the tests they name are not written. Exit 1 on a missing prerequisite."""
+    """Whether the proofs can run at all, before any wave is spawned:
+    which proofs would run ENV-BLOCKED (the program, Docker engine, or
+    named variable the environment lacks — when the environment cannot
+    be supplied, the owner's recorded ruling is the way to proceed,
+    D-047: a proof the delivery block already rules reads RULED, not a
+    NO-GO), a Docker engine answering when the docset leans on Docker,
+    and which proofs are still pending because the tests they name are
+    not written. Exit 1 on a missing prerequisite."""
     cl = classify_proofs(spec_dir)
+    ruled = proof_rulings(spec_dir)
     problems: list[str] = []
+    blocked: dict[str, str] = {}
+    ruled_blocked: dict[str, str] = {}
     pending: dict[str, list[str]] = {}
     for tc, cmd in cl["auto"]:
-        words = [w for w in cmd.split()
-                 if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w)]
-        first = words[0] if words else ""
-        if first.startswith(("./", "/")):
-            target = Path(first) if first.startswith("/") else repo / first
-            if not target.exists():
-                problems.append(f"{tc}: `{first}` does not exist")
-        elif first and not shutil.which(first):
-            problems.append(f"{tc}: `{first}` is not on PATH")
         missing = missing_named_tests(cmd, repo)
         if missing:
             pending[tc] = missing
+            continue
+        reason = env_block_reason(cmd, repo)
+        if reason:
+            (ruled_blocked if tc in ruled else blocked)[tc] = reason
     text = " ".join(_read(spec_dir / f) or ""
                     for f in ("task.md", "test.md", "tech-spec.md", "spec.md"))
     text += " ".join(cmd for _, cmd in cl["auto"])
     if re.search(r"docker|testcontainers", text, re.I):
-        try:
-            up = subprocess.run(["docker", "info"], capture_output=True,
-                                timeout=30).returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            up = False
-        if not up:
+        if not docker_engine_up():
             hint = re.search(r"DOCKER_HOST=\S+", text)
             problems.append(
                 "no Docker engine answers, and the docset's proofs lean on "
@@ -1811,14 +2571,31 @@ def mode_preflight(spec_dir: Path, repo: Path) -> int:
                 + (f" and export {hint.group(0)}" if hint else ""))
     print(f"preflight: {len(cl['auto'])} auto proof(s), "
           f"{len(cl['manual'])} manual")
+    for tc, reason in sorted(blocked.items()):
+        print(f"  NO-GO  {tc} would be ENV-BLOCKED — missing: {reason}")
+    for tc, reason in sorted(ruled_blocked.items()):
+        print(f"  RULED  {tc} would be ENV-BLOCKED — missing: {reason} "
+              "(ruled in the delivery block)")
     for line in problems:
         print(f"  NO-GO  {line}")
+    if blocked:
+        shape = ("- Proof: T### — <ruling>" if is_tiny(spec_dir)
+                 else "- Proof: TC-### — <ruling>")
+        print("  when the environment cannot be supplied, the owner's "
+              "recorded ruling is the way to proceed: "
+              f"`{shape}` in the delivery block turns "
+              "the proof RULED (a FAIL is never rulable this way)")
     for tc, names in sorted(pending.items()):
         print(f"  PENDING  {tc}: no source defines {', '.join(names)} yet")
-    print("preflight: " + ("NO-GO" if problems else "GO")
-          + (f" ({len(pending)} proof(s) pending until their tests exist)"
-             if pending else ""))
-    return 1 if problems else 0
+    notes = [f"{len(blocked)} proof(s) would run ENV-BLOCKED"
+             if blocked else "",
+             f"{len(ruled_blocked)} env-blocked proof(s) ruled in the "
+             "delivery block" if ruled_blocked else "",
+             f"{len(pending)} proof(s) pending until their tests exist"
+             if pending else ""]
+    print("preflight: " + ("NO-GO" if problems or blocked else "GO")
+          + (f" ({', '.join(n for n in notes if n)})" if any(notes) else ""))
+    return 1 if problems or blocked else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1861,6 +2638,8 @@ def main(argv: list[str] | None = None) -> int:
         rc = mode_converge(spec_dir, repo, base)
     elif mode == "block":
         rc = mode_block(spec_dir, repo, base)
+    elif mode == "verifiers":
+        rc = mode_verifiers(spec_dir, repo, base)
     elif mode == "preflight":
         rc = mode_preflight(spec_dir, repo)
     else:

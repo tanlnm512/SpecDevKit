@@ -79,7 +79,19 @@ that skill's `evals/results/` (`tools/evals.py validate
 <skill>/<case> <transcript>`). A changed panel brief, gate, or report
 contract without a matching eval result is a release blocker.
 
-## 7. Clean tree
+## 7. Not proven by tests
+
+Every release lists, in its pull request or release notes, what the
+change assumes that no test exercises — host and harness behaviour,
+install paths, anything a stub stands in for — and how each will be
+checked after install. Pull candidates from the open-assumptions table
+in `HARNESS-FACTS.md` that this change leans on, plus any new
+assumption the change introduces; one line each, naming the assumption
+and its post-install check (a live session on the affected harness,
+one install root listed, one command run). An assumption nobody will
+check is either tested first or named as a known risk.
+
+## 8. Clean tree
 
 `git status --porcelain` is empty again — the release changed nothing
 that regeneration cannot reproduce. Then tag:

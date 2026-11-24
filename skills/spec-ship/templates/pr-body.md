@@ -1,6 +1,7 @@
 <!-- Filled by scripts/ship.py pr-body: every {{slot}} is a fact read from
      the spec's doc state or git. Reword sentences; never add, drop, or
-     alter a fact, an id, a command, or a `none — <reason>` line. -->
+     alter a fact, an id, a command, a `none — <reason>` line, or an
+     `Owner to test after merge:` line — a ruled proof is not a pass. -->
 ## Summary
 
 {{what}}

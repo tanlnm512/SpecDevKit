@@ -39,6 +39,14 @@ ANCHORS = (
     "fail on the pre-fix code",
     "NEVER poll a",
     "you will be woken with its output",
+    "one of three kinds",
+    "not final; do not stop on it",
+    "up to three times",
+    "blocked: <tool> did not answer",
+    "Never work around it",
+    "never a failed check",
+    "not run: <why>",
+    "a verdict you did not observe",
     "Explain why, not what",
     "git history owns that",
     "Never embed volatile",
@@ -88,6 +96,18 @@ class KitRulesParityTests(unittest.TestCase):
         body = flat(SOURCE.read_text(encoding="utf-8"))
         for anchor in ANCHORS:
             self.assertIn(anchor, body)
+
+    def test_refusal_rules_are_injected_into_both_carriers(self):
+        # D-049's section reaches the developer and the fixer whole:
+        # the heading and the three kinds, not a summary of them
+        for carrier in self.CARRIERS:
+            text = flat(carrier.read_text(encoding="utf-8"))
+            with self.subTest(carrier=str(carrier.relative_to(REPO_ROOT))):
+                self.assertIn("### Refusals and failed calls", text)
+                for kind in ("Fix and run again", "Wait, then retry",
+                             "Stop and report"):
+                    self.assertIn(kind, text)
+                self.assertIn("up to three times", text)
 
 
 class BudgetsTruthTests(unittest.TestCase):

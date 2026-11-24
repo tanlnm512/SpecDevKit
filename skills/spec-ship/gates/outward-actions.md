@@ -18,6 +18,7 @@ shown and nothing else.
 | Edit the PR | what changes: the new title, or the body's diff against the PR's current text | `gh pr edit <number> --title <title> --body-file -` |
 | Post a reply | the thread (file, line, the comment answered) and the reply's full text | the `reply` command `comments` prints, one thread per call |
 | Re-request review | the reviewer's login | `gh pr edit <number> --add-reviewer <login>` |
+| Rerun failed CI runs | the check names and classes, and the exact `gh run rerun <id> --failed` commands | the printed commands, one run id per call |
 
 One local action rides the same discipline, because every commit in
 this kit is asked first:

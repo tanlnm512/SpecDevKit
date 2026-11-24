@@ -54,10 +54,18 @@ of a reply and the thread it answers.
 ## Ship never fixes code
 
 A red check or a must-fix comment is evidence, not a task for this
-run. Record it under the spec's `notes/` and route the fix round to
-`/spec-build`; a change no task's files cover is outside the approved
-contract and routes to `/spec-design`. The only files this run writes
-are the `Shipped:` record and those notes.
+run. A red check is classed before it routes (D-005): `code` — a
+project step failed — records its output under the spec's `notes/`
+and routes the fix round to `/spec-build`; `infrastructure` (a
+cancelled or never-started run, or the runner's own setup/wrap-up
+step failed) and `unknown` (no step data behind the status) open no
+fix round — show the class and reason, print the `gh run rerun <id>
+--failed` command, and run a rerun only on the user's yes: it is an
+outward action. `ship.py evidence --kind ci` opens a fix round on
+purpose when the user asks for one despite the class. A change no
+task's files cover is outside the approved contract and routes to
+`/spec-design`. The only files this run writes are the `Shipped:`
+record and those notes.
 
 ## State lives in git, the PR, and the docs
 
@@ -65,12 +73,22 @@ Nothing is remembered between invocations. The stage is whatever
 `scripts/ship.py status` derives now; a status marker in the spec is
 never written here — spec-build's orchestrator is its sole writer.
 
+What the user rules about a thread is remembered the same way — in
+the docs, never in the session: whenever the user relabels a thread,
+or confirms a classification they were asked about, record it before
+the next `threads` run (`ship.py rule <spec> --thread <id> --label
+<label> [--why <text>]`). A ruled thread keeps its label and is not
+to be reclassified — the ruling's why is the owner's reason; only
+unruled threads are open for classification.
+
 ## Honesty
 
 - A reply never claims a fix that has not landed, and names a commit
   only once that commit is pushed.
 - Pending CI is reported as pending. No checks reported is reported
-  as that — never as a pass.
+  as that — never as a pass. A red check classed `infrastructure` or
+  `unknown` is reported as that — never as code to fix, never as
+  green.
 - What was not read is said: more threads than the reader fetched, a
   log that could not be retrieved, a missing `gh`.
 - If your instructions cannot be satisfied, say so plainly instead of
