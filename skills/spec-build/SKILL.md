@@ -109,9 +109,18 @@ the rest. A task with no parseable `Touches:` runs alone. Per round:
    or refuses a wave the frontier has outgrown.
 2. Spawn exactly the emitted payloads in ONE message — one developer
    each; deferred and chained tasks come up on a later emit.
+   **`Mode: fast`** (tiny only, D-066): spawn nothing — implement
+   each payload yourself in task-id order, following its developer
+   brief (digest file included); steps 3–4 are unchanged.
 3. Collect digests. A reported deviation → append the D-### to
    tech-spec.md immediately (append-only; reconcile sibling docs
-   quoting the old value in the same pass). A digest claiming a TC
+   quoting the old value in the same pass). A TYPED deviation names
+   its route (D-043): `scope:<paths>` → widen that task's `Touches:`
+   under the D-### and re-emit it (no fix round — the work was never
+   wrong); `spec-defect:<why>` → `mark.py release` and route to
+   `/spec-design` (no fix round, no higher tier — a retry of a wrong
+   task fails again); `other:` → the D-### ruling alone, as before. A
+   digest claiming a TC
    is wrong → re-brief the tester afterward, never edit test.md now. A
    digest `note` (an acceptance command red in a file outside the
    task's `Touches:`) is the owning task's failure, never the
@@ -144,7 +153,7 @@ a hand edit — which checks the current marker, takes the spec's
 | `- [ ] T###` (pending) | its payload's wave is claimed | `mark.py claim <spec> --wave <wave-dir> [--run-id ID]` — writes `(in-progress)` + the claim stamp sub-line `  - claimed <UTC ISO> — run <id>` on exactly the wave's `implementer-T###.md` tasks |
 | `(in-progress)` | digest `implemented` or `already-satisfied`, and `audit.py proofs <spec> --run --task T###` is green | `mark.py land <spec> T###` — writes `(implemented)` in place of the claim, the stamp gone |
 | `(in-progress) (fix n/5)` | the round landed and verified | `mark.py land <spec> T### --resolution "<text>"` — writes `(implemented) (fixed n/5)`, the round's close sub-line `fixed <n> — <resolution> — <proof>` appended |
-| `(in-progress)` | digest `blocked:why` | `mark.py release <spec> T### --reason "<text>"` — claim and stamp cleared; rule (D-###) and re-spawn, or route to `/spec-design` — no fix round |
+| `(in-progress)` | digest `blocked:why` | `mark.py release <spec> T### --reason "<text>"` — claim and stamp cleared; rule (D-###) and re-spawn, or route to `/spec-design` — no fix round. A typed deviation names the route (D-043): `scope:<paths>` → widen `Touches:` under the ruling and re-emit; `spec-defect:<why>` → `/spec-design` |
 | `(in-progress)` or `(implemented)` | it came back wrong | `mark.py fail <spec> T### --evidence <file> --digest "<line>"` — writes `(fix n/5)` (in place of the claim, or beside `(implemented)`) plus the round's open sub-line `fix <n> — <digest>`, evidence verbatim into `notes/T###.md` |
 | `(implemented)` | delivery pass green and the user's yes | `- [x]` + proof note, by `tick.py` (it also strips the stamp) |
 | any open entry | dropped by ruling | `mark.py drop <spec> T### --decision D-###` — refuses a D-### tech-spec.md does not define, and refuses outright at `Tier: tiny` |
@@ -169,7 +178,9 @@ to `/spec-design` for re-approval.
 Only failed implementation opens a round: your re-run of the task's
 acceptance commands is red, a delivery-pass proof failure traces to
 it, or the auditor BLOCKs its change. `blocked:why` is not a
-failure and consumes no round. To open round n (n = the times this
+failure and consumes no round — and neither is a typed deviation
+(D-043): `scope:` re-emits on widened `Touches:`, `spec-defect:`
+routes to `/spec-design`; a fix round would only re-fail them. To open round n (n = the times this
 task has come back wrong), run
 `mark.py fail <spec> T### --evidence <file> --digest "<line>"` —
 mark.py refuses a digest that is not copied verbatim from
@@ -195,6 +206,14 @@ tier up. Round 4 failing writes `(fix 5/5)` with its
 `fix 5 — <digest>` sub-line, the cap — the engine never re-spawns it.
 Adjudicate with the user: wrong (park with a
 D-###), isolated (defer), or load-bearing (`/spec-design` re-plans).
+
+**Same-signature (D-044)**: each round's evidence names its failing
+command; when the SAME command fails 3 consecutive rounds, `mark.py
+fail` says so and the task's line carries a `[watch: …]` suffix from
+the second repeat on — a repeated signature means another round, or a
+stronger tier, re-runs the same failing command. Treat it as the
+round-3 plan suspicion the moment it fires: repair the docs or
+adjudicate; don't spend round 4's stronger tier on it.
 
 ### Resume (a session killed mid-run)
 

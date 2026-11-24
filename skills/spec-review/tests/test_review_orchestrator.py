@@ -432,6 +432,134 @@ class ReportTests(unittest.TestCase):
         msg = err(["report", "--kind", "review", "--data", "@/no/such/file.json"])
         self.assertIn("report data invalid", msg)
 
+    def test_fix_report_derives_the_floor_and_rejects_a_claim_below_it(self):
+        def tracked(fid, fix="fixed", status="verified"):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "w", "evidence": "e",
+                                "severity": "medium", "lens": "general",
+                                "confirmation": {"status": status, "note": ""}},
+                    "fix": fix}
+        base = {"gate_rows": [{"name": "make test", "exit_code": 0, "source": "repo", "tail": ""}],
+                "assessment": {"verdict": "v", "testGaps": [], "residualRisks": []},
+                "rounds_used": 2}
+        # merge is derivable and claimed — stands, and is echoed as derived
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True, "tracked": [tracked("F-1")],
+                            "conclusion": "merge"})])
+        self.assertEqual(d["conclusion"], "merge")
+        self.assertEqual(d["derived_conclusion"], "merge")
+        # unresolved finding, merge claimed — below the floor: error naming both
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", fix="unfixed")],
+                               "conclusion": "merge"})])
+        self.assertIn("below the derived floor 'fix-first'", msg)
+        self.assertIn("1 unresolved finding", msg)
+        # red gate, merge claimed — same rejection
+        err(["report", "--kind", "fix", "--data",
+             json.dumps({**base, "gate_green": False, "tracked": [tracked("F-1")],
+                         "conclusion": "merge"})])
+        # unconfirmed residue (unfixed) derives human; a fix-first claim is below it
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", fix="unfixed", status="unconfirmed")],
+                               "conclusion": "fix-first"})])
+        self.assertIn("below the derived floor 'human'", msg)
+        # an unconfirmed finding that WAS fixed is resolved — floor merge,
+        # and escalating above it stays the assessor's call
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", fix="fixed", status="unconfirmed")],
+                            "conclusion": "fix-first"})])
+        self.assertEqual(d["derived_conclusion"], "merge")
+        self.assertEqual(d["conclusion"], "fix-first")
+        # escalation is always allowed: derived fix-first, claimed human
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", fix="unfixed")],
+                            "conclusion": "human"})])
+        self.assertEqual(d["conclusion"], "human")
+        self.assertEqual(d["derived_conclusion"], "fix-first")
+        # absent or unrecognized claim is filled with the floor
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", fix="unfixed")]})])
+        self.assertEqual(d["conclusion"], "fix-first")
+        self.assertEqual(d["derived_conclusion"], "fix-first")
+        # a review-kind report never derives (review-only runs do not recommend)
+        d = ok(["report", "--kind", "review", "--data",
+                json.dumps({**base, "gate_green": True, "tracked": [tracked("F-1")],
+                            "conclusion": "whatever the assessor said"})])
+        self.assertEqual(d["conclusion"], "whatever the assessor said")
+        self.assertNotIn("derived_conclusion", d)
+
+    def test_fix_verdict_vocabulary_adjudicates_and_routes(self):
+        def tracked(fid, fix, status="verified"):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "w", "evidence": "e",
+                                "severity": "medium", "lens": "general",
+                                "confirmation": {"status": status, "note": ""}},
+                    "fix": fix}
+        base = {"gate_rows": [], "assessment": {"verdict": "v", "testGaps": [], "residualRisks": []},
+                "rounds_used": 2}
+        # rejected-valid resolves like fixed — merge is derivable with one
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", "fixed"), tracked("F-2", "rejected-valid")],
+                            "conclusion": "merge"})])
+        self.assertEqual(d["derived_conclusion"], "merge")
+        self.assertIn("1 withdrawn", d["markdown"])
+        # rejected-invalid stands — merge claim is below the fix-first floor
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", "fixed"), tracked("F-2", "rejected-invalid")],
+                               "conclusion": "merge"})])
+        self.assertIn("below the derived floor 'fix-first'", msg)
+        # out-of-scope floors at human — the user's widening call
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", "out-of-scope")],
+                               "conclusion": "fix-first"})])
+        self.assertIn("below the derived floor 'human'", msg)
+        self.assertIn("1 out-of-scope", ok(["report", "--kind", "fix", "--data",
+                                            json.dumps({**base, "gate_green": True,
+                                                        "tracked": [tracked("F-1", "out-of-scope")],
+                                                        "conclusion": "human"})])["markdown"])
+        # a withdrawn finding does not come back on a fix_from carry (JSON or
+        # markdown carrier); what is carried restarts pending by design (D-005)
+        carried = ok(["findings-parse", "--text", json.dumps(
+            {"findings": [{"id": "F-1", "where": "a.py:1", "what": "w", "fixStatus": "rejected-valid"},
+                          {"id": "F-2", "where": "b.py:1", "what": "x", "fixStatus": "rejected-invalid"},
+                          {"id": "F-3", "where": "c.py:1", "what": "y", "fixStatus": "out-of-scope"}]})])["tracked"]
+        self.assertEqual([t["finding"]["id"] for t in carried], ["F-2", "F-3"])
+        self.assertTrue(all(t["fix"] == "pending" for t in carried))
+        md = ok(["report", "--kind", "fix", "--data",
+                 json.dumps({**base, "gate_green": True,
+                             "tracked": [tracked("F-1", "rejected-valid"), tracked("F-2", "out-of-scope")],
+                             "conclusion": "human"})])["markdown"]
+        reparsed = ok(["findings-parse", "--text", md])["tracked"]
+        self.assertEqual([t["finding"]["id"] for t in reparsed], ["F-2"])
+        # the verify ask teaches the ruling, the fixer ask the channel
+        self.assertIn("rejected-valid", ok(["ask", "--kind", "verify", "--ctx",
+                                            json.dumps({"tracked": {"finding": {"id": "F-1", "where": "a.py:1",
+                                                                                "what": "x", "severity": "high",
+                                                                                "lens": "correctness"}},
+                                                        "project": False, "base": "HEAD", "notes": "wrong: never nil"})])["ask"])
+        def item(fid, fix=None):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "x", "evidence": "e",
+                                "severity": "high", "lens": "correctness"}, "fix": fix}
+        ask = ok(["ask", "--kind", "fixer", "--ctx",
+                  json.dumps({"round": 1, "project": False, "base": "HEAD",
+                              "unresolved": [item("F-1"), item("F-8", "out-of-scope"),
+                                             item("F-9", "rejected-valid")]})])["ask"]
+        self.assertIn("outOfScope", ask)
+        self.assertIn('"F-1"', ask)
+        # off-loop items never reach the fixer, whatever the session passed
+        self.assertNotIn('"F-8"', ask)
+        self.assertNotIn('"F-9"', ask)
+        # a fix status outside the vocabulary is an inconsistent report, never counted
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True, "tracked": [tracked("F-1", "skipped")]})])
+        self.assertIn("unknown fix status 'skipped'", msg)
+
 
 ASK_CASES = [
     ("scout", {"base": "HEAD", "project": False, "files": ["src/a.py", "src/b.py"]}),

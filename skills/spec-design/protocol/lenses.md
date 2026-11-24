@@ -82,7 +82,9 @@ never a rule borrowed from another project; you ask the user nothing.
 § Questions & options yourself; intent.md § Constraints when present);
 repo root; the Baseline tech-spec.md records — and, on a converge
 re-ground, the `DELTA RE-GROUND` block (the files git says changed since
-that baseline, plus the current HEAD); any architecture constraints from
+that baseline, plus the current HEAD); on a first grounding after
+intake, the `INTENT SEED` block (the code files changed since
+intent.md's baseline, plus the current HEAD); any architecture constraints from
 the user (positioning, hard nos).
 
 **Method**:
@@ -92,7 +94,8 @@ the user (positioning, hard nos).
    every verify command — status derives from evidence, never intent;
    can't find it → `unknown — verify`, never a guess. Record the HEAD
    you grounded against in the `**Baseline**:` header. Intake's facts in
-   intent.md § Constraints are leads to re-grep, not citations.
+   intent.md § Constraints are leads to re-grep, not citations — the
+   one exception is an INTENT SEED block, below.
    - If the repo keeps a domain glossary (GLOSSARY.md, CONTEXT.md, or
      docs/glossary*), word items in the project's own terms.
    - On the repo's first spec (`specs/context/` absent), also write
@@ -105,6 +108,13 @@ the user (positioning, hard nos).
      Re-grep ONLY the items whose evidence cites a changed file, re-run
      their verify commands; keep every untouched item byte-identical;
      refresh the Baseline to the block's HEAD.
+   - **Intent seed** (only with an INTENT SEED block, first grounding,
+     D-065): intent.md § Constraints is your starting evidence. An item
+     it already grounds, citing a file the block does not list as
+     changed, takes that evidence line verbatim — re-run the item's
+     verify command, skip the re-grep. Grep fresh every item it does not
+     cover and every item citing a changed file. Never take a status
+     from intent.md.
    - `**Type**: bugfix | hotfix`: ground the bug itself — location
      (file:symbol, verbatim), suspected-cause evidence, existing
      regression coverage; run the repro command and paste the red

@@ -28,6 +28,14 @@ header comment has the rules; absent reads feature):
   itself make it large: size by the change (a few hundred lines in one
   service reads standard), because large costs a spawn per document. When unsure start at standard — Effort can be
   raised at any repair run. A missing or unknown Effort reads large.
+- **`Mode: fast`** (tiny only) — the session implements the tasks
+  itself: execute still emits each task's payload and `mark.py claim`,
+  proofs, land, and both human gates run as before, but no developer
+  is spawned and `--launch-check` never launches a workflow for it.
+  Use for a change you would otherwise just make by hand. At
+  `Tier: full` the header is ignored, with a note. Absent or unknown
+  reads `standard`. The line is frozen with spec.md: changing it after
+  approval is a re-approval.
 
 Effort has exactly these two values. `tiny` is a Tier, never an
 effort; a doc still carrying `Effort: tiny` reads standard. The

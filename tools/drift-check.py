@@ -11,8 +11,8 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                      --check)
   kit-rules   agents/developer.md and                  vs the injection from
               agents/review-fixer.md            rules/engineering-rules.md
-              § Engineering rules sections           (tools/kit-rules.py
-                                                     --check)
+              § Engineering rules + § Budgets        and rules/agent-limits.md
+              sections                           (tools/kit-rules.py --check)
   parity      skills/*/scripts/ replica views of     vs the master closure
               the shared core                        at skills/spec-design/
                                                      scripts/ (tools/parity.py

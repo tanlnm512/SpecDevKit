@@ -212,11 +212,17 @@ When the user asked to fix as well, run bounded rounds (default 2):
    backgrounded-job discipline, code commenting) — they bind the fix
    loop's every edit.
 2. Every attempted fix is verified by an independent reader: `fixed` /
-   `unfixed` / `worse` — a fix that weakens a test is `worse`.
-3. The gate re-runs; failures become findings the fixer must clear.
-4. A fresh-eyes reviewer scans the diff of exactly the paths the fixer
+   `unfixed` / `worse` — a fix that weakens a test is `worse`. A
+   fixer **skip is ruled on, not counted**: `rejected-valid` (the
+   reason holds — the finding is withdrawn) or `rejected-invalid`
+   (the finding stands); an unruled skip stands (D-022).
+3. A fixer **out-of-scope** item (the sound fix needs paths or
+   behavior this change must not touch) burns no round: it leaves the
+   loop and is surfaced in the report as the user's widening call.
+4. The gate re-runs; failures become findings the fixer must clear.
+5. A fresh-eyes reviewer scans the diff of exactly the paths the fixer
    touched, for NEW defects the fixes introduce.
-5. Loop until everything is fixed or rounds run out.
+6. Loop until everything is resolved or rounds run out.
 
 **The review-then-ask flow.** An unattended run cannot pause mid-run
 to ask, so the decision gate is a second run: run a review first
@@ -228,8 +234,11 @@ the recommendation.
 
 End with a **recommendation**: `merge` (everything fixed, gate green,
 nothing new), `fix-first` (ordinary findings remain), or `human`
-(judgment calls or unconfirmed residue). Fixes stay uncommitted — the
-commit decision and message are the user's.
+(judgment calls or unconfirmed residue). The oracle derives the floor
+from the report's own state and rejects a claim below it — escalating
+on judgment is always allowed (D-021, `gates/recommendation.md`).
+Fixes stay uncommitted — the commit decision and message are the
+user's.
 
 ## Run sequence (driving the oracle)
 
@@ -275,8 +284,10 @@ kept finding confirmed independently. `fast` findings are self-checked.
 ## Reading the result
 
 Findings carry `path:line`, evidence, severity, lens, and a
-verified/unconfirmed status (or fixed/unfixed/worse after a fix
-round). Triage drops are listed with reasons — "dropped at triage"
+verified/unconfirmed status (or, after a fix round, a fix verdict:
+`fixed`/`unfixed`/`worse`, a skip ruling `rejected-valid`/
+`rejected-invalid`, or `out-of-scope` — D-022). Triage drops are
+listed with reasons — "dropped at triage"
 means judged out of scope, not missed. `notCovered` distinguishes
 "found nothing" from "looked nowhere": read it before trusting a
 clean report. Field semantics: panel.md § Findings and § The report.

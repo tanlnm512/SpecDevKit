@@ -68,6 +68,10 @@ EFFORT_ALIASES = {"tiny": "standard"}
 # file (tasks live in spec.md § Tasks); absent/unknown reads "full",
 # so docsets without the field keep the full-contract graph.
 TIER_LINE = re.compile(r"^\*\*Tier\*\*:\s*`?([A-Za-z]+)", re.M)
+# `**Mode**: fast` (D-066): the session implements a tiny spec's tasks
+# itself instead of spawning a developer per task; absent/unknown reads
+# "standard", and only Tier: tiny honors fast.
+MODE_LINE = re.compile(r"^\*\*Mode\*\*:\s*`?([A-Za-z]+)", re.M)
 TASKS_HEADING = "## Tasks"
 
 # Work type: `**Type**: <word>` on spec.md (and intent.md, which seeds
@@ -196,8 +200,16 @@ RESEARCH_SKIP_MARKER = "not applicable — no open questions at Stage 0"
 # it verbatim into specs/<name>/digests/wave-<N>/<payload-stem>.md as
 # their final action; latest_digest parses it back. Run scratch, not
 # archived contract (archive.sh removes digests/ with spawns/).
+#
+# The deviation field is TYPED (D-043): `scope:<paths>` (the change
+# genuinely needs files outside the task's Touches set), `spec-defect:
+# <why>` (the task itself is wrong — a retry would fail again), or
+# `other:<summary needing D-###>` (anything else). An untyped
+# deviation string (older digests) parses with no kind and keeps the
+# free-form D-### routing.
 DIGEST_DIR = "digests"
 DIGEST_TASK = re.compile(r"^digest:\s*task\s+(T\d{3})\b")
+DEVIATION_KIND = re.compile(r"^(scope|spec-defect|other):")
 
 # The research gate's artifact in tech-spec.md: one section, two
 # subsections. The heading is matched anywhere in the file (no
@@ -312,6 +324,15 @@ def spec_tier(spec_md: str) -> str:
     m = TIER_LINE.search(spec_md) if spec_md else None
     word = m.group(1).lower() if m else ""
     return word if word in ("tiny", "full") else "full"
+
+
+def spec_mode(spec_md: str) -> str:
+    """The spec.md run mode as written — `fast` or `standard`; absent or
+    unknown reads `standard`. Whether the tier honors it is the engine's
+    call (fast holds only at Tier: tiny)."""
+    m = MODE_LINE.search(spec_md) if spec_md else None
+    word = m.group(1).lower() if m else ""
+    return word if word in ("fast", "standard") else "standard"
 
 
 def spec_type(spec_md: str) -> str:
@@ -526,7 +547,52 @@ def _parse_digest_line(line: str) -> dict | None:
             if seg.startswith(key + " "):
                 out[key.replace("-", "_")] = seg[width:].strip()
                 break
-    return out if out.get("task") and out.get("status") else None
+    if out.get("task") and out.get("status"):
+        kind = DEVIATION_KIND.match(out.get("deviation") or "")
+        if kind:
+            out["deviation_kind"] = kind.group(1)
+        return out
+    return None
+
+
+def failure_signature_run(note_text: str) -> tuple[str | None, int]:
+    """(command, trailing-run length) of a task's fix-round evidence:
+    each `## Fix round n` section a `mark.py fail` wrote holds the
+    failing command and its output verbatim, the command on the first
+    `$ `-prefixed line — that line is the round's failure signature.
+    The run counts how many trailing rounds (highest numbers backward)
+    share one command; a round with no command line ends the run, and
+    (None, 0) means the newest round carries none.
+    D-044: a repeated signature means another round, or a stronger
+    model, re-runs the same failing command — the plan is the suspect,
+    not the tier."""
+    sigs: dict[int, str | None] = {}
+    current: int | None = None
+    for ln in note_text.splitlines():
+        m = re.match(r"^## Fix round (\d+)\b", ln)
+        if m:
+            current = int(m.group(1))
+            sigs.setdefault(current, None)
+            continue
+        # the developer may append its own sections after a round
+        if ln.startswith("## "):
+            current = None
+            continue
+        if current is not None and sigs[current] is None \
+                and ln.startswith("$ "):
+            sigs[current] = ln.strip()
+    if not sigs:
+        return None, 0
+    order = sorted(sigs, reverse=True)
+    last = sigs[order[0]]
+    if last is None:
+        return None, 0
+    run = 0
+    for n in order:
+        if sigs[n] != last:
+            break
+        run += 1
+    return last, run
 
 
 def latest_digest(spec_dir: Path | str, task_id: str) -> dict | None:

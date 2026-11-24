@@ -589,7 +589,7 @@ FINDING_HEAD = re.compile(r"^### \[([^\s·]+) · (LOW|MEDIUM|HIGH) · (verified|
                           r" · ([^\]]+?)\] (.*)$")
 FINDING_HEAD_LEGACY = re.compile(r"^### \[(LOW|MEDIUM|HIGH) · (verified|unconfirmed)(?: \(self-checked\))?"
                                  r" · ([^\]]+?)\] (.*)$")
-FIX_SUFFIX = re.compile(r"^(.*?) · fix: (fixed|unfixed|worse|pending)$")
+FIX_SUFFIX = re.compile(r"^(.*?) · fix: (fixed|unfixed|worse|rejected-valid|rejected-invalid|out-of-scope|pending)$")
 
 
 def parse_findings_md(text):
@@ -634,7 +634,9 @@ def normalize_findings(items):
     for it in items:
         if not isinstance(it, dict) or not it.get("where") or not it.get("what"):
             continue
-        if it.get("fixStatus") == "fixed":
+        # D-022: a withdrawn finding (rejected-valid) is as dead as a fixed
+        # one — neither comes back on a fix_from carry.
+        if it.get("fixStatus") in RESOLVED_FIX:
             continue
         carried += 1
         tracked.append({
@@ -707,6 +709,40 @@ def reported_finding(t):
             "lens": f["lens"], "impact": f.get("impact", ""), "fixStatus": t.get("fix") or "pending"}
 
 
+# D-021: the recommendation floor is derived from the report's own state
+# (gates/recommendation.md), and an assessor's claim may only ESCALATE above
+# it — human outranks fix-first outranks merge. A claim below the floor is an
+# inconsistent result: rejected with both values, never guessed.
+RECOMMENDATION_RANK = {"merge": 0, "fix-first": 1, "human": 2}
+
+# D-022: fix-verdict vocabulary. RESOLVED_FIX ends a finding's life in the
+# loop: `fixed` (the fix held) or `rejected-valid` (the fixer's skip reason
+# held — the finding was withdrawn as not a real defect to fix). Everything
+# else keeps it open; `out-of-scope` (the sound fix needs paths or behavior
+# this change must not touch) is the user's widening call, not a round.
+RESOLVED_FIX = ("fixed", "rejected-valid")
+KNOWN_FIX = RESOLVED_FIX + ("unfixed", "worse", "rejected-invalid",
+                            "out-of-scope", "pending")
+# out-of-scope waits on the user's widening call, never on a round
+OFF_LOOP_FIX = RESOLVED_FIX + ("out-of-scope",)
+
+
+def derive_conclusion(gate_green, reported):
+    """The derived recommendation for a fix-loop report: `human` while an
+    out-of-scope widening call or unconfirmed findings the user must
+    adjudicate remain unresolved, `fix-first` while ordinary findings or
+    gate failures persist, else `merge`."""
+    if any(f["fixStatus"] == "out-of-scope" for f in reported):
+        return "human"
+    if any(f["status"] == "unconfirmed" and f["fixStatus"] not in RESOLVED_FIX
+           for f in reported):
+        return "human"
+    if not gate_green or any(f["fixStatus"] not in RESOLVED_FIX
+                             for f in reported):
+        return "fix-first"
+    return "merge"
+
+
 def cmd_report(a):
     try:
         d = json.loads(Path(a.data[1:]).read_text(encoding="utf-8")
@@ -718,11 +754,33 @@ def cmd_report(a):
     gate_green = d.get("gate_green", False)
     assessment = d.get("assessment", {})
     reported = [reported_finding(t) for t in tracked]
+    unknown = sorted({f["fixStatus"] for f in reported} - set(KNOWN_FIX))
+    if unknown:
+        return out(False, error=(f"unknown fix status {', '.join(map(repr, unknown))} — "
+                                 f"one of: {', '.join(KNOWN_FIX)}"))
+    conclusion = d.get("conclusion", "")
+    derived = None
+    if a.kind == "fix":
+        derived = derive_conclusion(gate_green, reported)
+        n_open = sum(1 for f in reported if f["fixStatus"] not in RESOLVED_FIX)
+        if conclusion in RECOMMENDATION_RANK \
+                and RECOMMENDATION_RANK[conclusion] < RECOMMENDATION_RANK[derived]:
+            return out(False, derived_conclusion=derived, conclusion=conclusion,
+                       error=(f"conclusion {conclusion!r} is below the derived floor "
+                              f"{derived!r} ({n_open} unresolved finding(s), gate green: "
+                              f"{bool(gate_green)}) — a claim may escalate to fix-first or "
+                              "human, never below the state the report itself shows"))
+        if conclusion not in RECOMMENDATION_RANK:
+            conclusion = derived
     n_high = sum(1 for f in reported if f["severity"] == "high")
     n_fixed = sum(1 for f in reported if f["fixStatus"] == "fixed")
+    n_withdrawn = sum(1 for f in reported if f["fixStatus"] == "rejected-valid")
+    n_oos = sum(1 for f in reported if f["fixStatus"] == "out-of-scope")
     n_confirmed = sum(1 for f in reported if f["status"] == "verified")
     n_self = sum(1 for f in reported if f["selfChecked"])
     unconfirmed = f"{len(reported) - n_confirmed} unconfirmed" + (f" ({n_self} self-checked)" if n_self else "")
+    verdict_extra = (f" · {n_withdrawn} withdrawn" if n_withdrawn else "") \
+                    + (f" · {n_oos} out-of-scope" if n_oos else "")
     rounds = d.get("rounds_used", 0)
     repo_rows = [g for g in gate if is_repo_row(g)]
     ci = [g for g in gate if g.get("source") == "ci"]
@@ -749,7 +807,7 @@ def cmd_report(a):
             verdict = "TIMED OUT" if g.get("status") == "timed_out" else "FAIL"
             lines += [f"- **{verdict}** — {g['name']}", "", "  ```", f"  {g['tail']}", "  ```"]
     lines += ["", f"## Findings ({len(reported)} · {n_confirmed} confirmed · {unconfirmed} · "
-                  f"{n_high} high · {n_fixed} fixed)", ""]
+                  f"{n_high} high · {n_fixed} fixed{verdict_extra})", ""]
     lines += findings_md(reported) if tracked else ["None — the reviewers reported nothing that met the bar.", ""]
     if rounds:
         lines += ["## What the fixer did", ""] + (
@@ -767,14 +825,15 @@ def cmd_report(a):
         _sys.path.insert(0, str(_Path(__file__).resolve().parent))
         from telemetry import record
         record("spec-review", "review_report", kind=a.kind,
-               conclusion=d.get("conclusion", ""),
+               conclusion=conclusion,
                findings=len(reported),
                unconfirmed=sum(1 for f in reported
                                if f.get("status") == "unconfirmed"))
     except Exception:
         pass
+    payload_extra = {"derived_conclusion": derived} if derived is not None else {}
     return out(True, markdown="\n".join(lines), reported_findings=reported,
-               conclusion=d.get("conclusion", ""), **backlog_offer(d, assessment))
+               conclusion=conclusion, **payload_extra, **backlog_offer(d, assessment))
 
 
 def backlog_offer(d, assessment):
@@ -1412,6 +1471,7 @@ def _final_ask_project(ctx):
 
 
 def _fixer_ask(ctx):
+    ctx = {**ctx, "unresolved": [t for t in ctx["unresolved"] if t.get("fix") not in OFF_LOOP_FIX]}
     if ctx["round"] == 1:
         opening = ("Fix the confirmed findings in the project's code:\n" if ctx["project"]
                    else f"Fix the confirmed findings on the change (`git diff {_base(ctx)}`):\n")
@@ -1425,8 +1485,11 @@ def _fixer_ask(ctx):
                 "before your first edit — the repo's own rules bind your fixes. You may run a single targeted test file "
                 "for code you touch, but the repo's checks re-run the moment you finish — do not run them yourself.\n"
                 + _intent_block(ctx)
-                + "Return addressed (the finding ids you fully fixed), skipped (the finding ids you deliberately left, with "
-                "why), changedPaths, and notes (one sentence per change: what was done and why it is minimal).")
+                + "Return addressed (the finding ids you fully fixed), skipped (the finding ids you deliberately left, "
+                "with why — either the finding is wrong, and your why will be independently ruled on, or it cannot be "
+                "fixed), outOfScope (finding ids whose SOUND fix needs paths or behavior this change must not touch — "
+                "name the paths and why; never make that change yourself), changedPaths, and notes (one sentence per "
+                "change: what was done and why it is minimal).")
     items = [{"id": t["finding"]["id"], "where": t["finding"]["where"], "what": t["finding"]["what"],
               "evidence": t["finding"]["evidence"], "severity": t["finding"]["severity"],
               "lens": t["finding"]["lens"], "verifier": t.get("fixNote")} for t in ctx["unresolved"]]
@@ -1451,7 +1514,11 @@ def _verify_ask(ctx):
             "the described defect is gone and the fix is minimal and sound.\n"
             + _test_hunks_block(ctx, "answer worse and name the weakened test")
             + "Answer fixed only if the defect itself is resolved — cosmetic proximity is not a fix. Answer unfixed if "
-            "it still stands. Answer worse if the fix introduced a new problem (say what, in note). Do not edit anything.")
+            "it still stands. Answer worse if the fix introduced a new problem (say what, in note).\n"
+            "If the author SKIPPED this finding (their reason is in the notes), do not verify a fix — rule on the skip "
+            "instead: rejected-valid when the reason holds (the finding was not a real defect the author must fix — "
+            "say what the code actually does), rejected-invalid when it does not (the finding stands whatever the "
+            "author believes). An unruled skip leaves the finding standing. Do not edit anything.")
 
 
 def _fix_review_ask(ctx):
@@ -1486,13 +1553,16 @@ def _loop_final_ask(ctx):
                     "residualRisks: what remains unverified. verdict: two or three sentences — is the code ready as it "
                     "stands now? recommendation: merge | fix-first | human — merge means the code is ready as it stands "
                     "(every finding fixed, the checks green, nothing new surfaced); human when judgment calls or "
-                    "unconfirmed residue remain." if ctx["project"] else
+                    "unconfirmed residue remain. The oracle derives the floor from the tracked findings and rejects a "
+                    "claim below it (escalating is always allowed), so claim what the state shows." if ctx["project"] else
                     f"\nProduce the final assessment of the change INCLUDING the fixes — run `git diff {_base(ctx)}` yourself "
                     "where you need to judge it, and read the test files before claiming a test gap.\n"
                     "risk: what merging now would risk. testGaps: behaviors still altered with no test covering them. "
                     "residualRisks: what remains unverified. verdict: two or three sentences — should this merge now? "
                     "recommendation: merge | fix-first | human — merge only if every finding is fixed, the checks are green, "
-                    "and nothing new surfaced; human when judgment calls or unconfirmed residue remain.")
+                    "and nothing new surfaced; human when judgment calls or unconfirmed residue remain. The oracle derives "
+                    "the floor from the tracked findings and rejects a claim below it (escalating is always allowed), so "
+                    "claim what the state shows.")
     return (f"The fix loop ran {ctx['rounds_used']} round(s). Every tracked finding and its state:\n" + jdump(items)
             + f"\nThe repo's own checks after the final round: {gate_state}."
             f"\nAll paths the author changed: {', '.join(ctx.get('changed_paths', [])) or '(none)'}"

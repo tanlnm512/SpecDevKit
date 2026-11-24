@@ -59,6 +59,7 @@ SYNC_CORPUS = (
     "tools/parity.py",
     "tools/retired-skills.txt",
     "rules/engineering-rules.md",
+    "rules/agent-limits.md",
     "skills/spec-discover/SKILL.md",
     "skills/spec-discover/VERSION",
     "skills/spec-discover/commands/spec-discover.md",
