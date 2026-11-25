@@ -14,6 +14,11 @@ decision, or strike it when resolved outright.
 3. **Scratch-only eval corpus** — accepted limitation: the recorded
    results for e4–e6 (2026-10-27, via `tools/evals.py validate`) all
    ran in scratch repos; no real-repo execution run is recorded yet.
+   e7–e9 (2026-11-25) ran in scratch repos too, as operator-driven
+   sessions: the orchestrator was the main agent session, with this
+   kit's AGENTS.md in its context, and an operator answered the user
+   gates per each case's Run line. The wave agents ran as separate
+   agents and an independent agent judged each run.
 4. **Fix-cap adjudication is a human call** — accepted limitation: at
    `(fix 5/5)` the graph surfaces the task and the orchestrator
    adjudicates (park, defer, re-plan); there is no mechanical
@@ -30,9 +35,9 @@ decision, or strike it when resolved outright.
    `[debug print]`; dod gate 7 then reads FAIL with no way to record
    that the lines are the product's output, and the pass goes to the
    user on a red mechanical verdict.
-7. **E8 has never run live.** It needs a full-tier docset authored
-   through `/spec-design` first, and its criteria still name
-   `notes/delivery.md`, which the delivery block replaced.
+7. ~~**E8 has never run live.**~~ (recorded 2026-11-25, against a
+   full-tier docset a fixture agent had taken through approve and
+   execute; its criteria now name the status holder's delivery block).
 8. ~~**A fix round's sub-line breaks the tiny freeze**~~ (decided 2026-11-13: spec-design D-057) (E7, 2026-11-13).
    SKILL.md § Task markers says the round sub-lines move freely at
    tiny tier, but writing `fix 1 — <digest>` under a § Tasks entry
@@ -43,4 +48,49 @@ decision, or strike it when resolved outright.
    Step 4 writes `retro.md` before the tick and C1, so it lists every
    task as open, nothing parked, and `Delivered: commit @ -`; archive
    reuses that file.
+10. **The scorecard reads a drafted delivery block only under a
+    `Delivered:` line** (E7 and E8, 2026-11-25). `audit.py dod` collects
+    the block from under the status holder's Delivered field. The
+    full-tier task.md template ships `**Delivered**: pending` to draft
+    under; the tiny-tier spec.md template ships none, so there a block
+    drafted before dod is invisible and gates 7 and 11 read FAIL until
+    the orchestrator adds a `Delivered: pending` line. At full tier the
+    same placeholder makes gate 15 read FAIL ("delivered but Verified
+    not `pass`") before anything is delivered, until a phase's Verified
+    cell is set — ahead of the C2 step the contract gives it to. And
+    since C1 carries the ticked task list, the drafted block rides into
+    C1 although the contract says C2 lands it.
+11. **The tiny-tier placeholder check reads inside code spans** (E7,
+    2026-11-25). `tiny_check` runs `PLACEHOLDER.search()` on the raw
+    text, where the full-tier path strips code spans, quoted spans and
+    HTML comments first. A tick proof note that quotes a usage line
+    with a `<name>` token turns the docset red after the tick, although
+    the same token inside backticks passes at full tier.
+12. **`mutate` and `block` judge files `scope` lists OUTSIDE** (E9,
+    2026-11-25). Both run from the approval base over every changed
+    file, including ones another change landed since approval: all
+    seven mutation survivors were in that other change's file, and
+    `block` drafted a `Docs impact` and a `Hygiene` line for it.
+13. **`scope` on an archived spec lists its own files OUTSIDE** (E7
+    and E8, 2026-11-25). Run on `specs/archive/<date>-<name>/`, it
+    prints the archived docset, BACKLOG.md and INDEX.md as "landed by
+    another change since approval", so the instrument cannot be re-run
+    on a delivered spec.
+14. **The rollback gate accepts its own placeholder** (E8, 2026-11-25).
+    `ROLLBACK_RULING` counts any non-blank text after the dash, so a
+    `Rollback: <row> — <ruling>` line that `audit.py block` drafts and
+    nobody fills lets gate 12 read PASS.
+15. **retro.md's counts read more than the run** (E8, 2026-11-25).
+    `retro.py` counts a digest as carrying a deviation when its line
+    contains the word, so "deviation none" is counted; and its
+    telemetry section tallies every spec-build event of that spec name
+    on the machine, so a fixture build's red runs appear in the
+    delivery's retro.
+16. **E8's seventh criterion names `archive.sh` as the writer of
+    retro.md and of the decision titles** (E8, 2026-11-25). The record
+    step runs `retro.py` and archive reuses that file (D-040), so
+    `archive.sh` writes neither in the ordinary flow and the run meets
+    the criterion in outcome only. Either the criterion follows the
+    contract, or the criterion is right and the contract is not —
+    undecided.
 
