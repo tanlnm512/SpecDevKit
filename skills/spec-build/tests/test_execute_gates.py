@@ -784,6 +784,20 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
         self.assertIn("/spec-design", r.stderr)
         self.assertEqual(spawn_files(spec_dir), [])
 
+    def test_fast_mode_hands_the_tiny_wave_to_the_session(self):
+        spec_dir = self._tmp / "specs" / "tiny"
+        spec_dir.mkdir(parents=True)
+        write(spec_dir / "spec.md", TINY_SPEC.replace(
+            "**Effort**: standard\n", "**Effort**: standard\n**Mode**: fast\n"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(freeze.record(spec_dir, self._tmp), 0)
+        r = self.emit(spec_dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(spawn_files(spec_dir), ["implementer-T001.md"])
+        self.assertIn("mark.py claim", r.stdout)
+        self.assertIn("spawn no developer", r.stdout)
+        self.assertNotIn("before spawning them", r.stdout)
+
     def test_a_tiny_spec_needs_the_freeze_not_just_the_status_word(self):
         spec_dir = self._tmp / "specs" / "tiny"
         spec_dir.mkdir(parents=True)

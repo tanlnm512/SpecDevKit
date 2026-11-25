@@ -88,6 +88,7 @@
 #                                 `agy plugin install` copies; agy owns
 #                                 ~/.gemini/config/plugins itself).
 #   rules/engineering-rules.md -> the § Engineering rules sections in
+#   + rules/agent-limits.md       (+ § Budgets)
 #                              skills/spec-build/agents/developer.md
 #                              and skills/spec-review/agents/
 #                              review-fixer.md — COMMITTED
@@ -920,8 +921,9 @@ fi
 # --check stops here: the preflight above reported refusals and
 # the verify pass below reports drift — read-only either way.
 if [ "$CHECK" = 0 ]; then
-  # Kit-wide engineering rules: refresh the § Engineering rules
-  # carrier sections from the canonical rules/engineering-rules.md
+  # Kit-wide engineering rules and budgets: refresh the § Engineering
+  # rules and § Budgets carrier sections from rules/engineering-rules.md
+  # and rules/agent-limits.md
   # BEFORE any install copies them out — same committed regenerate-only
   # discipline as the agy personas below. Never runs in --dry-run or
   # --check mode: those write nothing anywhere.

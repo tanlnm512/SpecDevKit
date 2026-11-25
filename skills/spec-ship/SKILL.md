@@ -83,7 +83,7 @@ it names:
 | `dirty-tree`, `diverged` | uncommitted work, or the remote branch is ahead | stop; the user settles it |
 | `unpushed` | commits not on the remote | 1 → 2 |
 | `no-pr` | branch pushed, no PR | 3 |
-| `ci-red`, `ci-pending` | the PR's checks | 4 |
+| `ci-red`, `ci-rerun`, `ci-pending` | the PR's checks | 4 |
 | `review-comments` | unresolved review threads | 5 |
 | `awaiting-merge` | green, nothing unresolved | say so and stop — the merge is the human's |
 | `merged-record-stale`, `merged` | merged | 6 |
@@ -98,19 +98,31 @@ it names:
    run the printed `git push --set-upstream <remote> <branch>`,
    exactly as printed.
 3. **PR** — `S pr-body <name> --json` assembles title and body from
-   the docs: summary and work type, requirements, proof, review
-   status, docs impact, dependency changes, rollout and rollback,
-   parked items. Spawn the integrator (`pr-text` mode) to tighten the
-   wording; check its digest changed no fact. Preview the title and
-   full body. On yes: create the PR, then `S record <name> --pr
-   <url>` writes `Shipped: PR <url>` beside the delivery record. The
-   record is a local doc change: its commit (`docs(<name>): record
-   the shipped PR`, staged by path) and the push that carries it are
-   part of the same preview, or asked on their own.
-4. **CI** — `S checks <name> [--logs]`:
-   - `red` → summarize each failing job, record its output with
-     `S evidence <name> --kind ci --title '<job>' --task T###`, and
-     route the fix round to `/spec-build <name>`.
+   the docs: summary and work type, requirements, proof (each ruled
+   environment-blocked proof as `Owner to test after merge: TC-### —
+   <ruling>`, read from the delivery block — a ruled proof is never
+   shown as passed), review status, docs impact, dependency changes,
+   rollout and rollback, parked items. Spawn the integrator
+   (`pr-text` mode) to tighten the wording; check its digest changed
+   no fact. Preview the title and full body. On yes: create the PR,
+   then `S record <name> --pr <url>` writes `Shipped: PR <url>` beside
+   the delivery record. The record is a local doc change: its commit
+   (`docs(<name>): record the shipped PR`, staged by path) and the
+   push that carries it are part of the same preview, or asked on
+   their own.
+4. **CI** — `S checks <name> [--logs]` reads each red check's run
+   steps and classes it `code`, `infrastructure`, or `unknown`
+   (D-005):
+   - `red` with at least one `code` row (stage `ci-red`) → summarize
+     each failing job, record its output with `S evidence <name>
+     --kind ci --title '<job>' --task T###`, and route the fix round
+     to `/spec-build <name>`.
+   - `red` all `infrastructure`/`unknown` (stage `ci-rerun`) → no fix
+     round opens: show each check's class and reason and print its
+     `gh run rerun <id> --failed` command. A rerun is an outward
+     action — run it only on the user's yes. To open a fix round on
+     purpose, record the output with `S evidence <name> --kind ci …`
+     and route to `/spec-build`.
    - `pending` → say so and stop.
    - `none` → no checks reported; that is not a pass — say so.
    - `green` → step 5.
@@ -118,11 +130,15 @@ it names:
    threads, each with the tasks whose `Touches:` cover its file.
    Spawn the integrator (`threads` mode): it classifies each thread
    `must-fix`, `question`, `nit`, or `disagree` (with its reason) and
-   drafts a reply. Must-fix items become fix-round evidence
-   (`S evidence … --kind review`) for `/spec-build`. Show every draft
-   reply; post only those the user says yes to. Re-requesting review
-   is its own yes. Threads are never resolved here — that is the
-   reviewer's call.
+   drafts a reply. When the user relabels a thread, or confirms a
+   classification they were asked about, record it before the next
+   run: `S rule <name> --thread <id> --label <label> [--why <text>]`
+   — a ruled thread keeps the owner's label and is not reclassified;
+   only unruled threads are open. Must-fix items become fix-round
+   evidence (`S evidence … --kind review`) for `/spec-build`. Show
+   every draft reply; post only those the user says yes to.
+   Re-requesting review is its own yes. Threads are never resolved
+   here — that is the reviewer's call.
 6. **After the merge** — `S status <name>` compares the merge commit
    with the delivery record. A merge commit keeps the record intact.
    A squash or rebase leaves `Delivered: commit @ <sha>` pointing off
@@ -153,6 +169,7 @@ do the integrator's work inline under the same brief.
 | `Shipped: PR <url>` | the status holder, beside `Delivered:` — task.md's header at full tier, spec.md § Evidence at tiny |
 | Fix-round evidence traced to a task | `specs/<name>/notes/T###.md`, under `## Fix round n` — the note spec-build's fix payload embeds |
 | Evidence no task covers | `specs/<name>/notes/ship.md` — a change outside the approved contract routes to `/spec-design` |
+| Review-thread rulings | `specs/<name>/notes/rulings.md`, one line per ruling (`S rule`) — `comments` reads them back; a ruled thread is not reclassified |
 | Re-pointed delivery record | written by spec-build's `tick.py --redeliver`, never by this skill |
 
 ## Command

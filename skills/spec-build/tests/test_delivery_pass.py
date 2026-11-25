@@ -149,7 +149,8 @@ class DeliveryPassTests(unittest.TestCase):
         (spec / "notes" / "T001.md").write_text(
             "## Regression test (red before fix)\n`pytest -k crash` exit 1\n", encoding="utf-8")
         gates = {n: st for n, st, _ in audit.delivery_gates(spec, self.root, [], True)}
-        self.assertEqual(gates, {"DOCS IMPACT": "PASS", "ROLLBACK": "PASS", "WORK TYPE": "PASS"})
+        self.assertEqual(gates, {"DOCS IMPACT": "PASS", "ROLLBACK": "PASS",
+                                 "WORK TYPE": "PASS", "VERIFIERS": "PASS"})
 
     def test_verified_column_cannot_run_ahead_of_the_delivered_record(self):
         spec = self.root / "specs" / "demo"

@@ -39,10 +39,13 @@ primary evidence, `--digest` the override when the file is missing —
 and on `audit.py proofs <spec> --run --task T###` running at least one
 acceptance command green — on red it prints the failure and the exact
 fail command to run. A proof whose named tests do not exist is PENDING,
-never a pass: when none of the task's proofs ran, land refuses unless
-`--allow-pending` says the tests are written by a later task — the
-landing is then an unproven `(implemented)`, and the delivery pass (dod
-gate 1) stays red until the pending proofs run. fail copies the digest verbatim from the recorded
+never a pass, and an ENV-BLOCKED proof (D-047 — the environment it
+needs is missing) counts the same: neither ran. When none of the
+task's proofs ran, land refuses unless `--allow-pending` says the
+tests are written by a later task (or the environment cannot be
+supplied) — the landing is then an unproven `(implemented)`, and the
+delivery pass (dod gate 1) stays red until the pending proofs run or
+the env-blocked ones are ruled. fail copies the digest verbatim from the recorded
 evidence and refuses a digest that is not a substring of it; a
 superseded in-flight round closes as `fixed n — failed again — …` so
 the checker's pairing gate stays green; round 3 points at
@@ -309,10 +312,21 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
             if dig is not None:
                 status = dig["status"]
                 if not re.match(r"(implemented|already-satisfied)\b", status):
+                    route = {
+                        "scope": ("its scope: deviation names paths outside "
+                                  "Touches — widen the entry's Touches under "
+                                  "the D-### ruling and re-emit; no fix round"),
+                        "spec-defect": ("its spec-defect: deviation says the "
+                                        "task itself is wrong — route to "
+                                        "/spec-design; no fix round, no "
+                                        "higher tier"),
+                    }.get(dig.get("deviation_kind"),
+                          "rule on the block (D-###) and re-spawn, or route "
+                          "to /spec-design")
                     print(f"refused: {task_id}'s digest on file reports "
                           f"{status!r} ({dig['path']}) — a blocked digest "
-                          "is not a landing: `mark.py release` the task "
-                          "and rule on the block", file=sys.stderr)
+                          f"is not a landing: `mark.py release` the task "
+                          f"and {route}", file=sys.stderr)
                     return 1
             elif digest and DIGEST_STATUS.search(digest):
                 print("warning: no digest file under digests/ — using the "
@@ -342,23 +356,49 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
                       "the output above>\"")
                 return 1
             pending = d["pending"]
-            if pending and len(pending) == len(d["auto"]):
+            blocked = d["env_blocked"]
+            unrun = sorted(set(pending) | set(blocked))
+            if unrun and len(unrun) == len(d["auto"]):
                 if not allow_pending:
-                    print(f"refused: none of {task_id}'s proofs ran — the "
-                          "tests they name do not exist yet "
-                          f"({', '.join(sorted(pending))}). Write them with "
-                          "the task; if a later task owns them, land with "
+                    why = []
+                    if blocked:
+                        why.append("ENV-BLOCKED: " + ", ".join(
+                            f"{tc} (missing: {blocked[tc]})"
+                            for tc in sorted(blocked)))
+                    if pending:
+                        why.append("pending — the tests they name do not "
+                                   f"exist yet: {', '.join(sorted(pending))}")
+                    print(f"refused: none of {task_id}'s proofs ran — "
+                          f"{'; '.join(why)}. Write the tests with the "
+                          "task, or supply what the environment is "
+                          "missing; if a later task owns the tests or the "
+                          "environment cannot be supplied, land with "
                           "--allow-pending (an unproven landing the "
                           "delivery pass will not accept)", file=sys.stderr)
                     return 1
-                print(f"warning: {task_id} lands unproven — pending: "
-                      f"{', '.join(sorted(pending))}; the delivery pass "
-                      "stays red until these tests exist and pass",
-                      file=sys.stderr)
-            elif pending:
-                print(f"note: {len(pending)} of {task_id}'s proofs are "
-                      f"pending ({', '.join(sorted(pending))}) — the "
-                      "delivery pass needs them", file=sys.stderr)
+                loud = []
+                if blocked:
+                    loud.append("env-blocked: " + ", ".join(
+                        f"{tc} (missing {blocked[tc]})"
+                        for tc in sorted(blocked)))
+                if pending:
+                    loud.append(f"pending: {', '.join(sorted(pending))}")
+                print(f"warning: {task_id} lands unproven — "
+                      f"{'; '.join(loud)}; the delivery pass stays red "
+                      "until these proofs run (the env-blocked ones until "
+                      "they run or are ruled)", file=sys.stderr)
+            else:
+                if blocked:
+                    print(f"note: {len(blocked)} of {task_id}'s proofs are "
+                          "ENV-BLOCKED (" + ", ".join(
+                              f"{tc}: missing {blocked[tc]}"
+                              for tc in sorted(blocked))
+                          + ") — the delivery pass needs them run or ruled",
+                          file=sys.stderr)
+                if pending:
+                    print(f"note: {len(pending)} of {task_id}'s proofs are "
+                          f"pending ({', '.join(sorted(pending))}) — the "
+                          "delivery pass needs them", file=sys.stderr)
 
             open_round = entry.fix_round
             if open_round is not None and not resolution:
@@ -564,6 +604,13 @@ def fail(spec_dir: Path, task_id: str, evidence: Path, digest: str) -> int:
     if n == 3:
         print("round 3 suspects the plan: repair via /spec-design before "
               "round 4")
+    sig, run = specstate.failure_signature_run(
+        note_path.read_text(encoding="utf-8", errors="replace"))
+    if sig and run >= graph.SAME_FAILURE_ADVISORY:
+        print(f"same-signature: {sig} has failed {run} consecutive "
+              f"round(s) — another round, or a stronger tier, re-runs the "
+              "same failing command; repair the plan (/spec-design) or "
+              "adjudicate now (D-044)")
     if n == 4:
         print("round 4: spawn one tier up")
     if n == graph.FIX_CAP:

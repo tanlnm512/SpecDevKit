@@ -199,9 +199,17 @@ class GateTests(unittest.TestCase):
         holder, repo = make_repo()
         with holder, tempfile.TemporaryDirectory() as bindir:
             gh = Path(bindir) / "gh"
-            gh.write_text("#!/bin/sh\n"
-                          "echo '[{\"name\":\"build\",\"bucket\":\"pass\",\"link\":\"\"},"
-                          "{\"name\":\"lint\",\"bucket\":\"fail\",\"link\":\"\"}]'\n")
+            gh.write_text(
+                "#!/bin/sh\n"
+                'if [ "$1 $2" = "run view" ]; then\n'
+                "  echo '{\"jobs\": [{\"name\": \"lint\", \"conclusion\": \"failure\", "
+                "\"steps\": [{\"name\": \"Set up job\", \"number\": 1, \"conclusion\": \"success\"}, "
+                "{\"name\": \"Run lint\", \"number\": 2, \"conclusion\": \"failure\"}]}]}'\n"
+                "  exit 0\n"
+                "fi\n"
+                "echo '[{\"name\":\"build\",\"bucket\":\"pass\",\"link\":\"\"},"
+                "{\"name\":\"lint\",\"bucket\":\"fail\","
+                "\"link\":\"https://github.com/acme/widget/actions/runs/4123\"}]'\n")
             gh.chmod(0o755)
             env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
             r = subprocess.run([sys.executable, str(SCRIPT), "gate", "--repo", str(repo),
@@ -210,8 +218,79 @@ class GateTests(unittest.TestCase):
             d = json.loads(r.stdout)
             ci = {g["name"]: g["status"] for g in d["rows"] if g["source"] == "ci"}
             self.assertEqual(ci, {"CI: build": "pass", "CI: lint": "fail"})
+            lint = next(g for g in d["rows"] if g["name"] == "CI: lint")
+            self.assertEqual(lint["class"], "code")
+            self.assertEqual(lint["failedStep"], "Run lint")
             self.assertFalse(d["green"])
             self.assertIn("CI did NOT pass — failing: CI: lint", d["note"])
+
+    def test_pr_ci_cancelled_run_is_infrastructure_and_stands(self):
+        holder, repo = make_repo()
+        with holder, tempfile.TemporaryDirectory() as bindir:
+            gh = Path(bindir) / "gh"
+            # no run view behind it either — the class comes from the bucket
+            gh.write_text(
+                "#!/bin/sh\n"
+                "echo '[{\"name\":\"build\",\"bucket\":\"cancel\","
+                "\"link\":\"https://github.com/acme/widget/actions/runs/4123\"},"
+                "{\"name\":\"lint\",\"bucket\":\"fail\",\"link\":\"\"}]'\n")
+            gh.chmod(0o755)
+            env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+            r = subprocess.run([sys.executable, str(SCRIPT), "gate", "--repo", str(repo),
+                                "--base", "HEAD", "--pr", "7"],
+                               capture_output=True, text=True, env=env)
+            d = json.loads(r.stdout)
+            by_name = {g["name"]: g for g in d["rows"] if g["source"] == "ci"}
+            build = by_name["CI: build"]
+            self.assertEqual(build["status"], "infrastructure")
+            self.assertEqual(build["class"], "infrastructure")
+            self.assertEqual(build["exit_code"], 0)
+            self.assertEqual(build["rerun"], "gh run rerun 4123 --failed")
+            lint = by_name["CI: lint"]
+            self.assertEqual(lint["class"], "unknown")
+            self.assertEqual(lint["status"], "unknown")
+            self.assertIsNone(lint.get("rerun"))
+            # neither row fails the gate — but neither is green-washed
+            self.assertTrue(d["green"])
+            self.assertIn("standing red, not failing the gate: "
+                          "CI: build; CI: lint", d["note"])
+            self.assertIn("merge floors at human", d["note"])
+
+    def test_pr_ci_setup_failure_is_infrastructure_test_failure_is_code(self):
+        holder, repo = make_repo()
+
+        def stub_with(steps_json):
+            return ("#!/bin/sh\n"
+                    'if [ "$1 $2" = "run view" ]; then\n'
+                    "  echo '{\"jobs\": [{\"name\": \"ci\", \"conclusion\": \"failure\", "
+                    "\"steps\": [" + steps_json + "]}]}'\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "echo '[{\"name\":\"ci\",\"bucket\":\"fail\","
+                    "\"link\":\"https://github.com/acme/widget/actions/runs/4123\"}]'\n")
+
+        setup = ('{"name": "Set up job", "number": 1, "conclusion": "failure"}, '
+                 '{"name": "Run tests", "number": 2, "conclusion": "skipped"}')
+        tests = ('{"name": "Set up job", "number": 1, "conclusion": "success"}, '
+                 '{"name": "Run tests", "number": 2, "conclusion": "failure"}')
+        for steps_json, want in ((setup, "infrastructure"), (tests, "code")):
+            with self.subTest(first_failure=want), \
+                 tempfile.TemporaryDirectory() as bindir:
+                gh = Path(bindir) / "gh"
+                gh.write_text(stub_with(steps_json))
+                gh.chmod(0o755)
+                env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+                r = subprocess.run([sys.executable, str(SCRIPT), "gate",
+                                    "--repo", str(repo), "--base", "HEAD",
+                                    "--pr", "7"],
+                                   capture_output=True, text=True, env=env)
+                d = json.loads(r.stdout)
+                ci = next(g for g in d["rows"] if g["source"] == "ci")
+                self.assertEqual(ci["class"], want)
+                self.assertEqual(ci["failedStep"],
+                                 "Set up job" if want == "infrastructure"
+                                 else "Run tests")
+                self.assertEqual(d["green"], want == "infrastructure")
 
     def test_gate_on_this_kit_repo_detects_its_checks(self):
         kit_root = SCRIPT.parents[2]  # CWD-independent: run.sh cds into the skill
@@ -431,6 +510,187 @@ class ReportTests(unittest.TestCase):
     def test_bad_report_data_fails_loudly(self):
         msg = err(["report", "--kind", "review", "--data", "@/no/such/file.json"])
         self.assertIn("report data invalid", msg)
+
+    def test_report_carries_standing_ci_rows_and_floors_merge_at_human(self):
+        def tracked(fid, fix="fixed"):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "w",
+                                "evidence": "e", "severity": "medium",
+                                "lens": "general",
+                                "confirmation": {"status": "verified",
+                                                 "note": ""}},
+                    "fix": fix}
+        base = {"tracked": [tracked("F-1")],
+                "gate_rows": [
+                    {"name": "make test", "exit_code": 0, "source": "repo",
+                     "status": "pass", "tail": ""},
+                    {"name": "CI: build", "exit_code": 0,
+                     "status": "infrastructure", "source": "ci",
+                     "class": "infrastructure", "failedStep": "Set up job",
+                     "reason": "the job 'build' failed in the runner step "
+                               "'Set up job'",
+                     "rerun": "gh run rerun 4123 --failed",
+                     "tail": "https://github.com/acme/widget/actions/runs/4123"}],
+                "assessment": {"verdict": "v", "testGaps": [],
+                               "residualRisks": []},
+                "rounds_used": 2}
+        # every finding is fixed and the gate is green, but a standing CI
+        # row blocks merge: the rerun is the user's call, not an edit
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "conclusion": "merge"})])
+        self.assertIn("below the derived floor 'human'", msg)
+        self.assertIn("1 CI row(s) standing infrastructure-or-unknown", msg)
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "conclusion": "human"})])
+        self.assertEqual(d["derived_conclusion"], "human")
+        md = d["markdown"]
+        self.assertIn("- infrastructure — CI: build — the job 'build' failed "
+                      "in the runner step 'Set up job'", md)
+        self.assertIn("first failed step: Set up job", md)
+        self.assertIn("rerun (an outward action, never run here): "
+                      "`gh run rerun 4123 --failed`", md)
+        self.assertIn("green after the final fix round, with 1 CI row(s) "
+                      "standing (infrastructure-or-unknown — see below)", md)
+        self.assertNotIn("all passed", md)
+        self.assertNotIn("- pass — CI: build", md)
+        # with the row resolved (rerun turned it green), merge floors again
+        clear = [{**base["gate_rows"][0]},
+                 {**base["gate_rows"][1], "status": "pass", "class": None,
+                  "failedStep": None, "reason": None}]
+        del clear[1]["rerun"]
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True, "gate_rows": clear,
+                            "conclusion": "merge"})])
+        self.assertEqual(d["derived_conclusion"], "merge")
+
+    def test_fix_report_derives_the_floor_and_rejects_a_claim_below_it(self):
+        def tracked(fid, fix="fixed", status="verified"):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "w", "evidence": "e",
+                                "severity": "medium", "lens": "general",
+                                "confirmation": {"status": status, "note": ""}},
+                    "fix": fix}
+        base = {"gate_rows": [{"name": "make test", "exit_code": 0, "source": "repo", "tail": ""}],
+                "assessment": {"verdict": "v", "testGaps": [], "residualRisks": []},
+                "rounds_used": 2}
+        # merge is derivable and claimed — stands, and is echoed as derived
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True, "tracked": [tracked("F-1")],
+                            "conclusion": "merge"})])
+        self.assertEqual(d["conclusion"], "merge")
+        self.assertEqual(d["derived_conclusion"], "merge")
+        # unresolved finding, merge claimed — below the floor: error naming both
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", fix="unfixed")],
+                               "conclusion": "merge"})])
+        self.assertIn("below the derived floor 'fix-first'", msg)
+        self.assertIn("1 unresolved finding", msg)
+        # red gate, merge claimed — same rejection
+        err(["report", "--kind", "fix", "--data",
+             json.dumps({**base, "gate_green": False, "tracked": [tracked("F-1")],
+                         "conclusion": "merge"})])
+        # unconfirmed residue (unfixed) derives human; a fix-first claim is below it
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", fix="unfixed", status="unconfirmed")],
+                               "conclusion": "fix-first"})])
+        self.assertIn("below the derived floor 'human'", msg)
+        # an unconfirmed finding that WAS fixed is resolved — floor merge,
+        # and escalating above it stays the assessor's call
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", fix="fixed", status="unconfirmed")],
+                            "conclusion": "fix-first"})])
+        self.assertEqual(d["derived_conclusion"], "merge")
+        self.assertEqual(d["conclusion"], "fix-first")
+        # escalation is always allowed: derived fix-first, claimed human
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", fix="unfixed")],
+                            "conclusion": "human"})])
+        self.assertEqual(d["conclusion"], "human")
+        self.assertEqual(d["derived_conclusion"], "fix-first")
+        # absent or unrecognized claim is filled with the floor
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", fix="unfixed")]})])
+        self.assertEqual(d["conclusion"], "fix-first")
+        self.assertEqual(d["derived_conclusion"], "fix-first")
+        # a review-kind report never derives (review-only runs do not recommend)
+        d = ok(["report", "--kind", "review", "--data",
+                json.dumps({**base, "gate_green": True, "tracked": [tracked("F-1")],
+                            "conclusion": "whatever the assessor said"})])
+        self.assertEqual(d["conclusion"], "whatever the assessor said")
+        self.assertNotIn("derived_conclusion", d)
+
+    def test_fix_verdict_vocabulary_adjudicates_and_routes(self):
+        def tracked(fid, fix, status="verified"):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "w", "evidence": "e",
+                                "severity": "medium", "lens": "general",
+                                "confirmation": {"status": status, "note": ""}},
+                    "fix": fix}
+        base = {"gate_rows": [], "assessment": {"verdict": "v", "testGaps": [], "residualRisks": []},
+                "rounds_used": 2}
+        # rejected-valid resolves like fixed — merge is derivable with one
+        d = ok(["report", "--kind", "fix", "--data",
+                json.dumps({**base, "gate_green": True,
+                            "tracked": [tracked("F-1", "fixed"), tracked("F-2", "rejected-valid")],
+                            "conclusion": "merge"})])
+        self.assertEqual(d["derived_conclusion"], "merge")
+        self.assertIn("1 withdrawn", d["markdown"])
+        # rejected-invalid stands — merge claim is below the fix-first floor
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", "fixed"), tracked("F-2", "rejected-invalid")],
+                               "conclusion": "merge"})])
+        self.assertIn("below the derived floor 'fix-first'", msg)
+        # out-of-scope floors at human — the user's widening call
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True,
+                               "tracked": [tracked("F-1", "out-of-scope")],
+                               "conclusion": "fix-first"})])
+        self.assertIn("below the derived floor 'human'", msg)
+        self.assertIn("1 out-of-scope", ok(["report", "--kind", "fix", "--data",
+                                            json.dumps({**base, "gate_green": True,
+                                                        "tracked": [tracked("F-1", "out-of-scope")],
+                                                        "conclusion": "human"})])["markdown"])
+        # a withdrawn finding does not come back on a fix_from carry (JSON or
+        # markdown carrier); what is carried restarts pending by design (D-005)
+        carried = ok(["findings-parse", "--text", json.dumps(
+            {"findings": [{"id": "F-1", "where": "a.py:1", "what": "w", "fixStatus": "rejected-valid"},
+                          {"id": "F-2", "where": "b.py:1", "what": "x", "fixStatus": "rejected-invalid"},
+                          {"id": "F-3", "where": "c.py:1", "what": "y", "fixStatus": "out-of-scope"}]})])["tracked"]
+        self.assertEqual([t["finding"]["id"] for t in carried], ["F-2", "F-3"])
+        self.assertTrue(all(t["fix"] == "pending" for t in carried))
+        md = ok(["report", "--kind", "fix", "--data",
+                 json.dumps({**base, "gate_green": True,
+                             "tracked": [tracked("F-1", "rejected-valid"), tracked("F-2", "out-of-scope")],
+                             "conclusion": "human"})])["markdown"]
+        reparsed = ok(["findings-parse", "--text", md])["tracked"]
+        self.assertEqual([t["finding"]["id"] for t in reparsed], ["F-2"])
+        # the verify ask teaches the ruling, the fixer ask the channel
+        self.assertIn("rejected-valid", ok(["ask", "--kind", "verify", "--ctx",
+                                            json.dumps({"tracked": {"finding": {"id": "F-1", "where": "a.py:1",
+                                                                                "what": "x", "severity": "high",
+                                                                                "lens": "correctness"}},
+                                                        "project": False, "base": "HEAD", "notes": "wrong: never nil"})])["ask"])
+        def item(fid, fix=None):
+            return {"finding": {"id": fid, "where": "a.py:1", "what": "x", "evidence": "e",
+                                "severity": "high", "lens": "correctness"}, "fix": fix}
+        ask = ok(["ask", "--kind", "fixer", "--ctx",
+                  json.dumps({"round": 1, "project": False, "base": "HEAD",
+                              "unresolved": [item("F-1"), item("F-8", "out-of-scope"),
+                                             item("F-9", "rejected-valid")]})])["ask"]
+        self.assertIn("outOfScope", ask)
+        self.assertIn('"F-1"', ask)
+        # off-loop items never reach the fixer, whatever the session passed
+        self.assertNotIn('"F-8"', ask)
+        self.assertNotIn('"F-9"', ask)
+        # a fix status outside the vocabulary is an inconsistent report, never counted
+        msg = err(["report", "--kind", "fix", "--data",
+                   json.dumps({**base, "gate_green": True, "tracked": [tracked("F-1", "skipped")]})])
+        self.assertIn("unknown fix status 'skipped'", msg)
 
 
 ASK_CASES = [

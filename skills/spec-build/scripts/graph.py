@@ -207,6 +207,15 @@ DOC_FILES = ["spec.md", "intent.md",
 # task at cap is surfaced for adjudication, never auto-retried past it.
 FIX_CAP = 5
 
+# D-044 same-failure thresholds, read from each fix round's evidence
+# (specstate.failure_signature_run over notes/T###.md): at ADVISORY rounds
+# of one repeated failing command, mark.py's fail and the at-cap reason say
+# the plan is the suspect — another round or a stronger tier re-runs the
+# same command. The WATCH bound is the earlier, never-blocking signal the
+# per-task lines print.
+SAME_FAILURE_ADVISORY = 3
+SAME_FAILURE_WATCH = 2
+
 # Payload cap for a fix round's evidence note: the newest round is
 # appended last, so the tail is what the developer needs.
 FIX_NOTE_LINE_CAP = 200
@@ -460,8 +469,18 @@ def claim_age(iso: str) -> str:
     return f"{secs // 86400}d"
 
 
+def failure_run(spec_dir: Path, task_id: str) -> tuple[str | None, int]:
+    try:
+        note = (spec_dir / "notes" / f"{task_id}.md").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return None, 0
+    return specstate.failure_signature_run(note)
+
+
 def task_frontier(entries: list[specstate.TaskEntry],
-                  run_id: str | None = None) -> list[dict]:
+                  run_id: str | None = None,
+                  spec_dir: Path | None = None) -> list[dict]:
     """The per-task frontier inside execute (§2.1): a task is runnable when
     it is `- [ ]`, unimplemented, its `(after T###)` deps are all
     implemented, ticked, or struck, and it is not at the fix-round cap. An
@@ -475,7 +494,10 @@ def task_frontier(entries: list[specstate.TaskEntry],
     stamp id, when it has one: a claim stamped with that id is this
     run's wave still in flight, not an orphan; every other claim —
     stamped with a different run id, or unstamped (hand-written,
-    older docset) — reads as a possible orphan as before."""
+    older docset) — reads as a possible orphan as before.
+    `spec_dir`, when given, lets an at-cap task's reason name a repeated
+    failure signature (D-044): the same failing command across rounds
+    means the plan is the suspect, not the tier."""
     by_id = {e.id: e for e in entries if e.id}
     # A struck entry's own id is unparseable (`- [ ] ~~T004~~ …` has no
     # leading T-id), so index the T-id its block names: a struck dep counts
@@ -530,6 +552,14 @@ def task_frontier(entries: list[specstate.TaskEntry],
                 state, why = "at-fix-cap", (
                     f"fix cap reached ({e.fix_round}/{FIX_CAP}) — adjudicate "
                     "before another round (plan-suspect → re-brief tech)")
+                if spec_dir is not None and e.id:
+                    sig, run = failure_run(spec_dir, e.id)
+                    if sig and run >= SAME_FAILURE_ADVISORY:
+                        why = (f"fix cap reached ({e.fix_round}/{FIX_CAP}) — "
+                               f"the same failing command has failed {run} "
+                               f"rounds ({sig}): another round re-runs it; "
+                               "adjudicate (wrong → park D-###, isolated → "
+                               "defer, load-bearing → /spec-design)")
             elif e.fix_round is not None:
                 state, why = "runnable", (
                     f"fix round {e.fix_round}/{FIX_CAP} open — re-run with "
@@ -586,13 +616,19 @@ def schedule_wave(runnable: list[dict], in_flight: list[dict]) -> None:
 
 def task_line(t: dict) -> str:
     """One per-task report line: id, state, reason, and the wave note —
-    claimed tasks add their digest-file reading (D-040)."""
+    claimed tasks add their digest-file reading (D-040), a typed
+    deviation riding beside it (D-043), and a watch suffix when the
+    same failing command recurs across fix rounds (D-044)."""
     note = (f"deferred: {t['deferred']}" if t.get("deferred")
             else t.get("note"))
     line = (f"{t['id'] or '—':<6} {t['state']:<11} {t['reason']}"
             + (f"  [{note}]" if note else ""))
     if t["state"] == "claimed" and "digest" in t:
         line += f"  [digest on file: {t['digest'] or 'none'}]"
+        if t.get("deviation"):
+            line += f"  [deviation {t['deviation']}]"
+    if t.get("watch"):
+        line += f"  [watch: {t['watch']}]"
     return line
 
 
@@ -843,16 +879,63 @@ def _reground_delta_lines(base: tuple[str, str] | None, repo: Path,
     return out
 
 
+def _intent_seed_lines(spec_dir: Path, repo: Path) -> list[str]:
+    """The INTENT SEED block for a first grounding (D-065): intake already
+    grepped the touched areas and pasted verbatim evidence into intent.md
+    § Constraints at its baseline. Evidence in a file unchanged since that
+    baseline cannot have moved, so the architect re-runs the item's verify
+    command instead of re-grepping; changed files and uncovered items
+    are grounded fresh. Statuses never carry over — only evidence."""
+    intent = read_doc(spec_dir / "intent.md")
+    base = specstate.doc_baseline(intent) if intent else None
+    if not base or not specstate.git_available(repo):
+        return []
+    head = specstate.head_sha(repo)
+    if not head:
+        return []
+    intent_ref = spec_dir / "intent.md"
+    if base[1].startswith(head) or head.startswith(base[1]):
+        paths: list[str] = []
+    else:
+        raw, paths = code_delta(repo, spec_dir, base[1], head)
+        if raw is None:
+            return [f"- intent seed: unavailable (git diff {base[1]}..{head} "
+                    "failed) — ground every item fresh"]
+    out = [
+        f"- INTENT SEED: {intent_ref} § Constraints holds verbatim evidence "
+        f"probed at {base[1]} (HEAD {head}) — start from it:",
+        "  - an item that evidence already grounds, citing a file NOT "
+        "listed below: copy the evidence line as-is and re-run the item's "
+        "verify command — do not re-grep;",
+        "  - grep fresh every item it does not cover, and every item whose "
+        "evidence cites a listed file;",
+        "  - intent facts are evidence only, never statuses: every status "
+        "comes from a verify command you ran.",
+    ]
+    if not paths:
+        out.append("  No code files changed since the intent baseline.")
+        return out
+    shown = paths[:DELTA_FILE_CAP]
+    out.append(f"  Files changed since the intent baseline ({len(paths)}):")
+    out += [f"     {p}" for p in shown]
+    if len(paths) > len(shown):
+        out.append(f"     … +{len(paths) - len(shown)} more (payload cap "
+                   f"{DELTA_FILE_CAP}) — ground every item fresh")
+    return out
+
+
 def grounding_lines(spec_dir: Path, repo: Path) -> list[str]:
     """The tech payload's grounding facts: repo root, tech-spec.md's
-    recorded Baseline, and the DELTA RE-GROUND block when it is stale."""
+    recorded Baseline, the DELTA RE-GROUND block when it is stale, and
+    on a first grounding the INTENT SEED block (D-065)."""
     tech_text = read_doc(spec_dir / "tech-spec.md")
     base = specstate.doc_baseline(tech_text) if tech_text else None
     return [
         f"- repo root: {repo}",
         "- baseline: " + (f"{base[0]} @ {base[1]}" if base
                           else "none recorded yet (first grounding)"),
-        *_reground_delta_lines(base, repo, spec_dir),
+        *(_reground_delta_lines(base, repo, spec_dir) if base
+          else _intent_seed_lines(spec_dir, repo)),
     ]
 
 
@@ -1526,8 +1609,16 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
                  f"{spec_dir} --wave {target}"
                  + (f" --run-id {run_id}" if run_id else ""))
         print(f"   next: {claim}")
-        print("   (claim --wave claims exactly this wave's "
-              "implementer-T### files — run it before spawning them)")
+        if state.get("mode") == "fast":
+            print("   Mode: fast — claim, then implement each "
+                  "implementer-T### payload YOURSELF in this session, in "
+                  "task-id order, exactly as its developer brief says "
+                  "(digest file included); spawn no developer")
+        else:
+            print("   (claim --wave claims exactly this wave's "
+                  "implementer-T### files — run it before spawning them)")
+            if state.get("mode_note"):
+                print(f"   {state['mode_note']}")
     return written
 
 
@@ -1680,6 +1771,12 @@ def launch_check(state: dict, spec_dir: Path, repo: Path) -> dict:
                 "reason": "one merged design payload — two lenses "
                           "(tech/plan) authoring tech-spec and plan — "
                           "heavy span, launch a dynamic workflow"}
+    if state.get("mode") == "fast" and all(
+            x["node"] == "execute" for x in payloads):
+        return {**advisory, "weight": "single",
+                "reason": f"Mode: fast — {len(payloads)} task payload(s) "
+                          "implemented inline by this session, no "
+                          "developer spawn and no workflow launch"}
     if len(payloads) == 1 and payloads[0]["node"] != "execute":
         return {**advisory, "weight": "single",
                 "reason": "one light doc node ("
@@ -1823,7 +1920,10 @@ def _headless_execute_wave(spec_dir: Path, written: list[tuple[Path, str, str]],
             print(f"   held: {tid}")
         print("fix rounds and adjudication stay with you: settle each "
               "held task (land on a green digest, release and rule, or "
-              "mark.py fail with the evidence), then re-run")
+              "mark.py fail with the evidence), then re-run. A typed "
+              "deviation names its route (D-043): scope: → widen "
+              "Touches under the D-### and re-emit; spec-defect: → "
+              "/spec-design — neither opens a fix round")
         return 0
     return None
 
@@ -1957,7 +2057,11 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
                       "wave starts")
                 return RUNNER_FAILED_EXIT
         waves_done += 1
-        if runner == PRINT_RUNNER and written:
+        if (runner == PRINT_RUNNER and written and state.get("mode") == "fast"
+                and all(node == "execute" for _, _, node in written)):
+            print("wave emitted — Mode: fast: implement these payloads "
+                  "inline (no spawn), land each, then re-run")
+        elif runner == PRINT_RUNNER and written:
             how = ("as the agent type beside each role" if native else
                    "agent type beside each role — these embed the brief: "
                    "add --native-agents before spawning as that type")
@@ -2041,6 +2145,8 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
     status = specstate.spec_status(spec_text) if spec_text is not None else None
     effort = specstate.spec_effort(spec_text)
     tier = specstate.spec_tier(spec_text) if spec_text is not None else "full"
+    written_mode = specstate.spec_mode(spec_text)
+    mode = "fast" if written_mode == "fast" and tier == "tiny" else "standard"
     markers = spec_text.count("NEEDS CLARIFICATION") if spec_text else 0
     # an unfilled template's markers are its examples, not questions
     template_spec = bool(spec_text and spec_text.strip()
@@ -2310,7 +2416,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
                              else "task.md has no task entries — spawn "
                                   "the task-breaker")}
     else:
-        per_task = task_frontier(entries, run_id)
+        per_task = task_frontier(entries, run_id, spec_dir)
         open_tasks = [t for t in per_task
                       if t["state"] not in ("ticked", "struck",
                                            "implemented")]
@@ -2331,11 +2437,29 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
     if per_task:
         # the resume view's digest column (spec-build D-040): a claimed
         # task shows whether a developer digest is on file and what it
-        # reported — pure doc reads, never status
+        # reported — pure doc reads, never status. A typed deviation
+        # (D-043) rides along: scope → widen Touches + D-###;
+        # spec-defect → /spec-design; neither opens a fix round.
         for t in per_task:
             if t["state"] == "claimed" and t["id"]:
                 d = specstate.latest_digest(spec_dir, t["id"])
-                t["digest"] = d["status"] if d else None
+                if d:
+                    t["digest"] = d["status"]
+                    if d.get("deviation_kind"):
+                        t["deviation"] = d["deviation"]
+                else:
+                    t["digest"] = None
+        # D-044 watch, once per report per task, never blocking: the
+        # same failing command recurring across a task's fix rounds —
+        # the early signal (>= SAME_FAILURE_WATCH) before the advisory
+        # bound makes the plan the suspect
+        for t in per_task:
+            if not t.get("id") or t["state"] in ("ticked", "struck",
+                                                 "implemented"):
+                continue
+            sig, run = failure_run(spec_dir, t["id"])
+            if sig and run >= SAME_FAILURE_WATCH:
+                t["watch"] = f"same failing command {run} round(s): {sig}"
         nodes["execute"]["tasks"] = per_task
 
     counts = {
@@ -2475,6 +2599,10 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
         "spec_dir": str(spec_dir),
         "status": status,
         "effort": effort,
+        "mode": mode,
+        **({"mode_note": "Mode: fast is honored only at Tier: tiny — "
+                         "execute spawns developers as usual"}
+           if written_mode == "fast" and mode != "fast" else {}),
         "git": {"available": git_ok, "head": head, "note": git_note},
         "nodes": {name: nodes[name] for name in NODES},
         "edges": edges,

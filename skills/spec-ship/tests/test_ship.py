@@ -32,11 +32,33 @@ CALC = "def multiply(a, b):\n    return a * b\n"
 
 STUB = """#!/bin/sh
 key="$1_$2"
+json=no
+for arg in "$@"; do [ "$arg" = "--json" ] && json=yes; done
+if [ "$json" = yes ] && [ -f "$GH_STUB_DIR/$key@json.json" ]; then exec /bin/cat "$GH_STUB_DIR/$key@json.json"; fi
 if [ -f "$GH_STUB_DIR/$key.json" ]; then exec /bin/cat "$GH_STUB_DIR/$key.json"; fi
 if [ -f "$GH_STUB_DIR/$key.err" ]; then /bin/cat "$GH_STUB_DIR/$key.err" >&2; exit 1; fi
 echo "gh stub: no canned output for $key" >&2
 exit 1
 """
+
+
+def job_steps(*entries: tuple[int, str, str]) -> list[dict]:
+    """Step rows in the shape `gh run view <id> --json jobs` reports
+    (docs.github.com "List jobs for a workflow run"). Every step is done
+    within a second of starting, so the fixtures always carry timing and
+    the classifier provably never reads it."""
+    return [{"number": n, "name": name, "conclusion": conclusion,
+             "status": "completed",
+             "startedAt": "2026-01-15T10:00:00Z",
+             "completedAt": f"2026-01-15T10:00:0{n % 10}Z"}
+            for n, name, conclusion in entries]
+
+
+def jobs_payload(name: str, *entries: tuple[int, str, str]) -> str:
+    return json.dumps({"jobs": [{"databaseId": 991, "name": name,
+                                 "conclusion": "failure",
+                                 "status": "completed",
+                                 "steps": job_steps(*entries)}]})
 
 
 def git(root: Path, *args: str) -> str:
@@ -187,9 +209,12 @@ class ShipTests(unittest.TestCase):
     def pr_env(self, pr: dict | None = None, head_oid: str | None = None,
                checks: str | None = None, checks_err: str | None = None,
                threads: dict | str | None = None,
-               run_view: str | None = None):
+               run_view: str | None = None,
+               run_jobs: str | None = None):
         """A gh stub canned for the PR-reading subcommands. Returns the
-        context manager; every call inside it sees the same responses."""
+        context manager; every call inside it sees the same responses.
+        `run_jobs` is served to `gh run view <id> --json jobs` (the
+        `@json` stub variant); `run_view` keeps serving `--log-failed`."""
         if head_oid is None:
             head_oid = git(self.root, "rev-parse", "HEAD")
         view = {**self.OPEN_PR, **(pr or {}), "headRefOid": head_oid}
@@ -206,6 +231,8 @@ class ShipTests(unittest.TestCase):
                                          {"reviewThreads": value}}}})
         if run_view is not None:
             files["run_view.json"] = run_view
+        if run_jobs is not None:
+            files["run_view@json.json"] = run_jobs
         return gh_stub(files)
 
     def assertStage(self, r, stage: str) -> None:
@@ -642,10 +669,27 @@ class ShipTests(unittest.TestCase):
     def test_status_stages_ci_red_pending_and_closed(self):
         self.deliver()
         git(self.root, "push", "-q", "-u", "origin", "ship-demo")
-        with self.pr_env(checks='[{"name": "ci", "bucket": "fail"}]') as env:
+        red = ('[{"name": "ci", "bucket": "fail", "link": '
+               '"https://github.com/acme/widget/actions/runs/4123"}]')
+        with self.pr_env(checks=red,
+                         run_jobs=jobs_payload(
+                             "ci", (1, "Set up job", "success"),
+                             (2, "Run tests", "failure"))) as env:
             r = self.stage("demo", env=env)
         self.assertStage(r, "ci-red")
         self.assertIn("next: /spec-ship checks demo", r.stdout)
+
+        # a cancelled run is the runner's, not code: no fix round opens
+        cancel = ('[{"name": "ci", "bucket": "cancel", "link": '
+                  '"https://github.com/acme/widget/actions/runs/4123"}]')
+        with self.pr_env(checks=cancel) as env:
+            r = self.stage("demo", env=env)
+            self.assertStage(r, "ci-rerun")
+            self.assertIn("ci — infrastructure: the run was cancelled",
+                          r.stdout)
+            self.assertIn("rerun: gh run rerun 4123 --failed", r.stdout)
+            self.assertIn("next: rerun the red runs (on the user's yes), "
+                          "then /spec-ship continue demo", r.stdout)
 
         with self.pr_env(checks='[{"name": "ci", "bucket": "pending"}]') as env:
             r = self.stage("demo", env=env)
@@ -704,9 +748,12 @@ class ShipTests(unittest.TestCase):
 
         red = ('[{"name": "ci", "bucket": "fail", "link": '
                '"https://github.com/acme/widget/actions/runs/4123"}]')
-        with self.pr_env(checks=red) as env:
+        jobs = jobs_payload("ci", (1, "Set up job", "success"),
+                            (2, "Run tests", "failure"))
+        with self.pr_env(checks=red, run_jobs=jobs) as env:
             r = ship(self.root, "checks", "demo", env=env)
         self.assertIn("— RED", r.stdout)
+        self.assertIn("FAIL     ci — code", r.stdout)
         self.assertIn("never fix code here", r.stdout)
         self.assertIn("ship.py evidence demo --kind ci", r.stdout)
         self.assertIn("/spec-build demo", r.stdout)
@@ -721,6 +768,133 @@ class ShipTests(unittest.TestCase):
             r = ship(self.root, "checks", "demo", env=env)
         self.assertIn("— NONE", r.stdout)
         self.assertIn("that is not a pass; say so", r.stdout)
+
+    def test_red_checks_are_classified_from_their_run_steps(self):
+        self.deliver()
+        git(self.root, "push", "-q", "-u", "origin", "ship-demo")
+        red = json.dumps([{"name": "ci", "bucket": "fail", "link":
+                           "https://github.com/acme/widget/actions/runs/4123"}])
+        cancel = json.dumps([{"name": "ci", "bucket": "cancel", "link":
+                              "https://github.com/acme/widget/actions/runs/4123"}])
+
+        def classified(jobs: str | None, checks: str = red) -> dict:
+            with self.pr_env(checks=checks, run_jobs=jobs) as env:
+                r = ship(self.root, "checks", "demo", "--json", env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            return json.loads(r.stdout)
+
+        # a project step failed: code, however fast it failed
+        result = classified(jobs_payload(
+            "ci", (1, "Set up job", "success"),
+            (2, "actions/checkout@v4", "success"),
+            (3, "Run tests", "failure")))
+        row = result["rows"][0]
+        self.assertEqual(row["class"], "code")
+        self.assertEqual(row["failedStep"], "Run tests")
+        self.assertIn("project step", row["reason"])
+        self.assertNotIn("rerun", row)
+        self.assertEqual(result["triage"], "code")
+
+        # the same job failing in the runner's setup step: infrastructure
+        result = classified(jobs_payload("ci", (1, "Set up job", "failure"),
+                                         (2, "Run tests", "skipped")))
+        row = result["rows"][0]
+        self.assertEqual(row["class"], "infrastructure")
+        self.assertEqual(row["failedStep"], "Set up job")
+        self.assertEqual(row["rerun"], "gh run rerun 4123 --failed")
+        self.assertEqual(result["triage"], "infrastructure")
+        self.assertEqual(result["verdict"], "red")
+
+        # `Set up Node` is a project step, not the runner's
+        result = classified(jobs_payload("ci", (1, "Set up job", "success"),
+                                         (2, "Set up Node", "failure")))
+        self.assertEqual(result["rows"][0]["class"], "code")
+
+        # a wrap-up step failing after an earlier failure decides nothing
+        result = classified(jobs_payload(
+            "ci", (1, "Set up job", "success"),
+            (2, "Run gofmt", "failure"),
+            (3, "Post Run gofmt", "failure"),
+            (4, "Complete job", "failure")))
+        self.assertEqual(result["rows"][0]["class"], "code")
+        self.assertEqual(result["rows"][0]["failedStep"], "Run gofmt")
+
+        # a sub-second project-step failure is still code, timing or not
+        fast = [{"number": 1, "name": "Set up job", "conclusion": "success",
+                 "status": "completed", "startedAt": "2026-01-15T10:00:00Z",
+                 "completedAt": "2026-01-15T10:00:00Z"},
+                {"number": 2, "name": "pytest", "conclusion": "failure",
+                 "status": "completed", "startedAt": "2026-01-15T10:00:00Z",
+                 "completedAt": "2026-01-15T10:00:01Z"}]
+        result = classified(json.dumps({"jobs": [{"name": "ci",
+                                                  "conclusion": "failure",
+                                                  "steps": fast}]}))
+        self.assertEqual(result["rows"][0]["class"], "code",
+                         "a fast project-step failure is still code")
+
+        # a cancelled run is infrastructure whatever its steps show
+        result = classified(jobs_payload("ci", (1, "Run tests", "failure")),
+                            checks=cancel)
+        row = result["rows"][0]
+        self.assertEqual(row["class"], "infrastructure")
+        self.assertIsNone(row["failedStep"])
+        self.assertEqual(row["rerun"], "gh run rerun 4123 --failed")
+
+        # a run that lists no jobs never started
+        result = classified(json.dumps({"jobs": []}))
+        row = result["rows"][0]
+        self.assertEqual(row["class"], "infrastructure")
+        self.assertIn("never started", row["reason"])
+
+        # no step data at all: unknown, and no rerun can be built
+        result = classified(None)
+        row = result["rows"][0]
+        self.assertEqual(row["class"], "unknown")
+        self.assertIsNone(row["failedStep"])
+        self.assertNotIn("rerun", row)
+        self.assertEqual(result["triage"], "unknown")
+
+    def test_checks_human_output_names_the_class_and_the_rerun(self):
+        self.deliver()
+        git(self.root, "push", "-q", "-u", "origin", "ship-demo")
+        red = ('[{"name": "ci", "bucket": "fail", "link": '
+               '"https://github.com/acme/widget/actions/runs/4123"}]')
+        with self.pr_env(checks=red,
+                         run_jobs=jobs_payload(
+                             "ci", (1, "Set up job", "failure"),
+                             (2, "Run tests", "skipped"))) as env:
+            r = ship(self.root, "checks", "demo", env=env)
+        self.assertIn("— RED", r.stdout)
+        self.assertIn("FAIL     ci — infrastructure", r.stdout)
+        self.assertIn("runner step", r.stdout)
+        self.assertIn("rerun (on the user's yes): gh run rerun 4123 --failed",
+                      r.stdout)
+        self.assertIn("a fix round cannot help", r.stdout)
+        self.assertIn("to open a fix round on purpose: ship.py evidence "
+                      "demo --kind ci", r.stdout)
+        self.assertNotIn("never fix code here", r.stdout)
+
+    def test_unknown_red_rows_offer_no_rerun_that_is_not_there(self):
+        # an unknown-class red row has no run behind its status, so no row
+        # names a rerun — neither surface may print the rerun instruction
+        # over an empty command list (run.md's triage order)
+        self.deliver()
+        git(self.root, "push", "-q", "-u", "origin", "ship-demo")
+        red = '[{"name": "ext", "bucket": "fail"}]'
+        with self.pr_env(checks=red) as env:
+            r = ship(self.root, "checks", "demo", env=env)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("FAIL     ext — unknown", r.stdout)
+        self.assertIn("no red row carries a rerun command", r.stdout)
+        self.assertNotIn("rerun the infrastructure rows", r.stdout)
+        self.assertNotIn("rerun (on the user's yes)", r.stdout)
+        with self.pr_env(checks=red) as env:
+            r = self.stage("demo", env=env)
+        self.assertStage(r, "ci-rerun")
+        self.assertIn("ext — unknown: no step data behind the status",
+                      r.stdout)
+        self.assertIn("the red rows name no rerun command", r.stdout)
+        self.assertNotIn("rerun: ", r.stdout)
 
     def test_checks_flags_a_stale_pr_head_and_tails_failed_logs(self):
         self.deliver()

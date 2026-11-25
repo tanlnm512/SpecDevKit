@@ -90,7 +90,17 @@ NOISE_DIRS = {
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".cache",
     "node_modules", ".venv", "venv",
 }
-CI_STATUS = {"pass": "pass", "fail": "fail", "cancel": "fail", "pending": "pending", "skipping": "skipped"}
+CI_STATUS = {"pass": "pass", "fail": "fail", "pending": "pending", "skipping": "skipped"}
+# A red CI row classed infrastructure or unknown stands without failing
+# the gate (D-023) — it is carried to the report and floors merge at human.
+CI_STANDING = ("infrastructure", "unknown")
+# The runner's own setup or wrap-up steps — exact names, then name
+# prefixes. Narrow on purpose: `Set up Node` is a project step, and a
+# failed project step is a code failure however fast it ran. This
+# constant and the three functions below are duplicated byte-for-byte
+# in ship.py and pinned identical by tools/tests.
+RUNNER_STEPS = (("Set up job", "Complete job"),
+                ("actions/checkout@", "Post "))
 BACKLOG = Path("specs") / "BACKLOG.md"
 SEVERITY_LADDER = ("Severity: high = data loss, crash, wrong result, or security compromise; "
                    "medium = a real defect the author should fix; low = minor.")
@@ -317,8 +327,102 @@ def gate_rows(repo, base, tree):
              "tail": g.get("tail", "")} for g in parsed]
 
 
+def is_runner_step(name):
+    exact, prefixes = RUNNER_STEPS
+    return isinstance(name, str) and (name in exact or name.startswith(prefixes))
+
+
+def first_failed_step(steps):
+    """The lowest-numbered step that neither succeeded nor was skipped."""
+    if not isinstance(steps, list):
+        return None
+    failed = [s for s in steps if isinstance(s, dict)
+              and s.get("conclusion") not in ("success", "skipped")]
+    return min(failed, key=lambda s: s.get("number")
+               if isinstance(s.get("number"), int) else 0, default=None)
+
+
+def classify_check(bucket, check_name, jobs):
+    """(class, failedStep, reason) for a red `gh pr checks` row.
+
+    bucket is the row's bucket; check_name its name; jobs the run's jobs
+    as `gh run view <id> --json jobs` reports them — None when no run
+    sits behind the status or gh could not be read (a status context
+    from a CI outside Actions), [] when it lists none. Evidence order,
+    first hit wins: cancelled or never started → infrastructure; a
+    first failed step that is the runner's own → infrastructure; any
+    other failed step → code; no step evidence at all → unknown. Never
+    how fast the job failed and never log text: a real test can print
+    `connection reset` or `context deadline exceeded`.
+    """
+    if bucket == "cancel":
+        return ("infrastructure", None,
+                "the run was cancelled — the runner stopped it, "
+                "no step verdict exists")
+    if jobs is None:
+        return ("unknown", None,
+                "no step data behind the status — the run could not be "
+                "read, or the check comes from a CI outside Actions")
+    if not jobs:
+        return ("infrastructure", None, "the run lists no jobs — it never started")
+    candidates = [j for j in jobs if isinstance(j, dict)
+                  and j.get("name") == check_name]
+    if not candidates:
+        candidates = [j for j in jobs if isinstance(j, dict)
+                      and j.get("conclusion") not in (None, "success",
+                                                      "skipped", "neutral")]
+    judged = []
+    for job in candidates:
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            steps = None
+        judged.append((job, steps, first_failed_step(steps)))
+    if judged and all(steps == [] for _, steps, _ in judged):
+        return ("infrastructure", None,
+                "the job lists no steps — it never started")
+    failed = [(job, step) for job, _, step in judged if step]
+    if not failed:
+        return ("unknown", None,
+                "no failed step stands behind the red status — nothing to class")
+    project = [(job, step) for job, step in failed
+               if not is_runner_step(step.get("name"))]
+    if project:
+        job, step = project[0]
+        return ("code", step.get("name"),
+                f"the job '{job.get('name')}' failed in its project step "
+                f"'{step.get('name')}'")
+    job, step = failed[0]
+    return ("infrastructure", step.get("name"),
+            f"the job '{job.get('name')}' failed in the runner step "
+            f"'{step.get('name')}'")
+
+
+RUN_ID = re.compile(r"/actions/runs/(\d+)")
+
+
+def run_jobs(link, repo):
+    """A check row's run jobs (`gh run view <id> --json jobs`), or None
+    when the link names no run or gh cannot serve the shape."""
+    m = RUN_ID.search(link or "")
+    if not m:
+        return None
+    r = subprocess.run(["gh", "run", "view", m.group(1), "--json", "jobs"],
+                       capture_output=True, text=True, cwd=repo or None)
+    try:
+        data = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    return jobs if isinstance(jobs, list) else None
+
+
 def ci_rows(pr_spec, repo):
-    """The PR's CI checks as gate rows (`source: ci`); red CI fails the gate like any check."""
+    """The PR's CI checks as gate rows (`source: ci`). A code-class red row
+    fails the gate like any check; an infrastructure or unknown red row
+    (a cancelled run, a runner setup/wrap-up failure, no step data behind
+    the status — D-023) does not fail the gate and does not stop the
+    reviewers, but stands with its class, reason and (infrastructure)
+    rerun command — never green-washed."""
     if not shutil.which("gh"):
         return []
     r = subprocess.run(["gh", "pr", "checks", pr_spec, "--json", "name,bucket,link"],
@@ -333,9 +437,23 @@ def ci_rows(pr_spec, repo):
     for c in checks:
         if not isinstance(c, dict):
             continue
-        status = CI_STATUS.get(c.get("bucket"), "pending")
-        rows.append({"name": f"CI: {c.get('name', '?')}", "exit_code": 1 if status == "fail" else 0,
-                     "status": status, "source": "ci", "tail": c.get("link") or ""})
+        bucket = c.get("bucket")
+        name = c.get("name", "?")
+        row = {"name": f"CI: {name}", "exit_code": 0,
+               "status": CI_STATUS.get(bucket, "pending"), "source": "ci",
+               "tail": c.get("link") or "",
+               "class": None, "failedStep": None, "reason": None}
+        if bucket in ("fail", "cancel"):
+            row["class"], row["failedStep"], row["reason"] = classify_check(
+                bucket, name, run_jobs(c.get("link"), repo))
+            if row["class"] == "code":
+                row["exit_code"], row["status"] = 1, "fail"
+            else:
+                row["status"] = row["class"]
+                if row["class"] == "infrastructure":
+                    m = RUN_ID.search(c.get("link") or "")
+                    row["rerun"] = f"gh run rerun {m.group(1)} --failed" if m else None
+        rows.append(row)
     return rows
 
 
@@ -365,11 +483,16 @@ def ci_note(ci):
     if not ci:
         return ""
     failed = [g["name"] for g in ci if g["exit_code"] != 0]
+    standing = [g["name"] for g in ci if g.get("class") in CI_STANDING]
     pending = [g["name"] for g in ci if g.get("status") == "pending"]
     if failed:
         part = "; the PR's CI did NOT pass — failing: " + "; ".join(failed) + " (each a gate finding)"
     else:
         part = f"; the PR's CI checks ({len(ci)}) did not fail"
+    if standing:
+        part += ("; standing red, not failing the gate: " + "; ".join(standing)
+                 + " (infrastructure or unknown — carried to the report, "
+                   "merge floors at human until they clear)")
     return part + ("; still pending: " + "; ".join(pending) if pending else "")
 
 
@@ -589,7 +712,7 @@ FINDING_HEAD = re.compile(r"^### \[([^\s·]+) · (LOW|MEDIUM|HIGH) · (verified|
                           r" · ([^\]]+?)\] (.*)$")
 FINDING_HEAD_LEGACY = re.compile(r"^### \[(LOW|MEDIUM|HIGH) · (verified|unconfirmed)(?: \(self-checked\))?"
                                  r" · ([^\]]+?)\] (.*)$")
-FIX_SUFFIX = re.compile(r"^(.*?) · fix: (fixed|unfixed|worse|pending)$")
+FIX_SUFFIX = re.compile(r"^(.*?) · fix: (fixed|unfixed|worse|rejected-valid|rejected-invalid|out-of-scope|pending)$")
 
 
 def parse_findings_md(text):
@@ -634,7 +757,9 @@ def normalize_findings(items):
     for it in items:
         if not isinstance(it, dict) or not it.get("where") or not it.get("what"):
             continue
-        if it.get("fixStatus") == "fixed":
+        # D-022: a withdrawn finding (rejected-valid) is as dead as a fixed
+        # one — neither comes back on a fix_from carry.
+        if it.get("fixStatus") in RESOLVED_FIX:
             continue
         carried += 1
         tracked.append({
@@ -707,6 +832,357 @@ def reported_finding(t):
             "lens": f["lens"], "impact": f.get("impact", ""), "fixStatus": t.get("fix") or "pending"}
 
 
+# D-021: the recommendation floor is derived from the report's own state
+# (gates/recommendation.md), and an assessor's claim may only ESCALATE above
+# it — human outranks fix-first outranks merge. A claim below the floor is an
+# inconsistent result: rejected with both values, never guessed.
+RECOMMENDATION_RANK = {"merge": 0, "fix-first": 1, "human": 2}
+
+# D-022: fix-verdict vocabulary. RESOLVED_FIX ends a finding's life in the
+# loop: `fixed` (the fix held) or `rejected-valid` (the fixer's skip reason
+# held — the finding was withdrawn as not a real defect to fix). Everything
+# else keeps it open; `out-of-scope` (the sound fix needs paths or behavior
+# this change must not touch) is the user's widening call, not a round.
+RESOLVED_FIX = ("fixed", "rejected-valid")
+KNOWN_FIX = RESOLVED_FIX + ("unfixed", "worse", "rejected-invalid",
+                            "out-of-scope", "pending")
+# out-of-scope waits on the user's widening call, never on a round
+OFF_LOOP_FIX = RESOLVED_FIX + ("out-of-scope",)
+
+
+def derive_conclusion(gate_green, reported, ci_standing=()):
+    """The derived recommendation for a fix-loop report: `human` while an
+    out-of-scope widening call, unconfirmed findings, or a standing
+    infrastructure-or-unknown CI row (D-023 — the rerun is the user's
+    call, not an edit) remains, `fix-first` while ordinary findings or
+    gate failures persist, else `merge`."""
+    if any(f["fixStatus"] == "out-of-scope" for f in reported):
+        return "human"
+    if any(f["status"] == "unconfirmed" and f["fixStatus"] not in RESOLVED_FIX
+           for f in reported):
+        return "human"
+    if ci_standing:
+        return "human"
+    if not gate_green or any(f["fixStatus"] not in RESOLVED_FIX
+                             for f in reported):
+        return "fix-first"
+    return "merge"
+
+
+# D-024: a consequential stop — one whose next move is the owner's judgment,
+# not an edit — renders a stop ask derived from the report's own state, never
+# from a claim (gates/recommendation.md § Consequential stops). Only a
+# `human` verdict and the `fix-first` a spent loop ends on carry one; `merge`
+# and an ordinary fix-first (rounds left) are unaffected, and so is every
+# review-only run (D-021 — there is nothing to recommend about yet).
+STOP_GATE = "the recommendation gate (gates/recommendation.md)"
+STOP_IDS_MAX = 6
+
+
+def _stop_ids(findings, with_where=True):
+    parts = [f"{f['id']} ({f['where']})" if with_where else f["id"]
+             for f in findings]
+    if len(parts) > STOP_IDS_MAX:
+        parts = parts[:STOP_IDS_MAX] + [f"and {len(parts) - STOP_IDS_MAX} more"]
+    return ", ".join(parts)
+
+
+def _stop_evidence(findings, with_where=True):
+    # Contract item 1: what stopped names the ids with the evidence
+    # itself — each finding's evidence, or its text when none — bounded
+    # so the one-line ask stays readable.
+    parts = []
+    for f in findings:
+        text = _stop_line(f["evidence"] or f["what"])
+        if len(text) > 120:
+            text = text[:120] + "…"
+        parts.append(f"{f['id']} ({f['where']}) — {text}" if with_where
+                     else f"{f['id']} — {text}")
+    if len(parts) > STOP_IDS_MAX:
+        parts = parts[:STOP_IDS_MAX] + [f"and {len(findings) - STOP_IDS_MAX} more"]
+    return "; ".join(parts)
+
+
+def _stop_line(s):
+    # whatStops is one line by contract; data-derived fragments must not break it
+    return " ".join(str(s).split())
+
+
+def stop_recommendation(options, label, reason):
+    """Contract item 4: a recommendation is one of the offered option
+    labels — a pick that names no option is dropped to null."""
+    if label is not None and not any(o["label"] == label for o in options):
+        return None, None
+    return label, reason
+
+
+def _fold_note(dropped):
+    # a folded option stays stated: its move rides in the kept option's
+    # consequence
+    extra = (f" Or {dropped['label'][0].lower() + dropped['label'][1:]}: "
+             + dropped["consequence"])
+    return extra if extra.endswith(".") else extra + "."
+
+
+def stop_ask(reported, gate_green, ci_standing, rounds_used, conclusion,
+             changed_since=None):
+    """The stop ask for a fix-kind report, or None when nothing in the
+    state waits on the owner's judgment. whatStops reads the unconfirmed
+    findings, the overruled skips and the unresolved items; the options
+    come from the same state; the recommendation fires only where a
+    criterion in gates/recommendation.md picks one, and names it."""
+    unconf = [f for f in reported
+              if f["status"] == "unconfirmed" and f["fixStatus"] not in RESOLVED_FIX]
+    oos = [f for f in reported if f["fixStatus"] == "out-of-scope"]
+    skips = [f for f in reported if f["fixStatus"] == "rejected-invalid"]
+    ordinary = [f for f in reported if f["fixStatus"] not in RESOLVED_FIX
+                and f["status"] == "verified" and f["fixStatus"] != "out-of-scope"
+                and f["fixStatus"] != "rejected-invalid"]
+    open_ordinary = ordinary + skips
+    # the loop is spent only when a round ran into work it left standing
+    exhausted = bool(rounds_used) and bool(open_ordinary)
+    # a contested skip is a judgment hand-over only when the verdict says so;
+    # under a fix-first floor it is ordinary residue an author turn clears
+    hand_over = bool(unconf or oos or ci_standing
+                     or (conclusion == "human" and skips))
+    if not (hand_over or exhausted):
+        return None
+
+    parts = []
+    if unconf:
+        parts.append(f"{len(unconf)} unconfirmed finding(s) await your "
+                     f"adjudication: {_stop_evidence(unconf)}")
+    if skips:
+        parts.append(f"{len(skips)} fixer skip(s) the verifier overruled "
+                     f"(rejected-invalid): {_stop_evidence(skips, False)}")
+    if oos:
+        parts.append(f"{len(oos)} out-of-scope finding(s) wait on your "
+                     f"widening call: {_stop_evidence(oos)}")
+    if ci_standing:
+        names = "; ".join(g["name"] for g in ci_standing)
+        reason = _stop_line(ci_standing[0].get("reason") or "")
+        parts.append(f"{len(ci_standing)} standing CI row(s): {names}"
+                     + (f" — {reason}" if reason else ""))
+    if exhausted and ordinary:  # skips left standing name themselves above
+        parts.append(f"{len(open_ordinary)} finding(s) still unresolved after "
+                     f"{rounds_used} fix round(s): "
+                     f"{_stop_evidence(ordinary, False)}")
+    if not gate_green:
+        parts.append("the mechanical gate is red")
+    what_stops = f"{STOP_GATE}: " + "; ".join(parts) + "."
+
+    drivers = unconf + ordinary + skips + oos
+    if any(f["severity"] == "high" for f in drivers):
+        level = "high"
+    elif drivers or ci_standing or not gate_green:
+        level = "medium"
+    else:
+        level = "low"
+    whys = []
+    if unconf:
+        whys.append(f"{len(unconf)} unverified claim(s) could be real defects "
+                    "shipping unjudged")
+    if skips:
+        whys.append(f"the fixer and its verifier disagree on {len(skips)} "
+                    "finding(s) — one side is wrong")
+    if oos:
+        whys.append("the sound fix sits outside this change — the need stays "
+                    "unmet until you widen or carry it")
+    if ci_standing:
+        whys.append("the standing CI row(s) hold no code verdict — merging "
+                    "floors at human until they clear")
+    if exhausted and ordinary:
+        whys.append(f"{len(ordinary)} finding(s) remain after the round cap — "
+                    "the loop cannot clear them by running again")
+    why = f"risk: {level} — " + "; ".join(whys) + "."
+    # the retry rule: a spent loop is not offered another round on nothing
+    if exhausted and not changed_since:
+        why += " No further fix round is offered — nothing has changed since the last one."
+
+    # the rules and open owner's-calls are computed before the options so
+    # the cap below never folds away an option they name
+    picks, opens = [], []
+    if unconf:
+        picks.append(("Adjudicate the unconfirmed findings",
+                      "the human criterion: unconfirmed findings are the user's "
+                      "adjudication (gates/recommendation.md)"))
+    if ci_standing:
+        if any(g.get("rerun") for g in ci_standing) and not oos:
+            picks.append(("Rerun the failed CI run",
+                          "the CI triage rule (D-023): the row is infrastructure — the code "
+                          "was never judged, so the verdict needs the rerun the row itself "
+                          "carries; rerunning an unjudged run is not a retry"))
+        else:
+            opens.append("whether the standing CI row is a flap to rerun or a workflow "
+                         "to repair is the owner's call — its class carries no step "
+                         "evidence to pick one (D-023)")
+    if oos:
+        opens.append("the widening call is the owner's by rule — an out-of-scope finding "
+                     "derives human until you settle it (D-022)")
+    if conclusion == "human" and skips:
+        opens.append("the fixer and its verifier split on the overruled skip(s) — the "
+                     "state holds both positions and picks neither")
+
+    options = []
+    if unconf:
+        options.append({"label": "Adjudicate the unconfirmed findings",
+                        "consequence": f"rule each of {_stop_ids(unconf, False)} real or not — "
+                                       "a confirmed one becomes fixable in a follow-up fix_from "
+                                       "run, a withdrawn one leaves the report; until then they "
+                                       "stay unverified claims in it"})
+        if ordinary or not gate_green:
+            options.append({"label": "Re-enter the fix loop after adjudicating (fix_from)",
+                            "consequence": "the adjudicated findings go through another loop's "
+                                           "fixer, verifiers and gate re-run; the round cap starts over"})
+    settle_skips = bool(skips) and (conclusion == "human" or unconf or oos or ci_standing)
+    if settle_skips:
+        options.append({"label": "Settle the overruled skips",
+                        "consequence": f"sustaining the fixer's skip withdraws {_stop_ids(skips, False)}, "
+                                       "rejecting it leaves them standing for an author turn — you "
+                                       "override one of the two agents either way"})
+    if oos:
+        options.append({"label": "Widen the change and fix the out-of-scope findings",
+                        "consequence": f"the sound fix for {_stop_ids(oos, False)} touches paths or "
+                                       "behavior this change must not touch; the widened set needs "
+                                       "its own review before the findings close"})
+        options.append({"label": "Keep them out of scope and carry the findings",
+                        "consequence": "the need ships unmet and the recommendation stays floored "
+                                       "at human; park it where the backlog offer was made, or "
+                                       "track it yourself"})
+    if ci_standing:
+        rerun = next((g.get("rerun") for g in ci_standing if g.get("rerun")), None)
+        if rerun:
+            options.append({"label": "Rerun the failed CI run",
+                            "consequence": f"`{rerun}` — the run never reached a code verdict; "
+                                           "while the row stands the recommendation floors at "
+                                           "human, and a repeat flap stands again"})
+        else:
+            options.append({"label": "Clear the standing CI row",
+                            "consequence": "rerun or repair the workflow yourself — the row keeps "
+                                           "flooring the recommendation at human until it clears; "
+                                           "the report carries its class and reason"})
+    if exhausted:
+        n = len(skips) if settle_skips else len(open_ordinary)
+        options.append({"label": "Clear what remains in a normal author turn",
+                        "consequence": f"the {n} unresolved finding(s)"
+                                       f"{' and the red gate' if not gate_green else ''} close only "
+                                       "once the edits land and a fix_from run verifies them"})
+        if changed_since:
+            options.append({"label": "Another fix round",
+                            "consequence": f"something changed since the last attempt "
+                                           f"({_stop_line(changed_since)[:200]}) — the next round "
+                                           "attempts the still-unresolved findings and re-runs "
+                                           "the gate"})
+    options.append({"label": "Accept the change as it is, risks on record",
+                    "consequence": "the open findings and residual risks ship with the change and "
+                                   "stay on record in this report; the recommendation stays at its "
+                                   "floor until they are settled"})
+    # Two to four options (contract item 3), the accept fallback always
+    # the last. A state that derives more folds its follow-through moves
+    # into the kept option that carries their route — never a chop: an
+    # option a rule above names must not go missing while the ask's own
+    # reason still names it.
+    accept = options[-1]
+    protected = {label for label, _ in picks} | {accept["label"]}
+    for label, carrier, clause in (
+        # re-entering the loop is adjudication's stated follow-through —
+        # the kept consequence already names the follow-up fix_from run,
+        # so the fold is silent (None)
+        ("Re-enter the fix loop after adjudicating (fix_from)",
+         "Adjudicate the unconfirmed findings", None),
+        # a named change re-opens the round inside the author-turn option
+        ("Another fix round",
+         "Clear what remains in a normal author turn",
+         f". Another fix round stays open — something changed since the "
+         f"last attempt ({_stop_line(changed_since)[:120]})."
+         if changed_since else ""),
+        # the author turn is an edit, not a judgment; the dropped option's
+        # own consequence (with the round clause above, if it landed there)
+        # folds beside adjudication's follow-up run
+        ("Clear what remains in a normal author turn",
+         "Adjudicate the unconfirmed findings", ""),
+    ):
+        if len(options) <= 4:
+            break
+        dropped = next((o for o in options if o["label"] == label), None)
+        if dropped is None or label in protected:
+            continue
+        options.remove(dropped)
+        kept = (next((o for o in options if o["label"] == carrier), None)
+                or next((o for o in options[:-1] if o["label"] not in protected),
+                        None))
+        if kept is not None and clause is not None:
+            extra = clause or _fold_note(dropped)
+            kept["consequence"] = _stop_line(kept["consequence"] + extra)
+    # the widening either/or folds into one option when the ask is still
+    # full — both halves stay stated
+    if len(options) > 4:
+        wide = next((o for o in options if o["label"].startswith("Widen ")), None)
+        carry = next((o for o in options if o["label"].startswith("Keep them ")), None)
+        if (wide is not None and carry is not None
+                and wide["label"] not in protected):
+            wide["label"] = ("Settle the widening call: widen the change "
+                             "or carry the findings")
+            wide["consequence"] = _stop_line(
+                wide["consequence"] + " Or keep them out of scope: "
+                + carry["consequence"])
+            options.remove(carry)
+    # every state caps at four: the last unpicked route folds into the
+    # option above it, its move still stated
+    while len(options) > 4:
+        dropped = next((o for o in reversed(options[:-1])
+                        if o["label"] not in protected), None)
+        if dropped is None:
+            break
+        options.remove(dropped)
+        kept = next((o for o in options[:-1] if o["label"] not in protected),
+                    accept)
+        kept["consequence"] = _stop_line(kept["consequence"]
+                                         + _fold_note(dropped))
+
+    rec = rec_reason = None
+    if len(picks) == 1 and not opens:
+        rec, rec_reason = picks[0]
+    elif len(picks) == 1:
+        pass  # a rule picks a move, but an open owner's-call sits beside it
+    elif len(picks) > 1:
+        opens.insert(0, "the rules pick different moves ("
+                        + "; ".join(p[0] for p in picks)
+                        + ") — no rule ranks one over the other")
+    elif not opens and exhausted:
+        rec, rec_reason = ("Clear what remains in a normal author turn",
+                           "the fix-first criterion: the remaining findings are ordinary — "
+                           "a normal author turn can clear them (gates/recommendation.md)")
+    rec, rec_reason = stop_recommendation(options, rec, rec_reason)
+    return {
+        "whatStops": _stop_line(what_stops),
+        "whyItMatters": _stop_line(why),
+        "options": options,
+        "recommendation": rec,
+        "recommendationReason": rec_reason if rec else None,
+        "noRecommendationReason": None if rec else ("; ".join(opens) or
+            "no rule in gates/recommendation.md picks an option for this state"),
+    }
+
+
+def stop_ask_md(stop):
+    """The ask in the contract's order: what stopped, why it matters,
+    the options, the recommendation, what the answer covers."""
+    lines = [f"**What stopped:** {stop['whatStops']}", "",
+             f"**Why it matters:** {stop['whyItMatters']}", "", "**Options:**", ""]
+    for n, o in enumerate(stop["options"], 1):
+        lines.append(f"{n}. **{o['label']}** — {o['consequence']}")
+    lines.append("")
+    if stop["recommendation"]:
+        lines.append(f"**Recommendation:** {stop['recommendation']} — "
+                     f"{stop['recommendationReason']}")
+    else:
+        lines.append(f"**No recommendation:** {stop['noRecommendationReason']}")
+    lines += ["", "**What the answer covers:** your yes covers exactly the "
+                  "chosen option and nothing else.", ""]
+    return lines
+
+
 def cmd_report(a):
     try:
         d = json.loads(Path(a.data[1:]).read_text(encoding="utf-8")
@@ -716,26 +1192,63 @@ def cmd_report(a):
     tracked = d.get("tracked", [])
     gate = d.get("gate_rows", [])
     gate_green = d.get("gate_green", False)
+    ci_standing = [g for g in gate
+                   if g.get("source") == "ci" and g.get("class") in CI_STANDING]
     assessment = d.get("assessment", {})
     reported = [reported_finding(t) for t in tracked]
+    unknown = sorted({f["fixStatus"] for f in reported} - set(KNOWN_FIX))
+    if unknown:
+        return out(False, error=(f"unknown fix status {', '.join(map(repr, unknown))} — "
+                                 f"one of: {', '.join(KNOWN_FIX)}"))
+    conclusion = d.get("conclusion", "")
+    derived = None
+    if a.kind == "fix":
+        derived = derive_conclusion(gate_green, reported, ci_standing)
+        n_open = sum(1 for f in reported if f["fixStatus"] not in RESOLVED_FIX)
+        if conclusion in RECOMMENDATION_RANK \
+                and RECOMMENDATION_RANK[conclusion] < RECOMMENDATION_RANK[derived]:
+            return out(False, derived_conclusion=derived, conclusion=conclusion,
+                       error=(f"conclusion {conclusion!r} is below the derived floor "
+                              f"{derived!r} ({n_open} unresolved finding(s), gate green: "
+                              f"{bool(gate_green)}"
+                              + (f", {len(ci_standing)} CI row(s) standing "
+                                 "infrastructure-or-unknown" if ci_standing else "")
+                              + ") — a claim may escalate to fix-first or "
+                              "human, never below the state the report itself shows"))
+        if conclusion not in RECOMMENDATION_RANK:
+            conclusion = derived
     n_high = sum(1 for f in reported if f["severity"] == "high")
     n_fixed = sum(1 for f in reported if f["fixStatus"] == "fixed")
+    n_withdrawn = sum(1 for f in reported if f["fixStatus"] == "rejected-valid")
+    n_oos = sum(1 for f in reported if f["fixStatus"] == "out-of-scope")
     n_confirmed = sum(1 for f in reported if f["status"] == "verified")
     n_self = sum(1 for f in reported if f["selfChecked"])
     unconfirmed = f"{len(reported) - n_confirmed} unconfirmed" + (f" ({n_self} self-checked)" if n_self else "")
+    verdict_extra = (f" · {n_withdrawn} withdrawn" if n_withdrawn else "") \
+                    + (f" · {n_oos} out-of-scope" if n_oos else "")
     rounds = d.get("rounds_used", 0)
+    stop = None
+    if a.kind == "fix":
+        stop = stop_ask(reported, gate_green, ci_standing, rounds, conclusion,
+                        d.get("changed_since"))
     repo_rows = [g for g in gate if is_repo_row(g)]
     ci = [g for g in gate if g.get("source") == "ci"]
     lines = [d.get("title", "Code review report"), "", d.get("mode_line", ""), ""]
+    # a standing red CI row is never green-washed into the header either
+    green = ("all passed" if not rounds else "green after the final fix round") \
+        if gate_green and not ci_standing \
+        else ("green" + (" after the final fix round" if rounds else "")
+              + f", with {len(ci_standing)} CI row(s) standing "
+                "(infrastructure-or-unknown — see below)") \
+        if gate_green else None
     lines += [assessment.get("verdict", ""), "",
               f"## Mechanical gate ({len(repo_rows)} repo check{'' if len(repo_rows) == 1 else 's'}"
               f" · {len(gate) - len(repo_rows) - len(ci)} built-in"
               + (f" · {len(ci)} CI" if ci else "") + ") — "
               + ("no repo checks detected — no mechanical floor"
                  + ("" if gate_green else "; built-in checks RED") if not repo_rows
-                 else "green after the final fix round" if gate_green and rounds
-                 else "all passed" if gate_green
-                 else "RED after the final fix round" if rounds else "RED"), ""]
+                 else green
+                 if green else "RED after the final fix round" if rounds else "RED"), ""]
     for g in gate:
         code = g.get("exit_code", g.get("exitCode", 0))
         if is_info_row(g):
@@ -743,13 +1256,22 @@ def cmd_report(a):
             lines += [f"  - {t}" for t in g.get("tail", "").splitlines()[1:]]
         elif g.get("status") in ("pending", "skipped"):
             lines.append(f"- {g['status']} — {g['name']}")
+        elif g.get("class") in CI_STANDING:
+            # a standing red CI row: carried with its evidence, never a pass
+            lines.append(f"- {g['class']} — {g['name']}"
+                         + (f" — {g['reason']}" if g.get("reason") else ""))
+            if g.get("failedStep"):
+                lines.append(f"  - first failed step: {g['failedStep']}")
+            if g.get("rerun"):
+                lines.append(f"  - rerun (an outward action, never run here): "
+                             f"`{g['rerun']}`")
         elif code in (0, None):
             lines.append(f"- pass — {g['name']}")
         else:
             verdict = "TIMED OUT" if g.get("status") == "timed_out" else "FAIL"
             lines += [f"- **{verdict}** — {g['name']}", "", "  ```", f"  {g['tail']}", "  ```"]
     lines += ["", f"## Findings ({len(reported)} · {n_confirmed} confirmed · {unconfirmed} · "
-                  f"{n_high} high · {n_fixed} fixed)", ""]
+                  f"{n_high} high · {n_fixed} fixed{verdict_extra})", ""]
     lines += findings_md(reported) if tracked else ["None — the reviewers reported nothing that met the bar.", ""]
     if rounds:
         lines += ["## What the fixer did", ""] + (
@@ -760,6 +1282,13 @@ def cmd_report(a):
     lines += [f"- {t}" for t in assessment.get("testGaps", [])] or ["None identified."]
     lines += ["", "## Residual risks", ""]
     lines += [f"- {r}" for r in assessment.get("residualRisks", [])] or ["None identified."]
+    if a.kind == "fix":
+        # the stop ask renders in the contract's order under the recommendation (D-024)
+        floor_note = (f" (the state's floor is {derived} — a claim may escalate above it, "
+                      "never descend, D-021)") if derived is not None and derived != conclusion else ""
+        lines += ["", f"## Recommendation — {conclusion}{floor_note}", ""]
+        if stop:
+            lines += stop_ask_md(stop)
     lines += ["", "## How this was checked", ""] + d.get("checked", []) + [""] + d.get("fix_checked", [])
     try:  # fire-and-forget local telemetry (see scripts/telemetry.py)
         import sys as _sys
@@ -767,14 +1296,16 @@ def cmd_report(a):
         _sys.path.insert(0, str(_Path(__file__).resolve().parent))
         from telemetry import record
         record("spec-review", "review_report", kind=a.kind,
-               conclusion=d.get("conclusion", ""),
+               conclusion=conclusion,
                findings=len(reported),
                unconfirmed=sum(1 for f in reported
                                if f.get("status") == "unconfirmed"))
     except Exception:
         pass
+    payload_extra = {"derived_conclusion": derived} if derived is not None else {}
     return out(True, markdown="\n".join(lines), reported_findings=reported,
-               conclusion=d.get("conclusion", ""), **backlog_offer(d, assessment))
+               conclusion=conclusion, stopAsk=stop,
+               **payload_extra, **backlog_offer(d, assessment))
 
 
 def backlog_offer(d, assessment):
@@ -1412,6 +1943,7 @@ def _final_ask_project(ctx):
 
 
 def _fixer_ask(ctx):
+    ctx = {**ctx, "unresolved": [t for t in ctx["unresolved"] if t.get("fix") not in OFF_LOOP_FIX]}
     if ctx["round"] == 1:
         opening = ("Fix the confirmed findings in the project's code:\n" if ctx["project"]
                    else f"Fix the confirmed findings on the change (`git diff {_base(ctx)}`):\n")
@@ -1425,8 +1957,11 @@ def _fixer_ask(ctx):
                 "before your first edit — the repo's own rules bind your fixes. You may run a single targeted test file "
                 "for code you touch, but the repo's checks re-run the moment you finish — do not run them yourself.\n"
                 + _intent_block(ctx)
-                + "Return addressed (the finding ids you fully fixed), skipped (the finding ids you deliberately left, with "
-                "why), changedPaths, and notes (one sentence per change: what was done and why it is minimal).")
+                + "Return addressed (the finding ids you fully fixed), skipped (the finding ids you deliberately left, "
+                "with why — either the finding is wrong, and your why will be independently ruled on, or it cannot be "
+                "fixed), outOfScope (finding ids whose SOUND fix needs paths or behavior this change must not touch — "
+                "name the paths and why; never make that change yourself), changedPaths, and notes (one sentence per "
+                "change: what was done and why it is minimal).")
     items = [{"id": t["finding"]["id"], "where": t["finding"]["where"], "what": t["finding"]["what"],
               "evidence": t["finding"]["evidence"], "severity": t["finding"]["severity"],
               "lens": t["finding"]["lens"], "verifier": t.get("fixNote")} for t in ctx["unresolved"]]
@@ -1451,7 +1986,11 @@ def _verify_ask(ctx):
             "the described defect is gone and the fix is minimal and sound.\n"
             + _test_hunks_block(ctx, "answer worse and name the weakened test")
             + "Answer fixed only if the defect itself is resolved — cosmetic proximity is not a fix. Answer unfixed if "
-            "it still stands. Answer worse if the fix introduced a new problem (say what, in note). Do not edit anything.")
+            "it still stands. Answer worse if the fix introduced a new problem (say what, in note).\n"
+            "If the author SKIPPED this finding (their reason is in the notes), do not verify a fix — rule on the skip "
+            "instead: rejected-valid when the reason holds (the finding was not a real defect the author must fix — "
+            "say what the code actually does), rejected-invalid when it does not (the finding stands whatever the "
+            "author believes). An unruled skip leaves the finding standing. Do not edit anything.")
 
 
 def _fix_review_ask(ctx):
@@ -1486,13 +2025,16 @@ def _loop_final_ask(ctx):
                     "residualRisks: what remains unverified. verdict: two or three sentences — is the code ready as it "
                     "stands now? recommendation: merge | fix-first | human — merge means the code is ready as it stands "
                     "(every finding fixed, the checks green, nothing new surfaced); human when judgment calls or "
-                    "unconfirmed residue remain." if ctx["project"] else
+                    "unconfirmed residue remain. The oracle derives the floor from the tracked findings and rejects a "
+                    "claim below it (escalating is always allowed), so claim what the state shows." if ctx["project"] else
                     f"\nProduce the final assessment of the change INCLUDING the fixes — run `git diff {_base(ctx)}` yourself "
                     "where you need to judge it, and read the test files before claiming a test gap.\n"
                     "risk: what merging now would risk. testGaps: behaviors still altered with no test covering them. "
                     "residualRisks: what remains unverified. verdict: two or three sentences — should this merge now? "
                     "recommendation: merge | fix-first | human — merge only if every finding is fixed, the checks are green, "
-                    "and nothing new surfaced; human when judgment calls or unconfirmed residue remain.")
+                    "and nothing new surfaced; human when judgment calls or unconfirmed residue remain. The oracle derives "
+                    "the floor from the tracked findings and rejects a claim below it (escalating is always allowed), so "
+                    "claim what the state shows.")
     return (f"The fix loop ran {ctx['rounds_used']} round(s). Every tracked finding and its state:\n" + jdump(items)
             + f"\nThe repo's own checks after the final round: {gate_state}."
             f"\nAll paths the author changed: {', '.join(ctx.get('changed_paths', [])) or '(none)'}"

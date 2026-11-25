@@ -13,12 +13,13 @@ Usage:
   ship.py pr-body   <spec> [--base B] [--remote R] [--review-report F] [--json]
   ship.py checks    <spec> [--logs] [--json]
   ship.py comments  <spec> [--json]
+  ship.py rule      <spec> --thread <id> --label L [--why W]
   ship.py status    <spec> [--base B] [--remote R] [--json]
   ship.py record    <spec> --pr <url>
   ship.py evidence  <spec> --kind ci|review --title T [--task T###] [--file F]
 
 <spec> is a spec name (specs/<name> under the repo root) or a spec dir.
-record and evidence write under specs/<name>/ only.
+record, evidence, and rule write under specs/<name>/ only.
 
 Exit: 0 = answered · 1 = a git/gh call failed · 2 = usage ·
 4 = refused, the blocking reason printed.
@@ -64,6 +65,32 @@ PR_URL = re.compile(r"^https?://([^/\s]+)/([^/\s]+)/([^/\s]+)/pull/(\d+)/?$")
 RUN_ID = re.compile(r"/actions/runs/(\d+)")
 REVIEW_VERDICT = re.compile(
     r"^\W*(?:recommendation|verdict|risk)\W*[:—-]", re.I)
+# The labels the integrator's threads digest uses; also `rule`'s
+# choices, so the owner's ruling can only name one of them.
+THREAD_LABELS = ("must-fix", "question", "nit", "disagree")
+# One owner ruling per line in notes/rulings.md — the kit's
+# ruling-line shape (`Rollback: <row> — <ruling>` in the delivery
+# block). Group 1 is the thread id, group 2 the label, group 3 the why.
+RULING_LINE = re.compile(
+    r"^[-*][ \t]+(\S+)[ \t]+—[ \t]+(" + "|".join(THREAD_LABELS) + r")"
+    r"[ \t]+—[ \t]+(.+)$", re.M)
+RULINGS_NOTE = ("a ruled thread keeps its label and is not to be "
+                "reclassified — the ruling's why is the owner's reason; "
+                "only unruled threads are open for classification")
+
+# The delivery block's owner facts, read with audit.py's
+# delivery_block/delivery_note/proof_rulings shape (the same read, so
+# both skills answer identically on one doc state): the bulleted lines
+# under the status holder's Delivered field, notes/delivery.md only as
+# the archived-history fallback. RECORD_LINE steps over the record
+# lines written directly under Delivered: — a Shipped: record must not
+# blank the block once `record` lands (run.md Records). PROOF_RULING is
+# the D-047 line — the owner's ruling for a proof the environment
+# could not run.
+DELIVERED_FIELD = re.compile(r"^[ \t]*\*{0,2}Delivered\*{0,2}[ \t]*:.*$", re.M)
+RECORD_LINE = re.compile(r"^[ \t]*\*{0,2}(?:Shipped|Released|Post-release check)\*{0,2}[ \t]*:")
+FACT_BULLET = re.compile(r"^[ \t]*-[ \t]")
+PROOF_RULING = re.compile(r"^Proof:[ \t]*(TC-\d{3})[ \t]+—[ \t]+(.+)$", re.M)
 
 MANIFESTS = ("package.json", "pyproject.toml", "go.mod", "Cargo.toml")
 MANIFEST_GLOB = "requirements*.txt"
@@ -71,6 +98,13 @@ TYPE_PREFIX = {"feature": "feat", "bugfix": "fix", "hotfix": "fix",
                "refactor": "refactor", "upgrade": "chore"}
 CHECK_RED = {"fail", "cancel"}
 CHECK_GREEN = {"pass", "skipping"}
+# The runner's own setup or wrap-up steps — exact names, then name
+# prefixes. Narrow on purpose: `Set up Node` is a project step, and a
+# failed project step is a code failure however fast it ran. This
+# constant and the three functions below are duplicated byte-for-byte
+# in review_orchestrator.py and pinned identical by tools/tests.
+RUNNER_STEPS = (("Set up job", "Complete job"),
+                ("actions/checkout@", "Post "))
 LOG_TAIL_LINES = 60
 LIST_CAP = 20
 
@@ -101,6 +135,10 @@ class Refusal(Exception):
 
 
 class ToolFailure(Exception):
+    pass
+
+
+class UsageError(Exception):
     pass
 
 
@@ -214,6 +252,36 @@ class Ctx:
     def shipped_url(self) -> str | None:
         m = SHIPPED.search(self.holder_text)
         return m.group(3) if m else None
+
+    @property
+    def delivery_block(self) -> str:
+        """The bulleted fact lines under the holder's Delivered field —
+        the delivery record commit's lines. Empty on specs whose holder
+        predates the block."""
+        text = self.holder_text
+        m = DELIVERED_FIELD.search(text)
+        if not m:
+            return ""
+        rest = text[m.end():].splitlines()
+        i = 0
+        while i < len(rest) and (not rest[i].strip() or RECORD_LINE.match(rest[i])):
+            i += 1
+        lines = []
+        while i < len(rest) and FACT_BULLET.match(rest[i]):
+            lines.append(rest[i].strip()[1:].strip())
+            i += 1
+        return "\n".join(lines)
+
+    @property
+    def delivery_note(self) -> str:
+        """The delivery block, or notes/delivery.md when the block
+        carries no fact lines — archived history that predates it. The
+        one source the PR body's owner facts read: Docs impact,
+        Behavior preserved, Rollback rulings, proof rulings."""
+        block = self.delivery_block
+        if block.strip():
+            return block
+        return read(self.spec_dir / "notes" / "delivery.md")
 
     @property
     def rel_spec_dir(self) -> str:
@@ -569,11 +637,20 @@ def review_report(ctx: Ctx, explicit: str | None) -> dict | None:
     return None
 
 
+def proof_rulings(note: str) -> list[dict]:
+    """The owner's `- Proof: TC-### — <ruling>` lines in the delivery
+    note, file order kept — one per proof the environment could not
+    run (spec-build D-047); the ruling says what was missing and why
+    the gap is accepted."""
+    return [{"tc": m.group(1), "ruling": m.group(2).strip()}
+            for m in PROOF_RULING.finditer(note)]
+
+
 def gather_facts(ctx: Ctx, review_arg: str | None) -> dict:
     spec = ctx.spec_md
     entries = tasks(ctx.holder_text)
     live = [t for t in entries if not t["dropped"]]
-    note = read(ctx.spec_dir / "notes" / "delivery.md")
+    note = ctx.delivery_note
     docs = re.search(r"^Docs impact:[ \t]*(.*)$", note, re.M)
     preserved = re.search(r"^Behavior preserved:[ \t]*(.*)$", note, re.M)
     backlog = read(ctx.spec_dir.parent / "BACKLOG.md")
@@ -615,6 +692,7 @@ def gather_facts(ctx: Ctx, review_arg: str | None) -> dict:
             "tasks_ticked": sum(t["ticked"] for t in live),
             "notes": [{"task": t["id"], "proof": t["proof"]}
                       for t in live if t["proof"]],
+            "ruled_proofs": proof_rulings(note),
             "behavior_preserved": preserved.group(1).strip() if preserved else None,
         },
         "docs_impact": docs.group(1).strip() if docs else None,
@@ -652,6 +730,10 @@ def render_body(facts: dict, template: str) -> str:
         f"- Delivery pass complete: `Delivered: commit @ {facts['delivered']}`.",
     ]
     proof_lines += [f"- {n['task']}: {n['proof']}" for n in proof["notes"]]
+    # a ruled proof is never a pass: its own line names the gap and
+    # hands the proof to the owner after the merge (spec-build D-047)
+    proof_lines += [f"- Owner to test after merge: {r['tc']} — {r['ruling']}"
+                    for r in proof["ruled_proofs"]]
     if proof["behavior_preserved"]:
         proof_lines.append(f"- Behavior preserved: {proof['behavior_preserved']}")
 
@@ -786,6 +868,110 @@ def checks_verdict(rows: list[dict]) -> str:
     return "green"
 
 
+def is_runner_step(name):
+    exact, prefixes = RUNNER_STEPS
+    return isinstance(name, str) and (name in exact or name.startswith(prefixes))
+
+
+def first_failed_step(steps):
+    """The lowest-numbered step that neither succeeded nor was skipped."""
+    if not isinstance(steps, list):
+        return None
+    failed = [s for s in steps if isinstance(s, dict)
+              and s.get("conclusion") not in ("success", "skipped")]
+    return min(failed, key=lambda s: s.get("number")
+               if isinstance(s.get("number"), int) else 0, default=None)
+
+
+def classify_check(bucket, check_name, jobs):
+    """(class, failedStep, reason) for a red `gh pr checks` row.
+
+    bucket is the row's bucket; check_name its name; jobs the run's jobs
+    as `gh run view <id> --json jobs` reports them — None when no run
+    sits behind the status or gh could not be read (a status context
+    from a CI outside Actions), [] when it lists none. Evidence order,
+    first hit wins: cancelled or never started → infrastructure; a
+    first failed step that is the runner's own → infrastructure; any
+    other failed step → code; no step evidence at all → unknown. Never
+    how fast the job failed and never log text: a real test can print
+    `connection reset` or `context deadline exceeded`.
+    """
+    if bucket == "cancel":
+        return ("infrastructure", None,
+                "the run was cancelled — the runner stopped it, "
+                "no step verdict exists")
+    if jobs is None:
+        return ("unknown", None,
+                "no step data behind the status — the run could not be "
+                "read, or the check comes from a CI outside Actions")
+    if not jobs:
+        return ("infrastructure", None, "the run lists no jobs — it never started")
+    candidates = [j for j in jobs if isinstance(j, dict)
+                  and j.get("name") == check_name]
+    if not candidates:
+        candidates = [j for j in jobs if isinstance(j, dict)
+                      and j.get("conclusion") not in (None, "success",
+                                                      "skipped", "neutral")]
+    judged = []
+    for job in candidates:
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            steps = None
+        judged.append((job, steps, first_failed_step(steps)))
+    if judged and all(steps == [] for _, steps, _ in judged):
+        return ("infrastructure", None,
+                "the job lists no steps — it never started")
+    failed = [(job, step) for job, _, step in judged if step]
+    if not failed:
+        return ("unknown", None,
+                "no failed step stands behind the red status — nothing to class")
+    project = [(job, step) for job, step in failed
+               if not is_runner_step(step.get("name"))]
+    if project:
+        job, step = project[0]
+        return ("code", step.get("name"),
+                f"the job '{job.get('name')}' failed in its project step "
+                f"'{step.get('name')}'")
+    job, step = failed[0]
+    return ("infrastructure", step.get("name"),
+            f"the job '{job.get('name')}' failed in the runner step "
+            f"'{step.get('name')}'")
+
+
+def run_jobs(ctx: Ctx, row: dict) -> list[dict] | None:
+    """A check row's run jobs (`gh run view <id> --json jobs`), or None
+    when the row's link names no run or gh cannot serve the shape."""
+    m = RUN_ID.search(row.get("link") or "")
+    if not m:
+        return None
+    rc, data, _ = gh_json(ctx, "run", "view", m.group(1), "--json", "jobs")
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    return jobs if isinstance(jobs, list) else None
+
+
+def classify_rows(ctx: Ctx, rows: list[dict]) -> str | None:
+    """Every red row gains `class`, `failedStep`, `reason` — an
+    infrastructure row also `rerun`, the exact command, which ship never
+    runs (an outward action). Returns the triage: `code` when any code
+    row exists, else `infrastructure`, else `unknown`, else None."""
+    rank = {"code": 0, "infrastructure": 1, "unknown": 2}
+    triage = None
+    for row in rows:
+        row["class"] = row["failedStep"] = row["reason"] = None
+        if row.get("bucket") not in CHECK_RED:
+            continue
+        cls, step, reason = classify_check(row.get("bucket"),
+                                           row.get("name") or "",
+                                           run_jobs(ctx, row))
+        row["class"], row["failedStep"], row["reason"] = cls, step, reason
+        if cls == "infrastructure":
+            m = RUN_ID.search(row.get("link") or "")
+            row["rerun"] = f"gh run rerun {m.group(1)} --failed" if m else None
+        if triage is None or rank[cls] < rank[triage]:
+            triage = cls
+    return triage
+
+
 def failed_log_tail(ctx: Ctx, run_id: str) -> str:
     rc, out, err = run(["gh", "run", "view", run_id, "--log-failed"],
                        cwd=ctx.repo, timeout=120)
@@ -798,6 +984,7 @@ def cmd_checks(ctx: Ctx, args) -> tuple[int, dict]:
     pr = find_pr(ctx)
     rows = check_rows(ctx, pr)
     verdict = checks_verdict(rows)
+    triage = classify_rows(ctx, rows)
     failing = [r for r in rows if r.get("bucket") in CHECK_RED]
     if args.logs:
         tails: dict[str, str] = {}
@@ -811,20 +998,42 @@ def cmd_checks(ctx: Ctx, args) -> tuple[int, dict]:
     stale = bool(pr.get("headRefOid")) and pr["headRefOid"] != head
     lines = [f"checks: PR #{pr['number']} {pr['url']} — {verdict.upper()}"]
     lines += [f"  {(r.get('bucket') or '?').upper():8} {r.get('name')}"
+              + (f" — {r['class']}" if r.get("class") else "")
               + (f" — {r['link']}" if r.get("bucket") in CHECK_RED
                  and r.get("link") else "") for r in rows]
+    lines += [f"    {r['reason']}" for r in failing if r.get("reason")]
+    lines += [f"    rerun (on the user's yes): {r['rerun']}"
+              for r in failing if r.get("rerun")]
     if stale:
         lines.append(f"  note: the PR head is {pr['headRefOid'][:12]}, local "
                      f"HEAD is {head[:12]} — these checks describe "
                      "what was pushed")
     if verdict == "red":
-        lines += [
-            "  next: never fix code here. Record each failing job's output "
-            "as fix-round evidence,",
-            f"    ship.py evidence {ctx.name} --kind ci --title '<job>' "
-            "--task T### < failing-output",
-            f"  then route the fix round: /spec-build {ctx.name}",
-            f"  ({UNTRUSTED_NOTE})"]
+        if triage == "code":
+            lines += [
+                "  next: never fix code here. Record each failing job's output "
+                "as fix-round evidence,",
+                f"    ship.py evidence {ctx.name} --kind ci --title '<job>' "
+                "--task T### < failing-output",
+                f"  then route the fix round: /spec-build {ctx.name}",
+                f"  ({UNTRUSTED_NOTE})"]
+        else:
+            reruns = [r["rerun"] for r in failing if r.get("rerun")]
+            # an unknown-class red row has no run behind its status, so it
+            # names no rerun — the lead-in must not offer one that is not there
+            lead = ("rerun the infrastructure rows, on the user's yes (an "
+                    "outward action; ship never runs one):" if reruns else
+                    "no red row carries a rerun command — no run behind the "
+                    "status (a CI outside Actions, or gh could not be read); "
+                    "rerunning or repairing them is the user's own call.")
+            lines += [
+                "  red, but no code failure: a fix round cannot help — " + lead,
+                *[f"    {c}" for c in reruns],
+                f"  to open a fix round on purpose: ship.py evidence "
+                f"{ctx.name} --kind ci --title '<job>' --task T### "
+                "< failing-output",
+                f"  then route it: /spec-build {ctx.name}",
+                f"  ({UNTRUSTED_NOTE})"]
     elif verdict == "pending":
         lines.append("  CI is still running — stop here; re-invoke "
                      f"/spec-ship continue {ctx.name} when it settles")
@@ -834,7 +1043,8 @@ def cmd_checks(ctx: Ctx, args) -> tuple[int, dict]:
     else:
         lines.append(f"  next: /spec-ship comments {ctx.name}")
     return 0, {"spec": ctx.name, "pr": pr["url"], "number": pr["number"],
-               "verdict": verdict, "rows": rows, "pr_head": pr.get("headRefOid"),
+               "verdict": verdict, "triage": triage, "rows": rows,
+               "pr_head": pr.get("headRefOid"),
                "local_head": head, "stale": stale, "untrusted": True,
                "human": lines}
 
@@ -858,25 +1068,43 @@ def review_threads(ctx: Ctx, pr: dict) -> tuple[list[dict], bool]:
     return threads["nodes"], threads["pageInfo"]["hasNextPage"]
 
 
+def read_rulings(ctx: Ctx) -> dict[str, dict]:
+    """The owner's thread rulings from notes/rulings.md, keyed by
+    thread id — file order kept, so the inactive report reads in the
+    order the owner ruled them."""
+    rulings: dict[str, dict] = {}
+    for m in RULING_LINE.finditer(
+            read(ctx.spec_dir / "notes" / "rulings.md")):
+        rulings[m.group(1)] = {"label": m.group(2), "why": m.group(3).strip()}
+    return rulings
+
+
 def cmd_comments(ctx: Ctx, _args) -> tuple[int, dict]:
     pr = find_pr(ctx)
     nodes, truncated = review_threads(ctx, pr)
     entries = tasks(ctx.holder_text)
+    rulings = read_rulings(ctx)
     threads = []
     for node in nodes:
         if node.get("isResolved"):
             continue
         path = node.get("path") or ""
+        ruling = rulings.pop(node["id"], None)
         threads.append({
             "id": node["id"],
             "path": path,
             "line": node.get("line") or node.get("originalLine"),
             "outdated": bool(node.get("isOutdated")),
+            "ruling": ({**ruling, "unresolved": True} if ruling else None),
             "task_candidates": touching_tasks(path, entries) if path else [],
             "comments": [{"author": (c.get("author") or {}).get("login"),
                           "body": c.get("body") or "", "url": c.get("url")}
                          for c in node["comments"]["nodes"]],
         })
+    # Whatever the pop left is a ruling whose thread is resolved or no
+    # longer listed — kept on file, reported inactive, never a failure.
+    inactive = [{"thread": tid, **ruling, "unresolved": False}
+                for tid, ruling in rulings.items()]
     latest: dict[str, dict] = {}
     for review in pr.get("reviews") or []:
         login = (review.get("author") or {}).get("login") or "?"
@@ -891,11 +1119,17 @@ def cmd_comments(ctx: Ctx, _args) -> tuple[int, dict]:
         where = f"{t['path']}:{t['line']}" if t["path"] else "(no file)"
         tasks_hint = (f" [{', '.join(t['task_candidates'])}]"
                       if t["task_candidates"] else " [no task touches it]")
-        lines.append(f"  {t['id']} {where}{tasks_hint}"
+        ruled = (f" — ruled {t['ruling']['label']}: {t['ruling']['why']}"
+                 if t["ruling"] else "")
+        lines.append(f"  {t['id']} {where}{tasks_hint}{ruled}"
                      + (" (outdated)" if t["outdated"] else ""))
         for c in t["comments"]:
             first = (c["body"].strip().splitlines() or [""])[0][:160]
             lines.append(f"    | {c['author']}: {first}")
+    for r in inactive:
+        lines.append(f"  note: ruling for {r['thread']} ({r['label']}) is "
+                     "inactive — the thread is resolved or no longer "
+                     "listed; it stays on file")
     if truncated:
         lines.append("  note: more than 100 threads — only the first "
                      "100 were read; say so")
@@ -903,12 +1137,14 @@ def cmd_comments(ctx: Ctx, _args) -> tuple[int, dict]:
              "-f thread=<thread id> -F body=@-")
     rerequest = f"gh pr edit {pr['number']} --add-reviewer <login>"
     if threads:
-        lines += ["  each reply, on the user's yes to its shown text: "
+        lines += [f"  ({RULINGS_NOTE})",
+                  "  each reply, on the user's yes to its shown text: "
                   + reply,
                   "  re-request review, on the user's yes: " + rerequest]
     return 0, {"spec": ctx.name, "pr": pr["url"], "number": pr["number"],
                "review_decision": pr.get("reviewDecision"),
                "threads": threads, "reviews": list(latest.values()),
+               "inactive_rulings": inactive, "rulings_note": RULINGS_NOTE,
                "truncated": truncated, "untrusted": True,
                "reply": reply, "rerequest": rerequest, "human": lines}
 
@@ -1028,15 +1264,19 @@ def cmd_status(ctx: Ctx, _args) -> tuple[int, dict]:
                         f"{pr['url']} open; {sync['ahead']} local commit(s) "
                         "not on the PR yet", *unrecorded)
         try:
-            verdict = checks_verdict(check_rows(ctx, pr))
+            rows = check_rows(ctx, pr)
+            verdict = checks_verdict(rows)
+            triage = classify_rows(ctx, rows)
         except ToolFailure as exc:
-            verdict, result["gh_error"] = "unknown", str(exc)
+            verdict, triage = "unknown", None
+            result["gh_error"] = str(exc)
         try:
             unresolved = sum(not n.get("isResolved")
                              for n in review_threads(ctx, pr)[0])
         except ToolFailure as exc:
             unresolved, result["gh_error"] = None, str(exc)
-        result.update(checks=verdict, unresolved_threads=unresolved)
+        result.update(checks=verdict, triage=triage,
+                      unresolved_threads=unresolved)
         facts = [f"{pr['url']} open" + (" (draft)" if pr.get("isDraft") else ""),
                  f"checks: {verdict} · unresolved threads: "
                  f"{'?' if unresolved is None else unresolved} · "
@@ -1045,8 +1285,27 @@ def cmd_status(ctx: Ctx, _args) -> tuple[int, dict]:
         if pr.get("headRefOid") and pr["headRefOid"] != ctx.head():
             facts.append("local HEAD differs from the PR head — "
                          "unpushed or unfetched commits")
-        if verdict == "red":
+        if verdict == "red" and triage == "code":
             return done("ci-red", f"/spec-ship checks {ctx.name}", *facts)
+        if verdict == "red":
+            red_rows = [r for r in rows if r.get("bucket") in CHECK_RED]
+            reruns = [r["rerun"] for r in red_rows if r.get("rerun")]
+            # an unknown-class row names no rerun — the stage must not
+            # send the user to rerun runs that are not there
+            return done("ci-rerun",
+                        (f"rerun the red runs (on the user's yes), then "
+                         f"/spec-ship continue {ctx.name}" if reruns else
+                         "the red rows name no rerun command — no run behind "
+                         "the status; rerunning or repairing them is the "
+                         "user's own call, then "
+                         f"/spec-ship continue {ctx.name}"),
+                        *[f"{r.get('name')} — {r.get('class')}: "
+                          f"{r.get('reason')}" for r in red_rows],
+                        *[f"rerun: {c}" for c in reruns],
+                        "a fix round opens only on purpose: ship.py evidence "
+                        f"{ctx.name} --kind ci --title '<job>' --task T### "
+                        "< failing-output, then /spec-build " + ctx.name,
+                        *facts)
         if verdict == "pending":
             return done("ci-pending", "wait for CI, then /spec-ship continue "
                         f"{ctx.name}", *facts)
@@ -1201,10 +1460,50 @@ def cmd_evidence(ctx: Ctx, args) -> tuple[int, dict]:
                "task": args.task, "warning": warning, "human": lines}
 
 
+def write_ruling(ctx: Ctx, thread: str, label: str, why: str) -> tuple[Path, bool]:
+    """One ruling line per thread in notes/rulings.md — where `evidence`
+    writes, at both tiers. Re-ruling a thread replaces its line in
+    place; returns (path, replaced)."""
+    path = ctx.spec_dir / "notes" / "rulings.md"
+    line = f"- {thread} — {label} — {why}"
+    lines = read(path).splitlines()
+    replaced = False
+    for i, old in enumerate(lines):
+        m = RULING_LINE.match(old)
+        if m and m.group(1) == thread:
+            lines[i] = line
+            replaced = True
+            break
+    if not replaced:
+        lines.append(line)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(path, "\n".join(lines) + "\n")
+    return path, replaced
+
+
+def cmd_rule(ctx: Ctx, args) -> tuple[int, dict]:
+    if not ctx.exists:
+        raise Refusal(delivery_problem(ctx) or "no spec")
+    thread = args.thread.strip()
+    if not thread or re.search(r"\s", thread):
+        raise UsageError("--thread takes one review-thread id, the ones "
+                         "`comments` lists")
+    why = " ".join(args.why.split()) if args.why else "no reason given"
+    path, replaced = write_ruling(ctx, thread, args.label, why)
+    rel = f"{ctx.rel_spec_dir}/notes/{path.name}"
+    return 0, {"spec": ctx.name, "file": rel, "thread": thread,
+               "label": args.label, "why": why, "replaced": replaced,
+               "human": [f"{'re-ruled' if replaced else 'ruled'} in {rel}: "
+                         f"{thread} — {args.label} — {why}",
+                         "  commit the ruling on this branch — asked "
+                         "first, like every commit; pushing it is one "
+                         "more previewed push"]}
+
+
 COMMANDS = {
     "preflight": cmd_preflight, "pr-body": cmd_pr_body, "checks": cmd_checks,
-    "comments": cmd_comments, "status": cmd_status, "record": cmd_record,
-    "evidence": cmd_evidence,
+    "comments": cmd_comments, "rule": cmd_rule, "status": cmd_status,
+    "record": cmd_record, "evidence": cmd_evidence,
 }
 
 
@@ -1226,6 +1525,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             p.add_argument("--logs", action="store_true")
         if name == "record":
             p.add_argument("--pr", required=True)
+        if name == "rule":
+            p.add_argument("--thread", required=True)
+            p.add_argument("--label", required=True, choices=THREAD_LABELS)
+            p.add_argument("--why")
         if name == "evidence":
             p.add_argument("--kind", required=True, choices=("ci", "review"))
             p.add_argument("--title", required=True)
@@ -1248,6 +1551,9 @@ def main(argv: list[str] | None = None) -> int:
     except ToolFailure as failure:
         rc, result = 1, {"spec": ctx.name, "error": str(failure),
                          "human": [f"ERROR: {failure}"]}
+    except UsageError as misuse:
+        rc, result = 2, {"spec": ctx.name, "usage": str(misuse),
+                         "human": [f"USAGE: {misuse}"]}
     human = result.pop("human", [])
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))

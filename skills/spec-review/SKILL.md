@@ -105,10 +105,18 @@ secret-shape scan of the change (hits name `path:line` and the
 pattern, never the token), and an informational row listing changed
 dependency-manifest lines — name every new dependency in the report.
 In pr mode the PR's CI checks join as `source: ci` rows when `gh` is
-available: red CI is a gate finding, never a silent pass. It prints a
-JSON array — one `{name, source, status, exit_code, tail}` per check,
-`status` pass/fail/timed_out (each repo check is killed after
-`GATE_CHECK_TIMEOUT`, default 600 s).
+available, and each red row is triaged first (D-023): a `code` class
+— a project step failed — is a gate finding, never a silent pass; a
+red row classed `infrastructure` (a cancelled or never-started run,
+or the runner's own setup/wrap-up step failed) or `unknown` (no step
+data behind the status) does not fail the gate and does not stop the
+reviewers — it stands in the report's gate section with its class,
+reason, and rerun command, and the recommendation floors at `human`
+while it stands. The class reads the run's steps (`gh run view
+--json jobs`), never how fast the job failed and never log text. It
+prints a JSON array — one `{name, source, status, exit_code, tail}`
+per check, `status` pass/fail/timed_out (each repo check is killed
+after `GATE_CHECK_TIMEOUT`, default 600 s).
 
 Rules: a red gate ends a fresh review — report the failing checks with
 their tails as the findings, and stop (exception: a project audit
@@ -212,11 +220,17 @@ When the user asked to fix as well, run bounded rounds (default 2):
    backgrounded-job discipline, code commenting) — they bind the fix
    loop's every edit.
 2. Every attempted fix is verified by an independent reader: `fixed` /
-   `unfixed` / `worse` — a fix that weakens a test is `worse`.
-3. The gate re-runs; failures become findings the fixer must clear.
-4. A fresh-eyes reviewer scans the diff of exactly the paths the fixer
+   `unfixed` / `worse` — a fix that weakens a test is `worse`. A
+   fixer **skip is ruled on, not counted**: `rejected-valid` (the
+   reason holds — the finding is withdrawn) or `rejected-invalid`
+   (the finding stands); an unruled skip stands (D-022).
+3. A fixer **out-of-scope** item (the sound fix needs paths or
+   behavior this change must not touch) burns no round: it leaves the
+   loop and is surfaced in the report as the user's widening call.
+4. The gate re-runs; failures become findings the fixer must clear.
+5. A fresh-eyes reviewer scans the diff of exactly the paths the fixer
    touched, for NEW defects the fixes introduce.
-5. Loop until everything is fixed or rounds run out.
+6. Loop until everything is resolved or rounds run out.
 
 **The review-then-ask flow.** An unattended run cannot pause mid-run
 to ask, so the decision gate is a second run: run a review first
@@ -227,9 +241,28 @@ findings JSON (schema: `templates/fix-from-findings.json`) — plus
 the recommendation.
 
 End with a **recommendation**: `merge` (everything fixed, gate green,
-nothing new), `fix-first` (ordinary findings remain), or `human`
-(judgment calls or unconfirmed residue). Fixes stay uncommitted — the
-commit decision and message are the user's.
+nothing new, and no standing infrastructure-or-unknown CI row —
+D-023), `fix-first` (ordinary findings remain), or `human`
+(judgment calls, unconfirmed residue, or a standing CI row whose
+rerun is the user's call). The oracle derives the floor
+from the report's own state and rejects a claim below it — escalating
+on judgment is always allowed (D-021, `gates/recommendation.md`).
+When the verdict is `human`, or a spent fix loop leaves findings
+unresolved, the report also carries the **stop ask** (`stopAsk`,
+D-024): what stopped, why it matters (a risk level and its reason),
+the options with their consequences, a recommendation only where a
+criterion in `gates/recommendation.md` picks one — otherwise `No
+recommendation: why this is the owner's call` — and what the answer
+covers. Put it to the user through the harness's structured question
+tool where one exists (the options as choices, a recommended one
+first and marked), otherwise print it — and stop: an unanswered ask
+is not an answer (spec-define D-018). A merge-derivable report, an
+ordinary fix-first with rounds left, and every review-only run carry
+no stop ask. Never re-run the fix loop to "make progress": another
+round is an option only when something changed since the last attempt,
+and the report names what (`changed_since`).
+Fixes stay uncommitted — the commit decision and message are the
+user's.
 
 ## Run sequence (driving the oracle)
 
@@ -244,7 +277,11 @@ the final ask → `O report --kind review`; when fixing, per round
 `O fix-snapshot` → fixer → `O fix-check` → `O gate` → verify →
 fix-review, then `O report --kind fix`. `O run-save --run-dir D
 --stage <stage> --data @F.json` after EVERY stage — the stage names
-are the oracle's `STAGES` tuple.
+are the oracle's `STAGES` tuple. A failed call is not a round: a
+fixer, reviewer or verifier spawn that returned nothing usable opens
+no fix round and changes no finding's status — re-run the same stage,
+three tries, then stop and tell the owner (`contracts/run-sequence.md`
+§ A failed call is not a round).
 
 **Resume** — a crash restarts nothing: `O run-resume --run-dir D`
 re-fingerprints the target; changed → refused (new run, or `fix_from`
@@ -275,9 +312,14 @@ kept finding confirmed independently. `fast` findings are self-checked.
 ## Reading the result
 
 Findings carry `path:line`, evidence, severity, lens, and a
-verified/unconfirmed status (or fixed/unfixed/worse after a fix
-round). Triage drops are listed with reasons — "dropped at triage"
-means judged out of scope, not missed. `notCovered` distinguishes
+verified/unconfirmed status (or, after a fix round, a fix verdict:
+`fixed`/`unfixed`/`worse`, a skip ruling `rejected-valid`/
+`rejected-invalid`, or `out-of-scope` — D-022). Triage drops are
+listed with reasons — "dropped at triage"
+means judged out of scope, not missed. A `human` verdict — or a spent
+fix loop with findings left — renders the stop ask in the markdown
+under `## Recommendation` and as `stopAsk` in the report result: work
+from its options, not from a re-run (D-024). `notCovered` distinguishes
 "found nothing" from "looked nowhere": read it before trusting a
 clean report. Field semantics: panel.md § Findings and § The report.
 

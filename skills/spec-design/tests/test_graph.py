@@ -2035,8 +2035,10 @@ class Exec011RepairDeltaTests(unittest.TestCase):
     fresh baseline, or a failing diff never reads as an empty delta."""
 
     def payload_for(self, tmp: Path, git=True, head="def5678",
-                    diff=("repo/calc.py", "repo/test_calc.py")):
+                    diff=("repo/calc.py", "repo/test_calc.py"), prep=None):
         d = copy_fixture(tmp)
+        if prep:
+            prep(d)
         patches = [
             unittest.mock.patch.object(graph.specstate, "git_available",
                                        lambda repo: git),
@@ -2063,6 +2065,49 @@ class Exec011RepairDeltaTests(unittest.TestCase):
             self.assertIn("do NOT rebuild", payload)
             self.assertIn("repo/calc.py", payload)
             self.assertIn("repo/test_calc.py", payload)
+            # a later grounding re-grounds from the delta, never from intent
+            self.assertNotIn("INTENT SEED", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_first_grounding_seeds_from_a_baselined_intent(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011g-"))
+        try:
+            def first_grounding_after_intake(d):
+                tech = (d / "tech-spec.md").read_text(encoding="utf-8")
+                (d / "tech-spec.md").write_text(
+                    tech.replace("**Baseline**: mini-calc v1 @ 3fa9c21",
+                                 "**Baseline**: <version @ commit>"),
+                    encoding="utf-8")
+                (d / "intent.md").write_text(
+                    "# Intent: mini\n\n**Baseline**: mini-calc v1 @ 3fa9c21\n",
+                    encoding="utf-8")
+            _d, payload = self.payload_for(
+                tmp, prep=first_grounding_after_intake)
+            self.assertIn("baseline: none recorded yet (first grounding)",
+                          payload)
+            self.assertIn("INTENT SEED", payload)
+            self.assertIn("probed at 3fa9c21 (HEAD def5678)", payload)
+            self.assertIn("repo/calc.py", payload)
+            self.assertIn("never statuses", payload)
+            self.assertNotIn("DELTA RE-GROUND", payload)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_first_grounding_without_an_intent_baseline_has_no_seed(self):
+        tmp = Path(tempfile.mkdtemp(prefix="exec011h-"))
+        try:
+            def no_intake_evidence(d):
+                tech = (d / "tech-spec.md").read_text(encoding="utf-8")
+                (d / "tech-spec.md").write_text(
+                    tech.replace("**Baseline**: mini-calc v1 @ 3fa9c21",
+                                 "**Baseline**: <version @ commit>"),
+                    encoding="utf-8")
+                (d / "intent.md").unlink(missing_ok=True)
+            _d, payload = self.payload_for(tmp, prep=no_intake_evidence)
+            self.assertIn("baseline: none recorded yet (first grounding)",
+                          payload)
+            self.assertNotIn("INTENT SEED", payload)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2071,6 +2116,7 @@ class Exec011RepairDeltaTests(unittest.TestCase):
         try:
             _d, payload = self.payload_for(tmp, head="3fa9c21")
             self.assertNotIn("DELTA RE-GROUND", payload)
+            self.assertNotIn("INTENT SEED", payload)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2474,6 +2520,23 @@ class Graph019LaunchCheckTests(unittest.TestCase):
         self.assertEqual(adv["frontier_agents"], ["execute"])
         # one runnable task (T001) — execute is heavy even as one payload
         self.assertEqual(adv["payloads"], 1)
+
+    def test_fast_mode_runs_a_tiny_execute_inline(self):
+        d = scaffold(self._tmp / "fast", "demo")
+        write(d / "spec.md", TINY_SPEC.replace(
+            "**Effort**: standard\n", "**Effort**: standard\n**Mode**: fast\n"))
+        set_status(d, "approved")
+        adv = self.advisory(d)
+        self.assertEqual(adv["weight"], "single")
+        self.assertFalse(adv["launch_workflow"])
+        self.assertIn("Mode: fast", adv["reason"])
+        # the full tier ignores the header, and says so
+        full = copy_fixture(self._tmp / "fast-full")
+        write(full / "spec.md", (full / "spec.md").read_text(encoding="utf-8")
+              .replace("**Status**:", "**Mode**: fast\n**Status**:", 1))
+        st = compute(full)
+        self.assertEqual(st["mode"], "standard")
+        self.assertIn("only at Tier: tiny", st["mode_note"])
 
     def test_wave_weight_for_the_grounding_fan_out(self):
         adv = self.advisory(self.analysis_dir)

@@ -36,5 +36,15 @@ outlive the next commit.
 | Not a git repository | refused — a non-git delivery has no commit to ship |
 | Remote-tracking refs stale | the gate reads them "as of the last fetch" and says so; a push the remote rejects is reported, never retried with force |
 
+After the push, `status` derives the CI stages. `ci-red` means at
+least one red check is classed `code` (D-005) — its evidence routes
+to `/spec-build`. When every red check is classed `infrastructure`
+(a cancelled or never-started run, or the runner's own setup/wrap-up
+step failed) or `unknown` (no step data behind the status), the
+`ci-rerun` stage opens no fix round: it prints each check's class and
+reason plus the `gh run rerun <id> --failed` commands, and a rerun —
+an outward action — runs only on the user's yes. `ship.py evidence
+--kind ci` routes a red check to a fix round on purpose.
+
 The gate decides only whether shipping may start. What leaves, and
 on whose word, is `gates/outward-actions.md`.

@@ -23,6 +23,10 @@
                                 proves behavior is preserved. -->
 **Effort**: standard       <!-- standard | large — agent-count scaling only;
                                 the Tier line above owns the contract shape. -->
+**Mode**: standard         <!-- standard | fast — fast: the session implements
+                                the tasks itself instead of spawning a
+                                developer per task (claims, proofs, gates
+                                unchanged); honored only at this tier. -->
 **Created**: YYYY-MM-DD
 **Branch**: `<type>/<name>`
 

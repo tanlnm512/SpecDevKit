@@ -38,7 +38,8 @@ dialects, manifests) is generated under `tools/` (C-03).
   - the `§ Engineering rules` sections in
     `skills/spec-build/agents/developer.md` and
     `skills/spec-review/agents/review-fixer.md` ←
-    `rules/engineering-rules.md` via `tools/kit-rules.py`
+    `rules/engineering-rules.md` via `tools/kit-rules.py`, and their
+    `§ Budgets` sections ← `rules/agent-limits.md` (same tool)
     (`tools/sync.sh` also refreshes them before every install)
 - **Agent briefs live in `skills/<skill>/agents/`** (roles only — the
   lens/protocol prose they point at lives in `protocol/`, D-049) — root
@@ -72,3 +73,8 @@ dialects, manifests) is generated under `tools/` (C-03).
 - `GLOSSARY.md` — the kit's shared language: canonical terms, terms
   to avoid, flagged ambiguities. Use its terms in briefs, docs, and
   commits; add a term when a new one stabilizes.
+- `HARNESS-FACTS.md` — what the kit has verified about the harnesses
+  it runs on, and the assumptions it still leans on. Read it before
+  relying on a harness behaviour: a fact enters only with its
+  evidence, and an assumption leaves only when a test or a recorded
+  run establishes it.
