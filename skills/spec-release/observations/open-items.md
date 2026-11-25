@@ -5,7 +5,7 @@ decision, or strike it when resolved outright.
 
 1. ~~**No tests yet.**~~ — `tests/test_release.py` proves the script
    behaviors `contracts/run.md` names, and R1–R4 ran live on
-   2026-11-13 (results under `evals/results/`): R1, R2, and R4 passed
+   2026-11-25 (results under `evals/results/`): R1, R2, and R4 passed
    every criterion; R3 failed one (item 9).
 2. **check.py does not verify `Released:`.** `Delivered:` shas get
    existence and ancestry checks (check.py's lifecycle integrity);
@@ -30,7 +30,8 @@ decision, or strike it when resolved outright.
    tags (`git tag -s`) signs by hand today.
 8. **No telemetry.** The other skills record local, content-free
    counts; this one records none yet.
-9. **The changelog is written before it is shown** (R3, 2026-11-13).
+9. **The changelog is written before it is shown** (R3, 2026-11-13
+   and 2026-11-25).
    Step 3 runs `notes <v> --write` and then shows the section, so on
    a repo with no changelog the file exists, uncommitted, before the
    user has seen its content. R3's criterion asks for the reverse.
@@ -40,6 +41,19 @@ decision, or strike it when resolved outright.
     2026-11-13) `cut` now tags with `--cleanup=verbatim`, so `### Added`
     and its siblings stay in the tag message.
 11. **Scratch-only eval corpus** — accepted limitation: R1–R4 ran in
-    scratch repos with a bare local remote, so the GitHub release
-    step ended in its documented failure path and no real-repo
-    release run is recorded.
+    scratch repos with a bare local remote (2026-11-13 and
+    2026-11-25), so the GitHub release step was never exercised for
+    real and no real-repo release run is recorded. The 2026-11-25
+    sessions were operator-driven too: an agent session answered by
+    the operator per each case's Run line, with this kit's AGENTS.md
+    in its context, so the yes-gated criteria show the gates holding
+    for an informed session, no more than that.
+12. **A moved Unreleased group is drafted out of template order.**
+    When `## [Unreleased]` already holds a group, `notes <v> --write`
+    places it first in the new section (`### Changed` above
+    `### Added` and `### Fixed`), where `contracts/run.md` orders
+    groups as `templates/changelog-section.md` does. The release
+    manager reordered it by hand in R1 (2026-11-25).
+13. **A rollout bullet wrapped across lines is cut at the break.** A
+    `### Rollout` item whose text continues on an indented next line
+    reaches the notes' `### Upgrade notes` as its first line only.

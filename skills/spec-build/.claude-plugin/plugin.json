@@ -1,6 +1,6 @@
 {
   "name": "spec-build",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Builds an approved spec \u2014 the suite's back half.",
   "author": {
     "name": "Stanley",
