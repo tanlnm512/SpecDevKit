@@ -5,6 +5,39 @@ back half of the split spec suite (spec-to-prod-split): implementer
 waves over approved task.md frontiers through the tick-commit gate —
 authoring is spec-shape's, intake spec-intent's.
 
+## 0.2.0 — 2026-11-25
+
+- A proof the environment cannot run is ENV-BLOCKED, a fifth outcome
+  that is neither a pass nor a charged failure: `audit.py proofs` exits
+  1 and dod gate 1 stays red until a `- Proof:` ruling sits in the
+  delivery block (D-047).
+- A change to the files that define what the checks check — make
+  recipes, CI workflows, test-runner and lint configuration — is listed
+  by `audit.py verifiers` and fails dod gate 14 until ruled (D-046).
+- A red repository check is re-run against the approved base in a
+  temporary worktree and charged to the change only when the base
+  passes; pre-existing and unknown outcomes take a `- Regression:`
+  ruling (D-048).
+- A consequential stop shows what stopped, two to four options with
+  their consequences, and a recommendation only when a rule or the
+  evidence picks one (D-050).
+- A digest's deviation is typed (scope, spec-defect, other), the same
+  failing command across fix rounds suspects the plan, the briefs carry
+  their budgets, and a red acceptance command gets a bounded self-check
+  first (D-043, D-044, D-045).
+- `Mode: fast` on a tiny spec runs its tasks in the session instead of
+  spawning a developer per task (D-066, spec-design).
+- `migrate.py <spec-dir> upgrade` folds a retired survey.md into
+  tech-spec.md § Code state (D-063, spec-design).
+
+Migration: run `python3 skills/spec-build/scripts/migrate.py <spec-dir>
+upgrade` on each docset that still holds a survey.md — check.py fails
+it and names that command — then re-approve it. Archived and done
+docsets keep their survey.md as history. Every other approved docset
+is untouched and `bash tools/sync.sh` refreshes the install. The
+delivery block gains optional `Proof:`, `Verifier:` and `Regression:`
+ruling lines; none is required until its row stands unruled.
+
 ## 0.1.2 — 2026-11-17
 
 - A proof naming a test no source defines is PENDING, not PASS:
