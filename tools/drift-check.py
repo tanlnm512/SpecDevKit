@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Release validation for generated surfaces: every committed artifact a
-tool regenerates must match a fresh regeneration, and every derived
-surface must agree with its canonical source. One command, one verdict —
+tool regenerates must match a fresh regeneration, every derived surface
+must agree with its canonical source, and every SKILL.md description
+must stay inside its length budget. One command, one verdict —
 exit 0 releases; exit 1 names what drifted and what owns it:
 
   manifests   .claude-plugin/marketplace.json and    vs the regeneration
@@ -10,7 +11,7 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                      (tools/plugin-manifest.py
                                                      --check)
   kit-rules   agents/developer.md and                  vs the injection from
-              agents/review-fixer.md            rules/engineering-rules.md
+              agents/spec-review-fixer.md       rules/engineering-rules.md
               § Engineering rules + § Budgets        and rules/agent-limits.md
               sections                           (tools/kit-rules.py --check)
   parity      skills/*/scripts/ replica views of     vs the master closure
@@ -38,6 +39,17 @@ exit 0 releases; exit 1 names what drifted and what owns it:
                                                    (case grammar, Check
                                                    bullets in range, results
                                                    citing real cases)
+  descriptions skills/*/SKILL.md description:       within the loader cap
+              lengths, counted as tools/sync.sh     (1024 chars — FAIL
+              counts them                           above it) and the
+                                                     600-char budget (WARN
+                                                     above it — AGENTS.md,
+                                                     § Commands)
+
+No `guards` set: the approval guard tools/hooks.py generates is
+machine-installed and never committed, so there is nothing here to
+compare — `tools/hooks.py --check` verifies an installed root, and
+`tools/sync.sh --check` runs it.
 
 Exit: 0 every surface matches its canonical source · 1 drift · 2 usage
 error.
@@ -64,6 +76,12 @@ NODE_DEF = re.compile(
 SOLID_EDGE = re.compile(r'^\s*([A-Za-z0-9_]+)\s*-->\s*([A-Za-z0-9_]+)\s*$')
 DOTTED_EDGE = re.compile(
     r'^\s*([A-Za-z0-9_]+)\s*-\.\->\s*\|([^|]*)\|\s*([A-Za-z0-9_]+)\s*$')
+# tools/sync.sh counts a description with this same block at install —
+# the two measures must stay alike.
+FOLDED_DESCRIPTION = re.compile(
+    r"description: >-\n((?:  .*\n|\n)*?)metadata:")
+DESCRIPTION_BUDGET = 600
+DESCRIPTION_CAP = 1024
 
 
 def run_tool(*argv: Path | str) -> int:
@@ -340,12 +358,52 @@ def check_evals() -> int:
     return 1 if problems else 0
 
 
+def folded_description(skill_md: Path) -> str | None:
+    m = FOLDED_DESCRIPTION.search(skill_md.read_text(encoding="utf-8"))
+    if not m:
+        return None
+    lines = m.group(1).splitlines(keepends=True)
+    return "".join(l[2:] if l.startswith("  ") else l for l in lines).strip()
+
+
+def check_descriptions() -> int:
+    print(f"== descriptions — budget {DESCRIPTION_BUDGET} chars "
+          f"(AGENTS.md), loader cap {DESCRIPTION_CAP} (HARNESS-FACTS.md); "
+          f"counted as tools/sync.sh counts")
+    skill_mds = sorted(PKG_ROOT.glob("skills/*/SKILL.md"))
+    if not skill_mds:
+        print("  FAIL skills/*/SKILL.md — no skill to count")
+        return 1
+    failed = False
+    for skill_md in skill_mds:
+        name = skill_md.parent.name
+        text = folded_description(skill_md)
+        if text is None:
+            print(f"  FAIL {name} — no folded description: >- block to "
+                  f"count")
+            failed = True
+            continue
+        count = len(text)
+        if count > DESCRIPTION_CAP:
+            print(f"  FAIL {name} — {count} chars, over the "
+                  f"{DESCRIPTION_CAP} loader cap")
+            failed = True
+        elif count > DESCRIPTION_BUDGET:
+            print(f"  WARN {name} — {count} chars, over the "
+                  f"{DESCRIPTION_BUDGET}-char budget")
+        else:
+            print(f"  OK   {name} — {count} chars")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="drift-check.py",
         description="Release-validate every generated surface against its "
-                    "canonical source: contract, manifests, kit-rules, "
-                    "parity, diagrams, examples, personas, evals.")
+                    "canonical source (contract, manifests, kit-rules, "
+                    "parity, diagrams, examples, personas, evals) and every "
+                    "SKILL.md description against its length budget "
+                    "(descriptions).")
     p.parse_args(argv)
 
     failed = []
@@ -356,15 +414,17 @@ def main(argv: list[str] | None = None) -> int:
                         ("diagrams", check_diagrams),
                         ("examples", check_examples),
                         ("personas", check_personas),
-                        ("evals", check_evals)):
+                        ("evals", check_evals),
+                        ("descriptions", check_descriptions)):
         if check():
             failed.append(name)
     if failed:
         print(f"drift check: FAILED — {', '.join(failed)} differ from their "
-              f"canonical sources")
+              f"canonical sources or break a budget")
         return 1
     print("drift check: OK — contract, manifests, kit-rules, parity, "
-          "diagrams, examples, personas, evals match their canonical sources")
+          "diagrams, examples, personas, evals match their canonical "
+          "sources; descriptions within budget")
     return 0
 
 

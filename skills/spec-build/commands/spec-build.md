@@ -16,7 +16,7 @@ itself named like a verb is addressed with the `spec` keyword —
   `graph.py --span execute` (approve DONE + verify green; anything
   less refuses with exit 4 naming the blocking gate — route
   authoring to /spec-design), then implementer waves over the
-  per-task frontier, fix rounds ≤5, the ONE delivery pass, and the
+  per-task frontier, fix rounds ≤4, the ONE delivery pass, and the
   tick-commit gate — a human gate: nothing is ticked or committed
   before the user's yes to the delivery summary.
 - `implement <spec> [T###]` → the execute node: implementer waves, no

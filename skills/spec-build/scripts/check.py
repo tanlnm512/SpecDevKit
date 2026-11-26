@@ -686,7 +686,8 @@ def constitution_status(repo_root: Path) -> tuple[bool, str]:
 
 def other_specs_exist(repo_root: Path, spec_dir: Path) -> bool:
     """True if specs/ holds another spec dir besides this one (excluding the
-    non-spec `context/` and `archive/` folders) — i.e. this is not the
+    non-spec `context/` and `archive/` folders; a spec dir holds a
+    spec.md) — i.e. this is not the
     repo's first spec, so a missing constitution cannot be blamed on
     scaffold.sh's first-scaffold auto-create."""
     specs_root = repo_root / "specs"
@@ -694,7 +695,8 @@ def other_specs_exist(repo_root: Path, spec_dir: Path) -> bool:
         return False
     this = spec_dir.resolve()
     for p in specs_root.iterdir():
-        if p.is_dir() and p.name not in ("context", "archive") and p.resolve() != this:
+        if (p.is_dir() and p.name not in ("context", "archive")
+                and (p / "spec.md").is_file() and p.resolve() != this):
             return True
     return False
 
@@ -1250,7 +1252,7 @@ def approval_failures(spec_dir: Path, repo_root: Path,
             for problem in freeze.verify(spec_dir, repo_root)]
 
 
-# FR-011 migration detector (D-010): the five pre-change grammar elements
+# FR-011 migration detector (D-010): the pre-change grammar elements
 # the per-spec-dir ramp warns once about, then fails by name. Scoped to
 # MIGRATABLE_STATUS docsets outside specs/archive/ — the same refusals
 # migrate.py upgrade inherits, so every docset that can see the WARN can
@@ -1258,8 +1260,6 @@ def approval_failures(spec_dir: Path, repo_root: Path,
 MIGRATABLE_STATUS = ("draft", "approved", "active")
 WARN_MARKER = ".grammar-v1-warned"
 MIGRATE_HINT = "run `migrate.py <spec-dir> upgrade`"
-FROZEN_CONTRACT_HEADING = re.compile(r"^## Frozen contract[ \t]*$", re.M)
-FREEZE_HEADING = re.compile(r"^## Freeze[ \t]*$", re.M)
 # audit.py's delivery-block shapes (runtime-only, outside the parity
 # closure — mirrored here for the block-presence test only).
 DELIVERED_FIELD = re.compile(r"^[ \t]*\*{0,2}Delivered\*{0,2}[ \t]*:.*$", re.M)
@@ -1289,10 +1289,12 @@ def has_delivery_block(holder: str) -> bool:
 def grammar_elements(spec_dir: Path, tier: str, holder: str,
                      task: str | None, tech: str | None) -> list[str]:
     """The pre-change grammar elements this docset still carries, in the
-    pinned order (D-010's five-element list). A research.md carrying the
-    canonical skip line is the folded record's legacy form — inert like
-    any leftover beside a migrated docset; so is a review.md beside an
-    already-folded approval record."""
+    pinned order (D-010's list). A research.md carrying the canonical
+    skip line is the folded record's legacy form — inert like any
+    leftover beside a migrated docset. An approval record is never an
+    element: only the owner's signature makes one current
+    (`freeze.py --approve`), so an old record or its review.md sidecar
+    is left to the re-approval."""
     elements: list[str] = []
     research = _read(spec_dir / "research.md") if tier == "full" else ""
     questions = bool(tech and QUESTIONS_SECTION.search(tech))
@@ -1300,13 +1302,6 @@ def grammar_elements(spec_dir: Path, tier: str, holder: str,
         line.strip() == RESEARCH_SKIP_MARKER for line in research.splitlines())
     if tier == "full" and research and not questions and not legacy_skip:
         elements.append("research.md present")
-    approval = _read(spec_dir / "approvals" / "approval.md")
-    old_record = (spec_dir / "approvals" / "review.md").exists() or bool(
-        approval and FROZEN_CONTRACT_HEADING.search(approval))
-    if old_record and not (approval and FREEZE_HEADING.search(approval)):
-        elements.append(
-            "the unfolded approval record (approvals/review.md sidecar "
-            "or a `## Frozen contract` manifest)")
     if (spec_dir / "notes" / "delivery.md").exists() \
             and not has_delivery_block(holder):
         elements.append("notes/delivery.md present with no delivery block "

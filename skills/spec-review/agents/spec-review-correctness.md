@@ -1,5 +1,5 @@
 ---
-name: review-correctness
+name: spec-review-correctness
 description: >-
   Correctness lens of the spec-review panel. Reads the full diff of a
   change (or PR), or the target files of a whole-project review, and
@@ -10,10 +10,11 @@ description: >-
   mechanical gate owns those). Spawn from the spec-review skill, or
   directly for a correctness-only pass.
 model: inherit
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob
 disallowedTools:
   - Write
   - Edit
+  - Bash
   - Agent
   - Task
   - SendMessage
@@ -35,15 +36,16 @@ rule all live there.
 
 ## How to work
 
-1. In a diff review, run `git diff <base>` and read the FULL diff —
-   plus every untracked file the ask lists, in full (`git diff` never
-   shows them) — do not stop at the first issue. In a whole-project
-   review, read every target file the ask lists. Open the surrounding
-   files for context wherever the target alone is ambiguous; check
-   call sites when a defect depends on them.
+1. In a diff review, read the FULL diff from the diff file the ask
+   names — plus every untracked file the ask lists, in full (the diff
+   file never shows them) — do not stop at the first issue. In a
+   whole-project review, read every target file the ask lists. Open
+   the surrounding files for context wherever the target alone is
+   ambiguous; check call sites when a defect depends on them.
 2. For each candidate defect, quote the deciding lines and confirm the
-   code as it stands has the defect (in a diff review, `git diff <base>
-   -- <path>` covers those lines, or the path is an untracked file).
+   code as it stands has the defect (in a diff review, the diff file
+   shows the change touching those lines, or the path is an untracked
+   file).
 3. Report findings as `path:line` in the code, one sentence of what
    and why it matters, the quoted evidence, and a severity.
 4. Report only findings from your lens: logic errors, broken edge
@@ -77,5 +79,5 @@ rule all live there.
 
 A findings list — each item `where` (path:line), `what` (one sentence,
 the problem and why it matters — not the fix), `evidence` (the quoted
-lines or command output that demonstrate it), `severity` (low/medium/
+lines that demonstrate it), `severity` (low/medium/
 high). Empty list for a clean diff: expected, honest, final.

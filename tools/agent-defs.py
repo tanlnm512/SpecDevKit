@@ -25,7 +25,7 @@ Targets:
   tool spawns them as subagent_type by `name`. Frontmatter: name
   (validated ^[a-z0-9-_]+$), description, model: inherit ALWAYS —
   pinning Factory model IDs guessed from Claude family names would risk
-  a DroidValidator load error on every wrong guess; cost tiers belong
+  a DroidValidator load error on every wrong guess; model steps belong
   on the Task call (complexity), not the def. Tools mapped Read/Grep/
   Glob -> same, Bash -> Execute, Write -> Create, Edit -> Edit,
   WebSearch/WebFetch -> WebSearch/FetchUrl; Skill is auto-included by

@@ -70,6 +70,16 @@ inline `[source]` — URL plus access date, or `file:line`. A lens
 that cannot satisfy its brief says so in `watch:` rather than
 working around it.
 
+Every returned digest is validated against this grammar before
+Stage 5 reads a field from it — `python3 <skill_dir>/scripts/
+digests.py validate panelist <lens> --require-tools`: exit 0
+valid, exit 1 with the problems, exit 3 when the reply's first
+line, its `tools:` report, lacks Read (the grammar ignores that
+line). A malformed digest is a fix-and-run-again refusal: hand the
+problems back to the same panelist and re-spawn it. Exit 3 is a
+failed spawn: spawn again on a type or harness that holds Read.
+Either burns no round, and no field of it is read.
+
 Stage 5 reads the digests through named fields: a **dealbreaker**
 is a line of the Cynic's `points:`; its `watch:` supplies a risk's
 early warning where one fits; its `kill:` seeds the kill criteria;

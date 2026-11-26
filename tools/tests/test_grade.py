@@ -103,7 +103,7 @@ class RepoSmokeTests(unittest.TestCase):
                      "skill:spec-discover", "skill:spec-ship",
                      "skill:spec-release", "agent:integrator",
                      "agent:release-manager",
-                     "agent:analyst", "agent:review-correctness",
+                     "agent:analyst", "agent:spec-review-correctness",
                      "agent:panelist"):
             self.assertIn(unit, self.report)
 

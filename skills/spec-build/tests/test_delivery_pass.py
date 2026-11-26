@@ -61,6 +61,10 @@ class DeliveryPassTests(unittest.TestCase):
     def tiny_spec(self, name: str = "tiny-delivered-demo") -> Path:
         spec = self.root / "specs" / name
         shutil.copytree(TINY, spec)
+        # the example's legacy record is unsigned: it counts as history
+        # only once a commit carries it
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "spec")
         return spec
 
     def test_dod_proves_counts_and_scopes_a_tiny_spec(self):

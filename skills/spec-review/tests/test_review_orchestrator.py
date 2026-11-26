@@ -5,9 +5,11 @@ Real temp git repos, not mocks: the oracle's contract is repo state in,
 JSON out. Error paths must fail loudly (exit 1 + status error), never
 silently proceed."""
 
+import atexit
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -74,11 +76,14 @@ class ScopeTests(unittest.TestCase):
             d = ok(["scope", "--target", "diff", "--repo", str(repo)])
             self.assertEqual(d["base"], "HEAD")
             self.assertEqual(d["files"], ["app.py"])
+            run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
             ask = ok(["ask", "--kind", "review", "--ctx", json.dumps(
-                {"base": d["base"], "files_n": 1, "lines": 1, "over_cap": False,
+                {"base": d["base"], "run_dir": run_dir, "files_n": 1, "lines": 1, "over_cap": False,
                  "lens": {"label": "correctness", "focus": "f."}, "gate_line": "ok"})])["ask"]
-            self.assertIn("`git diff HEAD`", ask)
-            self.assertNotIn("`git diff `", ask)
+            # the base the ask is rendered against decides what the reader reads
+            diff = Path(run_dir) / "reader-files" / "diff.patch"
+            self.assertIn(f"`{diff}`", ask)
+            self.assertIn("+y = 2\n", diff.read_text(encoding="utf-8"))
 
     def test_untracked_cache_and_binary_files_stay_out_of_scope(self):
         holder, repo = make_repo()
@@ -419,6 +424,20 @@ class FindingsParseTests(unittest.TestCase):
         # no recorded confirmation is never promoted to verified
         self.assertEqual(d["tracked"][0]["finding"]["confirmation"]["status"], "unconfirmed")
 
+    def test_a_leading_tools_report_is_never_a_finding(self):
+        # every reply opens with its tools report (D-029): handed over
+        # whole, it parses exactly as it does without that line
+        payload = json.dumps([{"id": "F-9", "where": "a.py:1", "what": "x",
+                               "severity": "high"}])
+        bare = ok(["findings-parse", "--text", payload])
+        for lead in ("tools: Read, Grep, Glob\n", "> tools: read\n",
+                     "Tools: `Read`.\n"):
+            with self.subTest(lead=lead):
+                self.assertEqual(ok(["findings-parse", "--text", lead + payload]), bare)
+        self.assertEqual(
+            ok(["findings-parse", "--text", "tools: Read\n" + FINDINGS_MD]),
+            ok(["findings-parse", "--text", FINDINGS_MD]))
+
     def test_garbage_fails_loudly(self):
         msg = err(["findings-parse", "--text", "neither json nor a report"])
         self.assertIn("neither valid JSON nor a parseable review report", msg)
@@ -693,28 +712,41 @@ class ReportTests(unittest.TestCase):
         self.assertIn("unknown fix status 'skipped'", msg)
 
 
+def make_run():
+    holder, repo = make_repo()
+    (repo / "app.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
+    return holder, repo, run_dir
+
+
+RUN_HOLDER, _, RUN_DIR = make_run()
+atexit.register(RUN_HOLDER.cleanup)
+
 ASK_CASES = [
-    ("scout", {"base": "HEAD", "project": False, "files": ["src/a.py", "src/b.py"]}),
+    ("scout", {"base": "HEAD", "project": False, "files": ["src/a.py", "src/b.py"], "run_dir": RUN_DIR}),
     ("scout", {"base": "HEAD", "project": True, "files": [f"m{i}.py" for i in range(45)],
-               "repo_abs": "/tmp/repo"}),
-    ("review", {"base": "HEAD~1", "files_n": 3, "lines": 120, "over_cap": False,
+               "repo_abs": "/tmp/repo", "run_dir": RUN_DIR}),
+    ("review", {"base": "HEAD", "files_n": 3, "lines": 120, "over_cap": False,
+                "run_dir": RUN_DIR,
                 "gate_line": "The repo's own checks all passed",
                 "lens": {"focus": "logic errors."},
                 "intent": "add caching", "scout_map": {"modules": [{"name": "m", "path": "src/m.py", "role": "r"}],
                                                         "conventions": ["c1"], "riskAreas": ["ra1"]}}),
     ("review-project", {"base": "HEAD", "files": ["a.py"], "candidates": 9, "part": 2, "parts": 3,
                         "gate_line": "checks passed", "lens": {"focus": "security."},
-                        "repo_abs": "/tmp/repo"}),
+                        "repo_abs": "/tmp/repo", "run_dir": RUN_DIR}),
     ("triage", {"base": "HEAD", "lens_label": "correctness", "intent": "fix bug",
                 "findings": [{"where": "a.py:1", "what": "x", "evidence": "q", "severity": "high"}]}),
     ("triage-project", {"lens_label": "quality", "findings": []}),
     ("cross-lens", {"base": "HEAD", "kept": [{"where": "a.py:1", "what": "x", "evidence": "q",
                                               "severity": "low", "lens": "quality"}]}),
-    ("confirm", {"base": "HEAD", "finding": {"where": "a.py:2", "what": "y", "evidence": "e",
-                                             "severity": "medium", "lens": "security", "impact": "i"}}),
+    ("confirm", {"base": "HEAD", "run_dir": RUN_DIR,
+                 "finding": {"where": "a.py:2", "what": "y", "evidence": "e",
+                             "severity": "medium", "lens": "security", "impact": "i"}}),
     ("confirm-project", {"finding": {"where": "a.py:2", "what": "y", "evidence": "e", "severity": "low"}}),
-    ("final", {"base": "HEAD", "gate_line": "checks passed", "summary": [{"id": "F-1"}],
-               "intent": "x", "scout_map": None}),
+    ("final", {"base": "HEAD", "run_dir": RUN_DIR, "gate_line": "checks passed",
+               "summary": [{"id": "F-1"}], "intent": "x", "scout_map": None}),
     ("final-project", {"gate_line": "checks passed", "summary": [], "files": [f"f{i}.py" for i in range(12)],
                        "repo_abs": None}),
     ("fixer", {"base": "HEAD", "round": 1, "project": False, "intent": "fix",
@@ -727,10 +759,11 @@ ASK_CASES = [
     ("verify", {"base": "HEAD", "project": False, "notes": "reordered guards",
                 "tracked": {"finding": {"id": "F-1", "where": "a.py:1", "what": "x",
                                         "severity": "high", "lens": "correctness"}}}),
-    ("fix-review", {"base": "HEAD", "gate_green": True, "paths": ["a.py", "b.py"]}),
-    ("fix-review", {"base": "HEAD", "gate_green": False, "paths": ["a.py"], "repo_abs": "/tmp/r"}),
-    ("loop-final", {"base": "HEAD", "rounds_used": 2, "gate_green": False, "changed_paths": ["a.py"],
-                    "project": False,
+    ("fix-review", {"base": "HEAD", "run_dir": RUN_DIR, "gate_green": True, "paths": ["a.py", "b.py"]}),
+    ("fix-review", {"base": "HEAD", "gate_green": False, "paths": ["a.py"], "repo_abs": "/tmp/r",
+                    "run_dir": RUN_DIR}),
+    ("loop-final", {"base": "HEAD", "run_dir": RUN_DIR, "rounds_used": 2, "gate_green": False,
+                    "changed_paths": ["a.py"], "project": False,
                     "tracked": [{"finding": {"id": "F-1", "where": "a.py:1", "what": "x", "evidence": "e",
                                              "severity": "high", "lens": "correctness",
                                              "confirmation": {"status": "verified", "note": ""}},
@@ -755,11 +788,36 @@ class AskRenderingTests(unittest.TestCase):
             {"batch": [{"kind": k, "ctx": c} for k, c in ASK_CASES[:4]]})])
         self.assertEqual(batch["asks"], [self._oracle(k, c) for k, c in ASK_CASES[:4]])
 
+    def test_every_ask_opens_with_the_tools_ask(self):
+        # the capability handshake (D-029): the first line of every ask is
+        # the report request, once — the rule itself sits in the protocol
+        ask_line = ("The first line of your reply is `tools: <the tools you "
+                    "actually hold, comma-separated>`.")
+        for kind, ctx in ASK_CASES:
+            with self.subTest(kind=kind, project=ctx.get("project")):
+                ask = self._oracle(kind, ctx)
+                self.assertEqual(ask.splitlines()[0], ask_line)
+                self.assertEqual(ask.count(ask_line), 1)
+                self.assertTrue(ask[len(ask_line) + 1:].rstrip(), ask)
+        asks = ok(["ask", "--kind", "batch", "--ctx", json.dumps(
+            {"batch": [{"kind": k, "ctx": c} for k, c in ASK_CASES[:4]]})])["asks"]
+        self.assertEqual([ask.splitlines()[0] for ask in asks],
+                         [ask_line] * len(asks))
+
     def test_review_ask_carries_untracked_files_and_severity_ladder(self):
         ask = self._oracle("review", {**ASK_CASES[2][1], "untracked": ["src/new.py"]})
-        self.assertIn("untracked files, which `git diff` does not show", ask)
-        self.assertIn("- src/new.py", ask)
+        self.assertIn("untracked files, which the diff file does not show", ask)
+        self.assertIn(f"- {Path(RUN_DIR).parents[2]}/src/new.py", ask)
         self.assertIn("high = data loss, crash, wrong result, or security compromise", ask)
+
+    def test_no_reader_ask_names_a_git_command(self):
+        # every ask but the fixer's is run by a type that holds no shell
+        for kind, ctx in ASK_CASES:
+            if kind != "fixer":
+                with self.subTest(kind=kind):
+                    self.assertNotRegex(self._oracle(kind, ctx), GIT_COMMAND)
+        fixer = next(c for k, c in ASK_CASES if k == "fixer" and c.get("repo_abs"))
+        self.assertIn("Run any git command as `git -C /tmp/r ...`", self._oracle("fixer", fixer))
 
     def test_systems_carry_the_three_lenses(self):
         d = ok(["systems"])
@@ -769,6 +827,206 @@ class AskRenderingTests(unittest.TestCase):
 
     def test_unknown_ask_kind_fails_loudly(self):
         err(["ask", "--kind", "nope", "--ctx", "{}"])
+
+
+GIT_COMMAND = re.compile(r"`git |git -C|\bgit (?:diff|ls-files|status|log|show)\b")
+
+
+class ReaderFileTests(unittest.TestCase):
+    """A panel reader holds no shell (D-028): the oracle writes what the
+    reader used a git command for into the run folder and the ask names
+    the file — it exists and holds the change; what the oracle cannot
+    produce is a named absence in the ask, never a crash; an ask with no
+    run folder to write into is an error, never a bare ask."""
+
+    def setUp(self):
+        holder, repo = make_repo()
+        self.addCleanup(holder.cleanup)
+        (repo / "lib.py").write_text("z = 3\n", encoding="utf-8")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-qm", "lib")
+        (repo / "app.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+        git(repo, "add", "-A")
+        self.repo = repo
+        self.run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
+        self.ctx = {"base": "HEAD", "run_dir": self.run_dir}
+
+    def named_files(self, ask):
+        folder = re.escape(self.run_dir) + "/reader-files/"
+        return [Path(name) for name in re.findall(r"`(" + folder + r"[^`]+)`", ask)]
+
+    def test_reader_asks_name_a_run_folder_file_that_holds_the_change(self):
+        tracked = {"finding": {"id": "F-1", "where": "app.py:1", "what": "x", "evidence": "e",
+                               "severity": "high", "lens": "correctness",
+                               "confirmation": {"status": "verified", "note": ""}},
+                   "fix": "fixed", "fixNote": "n"}
+        cases = [
+            ("scout", {"project": False, "files": ["app.py"]}, 1,
+             ("# target files (1)\napp.py\n", "# tracked files in the repository (2)\napp.py\nlib.py\n")),
+            ("review", {"files_n": 1, "lines": 1, "over_cap": False, "lens": {"focus": "f."},
+                        "gate_line": "ok"}, 1, ("+y = 2\n",)),
+            ("review-project", {"files": ["app.py", "lib.py"], "part": 1, "parts": 2, "candidates": 2,
+                                "lens": {"focus": "f."}, "gate_line": "ok"}, 1, ("app.py\nlib.py\n",)),
+            ("confirm", {"finding": {"where": "app.py:2", "what": "y", "evidence": "e", "severity": "low"}},
+             1, ("+y = 2\n",)),
+            ("final", {"gate_line": "checks passed", "summary": [{"id": "F-1"}]}, 1, ("+y = 2\n",)),
+            ("fix-review", {"gate_green": True, "paths": ["app.py", "lib.py"]}, 2, ("+y = 2\n",)),
+            ("loop-final", {"rounds_used": 1, "gate_green": True, "changed_paths": ["app.py"],
+                            "project": False, "tracked": [tracked]}, 1, ("+y = 2\n",)),
+        ]
+        for kind, extra, count, literals in cases:
+            with self.subTest(kind=kind):
+                d = ok(["ask", "--kind", kind, "--ctx", json.dumps({**self.ctx, **extra})])
+                self.assertEqual(sorted(d), ["ask", "status"])
+                named = self.named_files(d["ask"])
+                self.assertEqual(len(named), count, d["ask"])
+                for path in named:
+                    self.assertTrue(path.is_file(), path)
+                    self.assertTrue(str(path.resolve()).startswith(self.run_dir + "/reader-files/"), path)
+                texts = [path.read_text(encoding="utf-8") for path in named]
+                self.assertTrue(any(all(lit in text for lit in literals) for text in texts), literals)
+
+    def test_confirm_ask_rules_on_what_the_hunk_shows(self):
+        finding = {"where": "lib.py:1", "what": "y", "evidence": "e", "severity": "low"}
+        # a path the change does not touch: an empty hunk, and the finding predates the change
+        ask = ok(["ask", "--kind", "confirm", "--ctx", json.dumps({**self.ctx, "finding": finding})])["ask"]
+        (hunk,) = self.named_files(ask)
+        self.assertEqual(hunk.read_text(encoding="utf-8"), "")
+        self.assertIn("is EMPTY", ask)
+        self.assertIn("answer unconfirmed", ask)
+        # an untracked path is new code in its entirety — no hunk is named for it
+        ask = ok(["ask", "--kind", "confirm", "--ctx", json.dumps(
+            {**self.ctx, "untracked": ["new.py"], "finding": {**finding, "where": "new.py:1"}})])["ask"]
+        self.assertEqual(self.named_files(ask), [])
+        self.assertIn("`new.py` is an untracked file", ask)
+
+    def test_a_diff_that_cannot_be_produced_is_a_named_absence_never_a_crash(self):
+        shutil.rmtree(self.repo / ".git")
+        cases = [
+            ("review", {"files_n": 1, "lines": 1, "lens": {"focus": "f."}, "gate_line": "ok"},
+             "diff file ABSENT"),
+            ("confirm", {"finding": {"where": "app.py:2", "what": "y", "evidence": "e", "severity": "low"}},
+             "Hunk file: ABSENT"),
+        ]
+        for kind, extra, absent in cases:
+            with self.subTest(kind=kind):
+                r = run(["ask", "--kind", kind, "--ctx", json.dumps({**self.ctx, **extra})])
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                d = json.loads(r.stdout)
+                self.assertEqual(d["status"], "ok")
+                self.assertIn(absent, d["ask"])
+                self.assertIn("not run: <why>", d["ask"])
+                self.assertNotIn("`" + self.run_dir + "/reader-files/", d["ask"])
+        folder = Path(self.run_dir) / "reader-files"
+        self.assertEqual([f.name for f in folder.iterdir()] if folder.is_dir() else [], [])
+
+    def test_a_reader_ask_with_no_run_folder_is_an_error_never_a_bare_ask(self):
+        ctx = {"base": "HEAD", "files_n": 1, "lines": 1, "lens": {"focus": "f."}, "gate_line": "ok"}
+        for run_dir in (None, str(self.repo / "nope")):
+            with self.subTest(run_dir=run_dir):
+                r = run(["ask", "--kind", "review", "--ctx", json.dumps({**ctx, "run_dir": run_dir})])
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                d = json.loads(r.stdout)
+                self.assertEqual((d["status"], d["stage"]), ("error", "ask"))
+                self.assertIn("run_dir", d["error"])
+        self.assertFalse((self.repo / "nope").exists())
+        # a wave carrying one bare reader ctx is refused whole, naming it
+        r = run(["ask", "--kind", "batch", "--ctx", json.dumps({"batch": [
+            {"kind": "triage", "ctx": {"lens_label": "correctness", "findings": []}},
+            {"kind": "confirm", "ctx": {"finding": {"where": "app.py:1"}}}]})])
+        d = json.loads(r.stdout)
+        self.assertEqual((d["status"], d.get("kind")), ("error", "confirm"))
+
+
+AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
+JUDGE_BRIEFS = {"confirm": "spec-review-confirmer.md", "verify": "spec-review-verifier.md"}
+JUDGE_ASKS = ("confirm", "confirm-project", "verify")
+# Every brief that reads and never writes: files only — the fixer is the panel's one author.
+READER_BRIEFS = ("spec-review-scout.md", "spec-review-correctness.md", "spec-review-security.md",
+                 "spec-review-quality.md", "spec-review-confirmer.md", "spec-review-verifier.md")
+
+
+class JudgeBriefTests(unittest.TestCase):
+    """The confirm and verify stages take their system prompt from a brief
+    (D-027): `systems` returns each brief's frontmatter-stripped body
+    byte-verbatim and holds no second copy of it, an unreadable brief is
+    an error — never a fallback — the asks keep their shape, and every
+    brief that reads grants files only (D-028)."""
+
+    def test_systems_carry_each_brief_body_byte_verbatim(self):
+        d = ok(["systems"])
+        oracle = SCRIPT.read_text(encoding="utf-8")
+        for stage, brief in JUDGE_BRIEFS.items():
+            with self.subTest(stage=stage):
+                body = (AGENTS_DIR / brief).read_bytes().decode("utf-8").split("\n---\n", 1)[1]
+                self.assertEqual(d[stage], body)
+                self.assertTrue(body.startswith("\n# "), "frontmatter not stripped")
+                # the kit's one honesty sentence is every system's, not a copy
+                for line in map(str.strip, body.splitlines()):
+                    if len(line) > 40 and line not in d["honesty"]:
+                        self.assertNotIn(line, oracle, "a second copy in the oracle")
+
+    def test_systems_keep_the_inline_roles(self):
+        d = ok(["systems"])
+        self.assertEqual(sorted(d), ["confirm", "fix_review", "fixer", "general", "honesty",
+                                     "lenses", "scout", "status", "triage", "verify"])
+        for key in ("triage", "fix_review"):
+            self.assertTrue(d[key].startswith("You are the "), key)
+
+    def test_judge_asks_keep_their_shape(self):
+        for kind, ctx in ASK_CASES:
+            if kind in JUDGE_ASKS:
+                with self.subTest(kind=kind):
+                    d = ok(["ask", "--kind", kind, "--ctx", json.dumps(ctx)])
+                    self.assertEqual(sorted(d), ["ask", "status"])
+                    self.assertTrue(d["ask"])
+
+    def test_reader_briefs_grant_files_only(self):
+        head = {}
+        for brief in READER_BRIEFS:
+            with self.subTest(brief=brief):
+                head[brief] = (AGENTS_DIR / brief).read_text(encoding="utf-8").split("\n---\n", 1)[0]
+                self.assertTrue(head[brief].startswith("---\n"))
+                self.assertRegex(head[brief], r"(?m)^name: " + re.escape(brief[:-3]) + r"$")
+                self.assertRegex(head[brief], r"(?m)^description:")
+                self.assertRegex(head[brief], r"(?m)^model: inherit$")
+                self.assertRegex(head[brief], r"(?m)^tools: Read, Grep, Glob$")
+                for tool in ("Bash", "Write", "Edit"):
+                    self.assertRegex(head[brief], r"(?m)^  - " + tool + r"$")
+        # the list is closed: no other spec-review brief exists to hold a shell
+        shipped = sorted(p.name for p in AGENTS_DIR.glob("spec-review-*.md"))
+        self.assertEqual(shipped, sorted(READER_BRIEFS + ("spec-review-fixer.md",)))
+        fixer = (AGENTS_DIR / "spec-review-fixer.md").read_text(encoding="utf-8").split("\n---\n", 1)[0]
+        self.assertRegex(fixer, r"(?m)^tools: Read, Grep, Glob, Bash, Write, Edit$")
+
+    def test_unreadable_brief_is_an_error_never_an_inline_fallback(self):
+        skill = SCRIPT.parent.parent
+        holder = tempfile.TemporaryDirectory(prefix="oracle-skill-")
+        with holder:
+            copy = Path(holder.name)
+            shutil.copytree(skill / "scripts", copy / "scripts",
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            shutil.copytree(AGENTS_DIR, copy / "agents")
+            for stage, brief in JUDGE_BRIEFS.items():
+                target = copy / "agents" / brief
+                intact = target.read_bytes()
+                for damage in ("missing", "no-frontmatter", "not-utf8"):
+                    with self.subTest(brief=brief, damage=damage):
+                        if damage == "missing":
+                            target.unlink()
+                        elif damage == "no-frontmatter":
+                            target.write_text("no frontmatter here\n", encoding="utf-8")
+                        else:
+                            target.write_bytes(b"\xff\xfe\x00bad")
+                        r = subprocess.run([sys.executable, str(copy / "scripts" / SCRIPT.name),
+                                            "systems"], capture_output=True, text=True)
+                        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                        d = json.loads(r.stdout)
+                        self.assertEqual(d["status"], "error")
+                        self.assertEqual(d["stage"], "systems")
+                        self.assertIn(f"agents/{brief}", d["error"])
+                        self.assertNotIn(stage, d)
+                        target.write_bytes(intact)
 
 
 class RunFolderTests(unittest.TestCase):

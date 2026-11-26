@@ -381,11 +381,15 @@ def build_docset() -> tuple[Path, Path]:
         (spec_dir / "approvals" / "review.md").write_text(
             "# Contract review\n\nDocset fingerprint: "
             f"{freeze.docset_fingerprint(spec_dir)}\n\n"
+            "tools: Read, Grep, Glob\n"
             "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
             encoding="utf-8")
-        r = run_py(FREEZE, str(spec_dir), "--record", cwd=repo)
-        if r.returncode != 0:
-            raise AssertionError(f"freeze.py failed: {r.stdout}{r.stderr}")
+        sys.path.insert(0, str(SKILL / "tests"))
+        import _approval
+        _approval.approve(
+            spec_dir, repo=repo,
+            review=str(spec_dir / "approvals" / "review.md"),
+            scripts=FREEZE.parent)
         return tmp, repo
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -1,5 +1,5 @@
 ---
-name: review-scout
+name: spec-review-scout
 description: >-
   Preflight scout of the spec-review panel. Before the reviewers
   audit a change or the whole project, explores the codebase and maps
@@ -9,10 +9,11 @@ description: >-
   never findings. Spawn from the spec-review skill, or
   directly for a codebase-orientation pass.
 model: inherit
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob
 disallowedTools:
   - Write
   - Edit
+  - Bash
   - Agent
   - Task
   - SendMessage

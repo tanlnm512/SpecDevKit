@@ -20,6 +20,23 @@ names a digest file, that file holds the same text as your returned
 digest: write it as your final action, so it survives whatever happens
 to the session that spawned you.
 
+Your reply opens with one line, and so does your digest file, above
+its `digest:` line: `tools: <the tools you actually hold,
+comma-separated>`. Report what you hold, never what you were told you
+hold; a tool you cannot see is absent. The orchestrator refuses a
+report that lacks a tool your role requires — a failed spawn, never a
+fix round. Nothing else is required: a missing tool that is not
+required only narrows the work, so say so in your digest.
+
+Every returned digest is validated against its schema
+(`scripts/digests.py`) before anything is read from it: a field
+that is missing, unknown, misordered, or of the wrong kind makes
+the whole digest malformed — it is never parsed by half. A
+malformed digest is a fix-and-run-again refusal: the problems go
+back to the same agent and the spawn re-runs (no fix round, no
+status change). Write every field exactly as your brief's contract
+prints it.
+
 ## Universal rules (canonical — your brief does not repeat these)
 1. **Citations verbatim** from tech-spec.md § Code state, or from your own session's grep
    output — never from memory. A number in an existing doc is a claim;

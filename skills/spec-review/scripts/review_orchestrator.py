@@ -23,7 +23,7 @@ Usage:
   review_orchestrator.py id-next --prefix P --used N
   review_orchestrator.py findings-parse (--file PATH | --text STR)
   review_orchestrator.py report  --kind review|fix --data @FILE|STR
-  review_orchestrator.py systems
+  review_orchestrator.py systems                        (confirm/verify = brief bodies from agents/)
   review_orchestrator.py ask     --kind KIND --ctx @FILE|JSON   (ctx {"batch": [...]} renders a wave)
 
 run-init / run-save / run-resume checkpoint a review run into
@@ -49,7 +49,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from gate_helpers import diff_changes, git_diff
+from gate_helpers import GIT_DIFF, diff_changes, git_diff
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 GATE_SH = SKILL_DIR / "scripts" / "gate.sh"
@@ -783,6 +783,7 @@ def normalize_findings(items):
 
 def cmd_findings_parse(a):
     text = a.text if a.text is not None else Path(a.file).read_text(encoding="utf-8")
+    text = TOOLS_REPORT.sub("", text, count=1)
     if re.match(r"^\s*[\[{]", text):
         try:
             parsed = json.loads(text)
@@ -1659,6 +1660,14 @@ def main(argv=None):
 HONESTY = (" If your instructions are impossible to satisfy, escalate and "
            "say so plainly rather than working around it.")
 
+# Every ask opens with this line (spec-review D-029): the rule itself lives
+# in protocol/panel-protocol.md and the judge briefs — the ask only asks
+# for the report. findings-parse skips it: a reply handed over whole is
+# read for its findings alone.
+TOOLS_ASK = ("The first line of your reply is `tools: <the tools you actually hold, "
+             "comma-separated>`.\n")
+TOOLS_REPORT = re.compile(r"\A[ \t>*`-]*tools:[^\n]*\n?", re.I)
+
 LENSES = [
     {
         "label": "correctness",
@@ -1722,9 +1731,23 @@ SCOUT_SYSTEM = ("You are the preflight scout of a code review panel. Before the 
                 "codebase and map the modules, conventions and risk areas they will judge against. You report a map, never "
                 "findings — defects belong to the reviewers, and a map entry is context to verify, not evidence to cite." + HONESTY)
 
-VERIFY_SYSTEM = ("You are an independent verifier. You receive one reported finding at a time and check it from the code "
-                 "alone — the reviewer's claim, quoted lines, and the change that introduced it. You never see the scout's "
-                 "map, the author's intent, or the other lenses' findings, and you never edit anything." + HONESTY)
+FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
+# A judge stage's system prompt is its brief's body, read from agents/ at
+# call time — the brief is the one copy (D-027).
+BRIEF_SYSTEMS = {"confirm": "spec-review-confirmer.md", "verify": "spec-review-verifier.md"}
+
+
+def brief_body(name):
+    try:
+        text = (SKILL_DIR / "agents" / name).read_bytes().decode("utf-8")
+    except OSError as e:
+        raise ValueError(f"agents/{name}: {e.strerror or e}") from None
+    except UnicodeDecodeError:
+        raise ValueError(f"agents/{name}: not UTF-8") from None
+    m = FRONTMATTER.match(text)
+    if not m:
+        raise ValueError(f"agents/{name}: no frontmatter block")
+    return text[m.end():]
 
 
 def jdump(obj):
@@ -1740,16 +1763,89 @@ def _base(ctx):
     return ctx.get("base") or "HEAD"
 
 
+# --- reader files ------------------------------------------------------------
+# A panel reader holds no shell: what it used a git command for, the oracle
+# writes into the run folder and the ask names the file.
+
+READER_DIRNAME = "reader-files"
+NO_RUN_FOLDER = ("a reader ask names files the oracle writes into the run folder — ctx.run_dir is "
+                 "missing or is not a run folder (no run.json); pass the path `O run-init` returned")
+
+
+class NoRunFolder(Exception):
+    def __init__(self, kind: str):
+        super().__init__(kind)
+        self.kind = kind
+
+
+def _is_run_dir(v) -> bool:
+    return isinstance(v, str) and bool(v) and (Path(v) / "run.json").is_file()
+
+
+def _run_dir(ctx) -> Path:
+    if not _is_run_dir(ctx.get("run_dir")):
+        raise NoRunFolder("")
+    return Path(ctx["run_dir"])
+
+
+# run-init's layout: <repo>/.spec-review/runs/<run-id>
+def _run_repo(run_dir: Path) -> Path:
+    return run_dir.parents[2]
+
+
+def _repo_root(ctx):
+    if ctx.get("repo_abs"):
+        return ctx["repo_abs"]
+    return str(_run_repo(Path(ctx["run_dir"]))) if _is_run_dir(ctx.get("run_dir")) else None
+
+
 def _repo_path(ctx, p):
-    return f"{ctx['repo_abs']}/{p}" if ctx.get("repo_abs") else p
+    root = _repo_root(ctx)
+    return f"{root}/{p}" if root else p
 
 
-def _repo_block(ctx):
-    if not ctx.get("repo_abs"):
+def _repo_block(ctx, shell=False):
+    root = _repo_root(ctx)
+    if not root:
         return ""
-    return (f"The repository under review lives at \"{ctx['repo_abs']}\" — treat that directory as the repo root "
-            "(AGENTS.md / CLAUDE.md / the Makefile live there; every path below is absolute). Run any git command as "
-            f"`git -C {ctx['repo_abs']} ...`.\n")
+    return (f"The repository under review lives at \"{root}\" — treat that directory as the repo root "
+            "(AGENTS.md / CLAUDE.md / the Makefile live there; every path below is absolute)."
+            + (f" Run any git command as `git -C {root} ...`.\n" if shell else "\n"))
+
+
+def _write_reader_file(ctx, name: str, data: bytes) -> Path:
+    folder = _run_dir(ctx) / READER_DIRNAME
+    folder.mkdir(exist_ok=True)
+    path = folder / name
+    path.write_bytes(data)
+    return path
+
+
+def _reader_git(ctx, args: list) -> tuple[bytes | None, str]:
+    try:
+        r = subprocess.run(["git", "-C", str(_run_repo(_run_dir(ctx))), *args], capture_output=True)
+    except OSError as e:
+        return None, f"{type(e).__name__}: {e}"
+    if r.returncode != 0:
+        # git can answer a usage error with its whole help text
+        lines = r.stderr.decode("utf-8", "replace").strip().splitlines()
+        return None, lines[0][:200] if lines else f"exit {r.returncode}"
+    return r.stdout, ""
+
+
+def _write_diff(ctx, name: str, path: str | None = None) -> tuple[Path | None, str]:
+    base = str(_base(ctx))
+    if base.startswith("-"):
+        return None, f"base {base!r} is not a revision"
+    data, reason = _reader_git(ctx, [*GIT_DIFF, base] + (["--", path] if path is not None else []))
+    if data is None:
+        return None, reason
+    return _write_reader_file(ctx, name, data), ""
+
+
+def _hunk_name(path: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]", "-", path)[-80:]
+    return f"hunk-{slug}-{hashlib.sha256(path.encode('utf-8', 'replace')).hexdigest()[:8]}.patch"
 
 
 def _intent_block(ctx):
@@ -1765,7 +1861,7 @@ def _untracked_block(ctx):
     files = ctx.get("untracked") or []
     if not files:
         return ""
-    return ("The change also adds these untracked files, which `git diff` does not show — read each one in "
+    return ("The change also adds these untracked files, which the diff file does not show — read each one in "
             "full as new code introduced by this change:\n" + "\n".join(f"- {_repo_path(ctx, f)}" for f in files) + "\n")
 
 
@@ -1795,17 +1891,33 @@ def _scout_block(ctx):
             f"- risk areas: {'; '.join(m.get('riskAreas', [])) or '(none mapped)'}\n")
 
 
+def _inventory_block(ctx, files):
+    tree, reason = _reader_git(ctx, ["ls-files", "-z"])
+    listing = [f for f in tree.decode("utf-8", "replace").split("\0") if f] if tree is not None else None
+    body = f"# target files ({len(files)})\n" + "".join(f"{f}\n" for f in files)
+    if listing is not None:
+        body += f"\n# tracked files in the repository ({len(listing)})\n" + "".join(f"{f}\n" for f in listing)
+    path = _write_reader_file(ctx, "inventory.txt", body.encode("utf-8"))
+    if listing is None:
+        return (f"The full target file list is the file `{path}`; its tracked-tree listing: ABSENT — {reason}. "
+                "You hold no shell: explore with your file tools and name the gap.\n")
+    return (f"The full target file list and the repository's tracked tree are the file `{path}` — you hold "
+            "no shell: read them there and explore with your file tools.\n")
+
+
 def _scout_ask(ctx):
     files = ctx["files"]
     listed = files[:40]
+    inventory = _inventory_block(ctx, files)
     target = (f"A whole-project review is about to start. Its target is the repo's tracked source files — the "
               f"{len(files)} files the panel will read, and the modules they live in.\n" if ctx["project"]
-              else f"A change review is about to start. The change (`git diff {_base(ctx)}` plus any untracked "
-              "new files) touches these files:\n")
-    more = (f"\n- ... and {len(files) - len(listed)} more — map the modules across all of them"
+              else "A change review is about to start. The change (its diff plus any untracked new files) touches "
+              "these files:\n")
+    more = (f"\n- ... and {len(files) - len(listed)} more, all in the target file list"
             if len(files) > len(listed) else "")
     return (target + _repo_block(ctx)
             + "\n".join(f"- {_repo_path(ctx, f)}" for f in listed) + more + "\n"
+            + inventory
             + "You are the preflight scout: before the panel reads the target, explore the codebase and map the ground "
             "the reviewers will stand on.\n"
             "1. modules — the modules the target files live in, plus the modules they depend on and are depended on "
@@ -1821,14 +1933,22 @@ def _scout_ask(ctx):
             "at most 8 modules, 6 conventions, 6 risk areas; the map orients, it does not enumerate.")
 
 
+NO_DIFF = ("You hold no shell and nothing else carries the diff: do not work around it. Report "
+           "`not run: <why>` instead of a findings list — an empty list would read as a clean diff.")
+
+
 def _review_ask(ctx):
     ld = ctx["lens"]
-    over = " (diff over the harness size cap — page through it with git diff directly)" if ctx.get("over_cap") else ""
-    scope = f"`git diff {_base(ctx)}` — {ctx['files_n']} files, ~{ctx['lines']} added lines{over}"
-    return ("Review the change " + scope + " in this repository.\n" + _scout_block(ctx)
-            + f"1. Run `git diff {_base(ctx)}` and read the FULL diff — do not stop at the first issue. Open the changed "
-            "files for context wherever the diff alone is ambiguous; check call sites when a defect depends on them.\n"
-            + _untracked_block(ctx)
+    over = (" (diff over the harness size cap — page through the diff file with your Read tool's offset and "
+            "limit until you have seen all of it)" if ctx.get("over_cap") else "")
+    diff = _write_diff(ctx, "diff.patch")
+    scope = (f"the diff file `{diff[0]}` — {ctx['files_n']} files, ~{ctx['lines']} added lines{over}"
+             if diff[0] else f"diff file ABSENT — {diff[1]}")
+    step = ("1. Read the FULL diff from that file — do not stop at the first issue. Open the changed files "
+            "for context wherever the diff alone is ambiguous; check call sites when a defect depends on them.\n"
+            if diff[0] else "1. " + NO_DIFF + "\n")
+    return ("Review the change in this repository: " + scope + ".\n" + _repo_block(ctx) + _scout_block(ctx)
+            + step + _untracked_block(ctx)
             + "2. If AGENTS.md or CLAUDE.md exists at the repo root, read it first and cite any rule a finding violates.\n"
             f"3. Report only findings from your lens: {ld['focus']}\n" + _intent_block(ctx)
             + "Each finding also carries impact: one sentence on what the defect breaks and when it bites (which callers, "
@@ -1848,8 +1968,11 @@ def _review_ask_project(ctx):
     scope = (f"part {ctx['part']} of {ctx['parts']} of the project's tracked source files ({ctx['candidates']}"
              " files in total — your sibling reviewers of the same lens read the other parts; report only "
              "what you find in the files below)")
+    part = _write_reader_file(ctx, f"part-{ctx['part']}-of-{ctx['parts']}.txt",
+                              "".join(f"{f}\n" for f in ctx["files"]).encode("utf-8"))
     return ("Review the current state of this project's code. There is no diff — the target is " + scope + ":\n"
             + "\n".join(f"- {_repo_path(ctx, f)}" for f in ctx["files"]) + "\n"
+            + f"This part's file list is also the file `{part}`.\n"
             + _repo_block(ctx) + _scout_block(ctx)
             + "1. Read EVERY target file in full — do not stop at the first issue. Check call sites outside the list "
             "whenever a defect depends on them.\n"
@@ -1868,7 +1991,7 @@ def _review_ask_project(ctx):
 
 
 def _triage_ask(ctx):
-    return (f"Raw findings from the {ctx['lens_label']} reviewer for the change under review (`git diff {_base(ctx)}`):\n"
+    return (f"Raw findings from the {ctx['lens_label']} reviewer for the change under review:\n"
             + jdump(ctx["findings"]) + "\n" + _intent_block(ctx)
             + "You are the triage editor. For each finding, keep it or drop it. Keep = it meets the bar — real, "
             "introduced by this change, actionable, worth the author's attention. Drop = a duplicate of another finding "
@@ -1888,7 +2011,7 @@ def _triage_ask_project(ctx):
 
 
 def _cross_lens_ask(ctx):
-    return (f"Kept findings from every lens after per-lens triage (change: `git diff {_base(ctx)}`):\n"
+    return ("Kept findings from every lens after per-lens triage of the change under review:\n"
             + jdump(ctx["kept"])
             + "\nYou are the triage editor making the final cross-lens pass. Drop a finding ONLY if it duplicates another "
             "kept finding — the same underlying defect reported twice. When two entries describe one defect, keep the "
@@ -1896,12 +2019,34 @@ def _cross_lens_ask(ctx):
             "per-lens triage already enforced the flagging bar. Return the kept findings with their lens field intact.")
 
 
+NO_HUNK = ("You hold no shell and nothing else carries the change to that path: do not work around it — "
+           "the finding is `unconfirmed`, its note `not run: <why>`.")
+
+
 def _confirm_ask(ctx):
-    return (f"You are an independent confirmer. A reviewer reported this finding on the change `git diff {_base(ctx)}`:\n"
-            + jdump(ctx["finding"])
-            + f"\nVerify it from the code alone. Read the file at that location; confirm the cited lines exist and the claim "
-            "holds; confirm this change introduced it (`git diff " + _base(ctx) + " -- <path>` covers those lines). Check a "
-            "call site if the claim depends on one. Do not edit anything, and do not re-run the repo's test suites.\n"
+    finding = ctx["finding"]
+    path = str(finding.get("where") or "").split(":")[0]
+    if not path:
+        hunk = "Hunk file: ABSENT — the finding names no path. " + NO_HUNK + "\n"
+    elif path in (ctx.get("untracked") or []):
+        hunk = (f"`{path}` is an untracked file — new code in its entirety, so there is no hunk file: the "
+                "whole file is the change.\n")
+    else:
+        wrote = _write_diff(ctx, _hunk_name(path), path)
+        if wrote[0] is None:
+            hunk = f"Hunk file: ABSENT — {wrote[1]}. " + NO_HUNK + "\n"
+        elif wrote[0].stat().st_size == 0:
+            hunk = (f"The hunk file `{wrote[0]}` is EMPTY: the change does not touch `{path}`, so the finding "
+                    "predates the change — answer unconfirmed.\n")
+        else:
+            hunk = (f"The change to that path is the hunk file `{wrote[0]}`: the cited lines must be inside "
+                    "what it shows the change touching.\n")
+    return ("You are an independent confirmer. A reviewer reported this finding on the change under review:\n"
+            + jdump(finding)
+            + "\nVerify it from the code alone. Read the file at that location; confirm the cited lines exist and the claim "
+            "holds; confirm this change introduced it.\n"
+            + _repo_block(ctx) + hunk
+            + "Check a call site if the claim depends on one. Do not edit anything, and do not re-run the repo's test suites.\n"
             + _untracked_block(ctx)
             + "If the claim holds and the change introduced it, answer verified. If you cannot reproduce it, or it predates "
             "the change, answer unconfirmed and say what you saw instead.")
@@ -1918,11 +2063,15 @@ def _confirm_ask_project(ctx):
 
 
 def _final_ask(ctx):
+    diff = _write_diff(ctx, "diff.patch")
+    judge = (f"Read the diff file `{diff[0]}` wherever you need to judge it, and read the test files before "
+             "claiming a test gap.\n" if diff[0] else
+             f"Diff file: ABSENT — {diff[1]}. You hold no shell: do not work around it — judge from what you "
+             "can read, and name the diff you did not see under residualRisks as `not run: <why>`.\n")
     return ("Every kept non-gate finding has now been through independent confirmation:\n"
             + jdump(ctx["summary"])
-            + "\n" + _gate_sentence(ctx) + " Produce the final assessment of this change. Run `git diff "
-            + _base(ctx) + "` yourself wherever you need to judge it, and read the test files before claiming a test "
-            "gap.\n" + _untracked_block(ctx) + _intent_block(ctx) + _scout_block(ctx)
+            + "\n" + _gate_sentence(ctx) + " Produce the final assessment of this change. " + judge + _repo_block(ctx)
+            + _untracked_block(ctx) + _intent_block(ctx) + _scout_block(ctx)
             + "risk: low | medium | high — what merging this change as-is would risk. testGaps: behaviors this change "
             "alters that no test covers (empty if none). residualRisks: what remains unverified after the checks and "
             "the review. verdict: two or three sentences — should this merge, and what must the author fix first.")
@@ -1952,7 +2101,7 @@ def _fixer_ask(ctx):
                   "lens": t["finding"]["lens"],
                   "impact": t["finding"].get("impact") if isinstance(t["finding"].get("impact"), str) else ""}
                  for t in ctx["unresolved"]]
-        return (opening + _repo_block(ctx) + jdump(items)
+        return (opening + _repo_block(ctx, shell=True) + jdump(items)
                 + "\nWork in the working tree; never commit. If AGENTS.md or CLAUDE.md exists at the repo root, read it "
                 "before your first edit — the repo's own rules bind your fixes. You may run a single targeted test file "
                 "for code you touch, but the repo's checks re-run the moment you finish — do not run them yourself.\n"
@@ -1969,14 +2118,14 @@ def _fixer_ask(ctx):
                if ctx.get("gate_feedback")
                else "\nThe repo's own checks passed after the last round.")
     return (f"Round {ctx['round']}. These findings are still unresolved after the previous round — the independent "
-            "verifiers said, per item:\n" + jdump(items) + gate_fb + _repo_block(ctx)
+            "verifiers said, per item:\n" + jdump(items) + gate_fb + _repo_block(ctx, shell=True)
             + "\nEach finding above carries its full detail. Fix exactly these, same rules as before: minimal, in the "
             "repo's style, never commit, never weaken a test to make a finding go away.")
 
 
 def _verify_ask(ctx):
     t = ctx["tracked"]
-    where = ("in the project's code" if ctx["project"] else f"on the change (`git diff {_base(ctx)}`)")
+    where = ("in the project's code" if ctx["project"] else "on the change under review")
     finding = {"id": t["finding"]["id"], "where": t["finding"]["where"], "what": t["finding"]["what"],
                "severity": t["finding"]["severity"], "lens": t["finding"]["lens"]}
     return (f"A reviewer confirmed this finding {where}, and the author has since attempted a fix.\n"
@@ -1994,16 +2143,19 @@ def _verify_ask(ctx):
 
 
 def _fix_review_ask(ctx):
-    ra = ctx.get("repo_abs")
-    git_c = "git -C '" + ra.replace("'", "'\\''") + "' " if ra else "git "
-    diff_cmd = git_c + "diff " + _base(ctx) + " -- <path>"
+    hunks = []
+    for p in ctx["paths"]:
+        path, reason = _write_diff(ctx, _hunk_name(p), p)
+        hunks.append(f"- {p} — hunk file `{path}`" if path else f"- {p} — hunk file: ABSENT — {reason}")
     gate_state = "all passed" if ctx.get("gate_green") else "are currently failing"
     return ("The author fixed review findings by changing:\n"
-            + "\n".join(f"- {p}" for p in ctx["paths"])
+            + "\n".join(hunks)
             + "\n" + _repo_block(ctx)
-            + "Read the cumulative diff for exactly these paths (`" + diff_cmd + "`, one per path) and "
-            "the current file contents where context matters; a path that diff shows nothing for is an untracked "
-            "new file — read it in full. Judge the fix code as a fresh reviewer on a new change: "
+            + "Read the cumulative change for exactly these paths from the hunk files above, one per path, and "
+            "the current file contents where context matters; an empty hunk file means the diff shows nothing for "
+            "that path — an untracked new file, read it in full. You hold no shell: a path whose hunk file is "
+            "ABSENT above you did not see — do not work around it; report `not run: <why>` instead of findings. "
+            "Judge the fix code as a fresh reviewer on a new change: "
             "report only NEW defects these fixes introduce — the same bar as the panel (real, introduced by these "
             "fixes, demonstrable from the code, the author would fix). Do not re-report the original findings; "
             "separate verifiers own those.\n"
@@ -2019,6 +2171,7 @@ def _loop_final_ask(ctx):
               "severity": t["finding"]["severity"], "lens": t["finding"]["lens"],
               "reviewStatus": t["finding"]["confirmation"]["status"], "fix": t["fix"],
               "fixNote": t.get("fixNote")} for t in tracked]
+    diff = (None, "") if ctx["project"] else _write_diff(ctx, "diff-with-fixes.patch")
     project_part = ("\nProduce the final assessment of the project's code INCLUDING the fixes — read the target files "
                     "yourself where you need to judge them, and read the test files before claiming a test gap.\n"
                     "risk: the risk in the code as it stands. testGaps: behaviors still without any test covering them. "
@@ -2027,9 +2180,13 @@ def _loop_final_ask(ctx):
                     "(every finding fixed, the checks green, nothing new surfaced); human when judgment calls or "
                     "unconfirmed residue remain. The oracle derives the floor from the tracked findings and rejects a "
                     "claim below it (escalating is always allowed), so claim what the state shows." if ctx["project"] else
-                    f"\nProduce the final assessment of the change INCLUDING the fixes — run `git diff {_base(ctx)}` yourself "
-                    "where you need to judge it, and read the test files before claiming a test gap.\n"
-                    "risk: what merging now would risk. testGaps: behaviors still altered with no test covering them. "
+                    "\nProduce the final assessment of the change INCLUDING the fixes — "
+                    + (f"read the diff file `{diff[0]}` (the change as it now stands, fixes included) where you "
+                       "need to judge it, and read the test files before claiming a test gap.\n" if diff[0] else
+                       f"diff file: ABSENT — {diff[1]}. You hold no shell: do not work around it — judge from what "
+                       "you can read, name the diff you did not see under residualRisks as `not run: <why>`, and "
+                       "read the test files before claiming a test gap.\n")
+                    + "risk: what merging now would risk. testGaps: behaviors still altered with no test covering them. "
                     "residualRisks: what remains unverified. verdict: two or three sentences — should this merge now? "
                     "recommendation: merge | fix-first | human — merge only if every finding is fixed, the checks are green, "
                     "and nothing new surfaced; human when judgment calls or unconfirmed residue remain. The oracle derives "
@@ -2051,8 +2208,22 @@ ASK_RENDERERS = {
 
 
 def cmd_systems(_a):
+    try:
+        briefs = {stage: brief_body(name) for stage, name in BRIEF_SYSTEMS.items()}
+    except ValueError as e:
+        return stage_err("systems", error=f"brief unreadable: {e}")
     return out(True, lenses=LENSES, general=GENERAL, triage=TRIAGE_SYSTEM, fixer=FIXER_SYSTEM,
-               fix_review=FIX_REVIEW_SYSTEM, scout=SCOUT_SYSTEM, verify=VERIFY_SYSTEM, honesty=HONESTY)
+               fix_review=FIX_REVIEW_SYSTEM, scout=SCOUT_SYSTEM, honesty=HONESTY, **briefs)
+
+
+def _render_ask(kind, ctx):
+    renderer = ASK_RENDERERS.get(kind)
+    if renderer is None:
+        raise ValueError(f"unknown ask kind: {kind}")
+    try:
+        return TOOLS_ASK + renderer(ctx)
+    except NoRunFolder:
+        raise NoRunFolder(kind) from None
 
 
 def cmd_ask(a):
@@ -2061,19 +2232,16 @@ def cmd_ask(a):
                          if a.ctx.startswith("@") else a.ctx)
     except (json.JSONDecodeError, OSError) as e:
         return out(False, error=f"ask ctx invalid: {e}")
-    if isinstance(ctx, dict) and isinstance(ctx.get("batch"), list):
-        # One probe renders a whole wave of asks, with no extra round trips per agent.
-        asks = []
-        for item in ctx["batch"]:
-            renderer = ASK_RENDERERS.get(item.get("kind"))
-            if renderer is None:
-                return out(False, error=f"unknown ask kind: {item.get('kind')}")
-            asks.append(renderer(item.get("ctx") or {}))
-        return out(True, asks=asks)
-    renderer = ASK_RENDERERS.get(a.kind)
-    if renderer is None:
-        return out(False, error=f"unknown ask kind: {a.kind}")
-    return out(True, ask=renderer(ctx))
+    try:
+        if isinstance(ctx, dict) and isinstance(ctx.get("batch"), list):
+            # One probe renders a whole wave of asks, with no extra round trips per agent.
+            return out(True, asks=[_render_ask(i.get("kind"), i.get("ctx") or {})
+                                   for i in ctx["batch"]])
+        return out(True, ask=_render_ask(a.kind, ctx))
+    except NoRunFolder as e:
+        return stage_err("ask", kind=e.kind, error=NO_RUN_FOLDER)
+    except ValueError as e:
+        return out(False, error=str(e))
 
 
 if __name__ == "__main__":

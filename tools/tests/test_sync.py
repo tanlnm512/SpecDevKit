@@ -8,9 +8,11 @@ guarantees against the copy — fresh install, idempotence, foreign-file
 refusal (skills trees and command roots), stale-own cleanup via the
 ledger, absent-harness skips, version-drift detection, zero-write
 on a late collision (the all-root preflight), the no-write
---dry-run/--check modes, and the retired-skills sweep:
+--dry-run/--check modes, the retired-skills sweep:
 a listed skill whose master is gone is removed from every install root
-on ledger proof alone, foreign files in its paths refused.
+on ledger proof alone, foreign files in its paths refused, and the
+approval-guard install: generated, ledgered, recommended and never
+registered.
 """
 import hashlib
 import io
@@ -55,6 +57,7 @@ SYNC_CORPUS = (
     "tools/ownership.py",
     "tools/omp-defs.py",
     "tools/agent-defs.py",
+    "tools/hooks.py",
     "tools/kit-rules.py",
     "tools/parity.py",
     "tools/retired-skills.txt",
@@ -70,7 +73,7 @@ SYNC_CORPUS = (
     f"{CMD_SKILL}/tests/run.sh",
     f"{CMD_SKILL}/scripts/gate.sh",
     f"{CMD_SKILL}/scripts/review_orchestrator.py",
-    "skills/spec-review/agents/review-fixer.md",
+    f"{CMD_SKILL}/agents/spec-review-fixer.md",
     f"{INTENT_SKILL}/SKILL.md",
     f"{INTENT_SKILL}/VERSION",
     f"{INTENT_SKILL}/commands/spec-define.md",
@@ -92,7 +95,7 @@ SYNC_CORPUS = (
     "agents/developer.md",
     "agents/auditor.md",
     "agents/tester.md",
-    "agents/review-fixer.md",
+    "agents/spec-review-fixer.md",
     "skills/spec-ship/SKILL.md",
     "skills/spec-ship/VERSION",
     "skills/spec-ship/commands/spec-ship.md",
@@ -187,7 +190,7 @@ class SyncShTests(SyncShBase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         claude = self.skill_root()
         compat = self.home / ".agents" / "skills" / "spec-review"
-        self.assertTrue((claude / "agents" / "review-fixer.md").is_file())
+        self.assertTrue((claude / "agents" / "spec-review-fixer.md").is_file())
         self.assertTrue(self.home.joinpath(
             ".claude", "skills", "spec-design", "protocol",
             "shared-protocol.md").is_file())
@@ -338,8 +341,8 @@ class SyncShTests(SyncShBase):
     def test_foreign_def_in_claude_agents_root_is_refused(self):
         r0 = self.run_sync()
         self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
-        dest = self.home / ".claude" / "agents" / "review-fixer.md"
-        dest.write_text("---\nname: review-fixer\n---\nhand-edited\n")
+        dest = self.home / ".claude" / "agents" / "spec-review-fixer.md"
+        dest.write_text("---\nname: spec-review-fixer\n---\nhand-edited\n")
         r = self.run_sync()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("REFUSE", r.stdout)
@@ -400,7 +403,7 @@ class SyncShTests(SyncShBase):
         master = (self.repo / CMD_SKILL / "scripts" / "gate.sh")
         master.write_text(master.read_text() + "# touched by master\n")
         late = (self.home / ".omp" / "agent" / "agents"
-                / "review-fixer.md")
+                / "spec-review-fixer.md")
         late.write_text(late.read_text() + "\nhand-edited\n")
         before = self.home_snapshot()
         r = self.run_sync()
@@ -432,12 +435,12 @@ class SyncShTests(SyncShBase):
         # preflight before the first write — not mid-apply with the
         # skill roots already updated.
         for foreign_rel in (
-                ".factory/droids/review-fixer.md",
-                ".config/opencode/agents/review-fixer.md"):
+                ".factory/droids/spec-review-fixer.md",
+                ".config/opencode/agents/spec-review-fixer.md"):
             foreign = self.home / foreign_rel
             foreign.parent.mkdir(parents=True, exist_ok=True)
             foreign.write_text(
-                "---\nname: review-fixer\nstale: old deploy\n")
+                "---\nname: spec-review-fixer\nstale: old deploy\n")
             before = self.home_snapshot()
             r = self.run_sync()
             self.assertNotEqual(r.returncode, 0, foreign_rel)
@@ -588,7 +591,7 @@ class KiloCommandsTests(SyncShBase):
                  / "SKILL.md").is_file(), skill)
         # agent dialect: subagent mode + derived permission map
         fixer = (self.home / ".config" / "kilo" / "agent"
-                 / "review-fixer.md").read_text()
+                 / "spec-review-fixer.md").read_text()
         self.assertIn("mode: subagent", fixer)
         self.assertIn("  task: deny", fixer)
         self.assertIn("  edit: allow", fixer)
@@ -597,8 +600,17 @@ class KiloCommandsTests(SyncShBase):
 
 class StaleCommandPruneTests(SyncShBase):
     """A name that leaves extra.txt must not linger in flat command
-    roots; a foreign file at an unclaimed name is shared turf and stays
+    roots, and a renamed brief's old def must not linger in an agent
+    root; a foreign file at an unclaimed name is shared turf and stays
     untouched."""
+
+    @staticmethod
+    def ledger_names(root):
+        """The names a flat root's provenance ledger lists."""
+        ledger = root / LEDGER
+        return ({line.split(" ", 1)[1]
+                 for line in ledger.read_text().splitlines()}
+                if ledger.is_file() else set())
 
     def test_renamed_extra_name_is_pruned_and_foreign_survives(self):
         commands = self.repo / CMD_SKILL / "commands"
@@ -636,6 +648,76 @@ class StaleCommandPruneTests(SyncShBase):
         self.assertTrue((old.parent / "investigator.md").is_file())
         self.assertTrue(foreign.is_file())
 
+    def test_namespaced_review_def_is_pruned_and_a_foreign_one_survives(
+            self):
+        # spec-review D-026 renamed `review-<role>` to
+        # `spec-review-<role>`: the retired name is a suffix of the
+        # shipped one, so the prune must match whole names, and every
+        # agent root retires the def a prior sync deployed under the
+        # old name.
+        agents = self.repo / CMD_SKILL / "agents"
+        retired = agents / "review-correctness.md"
+        renamed = agents / "spec-review-correctness.md"
+        pre_rename = ("---\nname: review-correctness\n"
+                      "description: the correctness lens, as last released\n"
+                      "tools: Read, Grep, Glob, Bash\n---\n"
+                      "# Correctness reviewer\n")
+        retired.write_text(pre_rename, encoding="utf-8")
+        (self.home / ".config" / "opencode").mkdir(parents=True)
+        claude = self.home / ".claude" / "agents"
+        opencode = self.home / ".config" / "opencode" / "agents"
+        omp = self.home / ".omp" / "agent" / "agents"
+
+        r0 = self.run_sync()
+        self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
+        for root in (claude, opencode, omp):
+            self.assertTrue((root / retired.name).is_file(), root)
+        for root in (claude, opencode):
+            self.assertIn(retired.name, self.ledger_names(root), root)
+        self.assertIn(
+            f"{hashlib.sha256(pre_rename.encode('utf-8')).hexdigest()}"
+            f" {retired.name}",
+            (claude / LEDGER).read_text().splitlines(),
+            "the ledger does not hold the pre-rename hash")
+
+        # the rename: the file stem and the frontmatter name move
+        renamed.write_text(pre_rename.replace(
+            "name: review-correctness", "name: spec-review-correctness", 1),
+            encoding="utf-8")
+        retired.unlink()
+        chk = self.run_sync("--check")
+        self.assertNotEqual(chk.returncode, 0)
+        self.assertIn(f"STALE {claude / retired.name}", chk.stdout)
+        # --check names the stale def and removes nothing
+        self.assertTrue((claude / retired.name).is_file())
+
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"clean {claude / retired.name} (stale deploy)",
+                      r.stdout)
+        for root in (claude, opencode, omp):
+            self.assertFalse((root / retired.name).exists(), root)
+            self.assertTrue((root / renamed.name).is_file(), root)
+        self.assertEqual((claude / renamed.name).read_bytes(),
+                         renamed.read_bytes())
+        for root in (claude, opencode):
+            names = self.ledger_names(root)
+            self.assertIn(renamed.name, names, root)
+            self.assertNotIn(retired.name, names, root)
+
+        # another plugin's agent at the retired name, in a root whose
+        # ledger no longer lists it: nothing proves it ours, so the kit
+        # neither prunes it nor refuses it
+        foreign = claude / retired.name
+        foreign_text = ("---\nname: review-correctness\n---\n"
+                        "another plugin's agent\n")
+        foreign.write_text(foreign_text, encoding="utf-8")
+        r2 = self.run_sync()
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertNotIn("REFUSE", r2.stdout)
+        self.assertNotIn(f"STALE {foreign}", r2.stdout)
+        self.assertEqual(foreign.read_text(encoding="utf-8"), foreign_text)
+
 
 class KitRulesSyncTests(SyncShBase):
     """tools/kit-rules.py wiring: sync refreshes the four
@@ -653,7 +735,7 @@ class KitRulesSyncTests(SyncShBase):
         r0 = self.run_sync()
         self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
         carrier = (self.repo / "skills" / "spec-review" / "agents"
-                   / "review-fixer.md")
+                   / "spec-review-fixer.md")
         self.hand_edit(carrier)
         r = self.run_sync()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -661,14 +743,14 @@ class KitRulesSyncTests(SyncShBase):
         self.assertNotIn("stale hand-edit", carrier.read_text())
         # and the installed copies carry the fresh section too
         installed = (self.home / ".agents" / "skills" / "spec-review"
-                     / "agents" / "review-fixer.md").read_text()
+                     / "agents" / "spec-review-fixer.md").read_text()
         self.assertNotIn("stale hand-edit", installed)
 
     def test_check_reports_stale_carrier_as_drift_and_writes_nothing(self):
         r0 = self.run_sync()
         self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
         carrier = (self.repo / "skills" / "spec-review" / "agents"
-                   / "review-fixer.md")
+                   / "spec-review-fixer.md")
         self.hand_edit(carrier)
         before = self.home_snapshot()
         r = self.run_sync("--check")
@@ -737,6 +819,158 @@ class RetiredSkillSweepTests(SyncShBase):
         self.assertTrue(
             (self.home / ".claude" / "skills" / "spec-review"
              / "SKILL.md").is_file())
+
+
+class GuardSyncTests(SyncShBase):
+    """The approval guard installs like the skills and commands beside
+    it — unconditionally, on the first sync, for both primary harness
+    roots: one generated script and its registration text per root,
+    planned with every other destination, landed through the
+    provenance ledger, byte-checked by --check, swept like the agent
+    defs, and never registered: the settings file stays the owner's to
+    edit."""
+
+    HOMES = {"claude": ".claude", "zcode": ".zcode"}
+    SETTINGS = {"claude": ".claude/settings.json",
+                "zcode": ".zcode/cli/config.json"}
+    FREEZE = {"claude": ".claude/skills/spec-design/scripts/freeze.py",
+              "zcode": ".agents/skills/spec-design/scripts/freeze.py"}
+    GUARD_FILES = ("spec-kit-guard.py", "REGISTER.md")
+
+    def guard_root(self, target):
+        return self.home / self.HOMES[target] / "spec-dev-kit"
+
+    def recommended(self, target):
+        return (f"recommended: register the approval guard — paste "
+                f"{self.guard_root(target) / 'REGISTER.md'} into "
+                f"{self.home / self.SETTINGS[target]}")
+
+    def test_a_fresh_home_gets_both_guards_on_its_first_sync(self):
+        self.assertEqual(list(self.home.rglob("*")), [])
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for target in self.HOMES:
+            root = self.guard_root(target)
+            entries = dict((name, sha) for sha, name in
+                           (line.split(" ", 1) for line
+                            in (root / LEDGER).read_text().splitlines()))
+            self.assertEqual(sorted(entries), sorted(self.GUARD_FILES), target)
+            for name, sha in entries.items():
+                self.assertEqual(
+                    sha, hashlib.sha256((root / name).read_bytes()).hexdigest())
+            freeze = self.home / self.FREEZE[target]
+            self.assertTrue(freeze.is_file())
+            self.assertIn(f'FREEZE_PY = "{freeze}"',
+                          (root / "spec-kit-guard.py").read_text())
+            guard = str(root / "spec-kit-guard.py")
+            pasted = (f'python3 \\"{guard}\\"' if target == "claude"
+                      else f'"args": ["{guard}"]')
+            self.assertIn(pasted, (root / "REGISTER.md").read_text())
+            # installed, not registered
+            self.assertFalse((self.home / self.SETTINGS[target]).exists())
+        self.assertEqual(r.stdout.splitlines()[-2:],
+                         [self.recommended("claude"), self.recommended("zcode")])
+        ok = self.run_sync("--check")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+
+    def test_a_hand_edited_guard_is_refused_by_check_and_by_a_rerun(self):
+        r0 = self.run_sync()
+        self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
+        root = self.guard_root("claude")
+        (root / "spec-kit-guard.py").write_text("# hand-edited\n")
+        before = self.home_snapshot()
+        for argv in (("--check",), ()):
+            r = self.run_sync(*argv)
+            self.assertNotEqual(r.returncode, 0, argv)
+            self.assertIn(f"REFUSE {root / 'spec-kit-guard.py'} — foreign file",
+                          r.stdout)
+            self.assertIn("PREFLIGHT FAILED", r.stdout)
+            self.assertEqual(self.home_snapshot(), before, argv)
+
+    def test_check_reports_a_guard_the_kit_moved_past_and_a_sync_updates_it(self):
+        r0 = self.run_sync()
+        self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
+        # a later kit renders the guard differently; the installed file
+        # is still the ledgered deploy of the earlier one
+        generator = self.repo / "tools" / "hooks.py"
+        generator.write_text(generator.read_text().replace(
+            "REASONS = {", "REASONS = {  # a later kit", 1))
+        root = self.guard_root("claude")
+        before = self.home_snapshot()
+        chk = self.run_sync("--check")
+        self.assertNotEqual(chk.returncode, 0)
+        self.assertIn(f"DRIFT {root / 'spec-kit-guard.py'} — rerun tools/sync.sh",
+                      chk.stdout)
+        self.assertIn(f"OK  {root / 'REGISTER.md'}", chk.stdout)
+        self.assertEqual(self.home_snapshot(), before)
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("# a later kit", (root / "spec-kit-guard.py").read_text())
+        entries = dict((name, sha) for sha, name in
+                       (line.split(" ", 1) for line
+                        in (root / LEDGER).read_text().splitlines()))
+        self.assertEqual(
+            entries["spec-kit-guard.py"],
+            hashlib.sha256((root / "spec-kit-guard.py").read_bytes()).hexdigest())
+
+    def test_a_foreign_guard_file_blocks_the_whole_run_before_any_write(self):
+        foreign = self.guard_root("claude") / "spec-kit-guard.py"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text("# a hand-written script at the kit's own name\n")
+        before = self.home_snapshot()
+        r = self.run_sync()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn(f"REFUSE {foreign} — foreign file", r.stdout)
+        self.assertIn("PREFLIGHT FAILED", r.stdout)
+        self.assertEqual(self.home_snapshot(), before)
+        for root in (".agents", ".claude/skills", ".zcode/commands",
+                     ".zcode/spec-dev-kit"):
+            self.assertFalse((self.home / root).exists(), root)
+
+    def test_dry_run_plans_the_guard_and_writes_nothing(self):
+        r = self.run_sync("--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for target in self.HOMES:
+            for name in self.GUARD_FILES:
+                self.assertIn(f"plan  create {self.guard_root(target) / name}",
+                              r.stdout)
+        self.assertEqual(list(self.home.rglob("*")), [])
+
+    def test_sync_never_touches_a_harness_settings_file(self):
+        settings = {".claude/settings.json": '{"model": "sonnet"}\n',
+                    ".zcode/cli/config.json": '{"theme": "dark"}\n'}
+        for rel, text in settings.items():
+            path = self.home / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for rel, text in settings.items():
+            self.assertEqual((self.home / rel).read_text(), text)
+        self.assertEqual(r.stdout.splitlines()[-2:],
+                         [self.recommended("claude"), self.recommended("zcode")])
+
+    def test_a_stale_guard_deploy_is_swept_on_ledger_proof_alone(self):
+        r0 = self.run_sync()
+        self.assertEqual(r0.returncode, 0, r0.stdout + r0.stderr)
+        root = self.guard_root("claude")
+        stale, foreign = root / "old-guard.py", root / "notes.txt"
+        stale.write_text("# a file an earlier kit generated\n")
+        foreign.write_text("# someone else's\n")
+        ledger = root / LEDGER
+        ledger.write_text(ledger.read_text() + (
+            f"{hashlib.sha256(stale.read_bytes()).hexdigest()} old-guard.py\n"))
+        chk = self.run_sync("--check")
+        self.assertNotEqual(chk.returncode, 0)
+        self.assertIn(f"STALE {stale} (deployed guard file no longer shipped "
+                      "— rerun sync)", chk.stdout)
+        self.assertTrue(stale.is_file())
+        r = self.run_sync()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"clean {stale} (stale deploy)", r.stdout)
+        self.assertFalse(stale.exists())
+        self.assertTrue(foreign.is_file())
+        self.assertNotIn("old-guard.py", ledger.read_text())
 
 
 def _run_one(task):

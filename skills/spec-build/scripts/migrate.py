@@ -23,16 +23,15 @@ the burndown grows the Verified column; research.md folds into
 tech-spec.md's `## Questions & options` section; survey.md folds into
 tech-spec.md's `## Code state` section (its Baseline header and items
 carried verbatim, appended so a recorded prefix freeze still verifies);
-the approval record
-folds into one approval.md (`## Contract review` + `## Freeze`, manifest
-entry lines transplanted byte-identically); a notes/delivery.md record
+a notes/delivery.md record
 transplants into the status holder's delivery block; the per-spec-dir
 `.grammar-v1-warned` marker is removed last. Each retired file is
 deleted only after its content is carried over, and a second apply finds
 nothing left to convert and changes nothing. Writes touch only unfrozen
 bytes — task.md, tech-spec.md appends beyond the recorded prefix length,
-and approvals/* / notes/* — so a recorded freeze still verifies after
-the upgrade. Evidence is never fabricated: missing hotfix targets and
+and notes/* — so a recorded freeze still verifies after the upgrade. An
+approval record is never written here: an unsigned one is left for the
+owner's re-approval (`freeze.py --approve`), the only writer of one. Evidence is never fabricated: missing hotfix targets and
 fix digests stay missing for their owners to record. The upgrade runs
 dry by default; `--apply` writes.
 
@@ -207,8 +206,9 @@ def grow(spec_dir: Path) -> int:
         print("next: the recorded approval froze the one-file contract and "
               "no longer matches — set Status back to draft; once the "
               "docset is check-green, re-approve through /spec-design: "
-              "the contract review, then on the user's explicit yes "
-              "`freeze.py <spec-dir> --record --force`")
+              "the contract review, then on the user's explicit yes the owner "
+              "runs `freeze.py <spec-dir> --approve --force --review "
+              "<payload>` in their own terminal")
     return 0
 
 
@@ -319,21 +319,6 @@ def append_section(text: str, section: str) -> str:
     prefix, which is what a recorded tech-spec prefix hash anchors."""
     glue = "" if text.endswith("\n") else "\n"
     return text + glue + "\n" + section
-
-
-def folded_approval(approval_text: str,
-                    review_lines: tuple[str, ...] | None) -> str:
-    """The old-grammar record folded: the `## Frozen contract` manifest
-    becomes `## Freeze` with its entry lines byte-identical, and at full
-    tier the review sidecar's trio lands in `## Contract review` ahead of
-    it. The **Approved-at** preamble survives untouched."""
-    if review_lines is None:
-        return check.FROZEN_CONTRACT_HEADING.sub(
-            "## Freeze", approval_text, count=1)
-    m = check.FROZEN_CONTRACT_HEADING.search(approval_text)
-    return (approval_text[:m.start()]
-            + "## Contract review\n\n" + "\n".join(review_lines)
-            + "\n\n## Freeze\n\n" + approval_text[m.end():].lstrip("\n"))
 
 
 def _last_line(pattern: re.Pattern[str], text: str) -> str | None:
@@ -487,64 +472,18 @@ def upgrade(spec_dir: Path, apply: bool) -> int:
                     "the next contract change to freeze it again")
 
     approval_path = spec_dir / "approvals" / "approval.md"
-    review_path = spec_dir / "approvals" / "review.md"
-    approval_text = (approval_path.read_text(encoding="utf-8")
-                     if approval_path.is_file() else None)
-    if approval_text is None and review_path.exists():
+    if approval_path.is_file():
+        if not approval_path.with_name(
+                approval_path.name + ".sig").is_file():
+            notes.append(
+                "approvals/approval.md is unsigned — left as written: the "
+                "owner re-approves in their own terminal: `freeze.py "
+                "<spec-dir> --approve --force --review <payload>`")
+    elif (spec_dir / "approvals" / "review.md").exists():
         notes.append(
-            "approvals/review.md has no approval.md record to fold into — "
-            "kept: the freeze folds it at re-approval (`freeze.py <spec-dir>"
-            " --record --review <payload>`)")
-    elif (approval_text is not None
-          and check.FREEZE_HEADING.search(approval_text) is None):
-        if not check.FROZEN_CONTRACT_HEADING.search(approval_text):
-            return refuse(
-                "approvals/approval.md has no `## Frozen contract` manifest "
-                "to fold — re-approve on the user's yes: `freeze.py "
-                "<spec-dir> --record --force --review <payload>`")
-        review_lines: tuple[str, ...] | None = None
-        done_line = ("approval: renamed the manifest to `## Freeze` "
-                     "(tiny tier has no review section)")
-        if not tiny:
-            if not review_path.is_file():
-                return refuse(
-                    "the old-grammar approval record needs its "
-                    "approvals/review.md sidecar to fold — restore it, or "
-                    "re-approve on the user's yes: `freeze.py <spec-dir> "
-                    "--record --force --review <payload>`")
-            review_lines = freeze.fold_review(
-                review_path.read_text(encoding="utf-8"))
-            problem = freeze.review_shape_problem("\n".join(review_lines))
-            if problem:
-                return refuse(f"approvals/review.md cannot fold: {problem}")
-            done_line = ("approval: folded the review into one "
-                         "approvals/approval.md (`## Contract review` + "
-                         "`## Freeze`); deleted approvals/review.md")
-        verify_before = freeze.verify(spec_dir, repo)
-
-        def run_approval(approval_text=approval_text,
-                         review_lines=review_lines,
-                         verify_before=verify_before,
-                         done_line=done_line):
-            err = _write_fold(approval_path, approval_text,
-                              folded_approval(approval_text, review_lines))
-            if err:
-                return err
-            fresh = [p for p in freeze.verify(spec_dir, repo)
-                     if p not in verify_before]
-            if fresh:
-                _rollback(approval_path, approval_text)
-                return ("postcheck: the folded record fails freeze verify "
-                        f"— {fresh[0]}")
-            if not tiny and review_path.exists():
-                err = _unlink(review_path)
-                if err:
-                    return err
-            print(done_line)
-            return None
-
-        plan.append(("approval: fold the old-grammar record into one "
-                     "approval.md, delete approvals/review.md", run_approval))
+            "approvals/review.md has no approval.md record — kept: it "
+            "backs the re-approval (`freeze.py <spec-dir> --approve "
+            "--review <approvals/review.md>`)")
 
     note_path = spec_dir / "notes" / "delivery.md"
     if note_path.is_file():

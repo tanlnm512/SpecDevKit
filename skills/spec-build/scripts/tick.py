@@ -389,12 +389,15 @@ def main(argv=None) -> int:
     # validate → transform → write → postcheck transaction holds
     # specstate.task_lock, the same lock mark.py takes.
     try:
-        lock_ctx = specstate.task_lock(Path(spec_dir))
+        with specstate.task_lock(Path(spec_dir)):
+            rc = _tick_locked(task_path, spec_dir, notes, parks, dry, date)
     except specstate.TaskLockBusy as exc:
         print(f"lock busy: {exc}", file=sys.stderr)
         return 1
-    with lock_ctx:
-        return _tick_locked(task_path, spec_dir, notes, parks, dry, date)
+    if rc == 0 and not dry:
+        # the spec's lock is free: the registry lock is never taken inside it
+        specstate.claims_forget(spec_dir, [tid for tid, _ in notes])
+    return rc
 
 
 def _tick_locked(task_path: Path, spec_dir: Path, notes: list[tuple[str, str]],

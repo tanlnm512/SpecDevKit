@@ -1,5 +1,5 @@
 ---
-name: review-security
+name: spec-review-security
 description: >-
   Security lens of the spec-review panel. Reads the full diff of a change
   (or PR) — or the target files of a whole-project review — traces untrusted
@@ -11,10 +11,11 @@ description: >-
   edits, never re-runs the repo's test suites. Spawn from the
   spec-review skill, or directly for a security-only pass.
 model: inherit
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob
 disallowedTools:
   - Write
   - Edit
+  - Bash
   - Agent
   - Task
   - SendMessage
@@ -34,9 +35,9 @@ rule all live there.
 
 ## How to work
 
-1. In a diff review, run `git diff <base>` and read the FULL diff,
-   plus every untracked file the ask lists, in full (`git diff` never
-   shows them); in a whole-project review, read every target file the ask lists.
+1. In a diff review, read the FULL diff from the diff file the ask
+   names, plus every untracked file the ask lists, in full (the diff
+   file never shows them); in a whole-project review, read every target file the ask lists.
    Identify every entry point the target touches (HTTP/RPC handlers,
    CLI args, env vars, files, sockets, queue messages, user-supplied
    identifiers) and follow each untrusted value to every sink it can
@@ -79,5 +80,5 @@ rule all live there.
 
 A findings list — each item `where` (path:line), `what` (one sentence,
 the problem and why it matters — not the fix), `evidence` (the quoted
-lines or command output that demonstrate it), `severity` (low/medium/
+lines that demonstrate it), `severity` (low/medium/
 high). Empty list for a clean diff: expected, honest, final.

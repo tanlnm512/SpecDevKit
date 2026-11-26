@@ -1,18 +1,16 @@
 ---
 name: spec-ship
 description: >-
-  Takes a delivered spec from its commit to a merged pull request — the
-  suite's integration phase. Pushes the branch, drafts the PR from the
-  spec's own records, reads CI, classifies review comments and drafts
-  the replies, and after the merge names the step that re-points the
-  delivery record. Every push, PR create or edit, and posted comment
-  waits for the user's yes to a shown preview; it never force-pushes,
-  never merges, never pushes the default branch, never fixes code. Use
-  when a delivered spec (its delivery commit is on record) needs to go
-  up — "open the PR for this spec", "push this spec" — or its PR needs
-  attention: "CI is red on the PR", "answer the review comments", "it
-  merged, what now". Not for building or committing (spec-build),
-  reviewing code (spec-review), or tagging a release (spec-release).
+  Takes a delivered spec from its commit to a merged pull
+  request — pushes the branch, drafts the PR, reads CI, and drafts
+  the replies to review comments. Each outward step waits for the
+  user's yes to a shown preview; it never merges or fixes code.
+  Use when a delivered spec (its delivery commit is on record)
+  needs to go up — "open the PR for this spec", "push this spec"
+  — or its PR needs attention: "CI is red on the PR", "answer the
+  review comments", "it merged, what now". Not for building or
+  committing (spec-build), reviewing code (spec-review), or
+  tagging a release (spec-release).
 metadata:
   owner: platform-core
   version: "0.1.1"
@@ -156,8 +154,10 @@ preview, CI again.
 
 `agents/integrator.md` (`spec-integrator`) — read-only, modes
 `pr-text` and `threads` (steps 3 and 5); its digest is its whole
-deliverable, and `protocol/ship-protocol.md` is the shared text its
-payload carries. On a harness with registered agents, spawn the
+deliverable, validated against its mode's grammar before anything is
+read from it (`contracts/run.md`), and `protocol/ship-protocol.md`
+is the shared text its payload carries. On a harness with registered
+agents, spawn the
 `spec-integrator` type with the inputs only; otherwise lead a
 general-purpose spawn with the brief body. With no subagent dispatch,
 do the integrator's work inline under the same brief.

@@ -1,19 +1,13 @@
 ---
 name: spec-release
 description: >-
-  Cuts a release from work that is already merged and delivered — the
-  suite's release phase. Collects what landed since the last version
-  tag (delivered specs with their work types, docs impact, dependency
-  changes, rollout notes, parked backlog items, plus commits outside
-  the spec flow), proposes the SemVer bump, writes the changelog
-  section and release notes from those facts, gates the cut (clean
-  tree, release branch, CI green, rollback stated), and only on the
-  user's yes to each shown plan makes the release commit and annotated
-  tag, then pushes them and creates the GitHub release; ends with a
-  post-release checklist for a human. Use when the user says "cut a
-  release", "bump the version", "write the release notes / changelog",
-  "tag v1.4.0", or "publish the release" for merged work. Not for
-  opening, pushing, or fixing a pull request (spec-ship), building or
+  Cuts a release from work that is already merged and delivered —
+  collects what landed, proposes the SemVer bump, writes the
+  changelog and release notes, then tags and publishes on the
+  user's yes. Use when the user says "cut a release", "bump the
+  version", "write the release notes / changelog", "tag v1.4.0",
+  or "publish the release" for merged work. Not for opening,
+  pushing, or fixing a pull request (spec-ship), building or
   delivering a spec (spec-build), or deploying — this skill never
   deploys.
 metadata:
@@ -87,7 +81,9 @@ the current state.
 `spec-release-manager`) is spawned once per release, after `notes
 --write`: its payload is the collect JSON and the drafted section; it
 returns the tightened section and a trace from each bullet to its fact.
-It writes nothing; you replace the section and re-run `notes --check`.
+Its digest is validated against its grammar before anything is read
+from it (`contracts/run.md`). It writes nothing; you replace the
+section and re-run `notes --check`.
 A harness without subagents runs the same brief inline.
 
 **The record**: `Released: <tag> @ <sha>` lands in each included

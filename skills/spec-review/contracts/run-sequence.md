@@ -53,18 +53,19 @@ produced is not final: fix what it names and run it again.
 
 Ask ctx keys (`gate_line` = the gate object's `note`):
 
-- `scout`: base, project, files, repo_abs
-- `review`: base, files_n, lines, over_cap, untracked, lens (a
+- `scout`: base, project, files, repo_abs, run_dir
+- `review`: base, run_dir, files_n, lines, over_cap, untracked, lens (a
   `systems.lenses` entry, or `systems.general` in fast mode),
   gate_line, intent, scout_map
 - `review-project`: files (one part), part, parts, candidates, lens,
-  gate_line, repo_abs, scout_map
+  gate_line, repo_abs, scout_map, run_dir
 - `triage` / `triage-project`: base, lens_label, findings, intent
 - `cross-lens`: base, kept
 - `confirm` / `confirm-project`: base, finding, untracked — never
-  intent or scout_map
+  intent or scout_map (a diff-shaped `confirm` also carries `run_dir`)
 - `final` / `final-project`: base, summary, gate_line, untracked,
-  intent, scout_map (project: files, repo_abs)
+  intent, scout_map (project: files, repo_abs; a diff-shaped `final`
+  also carries `run_dir`)
 - `fixer`: round, project, base, unresolved, intent, repo_abs,
   gate_feedback (round ≥ 2) — `unresolved` never carries an
   `out-of-scope` item (it waits on the user, not on a round) or a
@@ -72,9 +73,16 @@ Ask ctx keys (`gate_line` = the gate object's `note`):
 - `verify`: tracked (one item), project, base, notes, repo_abs,
   test_hunks — a skipped item is RULED on here (D-022:
   `rejected-valid` | `rejected-invalid`, never a fix verdict)
-- `fix-review`: paths, base, gate_green, repo_abs, test_hunks
+- `fix-review`: paths, base, gate_green, repo_abs, test_hunks, run_dir
 - `loop-final`: tracked, rounds_used, gate_green, changed_paths,
-  project, base, scout_map
+  project, base, scout_map (a diff-shaped target also `run_dir`)
+
+A reader holds no shell (D-028), so every ask but `fixer`'s names a
+file, never a git command: the oracle writes the diff, the change to
+one path and the file lists into `<run_dir>/reader-files/` when it
+renders the ask. An ask with no run folder is `status: error` naming
+stage `ask`; a diff that cannot be produced is a named absence in the
+ask.
 
 Report data: title, mode_line, tracked[] (`{finding: {id, where,
 what, evidence, severity, lens, impact, confirmation: {status, note,
@@ -98,11 +106,12 @@ that wrote what it now judges:
 
 | Role | Agent type |
 |---|---|
-| Scout | `review-scout` |
-| Lens reviewer | `review-correctness` / `-security` / `-quality` (fast mode: one of them with the `general` lens) |
-| Fixer | `review-fixer` — the only role allowed to write |
-| Triage editor, final assessor | `review-quality` (read-only), with `systems.triage` ahead of the ask |
-| Confirmer, fix verifier | a read-only lens type — for a confirmer, not the finding's own lens — with `systems.verify` ahead of the ask |
+| Scout | `spec-review-scout` |
+| Lens reviewer | `spec-review-correctness` / `spec-review-security` / `spec-review-quality` (fast mode: one of them with the `general` lens) |
+| Fixer | `spec-review-fixer` — the only role allowed to write |
+| Triage editor, final assessor | `spec-review-quality` (read-only), with `systems.triage` ahead of the ask |
+| Confirmer | `spec-review-confirmer` — the brief `agents/spec-review-confirmer.md`, whose body `O systems` returns as `systems.confirm`, ahead of the ask |
+| Fix verifier | `spec-review-verifier` — the brief `agents/spec-review-verifier.md`, whose body `O systems` returns as `systems.verify`, ahead of the ask |
 | Fresh-eyes fix reviewer | a read-only lens type with `systems.fix_review` ahead of the ask |
 
 **Mode** — `auto` (default) is `fast` when scope's

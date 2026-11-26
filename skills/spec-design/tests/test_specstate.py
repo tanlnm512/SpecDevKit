@@ -5,12 +5,17 @@ output and write nothing, and every parser gets a representative case plus
 its None/missing/empty edge.
 """
 
+import contextlib
 import importlib.util
+import io
+import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -738,10 +743,145 @@ class ModuleShapeTests(unittest.TestCase):
         mods = set(re.findall(r"^(?:from|import)\s+([a-zA-Z_][\w.]*)", source, re.M))
         roots = {m.split(".")[0] for m in mods}
         self.assertTrue(roots)
+        # digests is the sibling schema module in scripts/, itself
+        # stdlib-only — not a package
         self.assertLessEqual(roots, {
-            "__future__", "contextlib", "datetime", "os", "pathlib", "re",
-            "subprocess", "sys", "time", "typing",
+            "__future__", "contextlib", "datetime", "hashlib", "json", "os",
+            "pathlib", "re", "subprocess", "sys", "tempfile", "time",
+            "typing", "digests",
         }, f"non-stdlib import found: {roots}")
+
+
+class ClaimRegistryTests(unittest.TestCase):
+    """The registry primitives the verbs and the engine share (D-078):
+    one key per claimed task, liveness read from the docs, and a damaged
+    file refused — never read as empty."""
+
+    TASKS = ("# Tasks\n\n## Phase 1\n"
+             "- [ ] T001 [P] first\n  - Touches:\n    - `src/a.py`\n"
+             "- [ ] T002 [P] second\n  - Touches:\n    - `src/b.py`\n")
+    ROW = {"run": "r-1", "at": "2026-11-25T10:00:00Z", "paths": ["src/a.py"]}
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="claims-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.specs = self._tmp / "specs"
+        self.alpha, self.beta = self.specs / "alpha", self.specs / "beta"
+        for d in (self.alpha, self.beta):
+            d.mkdir(parents=True)
+            write(d, "task.md", self.TASKS)
+        self.path = self.specs / ".claims" / "registry.json"
+        self.lock = self.specs / ".claims.lock"
+
+    def claim_by_hand(self, spec_dir: Path, task_id: str) -> None:
+        p = spec_dir / "task.md"
+        write(spec_dir, "task.md", p.read_text(encoding="utf-8").replace(
+            f"- [ ] {task_id}", f"- [ ] {task_id} (in-progress)", 1))
+
+    def test_key_and_root_follow_the_specs_tree(self):
+        self.assertEqual(specstate.claim_key(self.alpha, "T001"),
+                         "alpha/T001")
+        self.assertEqual(specstate.claims_registry_path(self.alpha),
+                         self.path)
+        archived = self.specs / "archive" / "2026-01-01-alpha"
+        self.assertEqual(specstate.claims_root(archived), self.specs)
+        self.assertEqual(specstate.claim_key(archived, "T001"),
+                         "archive/2026-01-01-alpha/T001")
+
+    def test_no_registry_reads_empty_and_takes_no_lock(self):
+        self.assertEqual(specstate.claims_read(self.alpha), {})
+        self.assertEqual(specstate.claims_held(self.beta), {})
+        self.assertFalse(self.path.parent.exists())
+        self.assertFalse(self.lock.exists())
+        self.assertTrue(specstate.claims_forget(self.alpha, ["T001"]))
+
+    def test_held_is_the_live_claims_of_other_specs_only(self):
+        self.claim_by_hand(self.alpha, "T001")
+        self.claim_by_hand(self.beta, "T002")
+        rows = {"alpha/T001": self.ROW, "alpha/T002": self.ROW,
+                "beta/T002": self.ROW}
+        with specstate.claims_lock(self.alpha):
+            specstate.claims_write(self.alpha, rows)
+        self.assertEqual(specstate.claims_held(self.beta),
+                         {"alpha/T001": ["src/a.py"]})
+        self.assertEqual(specstate.claims_held(self.alpha),
+                         {"beta/T002": ["src/a.py"]})
+        self.assertEqual(sorted(p.name for p in self.path.parent.iterdir()),
+                         [".gitignore", "registry.json"])
+        self.assertFalse(self.lock.exists())
+
+    def test_live_reads_the_status_holder_of_each_spec(self):
+        rows = {"alpha/T001": self.ROW, "gone/T001": self.ROW}
+        self.claim_by_hand(self.alpha, "T001")
+        self.assertEqual(sorted(specstate.claims_live(self.beta, rows)),
+                         ["alpha/T001"])
+        (self.alpha / "task.md").unlink()
+        self.assertEqual(specstate.claims_live(self.beta, rows), {})
+
+    def test_write_round_trips_and_is_self_ignored(self):
+        with specstate.claims_lock(self.alpha):
+            specstate.claims_write(self.alpha, {"alpha/T001": self.ROW})
+            self.assertEqual(specstate.claims_read(self.alpha),
+                             {"alpha/T001": self.ROW})
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")),
+                         {"alpha/T001": self.ROW})
+        self.assertEqual(
+            (self.path.parent / ".gitignore").read_text(encoding="utf-8"),
+            "*\n")
+        self.assertFalse(self.path.with_name("registry.json.tmp").exists())
+
+    def test_forget_drops_only_the_named_tasks_rows(self):
+        rows = {"alpha/T001": self.ROW, "alpha/T002": self.ROW,
+                "beta/T001": self.ROW}
+        with specstate.claims_lock(self.alpha):
+            specstate.claims_write(self.alpha, rows)
+        self.assertTrue(specstate.claims_forget(self.alpha, ["T001"]))
+        self.assertEqual(sorted(specstate.claims_read(self.alpha)),
+                         ["alpha/T002", "beta/T001"])
+        self.assertFalse(self.lock.exists())
+
+    def test_a_damaged_registry_is_refused_never_read_as_empty(self):
+        d = self.path.parent
+        d.mkdir(parents=True)
+        for damage in ("", "{not json", "[]", '{"alpha/T001": "claimed"}',
+                       '{"alpha/T001": {"run": "r-1"}}',
+                       '{"alpha-T001": %s}' % json.dumps(self.ROW)):
+            with self.subTest(damage=damage):
+                write(d, "registry.json", damage)
+                with specstate.claims_lock(self.alpha):
+                    with self.assertRaises(specstate.ClaimsRegistryError) as cm:
+                        specstate.claims_read(self.alpha)
+                self.assertIn(str(self.path), str(cm.exception))
+                self.assertIn("remove or repair it", str(cm.exception))
+                with self.assertRaises(specstate.ClaimsRegistryError):
+                    specstate.claims_held(self.beta)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertFalse(specstate.claims_forget(self.alpha,
+                                                             ["T001"]))
+                self.assertIn("claim registry not updated", err.getvalue())
+                self.assertEqual(self.path.read_text(encoding="utf-8"),
+                                 damage)
+
+    def test_a_busy_registry_lock_is_a_task_lock_busy(self):
+        self.assertTrue(issubclass(specstate.ClaimsLockBusy,
+                                   specstate.TaskLockBusy))
+        with specstate.claims_lock(self.alpha):
+            with self.assertRaises(specstate.ClaimsLockBusy) as cm:
+                with specstate.claims_lock(self.alpha, timeout=0.2):
+                    pass
+        self.assertIn(str(self.lock), str(cm.exception))
+        self.assertFalse(self.lock.exists())
+
+    def test_a_stale_registry_lock_is_broken(self):
+        self.specs.mkdir(parents=True, exist_ok=True)
+        write(self.specs, ".claims.lock", "12345 2026-11-13T10:00:00")
+        old = time.time() - 120
+        os.utime(self.lock, (old, old))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with specstate.claims_lock(self.beta):
+                pass
+        self.assertIn("broke stale claims lock", err.getvalue())
+        self.assertFalse(self.lock.exists())
 
 
 if __name__ == "__main__":

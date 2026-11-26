@@ -93,6 +93,34 @@ class GateCopyParityTests(unittest.TestCase):
                                  f"{copy} diverged from {master}")
 
 
+DIGEST_SCHEMA = "digests.py"
+DIGEST_SCHEMA_SKILLS = ["spec-build", "spec-define", "spec-design",
+                        "spec-discover", "spec-release", "spec-ship"]
+
+
+class DigestSchemaParityTests(unittest.TestCase):
+    """digests.py ships byte-identically in every skill whose roles have
+    a digest grammar; spec-review ships none — its roles return finding
+    carriers the oracle parses. Edit the spec-design master, then
+    `python3 tools/parity.py` (the closure) and copy it over."""
+
+    def test_exactly_the_digest_grammar_skills_ship_the_module(self):
+        shipped = sorted(
+            p.parent.parent.name
+            for p in (REPO_ROOT / "skills").glob(f"*/scripts/{DIGEST_SCHEMA}"))
+        self.assertEqual(shipped, DIGEST_SCHEMA_SKILLS)
+
+    def test_every_copy_is_byte_identical_to_the_master(self):
+        master = (REPO_ROOT / "skills" / "spec-design" / "scripts"
+                  / DIGEST_SCHEMA).read_bytes()
+        for skill in DIGEST_SCHEMA_SKILLS:
+            with self.subTest(skill=skill):
+                copy = (REPO_ROOT / "skills" / skill / "scripts"
+                        / DIGEST_SCHEMA)
+                self.assertEqual(copy.read_bytes(), master,
+                                 f"{copy} diverged from the master")
+
+
 class DivergenceFixtureTests(unittest.TestCase):
     def test_mutated_replica_byte_fails_check_and_real_tree_is_green(self):
         tmp = Path(tempfile.mkdtemp(prefix="parity-test-"))

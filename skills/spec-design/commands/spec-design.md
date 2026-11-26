@@ -13,9 +13,10 @@ run):
   `graph.py --span shape` (a red intent.md refuses with exit 4 — route
   to `/spec-define`), draft spec.md from a green intent if it is missing,
   then the frontier waves — tech ∥ qa → plan → tasks → verify — and the hard stop at the approve gate: run and record the
-  contract review (save the payload, pass it to `freeze.py --record
-  --review <payload>`), present the digest, record
-  the user's explicit yes (freeze, then `Status: approved`),
+  contract review (save the payload; the owner runs `freeze.py
+  --approve --review <payload>` in their own terminal), present the
+  digest, record the user's explicit yes (a verifying freeze, then
+  `Status: approved`),
   hand off to `/spec-build <name>`.
 - `continue <spec>` / an authoring ask on an existing docset → same
   run, resumed from doc state (no intent.md is demanded on a legacy

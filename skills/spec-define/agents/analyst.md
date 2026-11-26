@@ -65,8 +65,11 @@ output — never from memory, never invented.
    number a prior doc set claims (tables, indexes, file counts,
    consumer lists) — an old number is a claim, not evidence.
 2. **Research lens**: search the web (WebSearch/WebFetch); for academic
-   angles load the `paper-fetch` or `semanticscholar` skill if
-   installed, else query arXiv/Semantic Scholar APIs directly.
+   angles load the `paper-fetch` or `semanticscholar` skill — optional
+   integrations the kit does not ship — when one is installed on this
+   harness and your own tools include `Skill`; otherwise (not
+   installed, or no `Skill` tool) take the fallback: WebSearch/WebFetch
+   plus the arXiv and Semantic Scholar APIs queried directly.
    Breadth first per question, then narrow to the 2–3 sources that
    actually answer it. Every claim carries a URL — no unsourced "it is
    known that". Time-box: ≤15 tool calls per question; diminishing

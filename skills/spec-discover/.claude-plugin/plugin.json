@@ -1,7 +1,7 @@
 {
   "name": "spec-discover",
   "version": "0.1.1",
-  "description": "Five-stage idea discovery and pressure-testing \u2014 the pre-spec front door of the suite, for when WHETHER to build it or WHICH version is still open.",
+  "description": "Idea discovery and pressure-testing \u2014 for when WHETHER to build it or WHICH version is still open \u2014 ends in an idea brief ready for /spec-define.",
   "author": {
     "name": "Stanley",
     "email": "minhtan512@gmail.com"

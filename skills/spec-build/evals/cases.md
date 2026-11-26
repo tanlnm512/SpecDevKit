@@ -33,7 +33,8 @@ while authoring or editing the skill (D-061).
   work not redone; interrupted tasks resumed or respawned per their
   `(in-progress)` marks; `(fix n/5)` counts survive the resume
   because they live in task.md, never memory; the orphaned
-  `(in-progress)` claims are settled per SKILL.md § Resume before
+  `(in-progress)` claims are settled per `contracts/execution.md`
+  § Resume before
   anything sharing their files is spawned (diff of the task's
   Touches files read, acceptance commands re-run, then
   `(implemented)` or the claim cleared — the tree never reset); where

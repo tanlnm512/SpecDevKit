@@ -88,7 +88,11 @@ in `why:` and classify what remains.
 
 ## Output
 
-Return one digest and nothing else, in your mode's grammar.
+Your reply opens with one line: `tools: <the tools you actually hold,
+comma-separated>` — what you hold, never what you were told you hold; a
+tool you cannot see is absent. Then return one digest and nothing else,
+in your mode's grammar. A line without Read is a failed spawn: the
+digest is refused whole, never a fix round.
 
 pr-text digest:
 

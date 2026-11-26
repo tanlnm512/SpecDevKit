@@ -25,51 +25,71 @@ markers, `done <date> — <proof>` sub-lines, a `Delivered:` record), so
 status progress stays legal while an added, edited, or struck task or
 requirement breaks the freeze.
 
---record writes ONE file: the `## Contract review` section (the review
-payload's trio — fingerprint, digest, rulings) followed by the
-`## Freeze` manifest. At full tier the review payload the orchestrator
-saved is passed as `--review <payload>` (the auditor itself writes
-nothing); until migrate.py upgrade retires the old grammar, a
-persisted approvals/review.md backs a bare --record the same way.
+--approve is the owner's own-terminal step, run only after the explicit
+user approval. The record it writes is the `## Contract review` section
+(the review payload's trio — fingerprint, digest, rulings) followed by
+the `## Freeze` manifest. At full tier the review payload the
+orchestrator saved is passed as `--review <payload>` (the auditor itself
+writes nothing); a persisted approvals/review.md from the old grammar
+backs a bare --approve the same way.
 Three things must be on the review: the docset fingerprint the review
 named, the auditor's digest line (`digest: BLOCK <n> ·
 WARN <n> · NIT <n> · worst …`), and after that digest one `ruling:`
 line per BLOCK it counts. A docset repaired after its review has a new
-fingerprint, so the freeze refuses until it is re-reviewed.
+fingerprint, so the freeze refuses until it is re-reviewed. The digest
+line is read through its schema (digests.py): one the schema rejects
+refuses the approval as malformed until the auditor is re-run; a
+signed record verifies on the BLOCK count it carries.
 
---verify treats the Approved-at commit as history once the docset
-records its delivery: a squash-merge or rebase rewrites the anchor, and
-the delivery record owns the proof from there. It re-checks the folded
-review section's shape but never re-hashes the record — the manifest
-covers the four frozen files only — and never re-compares the
+An approval is a signature: --approve signs the record with an SSH key
+listed in the repo's approver list `specs/.approvers` (ssh
+allowed_signers: one `<principal> <key-type> <key-blob>` line per
+approver, `#` starts a comment) and writes
+specs/<name>/approvals/approval.md and approval.md.sig together — both
+or neither. The signed text is the record with LF line endings and
+exactly one trailing newline, so a CRLF checkout still verifies and any
+other change to the record breaks it. The record's `**Approved-by**`
+line carries the signing key's principal. --key defaults to the first
+of ~/.ssh/id_ed25519, ~/.ssh/id_ecdsa, ~/.ssh/id_rsa that exists;
+--force replaces an existing record.
+
+--verify refuses a record without a signature and one whose signature
+does not verify, unless the docset records its delivery — an unsigned
+record approved before signatures existed stays valid once delivered.
+It treats the Approved-at commit as history after delivery too: a
+squash-merge or rebase rewrites the anchor, and the delivery record
+owns the proof from there. It re-checks the folded review section's
+shape but never re-hashes the record — the signature covers it and the
+manifest covers the four frozen files only — and never re-compares the
 fingerprint to the live docset, whose legal post-approval drift
 (tech-spec appends, task.md status) changes it.
 
 Usage:
-  freeze.py <spec-dir> --record [--review <payload>] [--by "<name>"]... [--repo <path>]
-  freeze.py <spec-dir> --record --force [--repo <path>]   # fresh approval only
+  freeze.py <spec-dir> --approve [--review <payload>] [--key <private-key>] [--repo <path>] [--force]
   freeze.py <spec-dir> --verify [--repo <path>]
   freeze.py -h | --help
 
---record is run only after explicit user approval. It writes
-specs/<name>/approvals/approval.md atomically. --verify writes nothing.
---by names who signed off, one `**Approved-by**: <name>` line each
-(repeatable, optional — a record without it is the session user's yes).
+--verify writes nothing.
 """
 from __future__ import annotations
 
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import digests
 import specstate
 
 FROZEN_FILES = ("spec.md", "plan.md", "test.md", "tech-spec.md")
+NAMESPACE = "spec-dev-kit-approval"
+APPROVERS = Path("specs") / ".approvers"
+DEFAULT_KEYS = ("id_ed25519", "id_ecdsa", "id_rsa")
 TINY_EVIDENCE_HEADING = "## Evidence"
 TASK_STATUS_LINE = re.compile(
     r"^\s*(?:-\s*)?(?:done \d{4}-\d{2}-\d{2} \u2014|fix(?:ed)? \d+ \u2014"
@@ -158,14 +178,14 @@ def docset_fingerprint(spec_dir: Path) -> str:
     return h.hexdigest()[:12]
 
 
-REVIEW_DIGEST = re.compile(
-    r"^[ \t>*`-]*digest:[ \t]*BLOCK[ \t]+(\d+)\b", re.M)
+BLOCK_COUNT = re.compile(r"^digest:\s*BLOCK\s+(\d+)")
 REVIEW_FINGERPRINT = re.compile(
     r"Docset fingerprint:[ \t]*`?([0-9a-f]{6,64})`?", re.I)
 REVIEW_RULING = re.compile(
     r"^[ \t]*(?:[-*][ \t]+)?\**ruling\b[^\n:]*:[ \t]*\S", re.I | re.M)
 REVIEW_LEAD_MARKUP = re.compile(r"^[ \t>*`-]+")
-REVIEW_SHAPE = ("`Docset fingerprint: <hash>`, then the auditor's `digest: "
+REVIEW_SHAPE = ("`Docset fingerprint: <hash>`, then the auditor's "
+                "`tools: <the tools it holds>` line and its `digest: "
                 "BLOCK <n> · WARN <n> · NIT <n> · worst …` line verbatim, "
                 "then one `ruling: <finding> — repaired | <the user's "
                 "ruling>` line per BLOCK")
@@ -182,14 +202,16 @@ def _is_tiny(spec_dir: Path) -> bool:
 
 def approval_steps(spec_dir: Path) -> str:
     """What records an approval — a first one, or the one re-approval
-    of a docset approved before the freeze existed. Tiny tier has no
+    of a docset whose record no longer verifies. Tiny tier has no
     contract-review record."""
     if _is_tiny(spec_dir):
-        return "on the user's explicit yes run `freeze.py <spec-dir> --record`"
+        return ("on the user's explicit yes the owner runs `freeze.py "
+                "<spec-dir> --approve` in their own terminal")
     return (f"emit the contract review with {REVIEW_EMIT}, spawn the "
-            f"auditor on it, save the review payload ({REVIEW_SHAPE}), then "
-            "on the user's explicit yes run `freeze.py <spec-dir> --record "
-            "--review <payload>`")
+            "auditor on it, save the review payload ("
+            f"{REVIEW_SHAPE}), then on the user's explicit yes the owner "
+            "runs `freeze.py <spec-dir> --approve --review <payload>` in "
+            "their own terminal")
 
 
 def _review_text(spec_dir: Path, review: str | None) -> str:
@@ -202,19 +224,49 @@ def _review_text(spec_dir: Path, review: str | None) -> str:
         return ""
 
 
-def review_shape_problem(text: str) -> str | None:
+def _last_digest(text: str) -> tuple[int, str] | None:
+    lines = digests.digest_lines(text)
+    return lines[-1] if lines else None
+
+
+def review_shape_problem(text: str, strict: bool = True) -> str | None:
     """Why review text is not a complete REVIEW_SHAPE trio. A re-review
-    appends its digest, so the last one is the current review."""
-    digests = list(REVIEW_DIGEST.finditer(text))
-    if not digests:
+    appends its digest, so the last one is the current review. A signed
+    record verifies on its BLOCK count alone (strict=False): re-running
+    the review it froze means re-approving, which breaks a docset still
+    in execution (spec-design D-074). The live payload (strict=True) also
+    answers the capability handshake: the last `tools:` line above the
+    digest must hold Read (spec-design D-076)."""
+    last = _last_digest(text)
+    if last is None:
         return ("the review carries the fingerprint but no auditor digest "
                 "— a fingerprint alone is not a review: paste the "
                 "auditor's first line (`digest: BLOCK <n> · WARN <n> · NIT "
                 "<n> · worst …`) verbatim; no auditor ran yet → emit with "
                 f"{REVIEW_EMIT} and spawn it")
-    current = digests[-1]
-    blocks = int(current.group(1))
-    rulings = len(REVIEW_RULING.findall(text, current.end()))
+    offset, line = last
+    parsed = digests.parse("auditor", None, line)
+    loose = BLOCK_COUNT.match(line)
+    blocks = (parsed["BLOCK"] if parsed else
+              loose.group(1) if loose and not strict else None)
+    if blocks is None:
+        return (f"malformed auditor digest {line!r} — "
+                f"{'; '.join(digests.validate('auditor', None, line))} — "
+                "fix and run again: hand the problems back to the auditor, "
+                "re-run the review, and record the digest it returns")
+    if strict:
+        # the signed record folds the digest line alone: only the live
+        # payload carries the auditor's own `tools:` line
+        tools = digests.tools_lines(text[:offset])
+        reported = digests.tools_report(tools[-1][1] if tools else "")
+        missing = digests.tools_missing("auditor", reported)
+        if missing:
+            return (f"{digests.tools_refusal('auditor', reported, missing)} — "
+                    "spawn the auditor again on a type or harness that "
+                    "holds `Read`, re-run the review, and record the reply "
+                    "it returns, its `tools:` line first")
+    blocks = int(blocks)
+    rulings = len(REVIEW_RULING.findall(text, offset))
     if rulings < blocks:
         return (f"digest counts BLOCK {blocks} but {rulings} "
                 "ruling line(s) follow it — every BLOCK needs an owner: "
@@ -237,9 +289,9 @@ def review_problem(spec_dir: Path, review: str | None = None) -> str | None:
     text = _review_text(spec_dir, review)
     if not text.strip():
         return (f"contract review not recorded — emit it with {REVIEW_EMIT}, "
-                "spawn the auditor on that payload, then pass the saved "
-                "payload: `freeze.py <spec-dir> --record --review <payload>` "
-                f"({REVIEW_SHAPE})")
+                "spawn the auditor on that payload, then hand the saved "
+                "payload to the owner: `freeze.py <spec-dir> --approve "
+                f"--review <payload>` ({REVIEW_SHAPE})")
     fingerprint = docset_fingerprint(spec_dir)
     if fingerprint not in text:
         return (f"the review reviews a different docset (current "
@@ -275,12 +327,11 @@ def fold_review(text: str) -> tuple[str, ...]:
     fingerprints = list(REVIEW_FINGERPRINT.finditer(text))
     if fingerprints:
         lines.append(f"Docset fingerprint: {fingerprints[-1].group(1)}")
-    digests = list(REVIEW_DIGEST.finditer(text))
-    if digests:
-        last = digests[-1]
-        lines.append(REVIEW_LEAD_MARKUP.sub("", _line_of(text, last.start())))
+    last = _last_digest(text)
+    if last:
+        lines.append(last[1])
         lines += [REVIEW_LEAD_MARKUP.sub("", _line_of(text, m.start()))
-                  for m in REVIEW_RULING.finditer(text, last.end())]
+                  for m in REVIEW_RULING.finditer(text, last[0])]
     return tuple(lines)
 
 
@@ -321,9 +372,156 @@ def render(spec_dir: Path, approved_at: str,
     return "\n".join(lines)
 
 
-def record(spec_dir: Path, repo: Path, force: bool = False,
-           approvers: tuple[str, ...] = (),
-           review: str | None = None) -> int:
+def _canonical(text: str) -> bytes:
+    """The signed bytes: LF line endings, exactly one trailing newline."""
+    return (text.replace("\r\n", "\n").rstrip("\n") + "\n").encode("utf-8")
+
+
+def _first_line(text: bytes) -> str:
+    lines = text.decode("utf-8", errors="replace").strip().splitlines()
+    return lines[0] if lines else ""
+
+
+def _ssh_keygen(*args: str,
+                data: bytes | None = None) -> tuple[int, bytes, str]:
+    """(exit code, stdout, stderr's first line); stdin is `data`, or the
+    caller's own when None."""
+    try:
+        run = subprocess.run(["ssh-keygen", *args], input=data,
+                             capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 255, b"", str(exc)
+    return run.returncode, run.stdout, _first_line(run.stderr)
+
+
+def _keygen_problem() -> str | None:
+    if shutil.which("ssh-keygen") is None:
+        return ("ssh-keygen not found — an approval signature needs the "
+                "OpenSSH client tools")
+    return None
+
+
+NO_LIST = ("no approver list (specs/.approvers) — create it with your "
+           "SSH public key, one `<principal> <key-type> <key-blob>` line "
+           "per approver: `ssh-keygen -y -f ~/.ssh/id_ed25519` prints yours")
+
+
+def _approvers_file(spec_dir: Path, repo: Path) -> Path:
+    """The approver list: the nearest specs/.approvers at or above the
+    spec dir — an archived spec sits a level deeper than the default
+    repo root reaches — else the one --repo names."""
+    for parent in (spec_dir, *spec_dir.parents):
+        if (parent / APPROVERS).is_file():
+            return parent / APPROVERS
+    return repo / APPROVERS
+
+
+def _allowed_lines(approvers: Path) -> list[str]:
+    """The approver list's key lines — blank and `#` lines dropped."""
+    if not approvers.is_file():
+        return []
+    return [line for line in
+            approvers.read_text(encoding="utf-8",
+                                errors="replace").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+
+
+def _principals(approvers: Path) -> list[str]:
+    return list(dict.fromkeys(
+        name for name in (line.split()[0].split(",")[0]
+                          for line in _allowed_lines(approvers))
+        if name))
+
+
+def _public_half(path: Path) -> tuple[str, str] | str:
+    """The key's type and blob — read from its .pub file first, so a
+    passphrase-protected key resolves without a prompt — or why neither
+    yields them."""
+    pub = path.with_name(path.name + ".pub")
+    if pub.is_file():
+        words = pub.read_text(encoding="utf-8", errors="replace").split()
+        if len(words) >= 2:
+            return words[0], words[1]
+    code, public, error = _ssh_keygen("-y", "-f", str(path))
+    if code != 0:
+        return f"cannot read the public half of {path} — {error}"
+    keytype, blob = public.decode("utf-8", errors="replace").split()[:2]
+    return keytype, blob
+
+
+def _signer(spec_dir: Path, repo: Path,
+            key: str | None) -> tuple[Path, str] | str:
+    """The signing key and its principal in the approver list — the key
+    --key names, else the first standard identity that exists — or why
+    nothing can sign."""
+    problem = _keygen_problem()
+    if problem:
+        return problem
+    approvers = _approvers_file(spec_dir, repo)
+    if key:
+        path = Path(key).expanduser()
+        missing = f"no signing key at {path}"
+    else:
+        path = next((candidate for candidate in
+                     (Path.home() / ".ssh" / name for name in DEFAULT_KEYS)
+                     if candidate.is_file()), None)
+        missing = ("no signing key found — pass --key <private-key> "
+                   "(looked for "
+                   + ", ".join(f"~/.ssh/{name}" for name in DEFAULT_KEYS)
+                   + ")")
+    if path is None or not path.is_file():
+        return missing
+    if not approvers.is_file():
+        return NO_LIST
+    public = _public_half(path)
+    if isinstance(public, str):
+        return public
+    for line in _allowed_lines(approvers):
+        words = line.split()
+        if any(words[i:i + 2] == list(public)
+               for i in range(len(words) - 1)):
+            return path, words[0].split(",")[0]
+    return (f"the key {path} is not in {approvers} — add its public "
+            "half there as `<principal> <key-type> <key-blob>` "
+            "(`ssh-keygen -y -f <key>` prints it), or sign with a listed "
+            "key: --key <private-key>")
+
+
+def _staged(target: Path, data: bytes) -> Path:
+    fd, tmp = tempfile.mkstemp(prefix=f".{target.name}-",
+                               dir=str(target.parent))
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+    return Path(tmp)
+
+
+def _discard(tmp: Path) -> None:
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+
+
+def _write_pair(out: Path, tmp_record: Path, tmp_sig: Path) -> None:
+    """Replace the record and its signature together; a failed second
+    replace puts the record back as it was."""
+    before = out.read_bytes() if out.exists() else None
+    os.replace(tmp_record, out)
+    try:
+        os.replace(tmp_sig, out.with_name(out.name + ".sig"))
+    except OSError:
+        if before is None:
+            out.unlink()
+        else:
+            out.write_bytes(before)
+        raise
+
+
+def approve(spec_dir: Path, repo: Path, force: bool = False,
+            review: str | None = None, key: str | None = None) -> int:
+    out = spec_dir / "approvals" / "approval.md"
     if any("NEEDS CLARIFICATION" in (spec_dir / f).read_text(
             encoding="utf-8", errors="replace")
            for f in FROZEN_FILES if (spec_dir / f).exists()):
@@ -333,13 +531,6 @@ def record(spec_dir: Path, repo: Path, force: bool = False,
     if problem:
         print(f"FAIL: {problem}", file=sys.stderr)
         return 1
-    review_lines = ()
-    if not _is_tiny(spec_dir):
-        review_lines = fold_review(_review_text(spec_dir, review))
-    git_ok = specstate.git_available(repo)
-    sha = specstate.head_sha(repo) if git_ok else "-"
-    text = render(spec_dir, sha or "-", approvers, review_lines)
-    out = spec_dir / "approvals" / "approval.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and not force:
         print(
@@ -348,20 +539,36 @@ def record(spec_dir: Path, repo: Path, force: bool = False,
             file=sys.stderr,
         )
         return 1
-    fd, tmp = tempfile.mkstemp(prefix=".approval-", dir=str(out.parent))
+    signer = _signer(spec_dir, repo, key)
+    if isinstance(signer, str):
+        print(f"FAIL: {signer}", file=sys.stderr)
+        return 1
+    key_path, principal = signer
+    review_lines = ()
+    if not _is_tiny(spec_dir):
+        review_lines = fold_review(_review_text(spec_dir, review))
+    sha = specstate.head_sha(repo) if specstate.git_available(repo) else "-"
+    text = render(spec_dir, sha or "-", (principal,), review_lines)
+    print(f"approving {spec_dir.name} — docset fingerprint "
+          f"{docset_fingerprint(spec_dir)}, signing as {principal}\n{text}",
+          end="")
+    # the record is staged as a file and signed where it lies: ssh-keygen
+    # then leaves stdin to the terminal, so a passphrase prompt works
+    tmp_record = _staged(out, _canonical(text))
+    tmp_sig = Path(f"{tmp_record}.sig")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, out)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-    print(f"recorded {out} (approved-at {sha or '-'})")
+        code, _, error = _ssh_keygen("-Y", "sign", "-f", str(key_path), "-n",
+                                     NAMESPACE, str(tmp_record))
+        if code != 0 or not tmp_sig.is_file():
+            print(f"FAIL: ssh-keygen could not sign — {error}",
+                  file=sys.stderr)
+            return 1
+        _write_pair(out, tmp_record, tmp_sig)
+    finally:
+        _discard(tmp_record)
+        _discard(tmp_sig)
+    print(f"approved {out} (approved-at {sha or '-'}; "
+          f"signed by {principal})")
     return 0
 
 
@@ -391,6 +598,77 @@ def _delivered(spec_dir: Path) -> bool:
         for name in ("task.md", "spec.md") if (spec_dir / name).exists())
 
 
+def _record_is_history(spec_dir: Path, repo: Path) -> bool:
+    """True when an unsigned record is provably history: the docset is
+    delivered and a commit in this repo's ancestry — the delivery commit
+    or HEAD — carries the record byte for byte. A `Delivered:` line alone
+    proves nothing; any writer can add one."""
+    record = spec_dir / "approvals" / "approval.md"
+    if not _delivered(spec_dir) or not record.exists():
+        return False
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10)
+        if top.returncode != 0:
+            return False
+        rel = record.resolve().relative_to(
+            Path(top.stdout.strip()).resolve()).as_posix()
+        current = _canonical(record.read_bytes().decode(
+            "utf-8", errors="replace"))
+        deliveries = [specstate.delivery_state(
+            (spec_dir / name).read_text(encoding="utf-8",
+                                        errors="replace"))[1]
+            for name in ("task.md", "spec.md") if (spec_dir / name).exists()]
+        refs = [sha for sha in deliveries
+                if sha and sha != "-" and _commit_exists(repo, sha)]
+        for ref in [*refs, "HEAD"]:
+            committed = subprocess.run(
+                ["git", "-C", str(repo), "show", f"{ref}:{rel}"],
+                capture_output=True, timeout=10)
+            if (committed.returncode == 0
+                    and _canonical(committed.stdout.decode(
+                        "utf-8", errors="replace")) == current):
+                return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    return False
+
+
+def signature_problem(spec_dir: Path, repo: Path) -> str | None:
+    """Why the record's signature does not prove an approval, or None.
+    An unsigned record proves one only when a delivery commit carries it."""
+    sig = spec_dir / "approvals" / "approval.md.sig"
+    if not sig.exists():
+        if _record_is_history(spec_dir, repo):
+            return None
+        return ("no signature (approvals/approval.md.sig) — an unsigned "
+                "record is not an approval, whatever its `Delivered:` line "
+                "says: the owner re-approves in their own terminal: "
+                "`freeze.py <spec-dir> --approve --force`")
+    approvers = _approvers_file(spec_dir, repo)
+    problem = _keygen_problem()
+    if problem is None and not approvers.is_file():
+        problem = NO_LIST
+    if problem:
+        return problem
+    record = sig.with_name("approval.md")
+    message = _canonical(
+        record.read_bytes().decode("utf-8", errors="replace"))
+    detail = ""
+    for principal in _principals(approvers):
+        code, _, error = _ssh_keygen(
+            "-Y", "verify", "-f", str(approvers), "-I", principal,
+            "-n", NAMESPACE, "-s", str(sig), data=message)
+        if code == 0:
+            return None
+        detail = detail or error
+    return (f"signature does not verify ({detail or 'no approver listed'}) "
+            "— the record changed after signing, or its signer is not in "
+            "specs/.approvers: the owner re-approves in their own terminal: "
+            "`freeze.py <spec-dir> --approve --force`")
+
+
 def verify(spec_dir: Path, repo: Path) -> list[str]:
     """Return human-readable integrity problems; empty means green."""
     path = spec_dir / "approvals" / "approval.md"
@@ -398,6 +676,9 @@ def verify(spec_dir: Path, repo: Path) -> list[str]:
         return [f"approval freeze missing: {path.relative_to(spec_dir)}"]
     text = path.read_text(encoding="utf-8", errors="replace")
     problems: list[str] = []
+    signature = signature_problem(spec_dir, repo)
+    if signature:
+        problems.append(f"approval freeze: {signature}")
     am = APPROVED_AT.search(text)
     if not am:
         problems.append("approval freeze: missing Approved-at")
@@ -408,8 +689,8 @@ def verify(spec_dir: Path, repo: Path) -> list[str]:
             problems.append(
                 f"approval freeze: Approved-at commit {approved_at!r} not found "
                 "or not an ancestor of HEAD — history rewritten before "
-                "delivery: re-approve (`freeze.py <spec-dir> --record "
-                "--force` on the user's yes)"
+                "delivery: re-approve (`freeze.py <spec-dir> --approve "
+                "--force` in the owner's terminal on the user's yes)"
             )
     recorded: dict[str, tuple[str, str, int]] = {}
     for name, kind, digest, length in ENTRY.findall(text):
@@ -440,19 +721,20 @@ def verify(spec_dir: Path, repo: Path) -> list[str]:
         else:
             if old != new:
                 problems.append(f"approval freeze: {name} changed after approval")
-    # a `## Freeze` heading marks the folded one-file grammar; old-grammar
-    # records (## Frozen contract) keep their legacy review.md sidecar and
-    # are migrate.py upgrade's to convert
+    # a `## Freeze` heading marks the one-file grammar; an old-grammar
+    # record (## Frozen contract) is unsigned and never got this far
+    # unless its docset is delivered
     if not _is_tiny(spec_dir) and _heading_section(text, "Freeze") is not None:
         review = _heading_section(text, "Contract review")
         if review is None:
             problems.append(
                 "approval freeze: contract review section missing from the "
                 "record — a full-tier freeze folds the review trio; "
-                "re-approve (`freeze.py <spec-dir> --record --force --review "
-                "<payload>` on the user's yes)")
+                "re-approve (`freeze.py <spec-dir> --approve --force "
+                "--review <payload>` in the owner's terminal on the user's "
+                "yes)")
         else:
-            shape = review_shape_problem(review)
+            shape = review_shape_problem(review, strict=False)
             if shape:
                 problems.append(f"approval freeze: {shape}")
     return problems
@@ -460,16 +742,16 @@ def verify(spec_dir: Path, repo: Path) -> list[str]:
 
 def parse_args(
     argv: list[str],
-) -> tuple[Path, Path, str, bool, tuple[str, ...], str | None] | None:
+) -> tuple[Path, Path, str, bool, str | None, str | None] | None:
     spec_dir = repo = None
     mode = ""
     force = False
     review: str | None = None
-    approvers: list[str] = []
+    key: str | None = None
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg in ("--record", "--verify"):
+        if arg in ("--approve", "--verify"):
             mode = arg
         elif arg == "--force":
             force = True
@@ -478,12 +760,11 @@ def parse_args(
             if i >= len(argv):
                 return None
             review = argv[i]
-        elif arg == "--by":
+        elif arg == "--key":
             i += 1
-            name = " ".join(argv[i].split()) if i < len(argv) else ""
-            if not name:
+            if i >= len(argv):
                 return None
-            approvers.append(name)
+            key = argv[i]
         elif arg == "--repo":
             i += 1
             if i >= len(argv):
@@ -494,12 +775,18 @@ def parse_args(
         else:
             return None
         i += 1
-    if not spec_dir or mode not in ("--record", "--verify"):
+    if not spec_dir or mode not in ("--approve", "--verify"):
         return None
-    if (approvers or review) and mode != "--record":
+    if (key or review) and mode != "--approve":
         return None
     return (Path(spec_dir), Path(repo) if repo else Path(spec_dir).parent.parent,
-            mode, force, tuple(approvers), review)
+            mode, force, key, review)
+
+
+RECORD_REFUSAL = (
+    "FAIL: --record is retired — an unsigned record is not an approval; "
+    "the owner signs one in their own terminal: "
+    "`freeze.py <spec-dir> --approve`")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -508,16 +795,19 @@ def main(argv: list[str] | None = None) -> int:
     if any(a in ("-h", "--help") for a in argv):
         print(__doc__)
         return 0
+    if "--record" in argv:
+        print(RECORD_REFUSAL, file=sys.stderr)
+        return 1
     parsed = parse_args(argv)
     if parsed is None:
         print(__doc__, file=sys.stderr)
         return 2
-    spec_dir, repo, mode, force, approvers, review = parsed
+    spec_dir, repo, mode, force, key, review = parsed
     if not spec_dir.is_dir():
         print(f"FAIL: {spec_dir} is not a directory", file=sys.stderr)
         return 1
-    if mode == "--record":
-        return record(spec_dir, repo, force, approvers, review)
+    if mode == "--approve":
+        return approve(spec_dir, repo, force, review, key)
     problems = verify(spec_dir, repo)
     for problem in problems:
         print(f"FAIL: {problem}")

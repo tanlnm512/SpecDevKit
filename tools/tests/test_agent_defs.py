@@ -4,8 +4,9 @@ Run via tools/tests/run.sh (needs Python >= 3.10).
 Same philosophy as test_omp_defs.py: the generator derives everything
 by parsing each source role's own Claude-style frontmatter — no
 per-role table to test in isolation — so these exercise it against
-the spec trio's real shipped agents/*.md (the five archetype briefs,
-staged into one skill dir), plus a synthetic scratch skill
+the spec trio's real shipped agents/*.md (the archetype briefs,
+staged into one skill dir, plus spec-review's readers — its lens,
+scout and judge briefs — for the read-only set), plus a synthetic scratch skill
 for staging and no-deletion behavior sync.sh can't safely practice on
 the live shared roots.
 """
@@ -20,10 +21,26 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# `bash` per read-only brief, as its `tools:` line grants it — write is
+# denied for all of them, and the shell for none: spec-review's oracle hands
+# a reader its diff as a file, so no shipped reader holds a shell.
+REVIEW_JUDGE_BRIEFS = ("spec-review-confirmer.md", "spec-review-verifier.md")
+REVIEW_LENS_BRIEFS = ("spec-review-scout.md", "spec-review-correctness.md",
+                      "spec-review-security.md", "spec-review-quality.md")
+READER_BASH = {
+    "auditor.md": "deny",
+    **dict.fromkeys(REVIEW_LENS_BRIEFS, "deny"),
+    "spec-review-confirmer.md": "deny",
+    "spec-review-verifier.md": "deny",
+}
+READONLY_ROLES = tuple(n for n, bash in READER_BASH.items() if bash == "deny")
+SHELL_READER_ROLES = tuple(n for n, bash in READER_BASH.items() if bash == "allow")
+
 
 def staged_archetypes() -> Path:
-    """The spec trio's five archetypes in one skill dir — each skill
-    ships only its span's subset, byte-shared where they overlap."""
+    """The spec trio's archetypes in one skill dir — each skill ships
+    only its span's subset, byte-shared where they overlap — plus
+    spec-review's reader briefs."""
     root = Path(tempfile.mkdtemp(prefix="archetypes-"))
     atexit.register(shutil.rmtree, root, ignore_errors=True)
     agents = root / "agents"
@@ -31,6 +48,9 @@ def staged_archetypes() -> Path:
     for skill in ("spec-define", "spec-design", "spec-build"):
         for f in (REPO_ROOT / "skills" / skill / "agents").glob("*.md"):
             shutil.copyfile(f, agents / f.name)
+    for name in REVIEW_JUDGE_BRIEFS + REVIEW_LENS_BRIEFS:
+        shutil.copyfile(REPO_ROOT / "skills" / "spec-review" / "agents" / name,
+                        agents / name)
     return root
 
 
@@ -102,10 +122,22 @@ class OpencodeDefsTests(unittest.TestCase):
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "auditor.md").read_text()
-            fm = FM.match(reviewer).group(1)
+            for name in READONLY_ROLES:
+                with self.subTest(role=name):
+                    fm = FM.match((out / name).read_text()).group(1)
+                    self.assertIn("  edit: deny", fm)
+                    self.assertIn("  bash: deny", fm)
+                    self.assertIn("  read: allow", fm)
+
+    def test_shell_reader_keeps_bash_and_never_gets_a_write(self):
+        # no shipped reader holds a shell; a brief that did keeps it, without a write
+        self.assertEqual(SHELL_READER_ROLES, ())
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            out = run("opencode", make_skill(tmp, ["spec-shell"]), tmp / "oc")
+            fm = FM.match((out / "spec-shell.md").read_text()).group(1)
+            self.assertIn("  bash: allow", fm)
             self.assertIn("  edit: deny", fm)
-            self.assertIn("  bash: deny", fm)
             self.assertIn("  read: allow", fm)
 
     def test_body_is_verbatim(self):
@@ -133,8 +165,20 @@ class DroidDefsTests(unittest.TestCase):
     def test_readonly_set_collapses_to_category(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "auditor.md").read_text()
-            self.assertIn("tools: read-only", reviewer)
+            for name in READONLY_ROLES:
+                with self.subTest(role=name):
+                    self.assertIn("tools: read-only", (out / name).read_text())
+
+    def test_shell_reader_keeps_execute_and_never_gets_a_write(self):
+        # no shipped reader holds a shell; a brief that did keeps it, without a write
+        self.assertEqual(SHELL_READER_ROLES, ())
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            out = run("droid", make_skill(tmp, ["spec-shell"]), tmp / "dr")
+            fm = FM.match((out / "spec-shell.md").read_text()).group(1)
+            self.assertIn('tools: ["Read", "Execute"]', fm)
+            self.assertNotIn("Create", fm)
+            self.assertNotIn('"Edit"', fm)
 
     def test_tool_ids_map_to_factory_names(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -172,13 +216,25 @@ class KiloDefsTests(unittest.TestCase):
     def test_readonly_role_denies_edit_and_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = self.gen(Path(tmp))
-            reviewer = (out / "auditor.md").read_text()
-            fm = FM.match(reviewer).group(1)
+            for name in READONLY_ROLES:
+                with self.subTest(role=name):
+                    fm = FM.match((out / name).read_text()).group(1)
+                    self.assertIn("  edit: deny", fm)
+                    self.assertIn("  bash: deny", fm)
+                    self.assertIn("  read: allow", fm)
+                    self.assertIn("  glob: allow", fm)
+                    self.assertIn("  grep: allow", fm)
+
+    def test_shell_reader_keeps_bash_and_never_gets_a_write(self):
+        # no shipped reader holds a shell; a brief that did keeps it, without a write
+        self.assertEqual(SHELL_READER_ROLES, ())
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            out = run("kilo", make_skill(tmp, ["spec-shell"]), tmp / "ki")
+            fm = FM.match((out / "spec-shell.md").read_text()).group(1)
+            self.assertIn("  bash: allow", fm)
             self.assertIn("  edit: deny", fm)
-            self.assertIn("  bash: deny", fm)
             self.assertIn("  read: allow", fm)
-            self.assertIn("  glob: allow", fm)
-            self.assertIn("  grep: allow", fm)
 
     def test_model_omitted_and_body_verbatim(self):
         # Kilo wants provider-prefixed model IDs the briefs don't

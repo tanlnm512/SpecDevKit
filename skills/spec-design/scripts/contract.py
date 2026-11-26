@@ -60,8 +60,9 @@ NODE_TABLE = [
      "`check.py <spec-dir>` exits 0"),
     ("approve", "human",
      "verify done (HUMAN gate)",
-     "spec.md Status: approved (or later) AND the approval freeze "
-     "recorded (`approvals/approval.md`, at every tier)"),
+     "spec.md Status: approved (or later) AND its signed approval "
+     "record verifying (`approvals/approval.md` + `approval.md.sig`, at "
+     "every tier)"),
     ("execute", "mechanical",
      "approved",
      "every task entry implemented (no fix round open), ticked [x], or "
