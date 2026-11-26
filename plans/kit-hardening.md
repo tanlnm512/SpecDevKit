@@ -1,190 +1,163 @@
-# Kit hardening plan — skills, agents, and the anonymous-agent SDLC
+# Kit hardening plan — round 2: close the gaps the implementation review found
 
-Source: a review of the seven `SKILL.md` files and thirteen agent
-briefs (definition quality), then a gap analysis for running the kit
-with anonymous agents — interchangeable, stateless, of unknown model
-and harness, whose output is trusted for what can be checked, never
-for who produced it.
+Source: the review of 4913c41 ("harden skills and agents for the
+anonymous-agent SDLC") against the round-1 plan. All suites,
+`tools/tests/run.sh`, `drift-check.py` and the mini-spec check pass;
+phase 1, the claim registry, the reader shell removal, the
+confirmer/verifier briefs and the SKILL.md slimming hold. What remains
+is below, highest risk first.
 
-Every item that changes a doc contract lands with its own D-### in
-the owning skill's `decisions/` (C-05). Generated surfaces are edited
-at their source and regenerated (`tools/agent-defs.py`,
-`tools/kit-rules.py`, `tools/plugin-manifest.py`). Done for every
-item means: all seven skill suites, `tools/tests/run.sh`, and
-`python3 tools/drift-check.py` green.
+Every item that changes a doc contract lands with its own D-### in the
+owning skill's `decisions/` (C-05); scripts are edited in one skill and
+copied byte-identically (parity tests); generated surfaces are
+regenerated, never hand-edited. Done for every item: all seven skill
+suites, `tools/tests/run.sh`, `python3 tools/drift-check.py` green, and
+each fix's regression test fails on 4913c41 for the intended reason.
 
-## Phase 1 — Fix what the definitions promise but do not do (small, mechanical)
+## Phase A — An agent must not be able to produce an approval (blocking)
 
-### 1.1 Wire the round-4 model escalation
-- **Gap**: `agents/developer.md` pins `model: sonnet`; `mark.py` prints
-  `round 4: spawn one tier up`, but no payload carries a model, so a
-  `--native-agents` spawn runs on the frontmatter model.
-- **Do**: `graph.py --emit-spawns` writes a `Model:` line (and the
-  emit line names it) on a round-4 payload; SKILL.md § Fix rounds says
-  how to honor it per harness (spawn-time override, or general agent).
-- **Accept**: a test emits a round-4 payload and asserts the line;
-  `HARNESS-FACTS.md` gains an assumption row per harness that cannot
-  override a registered agent's model.
+Do this before any spec is approved under the signature scheme.
 
-### 1.2 Make the fix-cap arithmetic say one thing
-- **Gap**: "at most 5 per task" (`rules/agent-limits.md`), but round 4
-  failing writes `(fix 5/5)` and the engine never re-spawns — four
-  attempts run.
-- **Do**: pick one — "4 attempts; `5/5` is the stop marker" in the
-  budget text, or let round 5 run. Update `agent-limits.md`, spec-build
-  SKILL.md, `mark.py` docstring together.
-- **Accept**: wording and `graph.FIX_CAP` behavior agree; a test pins
-  the number of spawns before the cap stop.
+### A1 Pin the approver list to one trusted location
+- **Gap**: `freeze.py` `_approvers_file` takes the nearest
+  `specs/.approvers` walking up from the spec dir. A nested
+  `specs/<name>/specs/.approvers` shadows the root list (reproduced),
+  and the recommended CODEOWNERS pattern does not cover it.
+- **Do**: read the list from the repo root only; refuse verify when any
+  other `.approvers` exists under `specs/`. Prefer a trust root the
+  workspace cannot edit: a machine-level list
+  (`~/.config/spec-dev-kit/approvers`) for local runs, and the list as it
+  stands at the remote default branch for CI.
+- **Accept**: a test with a nested list holding an agent key — verify
+  fails naming the shadow file.
 
-### 1.3 Disambiguate "tier"
-- **Gap**: `Tier: tiny|full` (spec size) and "capability tier" (model
-  strength) share a word.
-- **Do**: rename the model sense (e.g. "model step") in briefs,
-  SKILL.md, `mark.py` output; add both terms to `GLOSSARY.md`.
+### A2 Keep `--approve` in the owner's terminal
+- **Gap**: the guard's P3 admits any invocation of the installed
+  `freeze.py` (`tools/hooks.py` `_is_freeze_call`), `--approve --force`
+  included; `approve()` signs without a confirmation. With a
+  passphrase-less listed key, an agent's own call yields a valid
+  signature.
+- **Do**: P3 admits `freeze.py` only with `--verify` (and other
+  read-only flags); `--approve` requires a confirmation typed on
+  `/dev/tty` — refused with no controlling terminal — naming the spec
+  and fingerprint being approved.
+- **Accept**: hook test denying `freeze.py … --approve`; freeze test
+  where `--approve` with no tty exits 1.
 
-### 1.4 Namespace the review agents
-- **Gap**: `review-correctness|security|quality|scout|fixer` lack the
-  `spec-` prefix every other agent carries; generic names collide with
-  other plugins' agents.
-- **Do**: rename to `spec-review-*` in `skills/spec-review/agents/`,
-  the oracle's role table, `commands/`, and regenerate root `agents/`.
-- **Accept**: parity and drift checks green; sync's ledger removes the
-  old installed names (verify with `bash tools/sync.sh --check`).
+### A3 Close the unsigned-record grandfather
+- **Gap**: `_record_is_history` accepts an unsigned record when the
+  docset carries a `Delivered:` line and HEAD holds the record byte for
+  byte. An agent can add the line and `git commit -a` (no path named,
+  so the guard is blind).
+- **Do**: resolve the grandfather against the remote default branch
+  (`origin/<default>`), not HEAD or the claimed delivery sha — or only
+  for records whose introducing commit predates signing.
+- **Accept**: a test where a forged, locally committed, `Delivered:`
+  docset fails verify.
 
-### 1.5 Declare or drop optional external skills
-- **Gap**: briefs reference skills the kit does not ship —
-  `paper-fetch`, `semanticscholar` (analyst), `browser-use:web-gui-tester`,
-  `agent-native-design` (tester).
-- **Do**: list them as optional integrations in `HARNESS-FACTS.md`
-  (open assumptions) with a fallback stated in the brief, or remove.
+## Phase B — Make 2.5/2.6 enforced outside spec-build
 
-### 1.6 Trim skill descriptions
-- **Gap**: descriptions load into every session; spec-release 938,
-  spec-discover 835, spec-ship 814 chars against the 1024 loader cap.
-- **Do**: reduce each to trigger phrases + the "not for" boundary,
-  target ≤ 600 chars; add a drift-check warning above that budget.
+### B1 spec-design stops on a refused digest
+- **Gap**: `graph.py` `sweep_digests` output goes to stderr and the run
+  emits the next wave anyway; `--run` sweeps once at startup only.
+- **Do**: a malformed or `capability_missing` digest holds its node
+  (the frontier treats it as not done) and `--run` re-sweeps between
+  waves; exit with the fix-and-run-again line.
+- **Accept**: graph test — a malformed tech digest blocks the plan wave.
 
-## Phase 2 — Close the trust gaps (highest risk)
+### B2 spec-review checks the tools report in code
+- **Gap**: `review_orchestrator.py` `findings-parse` strips the
+  `tools:` line without checking it; D-029 is prose. The fixer's
+  required set is `Read` only.
+- **Do**: the oracle validates the report per role against the brief's
+  `tools:` line (fixer: Read, Grep, Glob, Bash, Write, Edit); a missing
+  tool is a failed call, not a finding or a round.
 
-### 2.1 Approval only a human can grant
-- **Gap**: approval is `approvals/approval.md` + `Status: approved`;
-  any write-capable agent can author both, and `freeze.py --by` takes a
-  free-text name. The approve gate is only as strong as its writer.
-- **Do**:
-  1. A generated PreToolUse hook (per harness, under `tools/`, C-03)
-     denying spawned agents writes to `specs/**/approvals/**` and to
-     `Status:` lines.
-  2. Bind the record to something agents cannot forge: `freeze.py`
-     records the approving human's commit identity / signed commit, or
-     verifies a PR approval; `check.py` and spec-build's invocation gate
-     reject a record without it.
-  3. Recommend CODEOWNERS on `specs/**/approvals/` in the scaffold.
-- **Accept**: a test where a simulated agent-written approval is
-  refused by spec-build's gate (exit 4).
+## Phase C — Wiring and contradictions
 
-### 2.2 Enforce read-only and blindness mechanically
-- **Gap**: the four `review-*` readers hold `Bash`, so "read-only" is
-  prose; the tester's blindness to tech-spec/plan/task is "enforced
-  only by you".
-- **Do**: give readers the diff as a file (as the auditor already gets
-  `reviewer-diff.patch`) and drop `Bash`, or keep it behind a hook that
-  denies mutating commands; a hook denying the tester `Read` on
-  `tech-spec.md|plan.md|task.md`.
-- **Accept**: generated defs/hooks tested per harness that supports
-  them; unsupported harnesses listed in `HARNESS-FACTS.md`.
+### C1 Headless `--run` honors or refuses the model step
+- `graph.py` runner substitution has no `{model}`; round 4 runs on the
+  same model silently. Add a `{model}` placeholder; a runner template
+  without it stops `AWAITING ORCHESTRATOR` on a round-4 payload rather
+  than spending the round.
 
-### 2.3 Brief the spec-review roles that carry independence
-- **Gap**: triage editor, confirmer, fix verifier, and fresh-eyes fix
-  reviewer exist only in `contracts/` — no agent def, so no
-  tool restriction and no parity pin.
-- **Do**: add `spec-review-confirmer.md` and `spec-review-verifier.md`
-  (read-only tools); the oracle's asks point at them.
+### C2 Fix the worktree payload contradiction
+- `ISOLATED_WORKTREE_LINE` forbids writing outside the worktree while
+  the same payload asks for the digest (and the brief allows
+  `notes/T###.md`) in the main tree. State the two exceptions in the
+  line; test that `land` finds an isolated developer's digest.
 
-### 2.4 Provenance ledger
-- **Gap**: no record of which role, model, harness, and payload
-  produced an artifact — outputs cannot be audited, reproduced, or
-  compared across models.
-- **Do**: every digest file carries a provenance line (role, lens,
-  model, harness, payload sha, input fingerprint, run id); an
-  append-only `specs/<name>/runs/` ledger written by the orchestrator
-  scripts, never by agents.
+### C3 Tester blindness covers every reading tool
+- P4 guards `Read`/`NotebookRead`/`view` only; the tester holds `Grep`
+  and `Bash`. Either drop Bash from the tester (it needs check.py — run
+  it from the orchestrator instead) or extend P4 to `Grep`/`Glob` paths
+  and shell commands naming the three files. Update D-073.
 
-### 2.5 Strict digest validation
-- **Gap**: `mark.py` reads a digest's status; the rest of each grammar
-  is loosely parsed.
-- **Do**: one schema per digest grammar (developer, architect, tester,
-  analyst, auditor, panelist, integrator, release-manager); a malformed
-  digest is a "fix and run again" refusal, never half-parsed.
+### C4 Move the eight draft intents out of `specs/`
+- They carry six open markers each and a baseline of the parent commit,
+  so they can never be green and drop `tools/grade.py`'s spec-define
+  dogfood to 1/9. Move them to `plans/intents/` (or teach grade.py to
+  skip parked drafts) until each enters through `/spec-define`.
 
-### 2.6 Capability handshake
-- **Gap**: a spawned agent's real tool surface can be narrower than
-  its def (recorded for omp); a degraded agent returns a degraded result.
-- **Do**: the payload asks for a first-line `tools:` report; the
-  orchestrator refuses on a missing required tool.
+## Phase D — Provenance and schema tightening
 
-## Phase 3 — Coordination across agents and specs
+- **D1 Unvouched digests**: a digest file with no matching ledger
+  `wave` row is marked `unverified`, never given an orchestrator line;
+  the latest digest is the one the ledger names, not the highest
+  `wave-N/` directory.
+- **D2 Escape reported tool names**: reject `·` (and newlines) in a
+  `tools:` report before it enters the provenance line.
+- **D3 Land never reads an unswept digest**: on `TaskLockBusy`, `land`
+  refuses instead of proceeding; a digest with no provenance line is
+  not valid at land.
+- **D4 Ledger tamper evidence**: chain each ledger row to the previous
+  row's hash so an appended or edited row is detectable; state in D-055
+  that this detects, not prevents.
+- **D5 Schema strictness**: no trailing segment absorbed by the last
+  free-text field; summary counts checked against the content (threads,
+  auditor findings); the `tools:` report read from the first line only.
+- **D6 Schema ↔ brief test**: extract each digest grammar from its brief
+  or `protocol/lenses.md` and assert `digests.py` accepts it, so a brief
+  edit cannot drift silently.
 
-### 3.1 Cross-spec claim registry
-- **Gap**: `Touches:` overlap is checked within one spec only; two specs
-  executing at once can edit the same files.
-- **Do**: `mark.py claim` checks and writes a repo-level registry
-  (e.g. `specs/.claims`) under a lock; overlap defers the task.
+## Phase E — Coordination edges
 
-### 3.2 Optional worktree-per-task execution
-- **Gap**: wave-mates share one working tree (hence the brief's ban on
-  `git stash/reset/checkout`); a bad agent's work is hard to discard.
-- **Do**: opt-in `--isolate worktree` — each task in its own worktree,
-  merged by the orchestrator on land, dropped on release.
+- **E1 Budget is a ceiling**: truncate a wave to the remaining budget
+  (or refuse the claim) instead of overshooting by a wave; test with a
+  multi-task wave.
+- **E2 Failed tasks keep their files**: a task at `(fix n/5)` — and at
+  the cap while adjudicated — keeps its registry row live so another
+  spec cannot claim its files.
+- **E3 `drop` removes the task's worktree**, as land and release do.
+- **E4 Proof location**: `land` proves the tree the digest says the
+  work is in; a main-tree edit with an existing worktree is refused,
+  not landed unproven.
 
-### 3.3 Run budgets for unattended spans
-- **Gap**: telemetry counts events only; no ceiling on an unattended
-  execute run.
-- **Do**: per-run and per-spec limits (spawns, wall-clock, tokens where
-  the harness reports them) that park `AWAITING HUMAN`.
+## Phase F — Docs and process
 
-## Phase 4 — Prompt weight and drift surface
-
-### 4.1 Slim the large SKILL.md bodies
-- **Gap**: spec-build (405 lines) and spec-review (337) restate the
-  contracts they say arbitrate, and cite ADR numbers (9 and 8) the
-  executing model cannot act on.
-- **Do**: SKILL.md keeps entry gate, happy path, pointers; edge cases
-  (resume, cap adjudication, marker table) move to `contracts/`, read
-  on demand; drop inline D-### references from instructions.
-- **Accept**: live evals in `evals/cases.md` re-recorded green.
-
-### 4.2 Normalize `rules/engineering-rules.md` formatting
-- § Refusals and failed calls uses unwrapped long lines unlike the
-  rest; rewrap and regenerate the carriers.
-
-## Phase 5 — SDLC coverage
-
-| Item | New surface | Feeds |
-|---|---|---|
-| 5.1 `/spec` status router | one command reading graph/ship/release state, naming the next skill | all |
-| 5.2 Async human gates | gate preview posted as a PR/issue comment; resume on a verified approval (builds on 2.1) | approve, tick-commit, ship, release |
-| 5.3 `spec-incident` | alert/log/postmortem → hotfix `intent.md` with evidence attached | spec-define |
-| 5.4 Maintenance flow | dependency/CVE audit output → `Type: upgrade` intents | spec-define |
-| 5.5 `spec-triage` | rank, merge, promote `BACKLOG.md` parked items | spec-define / spec-discover |
-| 5.6 Routing evals | cases where similar wording must land in different skills (discover vs define vs design) | descriptions (1.6) |
-
-## Phase 6 — Learning loop
-
-### 6.1 Repo lessons injected into payloads
-- `retro.py` proposes entries to `specs/LESSONS.md`; a human accepts
-  them at a gate; payloads carry the accepted lessons through the same
-  injection path `kit-rules.py` uses.
-
-### 6.2 Per-role, per-model scorecard
-- From the provenance ledger (2.4): fix-round rate, BLOCK rate,
-  pending-proof rate by role and model — the evidence for model
-  choice per role and for the escalation in 1.1.
+- **F1** Remove the ADR ids added to SKILL.md bodies (spec-design
+  2 → 7, spec-build D-053/D-057) per D-060.
+- **F2** Point to the same-signature rule from fix rounds 2–3, not only
+  at the cap.
+- **F3** Drop "or directly for a …-only pass" from the four reader
+  descriptions — without a shell they need the oracle's diff files.
+- **F4** Attempt wording: "four rounds spawn, the fifth failure stops"
+  everywhere (`rules/agent-limits.md`, developer.md, `MODEL_STEP_LINE`,
+  D-051 title).
+- **F5** Note the spec-design D-077 gap in `decisions/INDEX.md`; fix
+  "tiered spawn" at `HARNESS-FACTS.md:62`.
+- **F6** Re-record the live evals (the round-1 4.1 acceptance, and the
+  seven results D-067 marks stale); decide the VERSION/CHANGELOG bump.
+- **F7** Run `bash tools/sync.sh` then `--check` on each machine: the
+  retired `review-*` agents (still holding Bash) are installed and the
+  guard is not.
+- **F8** Land future rounds as one PR per phase — a single 21k-line
+  commit is not reviewable or revertible piecemeal.
 
 ## Order
 
-1. Phase 1 (one PR, mechanical).
-2. 2.1 approval hardening — the gap that lets an agent unlock execution.
-3. 2.4 + 2.5 provenance and digest validation; then 2.2, 2.3, 2.6.
-4. Phase 3, then 4.1.
-5. Phases 5 and 6 — each new skill enters through `/spec-discover` or
-   `/spec-define`.
+1. Phase A (blocking).
+2. Phase B.
+3. Phase C.
+4. Phases D and E.
+5. Phase F alongside, F7 immediately.
