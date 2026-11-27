@@ -626,8 +626,11 @@ class ApprovalSignatureTests(unittest.TestCase):
         self._approve()
         self._no_machine_list()
         self.assertTrue(self.verify(), "verified on a workspace list alone")
+        # this is the LOCAL refusal: CI="" holds the resolver off the
+        # remote-default-branch path this test does not set up
         code, shown = _approval.run_freeze(
-            [*self.approve_argv(), "--force"], env={"HOME": str(self.home)})
+            [*self.approve_argv(), "--force"],
+            env={"HOME": str(self.home), "CI": ""})
         self.assertEqual(code, 1, shown)
         self.assertIn("no approver list", shown)
 
