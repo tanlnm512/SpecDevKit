@@ -1270,8 +1270,9 @@ HAND_REPORTED = "Bash, Edit, Glob, Grep, Read, Write"
 
 
 def facts(row: dict) -> dict:
-    """A ledger row without its timestamp — the literal a test compares."""
-    return {k: v for k, v in row.items() if k != "ts"}
+    """A ledger row without its timestamp and chain field — the literal
+    a test compares."""
+    return {k: v for k, v in row.items() if k not in ("ts", "prev")}
 
 
 def provenance_section(text: str) -> str:
@@ -1288,8 +1289,9 @@ class Gate011RunLedgerTests(unittest.TestCase):
     the ledger with its stop reason; the headless wave's claims,
     digests and landings join the same rows. Every graph.py invocation
     that touches the spec sweeps digests/ first: a valid digest file
-    gains the one provenance line a ledger row vouches for, a malformed
-    one is left as it is and named."""
+    gains the one provenance line a ledger row vouches for; a malformed
+    one, or one no `wave` or `claim` row records, is left as it is and
+    named."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="gate011-"))
@@ -1419,33 +1421,35 @@ class Gate011RunLedgerTests(unittest.TestCase):
                 f"{digest['digest']} | implemented |", section)
 
     def test_a_hand_written_digest_is_swept_before_every_read(self):
-        # each mode that touches the spec sweeps first: the file gains
-        # exactly one line, built from the file's own name when the
-        # ledger holds no wave row for it
+        # each mode that touches the spec sweeps first: a hand-written
+        # file no ledger row records is refused — named on stderr, once
+        # per content, given no provenance line. The sweep ran; it
+        # vouches nothing for a digest nobody's emit or claim asked for
         modes = ([], ["--state-json"], ["--explain", "execute"],
                  ["--emit-spawns"], ["--run"])
-        for wave, argv in enumerate(modes, start=7):
+        path = self.digest_at(self.spec, 7, HAND_DIGEST)
+        refusal = (f"digest: unverified at {path} — it carries no "
+                   "`provenance:` line and no ledger row records its "
+                   "digest — nothing vouches its content — fix and run "
+                   "again: re-spawn the same payload to rewrite its "
+                   "digest file\n")
+        for argv in modes:
             with self.subTest(argv=argv):
-                path = self.digest_at(self.spec, wave, HAND_DIGEST)
                 r = run_graph(self.spec, *argv, tel=self.tel)
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-                self.assertEqual(r.stderr, "", (argv, r.stderr))
-                row = [row for row in self.rows()
-                       if row["event"] == "digest" and row["wave"] == wave]
-                self.assertEqual(len(row), 1)
-                self.assertEqual(facts(row[0]), {
-                    "skill": "spec-build", "event": "digest", "wave": wave,
-                    "task": "T001", "role": "implementer",
-                    "stem": "implementer-T001", "harness": "unknown",
-                    "digest": hashlib.sha256(HAND_DIGEST.encode())
-                    .hexdigest()[:12], "outcome": "implemented",
-                    "tools-reported": HAND_REPORTED})
-                self.assertEqual(path.read_text(encoding="utf-8"), (
-                    HAND_DIGEST
-                    + "provenance: run none · role implementer · lens none · "
-                      "model none · harness unknown · payload none · input "
-                      f"none · recorded {row[0]['ts']} · tools-reported "
-                      f"{HAND_REPORTED}\n"))
+                self.assertIn(refusal, r.stderr)
+        self.assertNotIn("provenance:", path.read_text(encoding="utf-8"))
+        rows = [row for row in self.rows()
+                if row["event"] == "digest_malformed"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["wave"], rows[0]["outcome"]),
+                         (7, "unverified"))
+        self.assertEqual(facts(rows[0]), {
+            "skill": "spec-build", "event": "digest_malformed", "wave": 7,
+            "task": "T001", "role": "implementer",
+            "stem": "implementer-T001", "harness": "unknown",
+            "digest": hashlib.sha256(HAND_DIGEST.encode())
+            .hexdigest()[:12], "outcome": "unverified"})
 
         # a pure read and a refusal at the gate touch nothing
         idle = self.digest_at(self.spec, 3, HAND_DIGEST)

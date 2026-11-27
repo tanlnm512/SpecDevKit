@@ -94,12 +94,11 @@ def delivery_record(spec_dir: Path) -> tuple[str, str | None]:
 
 
 def digest_rows(spec_dir: Path) -> tuple[list[str], int]:
-    """One line per task with a digest file on file (the newest wave
-    wins): what it reported, its deviation — or that the file is
-    malformed, which is counted, never skipped. Returns the rows and
-    the malformed count. The digests/ tree is run scratch — archive
-    removes it — so this count is the record that outlives it
-    (spec-build D-040)."""
+    """One line per task with the digest the ledger names: what it
+    reported, its deviation — or that the file is refused, which is
+    counted, never skipped. Returns the rows and the refused count. The
+    digests/ tree is run scratch — archive removes it — so this count
+    is the record that outlives it (spec-build D-040)."""
     on_file = specstate.digests_on_file(spec_dir)
     rows = []
     malformed = 0
@@ -108,6 +107,10 @@ def digest_rows(spec_dir: Path) -> tuple[list[str], int]:
         if d["state"] == specstate.DIGEST_MALFORMED:
             malformed += 1
             rows.append(f"- {tid} wave {d['wave']} — malformed")
+            continue
+        if d["state"] == specstate.DIGEST_UNVERIFIED:
+            malformed += 1
+            rows.append(f"- {tid} wave {d['wave']} — unverified")
             continue
         row = f"- {tid} wave {d['wave']} — {d['status']}"
         if d["deviation"] != "none":

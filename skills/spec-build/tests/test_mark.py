@@ -677,6 +677,32 @@ class LandProofGateTests(unittest.TestCase):
             self.assertIn("--resolution may carry no em dash", r.stderr)
         self.assertEqual((spec / "task.md").read_bytes(), before)
 
+    def test_a_digest_no_request_row_vouches_refuses_the_landing(self):
+        # the sweep vouches a digest only where the ledger records the
+        # request — the wave or claim row of ITS wave and stem. A file
+        # placed at a wave the task was never claimed in carries no
+        # provenance line and lands nothing; the entry stays claimed
+        spec = hand_fixture(self._tmp, "unvouched")
+        make_wave(spec, "T001")
+        claimed = run_mark(spec, "claim", "--wave",
+                           str(spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(claimed.returncode, 0, claimed.stdout + claimed.stderr)
+        path = digest_file(spec, 6, GREEN_DIGEST + "\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(f"refused: unverified digest at {path}", r.stderr)
+        self.assertIn("no ledger row records its digest", r.stderr)
+        self.assertIn("fix and run again", r.stderr)
+        self.assertNotIn("provenance:", path.read_text(encoding="utf-8"))
+        self.assertIn("(in-progress)", entry_text(spec, "T001"))
+        rows = [json.loads(line) for line in
+                (spec / "runs" / "ledger.jsonl").read_text(
+                    encoding="utf-8").splitlines()]
+        self.assertEqual([row["event"] for row in rows],
+                         ["claim", "digest_malformed"])
+        self.assertEqual((rows[-1]["outcome"], rows[-1]["wave"]),
+                         ("unverified", 6))
+
 
 class ClaimWaveTests(unittest.TestCase):
     """claim --wave's own contract: exactly the wave's files, the
@@ -778,6 +804,40 @@ class LockTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("stale task lock", r.stderr)
         self.assertFalse(lock.exists())
+
+    def test_land_with_a_held_lock_refuses_and_writes_nothing(self):
+        make_wave(self.spec, "T001")
+        claimed = run_mark(self.spec, "claim", "--wave",
+                           str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(claimed.returncode, 0, claimed.stdout + claimed.stderr)
+        digest = (self.spec / "digests" / "wave-4" / "implementer-T001.md")
+        digest.parent.mkdir(parents=True)
+        write(digest, GREEN_DIGEST + "\n")
+        holder = (
+            "import sys, time\n"
+            f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
+            "import specstate\n"
+            f"with specstate.task_lock({str(self.spec)!r}):\n"
+            "    print('held', flush=True)\n"
+            "    time.sleep(8)\n")
+        hpath = self._tmp / "holder.py"
+        write(hpath, holder)
+        p = subprocess.Popen([sys.executable, str(hpath)],
+                             stdout=subprocess.PIPE, text=True)
+        self.addCleanup(p.wait)
+        try:
+            self.assertEqual(p.stdout.readline().strip(), "held")
+            r = run_mark(self.spec, "land", "T001", tel=self.tel)
+            self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+            self.assertIn("lock busy", r.stderr)
+        finally:
+            p.kill()
+        self.assertIn("(in-progress)", entry_text(self.spec, "T001"))
+        self.assertNotIn("provenance:", digest.read_text(encoding="utf-8"))
+        ledger = json.loads(
+            (self.spec / "runs" / "ledger.jsonl").read_text(
+                encoding="utf-8").splitlines()[-1])
+        self.assertEqual(ledger["event"], "claim")
 
 
 class TickStampTests(unittest.TestCase):
@@ -949,6 +1009,15 @@ def sha12(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
+def chain_hash(row: dict) -> str:
+    """The hash a ledger row chains from, computed here from the
+    definition — sha256-12 of the row's sorted-key JSON without the
+    chain fields — never with the code under test."""
+    payload = {k: row[k] for k in sorted(row) if k not in ("prev", "chain")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True)
+                          .encode("utf-8")).hexdigest()[:12]
+
+
 def digest_file(spec: Path, wave: int, text: str) -> Path:
     path = spec / "digests" / f"wave-{wave}" / "implementer-T001.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -998,7 +1067,7 @@ class RunLedgerTests(unittest.TestCase):
                 "harness": "claude-code"})
         self.assertEqual(list(rows[0]), [
             "ts", "skill", "event", "run", "wave", "task", "role", "lens",
-            "stem", "payload", "model", "harness"])
+            "stem", "payload", "model", "harness", "prev"])
 
         # ungiven, the harness is `unknown`; the flag is claim's alone
         spec = hand_fixture(self._tmp, "unknown")
@@ -1143,6 +1212,37 @@ class RunLedgerTests(unittest.TestCase):
             "task": "T001", "role": "implementer",
             "stem": "implementer-T001", "outcome": "orphan"})
         self.assertEqual(facts(rows[3]), facts(rows[1]))
+
+    def test_a_broken_ledger_chain_refuses_the_verbs_nothing_written(self):
+        # each row chains to the row_hash of the line before it; a row
+        # appended by hand breaks the chain, and no verb writes a marker
+        # onto a ledger whose tail no longer chains
+        spec = hand_fixture(self._tmp, "chained")
+        make_wave(spec, "T001")
+        legacy = {"ts": "2026-11-13T10:00:00+00:00", "skill": "spec-build",
+                  "event": "claim", "run": "r-old", "wave": 1, "task": "T000",
+                  "stem": "implementer-T000"}
+        chained = {"ts": "2026-11-13T10:01:00+00:00", "skill": "spec-build",
+                   "event": "claim", "run": "r-new", "wave": 2, "task": "T000",
+                   "stem": "implementer-T000",
+                   "prev": chain_hash(legacy)}
+        ledger = specstate.ledger_path(spec)
+        ledger.parent.mkdir(parents=True)
+        write(ledger, json.dumps(legacy) + "\n" + json.dumps(chained) + "\n")
+        appended = dict(chained, ts="2026-11-13T10:02:00+00:00",
+                        event="release", outcome="orphan")
+        appended.pop("prev")
+        with ledger.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(appended) + "\n")
+        before = ledger.read_bytes()
+        r = run_mark(spec, "claim", "--wave",
+                     str(spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("refused: the run ledger's row chain is broken",
+                      r.stderr)
+        self.assertIn("line 3: appended without its `prev`", r.stderr)
+        self.assertEqual(ledger.read_bytes(), before)
+        self.assertNotIn("(in-progress)", entry_text(spec, "T001"))
 
     def test_fail_and_drop_append_their_rows(self):
         spec = copy_fixture(self._tmp, "verbs")

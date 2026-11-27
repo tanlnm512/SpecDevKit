@@ -35,10 +35,10 @@ ready/done conditions and why it sits where it sits.
 | `research-gate` | gate | spec.md done — *SKIPPED at Tier: tiny* | the research record is resolved — tech-spec.md `## Questions & options` holds real content (→ ran) or the skip marker (→ skipped); a pre-migration research.md reads the same until migration — *not required at Tier: tiny* |
 | `research` | agent | the research gate is resolved `run` — *SKIPPED at Tier: tiny* | the research record holds real, non-marker content (the tech-spec section; a pre-migration docset: research.md) — *not required at Tier: tiny* |
 | `intent` | agent | intent.md present and unfilled, or `check.py --intent-only` fails (absent → SKIPPED: legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 — or, once spec.md is filled, fails on its baseline alone (lost or stale: an intake-time gate) |
-| `tech` | agent | spec done AND research resolved (either form) — *SKIPPED at Tier: tiny* | tech-spec.md filled AND `check.py <spec-dir> --code-state-only` exits 0 — *not required at Tier: tiny* |
-| `plan` | agent | spec + tech done — *SKIPPED at Tier: tiny* | plan.md exists, non-empty, filled — *not required at Tier: tiny* |
-| `qa` | agent | spec done (reads spec.md only — blind to tech/plan, parallel-safe) — *SKIPPED at Tier: tiny* | test.md exists, non-empty, filled — *not required at Tier: tiny* |
-| `tasks` | agent | plan + tech + qa done — *SKIPPED at Tier: tiny* | task.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `tech` | agent | spec done AND research resolved (either form) — *SKIPPED at Tier: tiny* | tech-spec.md filled AND `check.py <spec-dir> --code-state-only` exits 0 — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
+| `plan` | agent | spec + tech done — *SKIPPED at Tier: tiny* | plan.md exists, non-empty, filled — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
+| `qa` | agent | spec done (reads spec.md only — blind to tech/plan, parallel-safe) — *SKIPPED at Tier: tiny* | test.md exists, non-empty, filled — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
+| `tasks` | agent | plan + tech + qa done — *SKIPPED at Tier: tiny* | task.md exists, non-empty, filled — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
 | `verify` | mechanical | tech, plan, qa, tasks all done | `check.py <spec-dir>` exits 0 |
 | `approve` | human | verify done (HUMAN gate) | spec.md Status: approved (or later) AND its signed approval record verifying (`approvals/approval.md` + `approval.md.sig`, at every tier) |
 | `execute` | mechanical | approved | every task entry implemented (no fix round open), ticked [x], or struck ~~ |

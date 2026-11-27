@@ -6,6 +6,7 @@ its None/missing/empty edge.
 """
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -882,6 +883,150 @@ class ClaimRegistryTests(unittest.TestCase):
                 pass
         self.assertIn("broke stale claims lock", err.getvalue())
         self.assertFalse(self.lock.exists())
+
+
+
+def chain_hash(row: dict) -> str:
+    """The hash a ledger row chains from, computed here from the
+    definition — sha256-12 of the row's sorted-key JSON without the
+    chain fields — never with the code under test."""
+    payload = {k: row[k] for k in sorted(row) if k not in ("prev", "chain")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True)
+                          .encode("utf-8")).hexdigest()[:12]
+
+
+class LedgerChainTests(unittest.TestCase):
+    """The ledger's tamper evidence (spec-build D-055): each row carries
+    `prev`, the content hash of the row before it, so a row appended by
+    hand carries no `prev` and an edited row's successor no longer
+    matches. The chain detects, it cannot prevent."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="specstate-chain-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.spec = self._tmp / "specs" / "demo"
+        self.spec.mkdir(parents=True)
+        self.ledger = self.spec / "runs" / "ledger.jsonl"
+
+    def row(self, n: int) -> dict:
+        return {"ts": f"2026-11-13T10:0{n}:00+00:00", "skill": "spec-design",
+                "event": "wave", "wave": n, "stem": "tech", "role": "tech"}
+
+    def test_an_appended_row_is_named(self):
+        specstate.ledger_append(self.spec, self.row(1))
+        specstate.ledger_append(self.spec, self.row(2))
+        with self.ledger.open("a", encoding="utf-8") as f:
+            appended = dict(self.row(3))
+            f.write(json.dumps(appended) + "\n")
+        problems = specstate.ledger_chain_problems(self.spec)
+        self.assertEqual(problems, [
+            "line 3: appended without its `prev` — the row is not "
+            "chained to the row before it"])
+
+    def test_an_edited_row_is_named(self):
+        for n in (1, 2, 3):
+            specstate.ledger_append(self.spec, self.row(n))
+        lines = self.ledger.read_text(encoding="utf-8").splitlines()
+        edited = dict(json.loads(lines[1]), wave=9)
+        lines[1] = json.dumps(edited)
+        self.ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertEqual(specstate.ledger_chain_problems(self.spec), [
+            "line 3: its `prev` does not match the row before it — the "
+            "row was edited after it was written"])
+
+    def test_a_pre_chain_ledger_reads_fine(self):
+        rows = [dict(self.row(1)), dict(self.row(2))]
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.ledger.write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        self.assertEqual(specstate.ledger_chain_problems(self.spec), [])
+        self.assertEqual(specstate.ledger_rows(self.spec),
+                         [{**r, "prev": None} for r in rows])
+
+    def test_a_chained_append_names_its_row(self):
+        specstate.ledger_append(self.spec, self.row(1))
+        rows = specstate.ledger_rows(self.spec)
+        self.assertEqual(rows[0]["prev"], None)
+        specstate.ledger_append(self.spec, self.row(2))
+        rows = specstate.ledger_rows(self.spec)
+        self.assertEqual(rows[1]["prev"], chain_hash(
+            {k: v for k, v in rows[0].items() if k != "prev"}))
+        self.assertEqual(specstate.ledger_chain_problems(self.spec), [])
+
+
+TECH_DIGEST = ("tools: Read, Grep, Glob, Bash, Write, Edit\n"
+               "digest: statuses 0 DONE / 0 PARTIAL / 3 TODO · approach "
+               "one event bus · rejected direct calls · blast radius "
+               "graph.py\n")
+GREEN_DIGEST = ("tools: Read, Write, Bash\n"
+                "digest: task T001 · status implemented · files 2 · "
+                "commit-line feat(x): shout · deviation none · note none\n")
+
+
+class DigestVouchTests(unittest.TestCase):
+    """A digest file is vouched only where the run ledger records the
+    request — the `wave` row of its wave and stem, or the `claim` row
+    that claimed the task there. Nothing vouching, the file is
+    `unverified`: the sweep gives it no provenance line, records it
+    once, and — with no vouched digest beside it — its refusal holds
+    the node. The latest digest is the one the ledger names, never the
+    highest wave directory."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="specstate-vouch-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.spec = self._tmp / "specs" / "demo"
+        self.spec.mkdir(parents=True)
+
+    def digest(self, wave: int, name: str, text: str) -> Path:
+        path = self.spec / "digests" / f"wave-{wave}" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_digest_no_row_records_is_unverified(self):
+        path = self.digest(1, "tech.md", TECH_DIGEST)
+        seen = specstate.refused_digests(self.spec, ["tech"])
+        self.assertEqual(seen["tech"]["state"], "unverified")
+        self.assertEqual(seen["tech"]["path"], str(path))
+        self.assertIn("no ledger row records its digest",
+                      seen["tech"]["problems"][0])
+        seen_lines = specstate.sweep_digests(self.spec, "spec-design")
+        self.assertEqual(seen_lines[0]["state"], "unverified")
+        self.assertNotIn("provenance:", path.read_text(encoding="utf-8"))
+        rows = specstate.ledger_rows(self.spec)
+        self.assertEqual((rows[-1]["event"], rows[-1]["outcome"]),
+                         ("digest_malformed", "unverified"))
+        # once per content: a second sweep appends nothing
+        specstate.sweep_digests(self.spec, "spec-design")
+        self.assertEqual(len(specstate.ledger_rows(self.spec)), 1)
+
+    def test_a_claim_row_vouches_its_tasks_digest(self):
+        specstate.ledger_event(self.spec, specstate.ledger_row(
+            "spec-design", "claim", wave=2, task="T001", role="implementer",
+            stem="implementer-T001"))
+        self.digest(2, "implementer-T001.md", GREEN_DIGEST)
+        found = specstate.digests_on_file(self.spec)["T001"]
+        self.assertEqual((found["state"], found["wave"]), ("valid", 2))
+
+    def test_the_ledger_names_the_latest_not_the_highest_wave(self):
+        specstate.ledger_event(self.spec, specstate.ledger_row(
+            "spec-design", "wave", wave=2, stem="implementer-T001",
+            role="implementer"))
+        named = self.digest(2, "implementer-T001.md", GREEN_DIGEST)
+        stray = self.digest(3, "implementer-T001.md", GREEN_DIGEST)
+        found = specstate.digests_on_file(self.spec)["T001"]
+        self.assertEqual((found["state"], found["path"], found["wave"]),
+                         ("valid", str(named), 2))
+        # the stray file no row records gains no provenance line
+        specstate.sweep_digests(self.spec, "spec-design")
+        self.assertNotIn("provenance:", stray.read_text(encoding="utf-8"))
+        # with the named file gone, the stray is all there is — and it
+        # holds
+        named.unlink()
+        held = specstate.digests_on_file(self.spec)["T001"]
+        self.assertEqual((held["state"], held["path"], held["wave"]),
+                         ("unverified", str(stray), 3))
 
 
 if __name__ == "__main__":

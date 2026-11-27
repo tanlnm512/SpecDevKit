@@ -3015,8 +3015,18 @@ PLAN_DIGEST = ("digest: milestones 3: scaffold, wire, prove · parallel "
 
 
 def facts(row: dict) -> dict:
-    """A ledger row without its timestamp — the literal a test compares."""
-    return {k: v for k, v in row.items() if k != "ts"}
+    """A ledger row without its timestamp and chain field — the literal
+    a test compares."""
+    return {k: v for k, v in row.items() if k not in ("ts", "prev")}
+
+
+def chain_hash(row: dict) -> str:
+    """The hash a ledger row chains from, computed here from the
+    definition — sha256-12 of the row's sorted-key JSON without the
+    chain fields — never with the code under test."""
+    payload = {k: row[k] for k in sorted(row) if k not in ("prev", "chain")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True)
+                          .encode("utf-8")).hexdigest()[:12]
 
 
 class RunLedgerTests(unittest.TestCase):
@@ -3200,6 +3210,25 @@ class RunLedgerTests(unittest.TestCase):
         self.assertEqual(s["nodes"]["plan"]["state"], "blocked")
 
 
+    def test_the_report_names_a_broken_ledger_chain(self):
+        legacy = {"ts": "2026-11-13T10:00:00+00:00", "skill": "spec-design",
+                  "event": "wave", "wave": 1, "stem": "tech"}
+        chained = {**legacy, "ts": "2026-11-13T10:01:00+00:00", "wave": 2,
+                   "stem": "planner", "prev": chain_hash(legacy)}
+        appended = {k: v for k, v in chained.items() if k != "prev"}
+        appended.update(ts="2026-11-13T10:02:00+00:00", stem="qa")
+        path = self.spec_dir / "runs" / "ledger.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text("".join(
+            json.dumps(r) + "\n" for r in (legacy, chained, appended)),
+            encoding="utf-8")
+        r = run_cli(self.spec_dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("run ledger: 1 row-chain problem(s) — its rows are "
+                      "not trustworthy evidence:", r.stdout)
+        self.assertIn("line 3: appended without its `prev`", r.stdout)
+
+
 TECH_SPEC = ("# Tech spec: demo\n\n" + GROUNDED_BODY +
              "## Approach\nA plain function in the arithmetic module "
              "(FR-001).\n\n### D-001: plain function\nContext: small "
@@ -3327,6 +3356,25 @@ class RefusedDigestHoldTests(unittest.TestCase):
         s = compute(approved)
         self.assertEqual(s["nodes"]["tech"]["state"], "done")
         self.assertEqual(s["nodes"]["execute"]["state"], "READY")
+
+    def test_a_digest_nobody_asked_for_holds_its_node(self):
+        # a valid-grammar tech digest placed with no ledger row behind
+        # it — hand-made, or left by a run whose ledger write failed —
+        # is unverified: nothing vouches its content, and it holds tech
+        # exactly as a refused digest does
+        write(self.spec_dir / "tech-spec.md", TECH_SPEC)
+        self.refused.parent.mkdir(parents=True, exist_ok=True)
+        write(self.refused, TECH_DIGEST)
+        s = compute(self.spec_dir)
+        n = s["nodes"]
+        self.assertEqual(n["tech"]["state"], "blocked")
+        self.assertIn(f"digest: unverified at {self.refused}",
+                      n["tech"]["reason"])
+        self.assertIn("no ledger row records its digest", n["tech"]["reason"])
+        self.assertIn("fix and run again", n["tech"]["reason"])
+        self.assertEqual(n["plan"]["state"], "blocked")
+        self.assertIn("waiting on: tech", n["plan"]["reason"])
+
 
 
 class PayloadHandshakeTests(unittest.TestCase):

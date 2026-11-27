@@ -3019,6 +3019,8 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
                     t["digest"] = None
                 elif d["state"] == specstate.DIGEST_MALFORMED:
                     t["digest"] = "malformed — fix and run again"
+                elif d["state"] == specstate.DIGEST_UNVERIFIED:
+                    t["digest"] = "unverified — fix and run again"
                 else:
                     t["digest"] = d["status"]
                     if d.get("deviation_kind"):
@@ -3183,6 +3185,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
         "frontier": [n for n in NODES if nodes[n]["state"] == READY],
         "loops": loops,
         "counts": counts,
+        "ledger_problems": specstate.ledger_chain_problems(spec_dir),
     }
 
 
@@ -3216,6 +3219,12 @@ def render_report(s: dict) -> str:
     out.append("")
     out.append(f"git: available (HEAD {g['head']})" if g["available"]
                else "git: SKIPPED (not a git repo)")
+    problems = s.get("ledger_problems")
+    if problems:
+        out.append("")
+        out.append(f"run ledger: {len(problems)} row-chain problem(s) — "
+                   "its rows are not trustworthy evidence:")
+        out.extend(f"  {p}" for p in problems)
     return "\n".join(out)
 
 

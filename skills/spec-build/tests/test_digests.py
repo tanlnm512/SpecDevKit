@@ -86,8 +86,16 @@ class SchemaTests(unittest.TestCase):
             path = folder / "implementer-T001.md"
             self.assertEqual(specstate.latest_digest(spec, "T001"), None)
             write(path, DEVELOPER + "\n")
+            # valid means vouched: with no ledger row recording the
+            # request, the file alone proves nothing
             self.assertEqual(specstate.latest_digest(spec, "T001")["state"],
-                             "valid")
+                             "unverified")
+            specstate.ledger_event(spec, specstate.ledger_row(
+                "spec-build", "wave", wave=4, stem="implementer-T001",
+                role="implementer"))
+            found = specstate.latest_digest(spec, "T001")
+            self.assertEqual((found["state"], found["path"], found["wave"]),
+                             ("valid", str(path), 4))
             write(path, "digest: task T001 · status implemented · files 2")
             found = specstate.latest_digest(spec, "T001")
             self.assertEqual((found["state"], found["path"], found["wave"]),
@@ -146,6 +154,18 @@ class ReaderTests(unittest.TestCase):
                       "\n".join(column()))
         write(path, DEVELOPER + "\n")
         self.assertIn("[digest on file: implemented]", "\n".join(column()))
+        # a stray file at a wave the task was never claimed in is
+        # unverified — and ignored while the named digest stands; with
+        # the named one gone it is all there is
+        stray = spec / "digests" / "wave-6" / "implementer-T001.md"
+        stray.parent.mkdir(parents=True)
+        write(stray, DEVELOPER + "\n")
+        self.assertIn("[digest on file: implemented]", "\n".join(column()))
+        path.unlink()
+        self.assertIn("[digest on file: unverified — fix and run again]",
+                      "\n".join(column()))
+        write(path, DEVELOPER + "\n")
+        self.assertIn("[digest on file: implemented]", "\n".join(column()))
         write(path, "digest: task T001 · status blocked: no evidence · files "
               "0 · commit-line none · deviation scope: repo/eval.py · "
               "note none\n")
@@ -163,12 +183,24 @@ class ReaderTests(unittest.TestCase):
               "digest: task T002 · status blocked: env · files 0 · "
               "commit-line none · deviation spec-defect: FR-003 · note none\n")
         write(newer / "implementer-T003.md", "digest: task T003 · status done")
+        stray = spec / "digests" / "wave-8" / "implementer-T004.md"
+        stray.parent.mkdir()
+        write(stray, DEVELOPER.replace("task T001", "task T004") + "\n")
+        # what the ledger names is what the retro folds: wave rows for
+        # the wave-4 requests, nothing for the wave-8 file nobody asked
+        # for
+        specstate.ledger_event(spec, *(
+            specstate.ledger_row("spec-build", "wave", wave=4,
+                                 stem=f"implementer-{tid}",
+                                 role="implementer")
+            for tid in ("T001", "T002")))
         rows, malformed = retro.digest_rows(spec)
         self.assertEqual(rows, [
             "- T001 wave 4 — implemented",
             "- T002 wave 4 — blocked: env · deviation spec-defect: FR-003",
-            "- T003 wave 6 — malformed"])
-        self.assertEqual(malformed, 1)
+            "- T003 wave 6 — malformed",
+            "- T004 wave 8 — unverified"])
+        self.assertEqual(malformed, 2)
         self.assertEqual(retro.digest_rows(self._tmp / "absent"), ([], 0))
 
 

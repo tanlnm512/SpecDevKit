@@ -100,9 +100,13 @@ sweep runs over digests/wave-*/: every digest file with no provenance
 line yet is validated with its role's schema and, when valid, gains the
 one line the ledger vouches for — the request that produced it, from
 what the orchestrator spawned, never from the agent. A malformed file,
-or one whose provenance line no ledger row vouches for, is left as it
-is, recorded as `digest_malformed`, and named. Agents are never asked
-to write or copy a provenance line.
+one whose provenance line no ledger row vouches for, or one no `wave`
+or `claim` row records — a hand-placed file, or a digest whose run's
+ledger write failed — is left as it is, recorded as `digest_malformed`,
+and named. Agents are never asked to write or copy a provenance line.
+land sweeps under its own lock hold, so the digest it judges is the
+swept one: a busy lock refuses the landing (exit 5, nothing written),
+it never skips the sweep.
 
 Claims are checked against every other spec's live claims in the repo
 (spec-build D-057): `claim` registers each task it claims in
@@ -162,7 +166,8 @@ Usage: mark.py <verb> …        (see the verb lines above)
 Exit:  0 = done · 1 = transition refused (current marker, wanted
        transition, and the allowed ones printed), or a run budget spent
        (nothing claimed), or an isolated landing over main-tree work
-       its proofs never ran on (nothing written) · 2 = usage, or a
+       its proofs never ran on (nothing written), or a broken
+       run-ledger row chain (nothing written) · 2 = usage, or a
        --resolution the round's close sub-line cannot hold ·
        5 = lock busy (another writer holds .task.lock or .claims.lock)
 """
@@ -320,18 +325,36 @@ def _ledger(spec_dir: Path, *rows: dict) -> None:
         print(f"warning: run ledger not written — {exc}", file=sys.stderr)
 
 
-def _sweep(spec_dir: Path, task_id: str | None = None) -> None:
-    """The provenance sweep before a verb reads a digest: every
-    malformed file it left in place is named — except the task's own,
-    which a land refusal names itself."""
+def _sweep(spec_dir: Path, task_id: str | None = None,
+           locked: bool = False) -> None:
+    """The provenance sweep before a verb reads a digest: every refused
+    file it left in place is named — except the task's own, which a
+    land refusal names itself. `locked` for a caller already holding
+    the spec's task lock, so the judged digest state is the swept one."""
     own = ((specstate.latest_digest(spec_dir, task_id) or {}).get("path")
            if task_id else None)
-    for seen in specstate.sweep_digests(spec_dir, "spec-build"):
+    for seen in specstate.sweep_digests(spec_dir, "spec-build",
+                                        locked=locked):
         if seen["path"] != own:
-            print(f"note: malformed digest at {seen['path']} — "
-                  f"{'; '.join(seen['problems'])} — fix and run again: "
-                  "re-spawn the same payload to rewrite its digest file",
+            print(f"note: {specstate.digest_refusal_line(seen)}",
                   file=sys.stderr)
+
+
+def _refuse_chain(spec_dir: Path) -> bool:
+    """True, with the refusal printed, when the run ledger's row chain
+    is broken: no verb writes a marker onto a ledger it cannot vouch —
+    nothing is appended onto evidence whose tail no longer chains."""
+    problems = specstate.ledger_chain_problems(spec_dir)
+    if not problems:
+        return False
+    print("refused: the run ledger's row chain is broken — nothing "
+          "written:", file=sys.stderr)
+    for problem in problems:
+        print(f"  {problem}", file=sys.stderr)
+    print("  the ledger is evidence, not status — repair or truncate "
+          f"{specstate.ledger_path(spec_dir)}, then run the verb again",
+          file=sys.stderr)
+    return True
 
 
 def _digest_sha(path: str) -> str | None:
@@ -397,6 +420,8 @@ def claim(spec_dir: Path, wave_dir: Path, run_id: str | None,
     try:
         with specstate.claims_lock(spec_dir, LOCK_TIMEOUT), \
                 specstate.task_lock(spec_dir, LOCK_TIMEOUT):
+            if _refuse_chain(spec_dir):
+                return 1
             stop = specstate.budget_stop(spec_dir, run_id, budget_spawns,
                                          budget_minutes)
             if stop:
@@ -508,12 +533,16 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
     if not holder.is_file():
         print(f"no {holder.name} under {spec_dir}", file=sys.stderr)
         return 1
-    _sweep(spec_dir, task_id)
     repo = spec_dir.parent.parent
     worktree = specstate.worktree_path(repo, spec_dir.name, task_id)
     isolated = worktree.is_dir()
     try:
         with specstate.task_lock(spec_dir, LOCK_TIMEOUT):
+            if _refuse_chain(spec_dir):
+                return 1
+            # the sweep runs under the lock the gate reads under: a busy
+            # lock refuses the landing, it never skips the sweep
+            _sweep(spec_dir, task_id, locked=True)
             text = holder.read_text(encoding="utf-8")
             entry = _parse_task(specstate.task_entries(text), task_id)
             if entry is None:
@@ -536,6 +565,14 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
             if dig is not None \
                     and dig["state"] == specstate.DIGEST_MALFORMED:
                 print(f"refused: malformed digest at {dig['path']} — "
+                      f"{'; '.join(dig['problems'])} — fix and run "
+                      "again: re-spawn the developer with the same "
+                      "payload to rewrite its digest file",
+                      file=sys.stderr)
+                return 1
+            if dig is not None \
+                    and dig["state"] == specstate.DIGEST_UNVERIFIED:
+                print(f"refused: unverified digest at {dig['path']} — "
                       f"{'; '.join(dig['problems'])} — fix and run "
                       "again: re-spawn the developer with the same "
                       "payload to rewrite its digest file",
@@ -855,6 +892,8 @@ def release(spec_dir: Path, task_id: str, reason: str) -> int:
     try:
         with specstate.claims_lock(spec_dir, LOCK_TIMEOUT), \
                 specstate.task_lock(spec_dir, LOCK_TIMEOUT):
+            if _refuse_chain(spec_dir):
+                return 1
             text = holder.read_text(encoding="utf-8")
             entry = _parse_task(specstate.task_entries(text), task_id)
             if entry is None:
@@ -927,6 +966,8 @@ def fail(spec_dir: Path, task_id: str, evidence: Path, digest: str) -> int:
 
     try:
         with specstate.task_lock(spec_dir, LOCK_TIMEOUT):
+            if _refuse_chain(spec_dir):
+                return 1
             text = holder.read_text(encoding="utf-8")
             entry = _parse_task(specstate.task_entries(text), task_id)
             if entry is None:
@@ -1066,6 +1107,8 @@ def drop(spec_dir: Path, task_id: str, decision: str) -> int:
     try:
         with specstate.claims_lock(spec_dir, LOCK_TIMEOUT), \
                 specstate.task_lock(spec_dir, LOCK_TIMEOUT):
+            if _refuse_chain(spec_dir):
+                return 1
             text = holder.read_text(encoding="utf-8")
             entry = _parse_task(specstate.task_entries(text), task_id)
             if entry is None:

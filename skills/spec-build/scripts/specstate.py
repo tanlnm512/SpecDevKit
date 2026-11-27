@@ -219,6 +219,7 @@ DIGEST_DIR = "digests"
 DIGEST_FILE = re.compile(r"^implementer-(T\d{3})\.md$")
 DIGEST_VALID = "valid"
 DIGEST_MALFORMED = "malformed"
+DIGEST_UNVERIFIED = "unverified"
 
 # The research gate's artifact in tech-spec.md: one section, two
 # subsections. The heading is matched anywhere in the file (no
@@ -581,21 +582,23 @@ def failure_signature_run(note_text: str) -> tuple[str | None, int]:
 
 
 def digests_on_file(spec_dir: Path | str) -> dict[str, dict]:
-    """Per task id, the newest developer digest file on file. `state`
-    is `valid` — the digest's fields plus `wave` and `path` — or
-    `malformed`: the file exists but carries no valid digest line for
-    the task, or a `provenance:` line the run ledger does not vouch
-    for, and `problems` says what is wrong with it. The digest
-    line decides whose digest a file is (a stem can lie); a file whose
-    stem names the task and whose line names another is malformed for
-    the stem's task. Highest wave wins; at one wave a valid digest
-    outranks a malformed file. Pure read: a missing or unreadable
-    digests/ tree is an empty dict."""
-    newest: dict[str, tuple[tuple[int, int], dict]] = {}
+    """Per task id, the developer digest the run ledger names. `state`
+    is `valid` — the digest's fields plus `wave` and `path` — or the
+    refusal that holds the task: `malformed`, the file fails its schema
+    or its `provenance:` line is one no ledger row vouches for, or
+    `unverified` — no `wave` or `claim` row records the file's digest,
+    so nothing vouches its content. The newest file the sweep leaves
+    valid is the task's; a refused file newer than every valid one holds
+    the task in its place (at one wave the valid file outranks it). An
+    unverified file holds only while nothing vouches a digest for the
+    task — a hand-placed or dead-run file beside a vouched one is
+    ignored. Pure read, in the state the sweep would leave: a missing or
+    unreadable digests/ tree is an empty dict."""
     base = Path(spec_dir) / DIGEST_DIR
     if not base.is_dir():
         return {}
-    ledger = ledger_rows(spec_dir)
+    rows = ledger_rows(spec_dir)
+    seen: dict[str, list[tuple[int, int, dict]]] = {}
     for path in sorted(base.glob("wave-*/implementer-*.md")):
         wave = re.match(r"wave-(\d+)", path.parent.name)
         stem = DIGEST_FILE.match(path.name)
@@ -603,37 +606,31 @@ def digests_on_file(spec_dir: Path | str) -> dict[str, dict]:
             continue
         on_wave = int(wave.group(1))
         text = _read_doc_text(path) or ""
+        refusal = _refusal(path, on_wave, rows, text)
+        if refusal is not None:
+            rank = 0 if refusal.state == DIGEST_UNVERIFIED else 1
+            seen.setdefault(stem.group(1), []).append((on_wave, rank, dict(
+                state=refusal.state, wave=on_wave, path=str(path),
+                problems=refusal.problems)))
+            continue
         parsed = digests.parse("developer", None, text)
-        unvouched = provenance_problems(text, ledger, on_wave, path.stem)
-        found: list[tuple[int, str, dict]] = []
-        if parsed is None:
-            found.append((0, stem.group(1), dict(
-                state=DIGEST_MALFORMED, wave=on_wave, path=str(path),
-                problems=digests.validate("developer", None, text)
-                + unvouched)))
-        else:
-            if not unvouched:
-                found.append((1, parsed["task"], dict(
-                    parsed, state=DIGEST_VALID, wave=on_wave,
-                    path=str(path))))
-            trouble = unvouched
-            if parsed["task"] != stem.group(1):
-                trouble = [f"it names task {parsed['task']}, not "
-                           f"{stem.group(1)}"] + unvouched
-            if trouble:
-                found.append((0, stem.group(1), dict(
-                    state=DIGEST_MALFORMED, wave=on_wave, path=str(path),
-                    problems=trouble)))
-        for rank, task_id, entry in found:
-            if task_id not in newest \
-                    or (on_wave, rank) >= newest[task_id][0]:
-                newest[task_id] = ((on_wave, rank), entry)
-    return {task_id: found for task_id, (_rank, found) in newest.items()}
+        seen.setdefault(parsed["task"], []).append((
+            on_wave, 2, dict(parsed, state=DIGEST_VALID, wave=on_wave,
+                             path=str(path))))
+    named: dict[str, dict] = {}
+    for task_id, items in seen.items():
+        vouched = max((w for w, r, _e in items if r == 2), default=-1)
+        holds = [(w, r, e) for w, r, e in items
+                 if r == 2 or (r == 1 and w > vouched)
+                 or (r == 0 and vouched < 0)]
+        named[task_id] = max(holds, key=lambda item: (item[0], item[1]))[2]
+    return named
 
 
 def latest_digest(spec_dir: Path | str, task_id: str) -> dict | None:
-    """The newest developer digest file on file for `task_id` — one of
-    digests_on_file's entries — or None when no file exists for it."""
+    """The developer digest the run ledger names for `task_id` — one of
+    digests_on_file's entries — or None when it names none for it: a
+    file alone proves nothing."""
     return digests_on_file(spec_dir).get(task_id)
 
 
@@ -666,6 +663,8 @@ CAPABILITY_MISSING = "capability_missing"
 PROVENANCE_NONE = "none"
 PROVENANCE_SEP = re.compile(r"[ \t]*\u00b7[ \t]*")
 UNVERIFIED = "unverified"
+UNVOUCHED_PROBLEM = ("it carries no `provenance:` line and no ledger row "
+                     "records its digest — nothing vouches its content")
 
 # A digest file's stem names the payload that asked for it and the
 # schema its role validates with; a role with several grammars takes
@@ -721,9 +720,23 @@ def ledger_path(spec_dir: Path | str) -> Path:
     return Path(spec_dir) / LEDGER_DIR / LEDGER_NAME
 
 
+# The chain fields ride a row but are never part of its content hash
+LEDGER_CHAIN_FIELDS = ("prev", "chain")
+
+
+def row_hash(row: dict) -> str:
+    """The content hash one ledger row chains from: sha256-12 of the
+    row's sorted-key JSON without the chain fields — stable whatever
+    `prev` the row itself carries."""
+    canonical = {k: row[k] for k in sorted(row)
+                 if k not in LEDGER_CHAIN_FIELDS}
+    return sha12(json.dumps(canonical, sort_keys=True).encode("utf-8"))
+
+
 def ledger_rows(spec_dir: Path | str) -> list[dict]:
-    """The ledger's rows in the order they were appended; a line that is
-    not a JSON object is not a row."""
+    """The ledger's rows in the order they were appended, each carrying
+    `prev` (None for a row written before the chain existed); a line
+    that is not a JSON object is not a row."""
     rows: list[dict] = []
     for line in (_read_doc_text(ledger_path(spec_dir)) or "").splitlines():
         try:
@@ -731,8 +744,53 @@ def ledger_rows(spec_dir: Path | str) -> list[dict]:
         except ValueError:
             continue
         if isinstance(row, dict):
+            row.setdefault("prev", None)
             rows.append(row)
     return rows
+
+
+def ledger_chain_problems(spec_dir: Path | str) -> list[str]:
+    """Where the ledger's row chain is broken, one `line <n>: <why>`
+    each: a row appended without its `prev`, or whose `prev` no longer
+    matches the row before it — an edit. Rows before the first chained
+    one are a pre-chain ledger and read fine. The chain detects
+    tampering, it cannot prevent it: a ledger rewritten whole chains
+    consistently."""
+    rows: list[tuple[int, dict | None]] = []
+    for n, line in enumerate(
+            (_read_doc_text(ledger_path(spec_dir)) or "").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            rows.append((n, None))
+            continue
+        if isinstance(row, dict):
+            rows.append((n, row))
+    problems: list[str] = []
+    chained = False
+    for i, (n, row) in enumerate(rows):
+        if row is None:
+            problems.append(f"line {n}: not a ledger row — the line "
+                            "is not JSON")
+            continue
+        prev = row.get("prev")
+        if prev is not None:
+            chained = True
+        elif chained:
+            problems.append(f"line {n}: appended without its `prev` — "
+                            "the row is not chained to the row before it")
+            continue
+        if chained:
+            before = rows[i - 1][1] if i else None
+            expected = row_hash(before) if before is not None else None
+            if prev != expected:
+                why = ("names no row before it" if expected is None
+                       else "does not match the row before it — the row "
+                            "was edited after it was written")
+                problems.append(f"line {n}: its `prev` {why}")
+    return problems
 
 
 def ledger_row(skill: str, event: str, **fields) -> dict:
@@ -750,14 +808,27 @@ def ledger_row(skill: str, event: str, **fields) -> dict:
 
 
 def ledger_append(spec_dir: Path | str, row: dict) -> None:
-    """Append one row as one line. The caller holds the spec's task
-    lock, so two writers never interleave and a reader never sees a
-    partial line."""
+    """Append one row as one line, chained to the ledger's last line:
+    the row carries `prev`, the row_hash of the row before it, None on
+    an empty ledger. The caller holds the spec's task lock, so two
+    writers never interleave and a reader never sees a partial line."""
     path = ledger_path(spec_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
+    prev = None
+    try:
+        written = [ln for ln in path.read_text(
+            encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+    except OSError:
+        written = []
+    if written:
+        try:
+            prev = row_hash(json.loads(written[-1]))
+        except ValueError:
+            prev = None
     fd = os.open(str(path), os.O_CREAT | os.O_WRONLY | os.O_APPEND)
     try:
-        os.write(fd, (json.dumps(row) + "\n").encode("utf-8"))
+        os.write(fd, (json.dumps({**row, "prev": prev}) + "\n")
+                .encode("utf-8"))
     finally:
         os.close(fd)
 
@@ -1000,13 +1071,29 @@ class RefusedDigest(NamedTuple):
     reported: set[str]
 
 
+def _digest_request(rows: list[dict], wave: int, stem: str) -> dict | None:
+    """The ledger's record of the request a digest file answers: the
+    `wave` row for its wave and stem — the payload the emit wrote — or,
+    when none, the `claim` row of the same wave and stem, which records
+    the task claimed there. Neither: nothing vouches the file."""
+    for event in ("wave", "claim"):
+        found = next((row for row in reversed(rows)
+                      if row.get("event") == event
+                      and row.get("wave") == wave
+                      and row.get("stem") == stem), None)
+        if found is not None:
+            return found
+    return None
+
+
 def _refusal(path: Path, wave: int, rows: list[dict],
              text: str) -> RefusedDigest | None:
     """Why the orchestrator refuses the digest file at `path`, or None
-    for one it does not: no role's digest, valid with its tools, or
-    already carrying the line a ledger row vouches for. One definition
-    for the sweep, which records it, and the state reader, which only
-    names it."""
+    for one it does not: no role's digest, valid with its tools, already
+    carrying the line a ledger row vouches for, or — line-less — a
+    digest an emit or claim asked for, which the sweep vouches. One
+    definition for the sweep, which records it, and the state reader,
+    which only names it."""
     schema = digest_schema(path.stem)
     if schema is None:
         return None
@@ -1035,6 +1122,9 @@ def _refusal(path: Path, wave: int, rows: list[dict],
     if problems:
         return RefusedDigest(DIGEST_MALFORMED, DIGEST_MALFORMED, problems,
                              set())
+    if _digest_request(rows, wave, path.stem) is None:
+        return RefusedDigest(DIGEST_UNVERIFIED, UNVERIFIED,
+                             [UNVOUCHED_PROBLEM], set())
     reported = digests.tools_report(text)
     # the developer's report is mark.py land's to refuse: it names the
     # task and its release, and no file lands past it
@@ -1054,8 +1144,9 @@ def digest_refusal_line(seen: dict) -> str:
     if seen["state"] == CAPABILITY_MISSING:
         return (f"{seen['problems'][0]} —{at}: no provenance line is "
                 "written and nothing reads this digest")
-    return (f"malformed{at} — {'; '.join(seen['problems'])} — fix and run "
-            "again: re-spawn the same payload to rewrite its digest file")
+    return (f"{seen['state']}{at} — {'; '.join(seen['problems'])} — fix "
+            "and run again: re-spawn the same payload to rewrite its "
+            "digest file")
 
 
 def _sweep_digest(path: Path, wave: int, rows: list[dict],
@@ -1119,70 +1210,88 @@ def _sweep_digest(path: Path, wave: int, rows: list[dict],
     return None, row
 
 
-def sweep_digests(spec_dir: Path | str, skill: str) -> list[dict]:
+def sweep_digests(spec_dir: Path | str, skill: str,
+                  locked: bool = False) -> list[dict]:
     """The orchestrator's provenance sweep over digests/wave-*/. Every
     digest file with no provenance line yet is validated with its
     role's schema; a valid one gains ONE line and a `digest` row —
     both from the `wave` row that recorded the payload it answers,
     when the ledger has one, and from the file's own name when not —
     each carrying the file's `tools:` report as `tools-reported`. A
-    malformed file, or one whose line no ledger row vouches for, is
-    left untouched and recorded as `digest_malformed` (once per
-    content). An analyst, architect or tester file whose report lacks
-    a required tool is refused: recorded as `capability_missing` (once
-    per content), the refusal printed, no line written. Returns the
-    malformed files as digests_on_file-shaped entries."""
+    malformed file, one whose line no ledger row vouches for, or one no
+    `wave` or `claim` row records, is left untouched and recorded as
+    `digest_malformed` (once per content). An analyst, architect or
+    tester file whose report lacks a required tool is refused: recorded
+    as `capability_missing` (once per content), the refusal printed, no
+    line written. Returns the refused files as digests_on_file-shaped
+    entries. The sweep takes the spec's task lock; `locked` skips that
+    for a caller — mark.py land — already holding it, so the judged
+    state is the swept state."""
     base = Path(spec_dir) / DIGEST_DIR
     if not base.is_dir():
         return []
     seen: list[dict] = []
+
+    def swept() -> None:
+        rows = ledger_rows(spec_dir)
+        for path in sorted(base.glob("wave-*/*.md")):
+            wave = WAVE_DIR_NAME.fullmatch(path.parent.name)
+            if not wave:
+                continue
+            sighting, row = _sweep_digest(
+                path, int(wave.group(1)), rows, skill)
+            if sighting is not None:
+                seen.append(sighting)
+            elif row is not None:
+                rows.append(row)
+
     try:
-        with task_lock(spec_dir):
-            rows = ledger_rows(spec_dir)
-            for path in sorted(base.glob("wave-*/*.md")):
-                wave = WAVE_DIR_NAME.fullmatch(path.parent.name)
-                if not wave:
-                    continue
-                sighting, row = _sweep_digest(
-                    path, int(wave.group(1)), rows, skill)
-                if sighting is not None:
-                    seen.append(sighting)
-                elif row is not None:
-                    rows.append(row)
+        if locked:
+            swept()
+        else:
+            with task_lock(spec_dir):
+                swept()
     except (TaskLockBusy, OSError) as exc:
         print(f"warning: provenance sweep stopped — {exc}", file=sys.stderr)
     return seen
 
 
 def refused_digests(spec_dir: Path | str, stems) -> dict[str, dict]:
-    """`{stem: sighting}` for each stem in `stems` whose newest digest
-    file under digests/wave-*/ — the one in the highest wave — the
-    orchestrator refuses: `state` is malformed or capability_missing,
-    beside `wave`, `path` and `problems`. A stem with no file, or whose
-    newest file is valid or vouched for, is absent. Pure read: the
+    """`{stem: sighting}` for each stem in `stems` whose digest — the
+    one the run ledger names, the newest file the sweep leaves valid —
+    the orchestrator refuses: `state` is malformed, unverified or
+    capability_missing, beside `wave`, `path` and `problems`. A stem
+    with no file, or whose named digest is valid, is absent; an
+    unverified file beside a vouched one is ignored. Pure read: the
     refusal the sweep would name, without sweeping."""
     base = Path(spec_dir) / DIGEST_DIR
     if not base.is_dir():
         return {}
-    newest: dict[str, tuple[int, Path]] = {}
+    rows = ledger_rows(spec_dir)
+    seen: dict[str, list[tuple[int, int, dict]]] = {}
     for path in base.glob("wave-*/*.md"):
         wave = WAVE_DIR_NAME.fullmatch(path.parent.name)
         if not wave or path.stem not in stems:
             continue
         on_wave = int(wave.group(1))
-        if path.stem not in newest or on_wave > newest[path.stem][0]:
-            newest[path.stem] = (on_wave, path)
-    if not newest:
-        return {}
-    rows = ledger_rows(spec_dir)
-    found: dict[str, dict] = {}
-    for stem, (wave, path) in newest.items():
-        text = _read_doc_text(path)
-        refusal = _refusal(path, wave, rows, text) if text is not None \
-            else None
+        text = _read_doc_text(path) or ""
+        refusal = _refusal(path, on_wave, rows, text)
         if refusal is not None:
-            found[stem] = dict(state=refusal.state, wave=wave,
-                               path=str(path), problems=refusal.problems)
+            rank = 0 if refusal.state == DIGEST_UNVERIFIED else 1
+            seen.setdefault(path.stem, []).append((on_wave, rank, dict(
+                state=refusal.state, wave=on_wave, path=str(path),
+                problems=refusal.problems)))
+        else:
+            seen.setdefault(path.stem, []).append((on_wave, 2, None))
+    found: dict[str, dict] = {}
+    for stem, items in seen.items():
+        vouched = max((w for w, r, _e in items if r == 2), default=-1)
+        holds = [(w, r, e) for w, r, e in items
+                 if r == 2 or (r == 1 and w > vouched)
+                 or (r == 0 and vouched < 0)]
+        entry = max(holds, key=lambda item: (item[0], item[1]))[2]
+        if entry is not None:
+            found[stem] = entry
     return found
 
 
