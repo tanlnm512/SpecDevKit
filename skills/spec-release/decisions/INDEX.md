@@ -11,3 +11,4 @@ ADRs are append-only; new decisions continue from the highest number.
 | D-005 | `005-bump-rules.md` | SemVer bump from work types and breaking markers; every version source reported |
 | D-006 | `006-validate-the-release-managers-digest-before-reading-it.md` | every returned digest is validated against its grammar before anything is read from it; a malformed digest is a fix and run again (spec-design D-074) |
 | D-007 | `007-require-the-release-managers-tools-report.md` | the release manager's reply opens with a `tools:` report; `validate release-manager --require-tools` exits 3 without Read — a failed spawn, never a fix round |
+| D-008 | `008-the-tools-report-is-the-first-line-and-holds-no-separator.md` | the report is the reply's first line alone and a reported name holds no ` · `; the brief's digest block and the schema are pinned together (spec-design D-095) |

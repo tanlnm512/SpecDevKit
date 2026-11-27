@@ -31,7 +31,7 @@ into spec.md).
    recommendation — that is the architect's job with your data.
 
 **Digest**: `digest: questions <n> answered / <n> open · options
-<per open choice: choice → candidates, one line>`
+<per open choice: choice → candidates — with ; between choices>`
 
 **Guardrails**: every claim carries a URL; ≤15 tool calls per
 question; diminishing returns → say so.

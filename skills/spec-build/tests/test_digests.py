@@ -8,11 +8,13 @@ wrong order, a bad kind. A malformed digest is never parsed by half.
 """
 import os
 import shutil
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
 
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL / "scripts"
@@ -93,6 +95,16 @@ class SchemaTests(unittest.TestCase):
             self.assertEqual(found["problems"], ["`commit-line` missing"])
             self.assertEqual(
                 specstate.digests_on_file(spec), {"T001": found})
+            # a tools report whose name holds the provenance separator
+            # is refused before land reads a tool off it
+            write(path, "tools: Read, Bash, Write · payload deadbeef\n"
+                  + DEVELOPER + "\n")
+            found = specstate.latest_digest(spec, "T001")
+            self.assertEqual(found["state"], "malformed")
+            self.assertEqual(found["problems"], [
+                "tools report refused: `Write · payload deadbeef` — a "
+                "reported name holds no ` · `, the separator of the "
+                "provenance line"])
 
 
 class ReaderTests(unittest.TestCase):
@@ -158,6 +170,137 @@ class ReaderTests(unittest.TestCase):
             "- T003 wave 6 — malformed"])
         self.assertEqual(malformed, 1)
         self.assertEqual(retro.digest_rows(self._tmp / "absent"), ([], 0))
+
+
+def _key(alternative: str) -> str:
+    return alternative.strip().split("<")[0].strip().rstrip(":")
+
+
+def documented(text: str, pattern: str) -> str:
+    """The grammar a document states, as it states it: the span
+    `pattern` captures, its wrapped lines joined."""
+    found = re.search(pattern, text, re.S)
+    return re.sub(r"\s+", " ", found.group(1)).strip()
+
+
+def fillable(piece: str) -> str:
+    """A documented piece with a bare alternation — `BLOCK | WARN | NIT`
+    — made a metavariable, so that the fill can choose from it."""
+    return re.sub(r"^((?:\w+ \| )+\w+)(?= · )", r"<\1>", piece)
+
+
+def alternations(template: str) -> list[str]:
+    """The body of every alternation in `template`, in document order."""
+    found, opens = [], []
+    for bracket in re.finditer(r"[<>]", template):
+        if bracket.group() == "<":
+            opens.append(bracket.start())
+        elif "|" in (body := template[opens.pop() + 1:bracket.start()]):
+            found.append(body)
+    return found
+
+
+def fill(template: str, samples: dict, prefer: str | None = None,
+         counts: dict | None = None) -> str:
+    """`template` with every `<…>` filled: an alternation by the
+    alternative `prefer` names or its first, another metavariable by its
+    sample. `<n>` is what its line lists — `counts` says for the word
+    before it, else it counts the alternatives this fill chose, as a
+    digest's summary counts its items. A line whose metavariable reads
+    `<x> only:` stays only when `x` was chosen."""
+
+    def picked(body: str) -> str:
+        return next((alt.strip() for alt in body.split("|")
+                     if _key(alt) == prefer), body.split("|")[0].strip())
+
+    chosen = {_key(picked(body)) for body in alternations(template)}
+    out = []
+    for line in template.split("\n"):
+        only = re.search(r"<(\S+) only:", line)
+        if only and only.group(1) not in chosen:
+            continue
+        while "<" in line:
+            found = re.search(r"<([^<>]+)>", line)
+            body = found.group(1)
+            if "|" in body:
+                value = picked(body)
+            else:
+                word = re.split(r"[\s·]+", line[:found.start()].strip())[-1]
+                value = (samples[body] if body != "n" else
+                         (counts or {}).get(word)
+                         or ("1" if word in chosen else "0"))
+            line = line[:found.start()] + value + line[found.end():]
+        out.append(line)
+    return "\n".join(out)
+
+
+def refusals(digest: str) -> list[str]:
+    """The same line digest with its last segment dropped, an extra
+    segment added, and its first two swapped — each must be malformed;
+    the lines after the `digest:` line stay."""
+    line, _, rest = digest.partition("\n")
+    parts = line.split(" · ")
+    return [(broken + "\n" + rest).rstrip()
+            for broken in (" · ".join(parts[:-1]), line + " · extra x",
+                           " · ".join([parts[1], parts[0], *parts[2:]]))]
+
+
+def assert_is_schema(test, role, variant, template, samples,
+                     counts=None):
+    """The documented `template` validates under its role's schema, with
+    each of its alternations turned to each of its alternatives, and
+    each of its refusals is malformed."""
+    fills = [fill(template, samples, counts=counts)]
+    fills += [fill(template, samples, prefer=alt, counts=counts)
+              for body in alternations(template)
+              for alt in [_key(a) for a in body.split("|")][1:]]
+    for digest in fills:
+        test.assertEqual(digests.validate(role, variant, digest), [], digest)
+        test.assertIsNotNone(digests.parse(role, variant, digest))
+    for broken in refusals(fills[0]):
+        test.assertTrue(digests.validate(role, variant, broken), broken)
+        test.assertIsNone(digests.parse(role, variant, broken))
+
+
+SKILL_DIR = Path(__file__).resolve().parents[1]
+
+
+class BriefGrammarTests(unittest.TestCase):
+    """The schema is the brief's grammar: each digest a brief documents —
+    the auditor's with the finding line the same brief states — is read
+    from the brief, filled, and validated, so a brief edit cannot drift
+    from `digests.py` silently. An unmapped metavariable fails the fill
+    by name."""
+
+    SAMPLES = {
+        "T###": "T001",
+        "suggested line": "feat(x): T001 shout (FR-001)",
+        "paths": "repo/a.py",
+        "why": "no evidence",
+        "summary needing D-###": "needs D-012",
+        "one line": "the auth flow is wrong",
+        "file": "repo/calc.py",
+        "verbatim quote": "use ints",
+        "suggested fix": "cast the input",
+    }
+    FINDINGS = r"each exactly:\n`((?:BLOCK \| WARN \| NIT) · [^`]+)`"
+
+    def test_each_documented_grammar_is_the_schema(self):
+        # (role, the brief, the documented pieces — a lead-in and what
+        # the brief captures)
+        for role, path, pieces in (
+                ("developer", "agents/developer.md",
+                 (("", r"`(digest: task [^`]+)`"),)),
+                ("auditor", "agents/auditor.md",
+                 (("", r"`(digest: BLOCK [^`]+)`"),
+                  ("\n1. ", self.FINDINGS)))):
+            with self.subTest(role=role):
+                brief = (SKILL_DIR / path).read_text(encoding="utf-8")
+                assert_is_schema(
+                    self, role, None,
+                    "".join(lead + fillable(documented(brief, part))
+                            for lead, part in pieces),
+                    self.SAMPLES)
 
 
 if __name__ == "__main__":

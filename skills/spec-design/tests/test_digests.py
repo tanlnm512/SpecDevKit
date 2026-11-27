@@ -6,6 +6,7 @@ wrong order, a bad kind. A malformed digest is never parsed by half.
 This skill ships the master copy; tools/tests/test_parity.py pins every
 copy byte-identical.
 """
+import re
 import subprocess
 import sys
 import tempfile
@@ -105,9 +106,9 @@ LINES = [
      ("digest: options Q1: a · questions 3 answered / 1 open", UNKNOWN),
      ("digest: questions 3 / 1 · options Q1: a", "`questions` expects")),
     ("analyst", "constitution",
-     "digest: constitution 2 proposed · areas auth, storage · "
+     "digest: constitution 0 proposed · areas auth, storage · "
      "contradicted D-014 · unknowns 0",
-     ("digest: constitution 2 proposed · areas auth, storage · "
+     ("digest: constitution 0 proposed · areas auth, storage · "
       "unknowns 0", "`contradicted` missing"),
      ("digest: extra x · constitution 2 proposed · areas a · "
       "contradicted none · unknowns 0", UNKNOWN),
@@ -250,9 +251,10 @@ class LineGrammarTests(unittest.TestCase):
     def test_free_text_holds_a_separator_and_typed_values_do_not(self):
         # a value ends where the next key begins: free text may hold the
         # separator; a typed value — a count, a status, a note — may not
-        # swallow a segment
+        # swallow a segment, and neither may the last field, which has
+        # no next key to end it
         self.assertEqual(digests.validate("auditor", None, (
-            "digest: BLOCK 1 · WARN 0 · NIT 0 · worst the auth flow · "
+            "digest: BLOCK 1 · WARN 0 · NIT 0 · worst the auth flow — "
             "token refresh is wrong")), [])
         parsed = digests.parse("developer", None, (
             "digest: task T001 · status blocked: out of scope · files 0 · "
@@ -292,6 +294,55 @@ class LineGrammarTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 problems = digests.validate("developer", None, literal)
                 self.assertIn(why, " ".join(problems))
+        for role, variant, valid, *_ in LINES:
+            last = digests.GRAMMARS[role][variant][-1][0]
+            with self.subTest(role=role, variant=variant, last=last):
+                trailing = valid + " · extra foo"
+                self.assertIn(f"`{last}`", " ".join(
+                    digests.validate(role, variant, trailing)))
+                self.assertIsNone(digests.parse(role, variant, trailing))
+
+    def test_a_count_matches_what_the_digest_lists(self):
+        # the auditor's line is read with the findings that follow it and
+        # the constitution line with its numbered proposals; the line
+        # alone, as a record folds it, lists nothing and is not checked
+        findings = ('1. BLOCK · spec.md · "shall be fast" · name a bound\n'
+                    '2. WARN · plan.md · "later" · date it\n')
+        proposals = ("1. Pin dependencies · evidence: CI · rationale: drift\n"
+                     "2. Tests ship with the code · evidence: t · rationale: r\n")
+        # (role, variant, text, the problem, or None when valid)
+        for role, variant, text, why in (
+                ("auditor", None,
+                 "digest: BLOCK 1 · WARN 1 · NIT 0 · worst x\n" + findings,
+                 None),
+                ("auditor", None,
+                 "> tools: Read\n> digest: BLOCK 1 · WARN 1 · NIT 0 · worst x\n"
+                 + "".join("> " + ln + "\n" for ln in findings.splitlines()),
+                 None),
+                ("auditor", None,
+                 "digest: BLOCK 1 · WARN 0 · NIT 0 · worst x\n" + findings,
+                 "`WARN` counts 0 but 1 WARN findings follow the digest"),
+                ("auditor", None,
+                 "tools: Read\ndigest: BLOCK 1 · WARN 0 · NIT 0 · worst x\n",
+                 "`BLOCK` counts 1 but 0 BLOCK findings follow the digest"),
+                ("auditor", None,
+                 "digest: BLOCK 1 · WARN 0 · NIT 0 · worst x\n", None),
+                ("analyst", "constitution",
+                 "tools: Write\ndigest: constitution 2 proposed · areas a · "
+                 "contradicted none · unknowns 0\n" + proposals, None),
+                ("analyst", "constitution",
+                 "digest: constitution 3 proposed · areas a · contradicted "
+                 "none · unknowns 0\n" + proposals,
+                 "`constitution` counts 3 proposed but 2 numbered proposals "
+                 "follow the digest"),
+                ("analyst", "constitution",
+                 "digest: constitution 2 proposed · areas a · contradicted "
+                 "none · unknowns 0\n", None)):
+            with self.subTest(role=role, variant=variant, why=why):
+                self.assertEqual(digests.validate(role, variant, text),
+                                 [why] if why else [], text)
+                self.assertEqual(
+                    digests.parse(role, variant, text) is None, bool(why))
 
     def test_markup_around_a_line_is_tolerated(self):
         # review files quote the auditor line; a digest file may wrap
@@ -303,8 +354,8 @@ class LineGrammarTests(unittest.TestCase):
                 self.assertEqual(
                     digests.validate("auditor", None, quoted), [])
         self.assertEqual(digests.validate("auditor", None, (
-            "# Review\n\n" + AUDITOR + "\n\n1. BLOCK · spec.md · \"x\"\n")),
-            [])
+            "# Review\n\n" + AUDITOR.replace("BLOCK 0", "BLOCK 1")
+            + "\n\n1. BLOCK · spec.md · \"x\"\n")), [])
 
     def test_one_line_per_lens_and_one_lens_per_line(self):
         carried = "\n".join(valid for role, variant, valid, *_ in LINES
@@ -398,6 +449,33 @@ class BlockGrammarTests(unittest.TestCase):
                     "integrator", "threads", THREADS.replace(
                         "thread r1 — must-fix — repo/calc.py:12", head)))
 
+    def test_the_summary_counts_its_thread_blocks(self):
+        # THREADS lists one must-fix and one nit
+        # (the `summary:` line, the problem it is refused with)
+        for summary, why in (
+                ("must-fix 1 · question 0 · nit 1 · disagree 0", None),
+                ("must-fix 1 · question 1 · nit 1 · disagree 0",
+                 "`summary` counts question 1 but 0 thread block(s) carry it"),
+                ("must-fix 0 · question 0 · nit 1 · disagree 0",
+                 "`summary` counts must-fix 0 but 1 thread block(s) carry it"),
+                ("must-fix 1 · question 0 · nit 1 · disagree 2",
+                 "`summary` counts disagree 2 but 0 thread block(s) carry it")):
+            with self.subTest(summary=summary):
+                text = THREADS.replace(
+                    "summary: must-fix 1 · question 0 · nit 1 · disagree 0",
+                    "summary: " + summary)
+                self.assertEqual(
+                    digests.validate("integrator", "threads", text),
+                    [f"threads: {why}"] if why else [])
+                self.assertEqual(
+                    digests.parse("integrator", "threads", text) is None,
+                    bool(why))
+        r = run_validator("integrator", "threads", text=THREADS.replace(
+            "must-fix 1 · question 0 · nit 1", "must-fix 4 · question 0 · nit 1"))
+        self.assertEqual((r.returncode, r.stdout.strip()), (
+            1, "malformed: threads: `summary` counts must-fix 4 but 1 thread "
+               "block(s) carry it"))
+
     def test_quoted_fenced_and_list_marked_blocks_validate(self):
         quoted = "\n".join("> " + line if line else line
                            for line in PR_TEXT.splitlines()) + "\n"
@@ -481,11 +559,17 @@ class CapabilityHandshakeTests(unittest.TestCase):
             with self.subTest(role=role):
                 self.assertEqual(digests.REQUIRED_TOOLS[role], wanted)
 
-    def test_tools_report_reads_the_first_tools_line(self):
-        # (text, the names it reports)
+    def test_tools_report_reads_the_reply_s_first_line_alone(self):
+        # (text, the names it reports): the report is the line the reply
+        # opens with — blank lines and an opening fence aside — never a
+        # `tools:` line that stands anywhere else in the text
         for text, names in (
                 ("", set()),
                 (DEVELOPER + "\n", set()),
+                ("Here is my digest.\ntools: Read, Grep\n", set()),
+                ("title: x\nbody:\ntools: Read\nflags: none\n", set()),
+                ("\n\ntools: Read\n", {"Read"}),
+                ("```\ntools: Read\n", {"Read"}),
                 ("tools: Read, Grep, Glob\n", {"Read", "Grep", "Glob"}),
                 ("tools: Read,Grep , Glob\n", {"Read", "Grep", "Glob"}),
                 ("tools: read, GREP\n", {"read", "GREP"}),
@@ -521,6 +605,24 @@ class CapabilityHandshakeTests(unittest.TestCase):
                                  [])
                 self.assertEqual(digests.parse(role, variant, TOOLS + valid),
                                  digests.parse(role, variant, valid))
+
+    def test_a_reported_name_cannot_split_the_provenance_line(self):
+        # the sweep joins the reported names onto its ` · `-separated
+        # provenance line, so a name holding the separator would add or
+        # split a field there: the report is refused naming the name, and
+        # the digest with it — before any consumer reads a tool. A line
+        # break never reaches a name: it ends the report (the table above)
+        forged = "tools: Read, Grep · payload deadbeef\n"
+        refusal = "tools report refused: `Grep · payload deadbeef`"
+        for role, variant, valid, *_ in LINES + BLOCKS:
+            with self.subTest(role=role, variant=variant):
+                problems = digests.validate(role, variant, forged + valid)
+                self.assertIn(refusal, " ".join(problems))
+                self.assertIsNone(digests.parse(role, variant, forged + valid))
+        r = run_validator("auditor", "--require-tools", text=forged + AUDITOR)
+        self.assertEqual((r.returncode, "capability handshake" in r.stdout),
+                         (1, False))
+        self.assertIn("malformed: " + refusal, r.stdout)
 
     def test_require_tools_exits_three_on_a_missing_tool(self):
         # (role, flag, text, exit)
@@ -559,6 +661,158 @@ class CapabilityHandshakeTests(unittest.TestCase):
                 self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
                 self.assertIn("auditor role requires `Read`", r.stdout)
 
+
+SKILL = Path(__file__).resolve().parents[1]
+
+
+def _key(alternative: str) -> str:
+    return alternative.strip().split("<")[0].strip().rstrip(":")
+
+
+def documented(text: str, pattern: str) -> str:
+    """The grammar a document states, as it states it: the span
+    `pattern` captures, its wrapped lines joined."""
+    found = re.search(pattern, text, re.S)
+    return re.sub(r"\s+", " ", found.group(1)).strip()
+
+
+def fillable(piece: str) -> str:
+    """A documented piece with a bare alternation — `BLOCK | WARN | NIT`
+    — made a metavariable, so that the fill can choose from it."""
+    return re.sub(r"^((?:\w+ \| )+\w+)(?= · )", r"<\1>", piece)
+
+
+def alternations(template: str) -> list[str]:
+    """The body of every alternation in `template`, in document order."""
+    found, opens = [], []
+    for bracket in re.finditer(r"[<>]", template):
+        if bracket.group() == "<":
+            opens.append(bracket.start())
+        elif "|" in (body := template[opens.pop() + 1:bracket.start()]):
+            found.append(body)
+    return found
+
+
+def fill(template: str, samples: dict, prefer: str | None = None,
+         counts: dict | None = None) -> str:
+    """`template` with every `<…>` filled: an alternation by the
+    alternative `prefer` names or its first, another metavariable by its
+    sample. `<n>` is what its line lists — `counts` says for the word
+    before it, else it counts the alternatives this fill chose, as a
+    digest's summary counts its items. A line whose metavariable reads
+    `<x> only:` stays only when `x` was chosen."""
+
+    def picked(body: str) -> str:
+        return next((alt.strip() for alt in body.split("|")
+                     if _key(alt) == prefer), body.split("|")[0].strip())
+
+    chosen = {_key(picked(body)) for body in alternations(template)}
+    out = []
+    for line in template.split("\n"):
+        only = re.search(r"<(\S+) only:", line)
+        if only and only.group(1) not in chosen:
+            continue
+        while "<" in line:
+            found = re.search(r"<([^<>]+)>", line)
+            body = found.group(1)
+            if "|" in body:
+                value = picked(body)
+            else:
+                word = re.split(r"[\s·]+", line[:found.start()].strip())[-1]
+                value = (samples[body] if body != "n" else
+                         (counts or {}).get(word)
+                         or ("1" if word in chosen else "0"))
+            line = line[:found.start()] + value + line[found.end():]
+        out.append(line)
+    return "\n".join(out)
+
+
+def refusals(digest: str) -> list[str]:
+    """The same line digest with its last segment dropped, an extra
+    segment added, and its first two swapped — each must be malformed;
+    the lines after the `digest:` line stay."""
+    line, _, rest = digest.partition("\n")
+    parts = line.split(" · ")
+    return [(broken + "\n" + rest).rstrip()
+            for broken in (" · ".join(parts[:-1]), line + " · extra x",
+                           " · ".join([parts[1], parts[0], *parts[2:]]))]
+
+
+def assert_is_schema(test, role, variant, template, samples,
+                     counts=None):
+    """The documented `template` validates under its role's schema, with
+    each of its alternations turned to each of its alternatives, and
+    each of its refusals is malformed."""
+    fills = [fill(template, samples, counts=counts)]
+    fills += [fill(template, samples, prefer=alt, counts=counts)
+              for body in alternations(template)
+              for alt in [_key(a) for a in body.split("|")][1:]]
+    for digest in fills:
+        test.assertEqual(digests.validate(role, variant, digest), [], digest)
+        test.assertIsNotNone(digests.parse(role, variant, digest))
+    for broken in refusals(fills[0]):
+        test.assertTrue(digests.validate(role, variant, broken), broken)
+        test.assertIsNone(digests.parse(role, variant, broken))
+
+
+class BriefGrammarTests(unittest.TestCase):
+    """The schema is the brief's grammar: every digest this skill's
+    briefs and lens sections document is read from the document, filled,
+    and validated — a brief edit cannot drift from `digests.py`
+    silently. An unmapped metavariable fails the fill by name."""
+
+    LENS = r"## Lens: %s\b.*?\*\*Digest\*\*: `(digest:.*?)`"
+    FINDINGS = r"each exactly:\n`((?:BLOCK \| WARN \| NIT) · [^`]+)`"
+    PROPOSALS = r"one numbered entry per\s*proposal:\s*`(<n>\. .*?)`"
+    SAMPLES = {
+        "total FRs+NFRs": "10",
+        "requirement ids or none": "none",
+        "one line": "the auth flow is wrong",
+        "per open choice: choice → candidates — with ; between choices":
+            "storage → sqlite or postgres; cache → redis or in-process",
+        "those with evidence": "auth, storage",
+        "existing articles or none": "none",
+        "top alternative + one-word why": "direct calls + hidden coupling",
+        "biggest symbol + direct-caller count": "graph.py, 12 callers",
+        "names": "scaffold, wire",
+        "groups": "[T001, T002] [T003]",
+        "done": "0", "partial": "0", "todo": "0",
+        "task ids or none": "none",
+        "file": "spec.md",
+        "verbatim quote": "shall be fast",
+        "suggested fix": "name a bound",
+        "MUST-strength article": "Pin every dependency",
+        "file:line or command output, verbatim": "CI:14",
+        "what breaking it costs": "a drifted build",
+    }
+
+    def test_each_documented_grammar_is_the_schema(self):
+        # (role, variant, the file, the documented pieces — a lead-in and
+        # what the document captures — and what the digest line counts
+        # in the lines that follow it)
+        for role, variant, path, pieces, counts in (
+                ("tester", None, "agents/tester.md",
+                 (("", r"`(digest: TCs [^`]+)`"),), {}),
+                ("auditor", None, "agents/auditor.md",
+                 (("", r"`(digest: BLOCK [^`]+)`"),
+                  ("\n1. ", self.FINDINGS)), {}),
+                ("analyst", "research", "protocol/lenses.md",
+                 (("", self.LENS % "research"),), {}),
+                ("analyst", "constitution", "protocol/lenses.md",
+                 (("", self.LENS % "constitution"),
+                  ("\n", self.PROPOSALS)), {"constitution": "1"}),
+                ("architect", "tech", "protocol/lenses.md",
+                 (("", self.LENS % "tech"),), {}),
+                ("architect", "plan", "protocol/lenses.md",
+                 (("", self.LENS % "plan"),), {}),
+                ("architect", "tasks", "protocol/lenses.md",
+                 (("", self.LENS % "tasks"),), {})):
+            with self.subTest(role=role, variant=variant):
+                text = (SKILL / path).read_text(encoding="utf-8")
+                template = "".join(lead + fillable(documented(text, part))
+                                   for lead, part in pieces)
+                assert_is_schema(self, role, variant, template,
+                                 self.SAMPLES, counts=counts)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

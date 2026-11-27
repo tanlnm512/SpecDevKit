@@ -10,9 +10,13 @@ problems; parse returns its fields, only when there are none. Strict:
 every key present, in order, no unknown key, every value of its kind; a
 block with a missing, unknown, or misordered top-level field is
 malformed. A line value ends where the next key begins, so free text
-may hold a ` · `; a typed value may not. Tolerant only of leading
-markup on a line (`>`, `*`, backticks, list dashes) — review files quote
-the auditor line.
+may hold a ` · `; a typed value may not, and the last key takes the
+rest of the line and so may hold no separator at all. A count is read
+against what the digest lists: an auditor line with the findings that
+follow it, a constitution line with its numbered proposals, an
+integrator's `summary:` against its thread blocks. Tolerant only of
+leading markup on a line (`>`, `*`, backticks, list dashes) — review
+files quote the auditor line.
 
 Every returned digest is validated with its schema before anything is
 read from it; a malformed one is a fix-and-run-again refusal, never
@@ -21,11 +25,14 @@ something to act on.
 The capability handshake rides the same line (spec-design D-076). A
 role opens its reply — and its digest file, above the `digest:` line —
 with `tools: <the tools it actually holds>`; every grammar ignores that
-line. REQUIRED_TOOLS is the least a role needs to do its job at all,
-quoted from its brief: nothing else is required — a missing WebSearch
-degrades research, it does not void the artifact. A report that lacks
-a required tool is a failed spawn: refused, never acted on, and never a
-fix round.
+line. The report is that first line alone, and a reported name holds
+no ` · `: the orchestrator joins the names onto its own ` ·
+`-separated provenance line, so a name holding the separator would add
+or split a field there. REQUIRED_TOOLS is the least a role needs to do
+its job at all, quoted from its brief: nothing else is required — a
+missing WebSearch degrades research, it does not void the artifact. A
+report that lacks a required tool is a failed spawn: refused, never
+acted on, and never a fix round.
 
 Usage:
   digests.py validate <role> [<variant>] [file] [--require-tools]
@@ -41,7 +48,7 @@ from __future__ import annotations
 
 import re
 import sys
-from collections import namedtuple
+from collections import Counter, namedtuple
 from pathlib import Path
 
 USAGE = "Usage:" + __doc__.split("Usage:", 1)[1].split("Exit:", 1)[0].rstrip()
@@ -88,10 +95,11 @@ SUMMARY = _kind(
     "`must-fix <n> · question <n> · nit <n> · disagree <n>`",
     r"must-fix\s+\d+\s*·\s*question\s+\d+\s*·\s*nit\s+\d+\s*·\s*"
     r"disagree\s+\d+")
+LABELS = ("must-fix", "question", "nit", "disagree")
 THREAD_HEAD = _kind(
     "`thread <id> — <must-fix|question|nit|disagree> — <path:line>`",
-    r"(?P<id>\S+)\s+—\s+(?P<label>must-fix|question|nit|disagree)"
-    r"\s+—\s+(?P<where>\S.*)")
+    rf"(?P<id>\S+)\s+—\s+(?P<label>{'|'.join(LABELS)})"
+    rf"\s+—\s+(?P<where>\S.*)")
 TRACE = _kind(
     "`<first words> ← spec:<name> | commit:<sha> | dep:<file> | "
     "backlog:<spec> | rollout:<spec>:<label>`",
@@ -190,8 +198,22 @@ LEAD = re.compile(r"^[ \t>*`-]+")
 SEP = re.compile(r"[ \t]*\u00b7[ \t]*")
 QUOTE = re.compile(r"^(?:[ \t]*>)+[ \t]?")
 FENCE = re.compile(r"^`{3,}[\w+-]*$")
-MARKER = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
+LIST_MARK = r"(?:[-*+]|\d+[.)])[ \t]+"
+MARKER = re.compile(r"^[ \t]*" + LIST_MARK)
 SUBFIELD = re.compile(r"^[ \t]+([A-Za-z]+):(?:[ \t]+(.*))?$")
+
+# The count keys of a line grammar against the item lines its reply
+# lists beside the digest — (key, what a line lists, how an item line
+# opens).
+LISTED = {
+    ("auditor", None): tuple(
+        (level, f"{level} findings",
+         re.compile(rf"[ \t]*(?:{LIST_MARK})?{level}(?=[ \t]*·)"))
+        for level in ("BLOCK", "WARN", "NIT")),
+    ("analyst", "constitution"): (
+        ("constitution", "numbered proposals",
+         re.compile(r"[ \t]*\d+[.)][ \t]+")),),
+}
 
 
 def _stripped(raw: str) -> str:
@@ -228,7 +250,8 @@ def _tools_names(value: str) -> list[str]:
 
 def tools_lines(text: str) -> list[tuple[int, str]]:
     """(offset, line) of every `tools:` line in `text`, markup stripped
-    — the capability handshake's report."""
+    — the lines every grammar skips. The report is the first line of
+    the reply alone (`tools_report`)."""
     out = []
     offset = 0
     for raw in text.splitlines(keepends=True):
@@ -239,13 +262,41 @@ def tools_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+def _opening(text: str) -> str:
+    """The line the reply opens with, markup off — blank lines and an
+    opening code fence are not it."""
+    for raw in text.splitlines():
+        if not raw.strip() or FENCE.match(raw.strip()):
+            continue
+        line = _stripped(raw)
+        if line.strip():
+            return line
+    return ""
+
+
 def tools_report(text: str) -> set[str]:
-    """The tools the role reports holding — the first `tools:` line's
-    names, spelled as the role spelled them; empty when there is none.
-    A report is the agent's claim, never a fact the kit asserts."""
-    lines = tools_lines(text)
-    return set(_tools_names(lines[0][1][len(TOOLS_KEY) + 1:])) if lines \
+    """The tools the role reports holding — the names on the line the
+    reply opens with when it is a `tools:` line, spelled as the role
+    spelled them; empty when it is not or there is none. A `tools:`
+    line anywhere else is text, never a report. A report is the agent's
+    claim, never a fact the kit asserts."""
+    line = _opening(text)
+    is_report = line[:len(TOOLS_KEY) + 1].casefold() == TOOLS_KEY + ":"
+    return set(_tools_names(line[len(TOOLS_KEY) + 1:])) if is_report \
         else set()
+
+
+def tools_problem(text: str) -> str | None:
+    """Why the reply's tools report is refused — a reported name holding
+    the separator of the orchestrator's provenance line, which it would
+    split — or None when it is not. A line break never reaches a name:
+    the report is read from one line."""
+    forged = sorted(f"`{name}`" for name in tools_report(text)
+                    if "\u00b7" in name)
+    if not forged:
+        return None
+    return (f"tools report refused: {', '.join(forged)} — a reported name "
+            "holds no ` · `, the separator of the provenance line")
 
 
 def tools_missing(role: str, reported: set[str]) -> tuple[str, ...]:
@@ -327,6 +378,9 @@ def _parse_line(grammar: tuple, line: str) -> tuple[dict, list[str]]:
         value = body[start:end].strip()
         match = kind.pattern.fullmatch(value)
         problem = _value_problem(key, kind, value, match is not None)
+        if not problem and index == len(grammar) - 1 and SEP.search(value):
+            problem = (f"`{key}` is the line's last key and holds no ` · ` "
+                       f"— got `{value}`")
         if problem:
             problems.append(problem)
         else:
@@ -494,7 +548,21 @@ def _parse_block(fields: tuple, heads: tuple, text: str) -> tuple[dict, list[str
             values.setdefault(name, []).append(record)
     problems += _sequence(fields, seen, repeats={
         f.name for f in fields if f.shape[0] == "group"})
-    return values, problems
+    return (values, problems) if problems \
+        else (values, _summary_problems(values))
+
+
+def _summary_problems(values: dict) -> list[str]:
+    """Where an integrator's `summary:` disagrees with the thread blocks
+    it counts — none when the digest carries no thread to count."""
+    threads, summary = values.get("thread"), values.get("summary")
+    if not threads or summary is None:
+        return []
+    carried = Counter(t.get("label") for t in threads)
+    declared = zip(LABELS, map(int, re.findall(r"\d+", summary)))
+    return [f"`summary` counts {label} {count} but {carried[label]} thread "
+            f"block(s) carry it"
+            for label, count in declared if count != carried[label]]
 
 
 def _variants(schemas: dict, variant: str | None) -> list:
@@ -538,7 +606,34 @@ def _check_line(role: str, schemas: dict, variant: str | None,
         problems.append(f"no `digest:` line for {role} {variant}")
     if problems:
         return None, problems
-    return {**hits[order[0]][0], "variant": order[0]}, []
+    fields = {**hits[order[0]][0], "variant": order[0]}
+    trouble = _listed_problems(role, order[0], fields,
+                               _around(text, lines[0][0]))
+    return (None, trouble) if trouble else (fields, [])
+
+
+def _around(text: str, offset: int) -> str:
+    """`text` without the line starting at `offset`."""
+    end = text.find("\n", offset)
+    return text[:offset] + text[end:] if end != -1 else text[:offset]
+
+
+def _listed_problems(role: str, variant: str | None, fields: dict,
+                     around: str) -> list[str]:
+    """Where a line's counts disagree with the items listed beside it;
+    the line alone, as a record folds it, lists nothing and is not
+    checked."""
+    listed = LISTED.get((role, variant))
+    if not listed or not around.strip():
+        return []
+    lines = [QUOTE.sub("", raw) for raw in around.splitlines()]
+    problems = []
+    for key, item, opens in listed:
+        count = sum(1 for line in lines if opens.match(line))
+        if int(re.match(r"\d+", fields[key]).group()) != count:
+            problems.append(f"`{key}` counts {fields[key]} but {count} "
+                            f"{item} follow the digest")
+    return problems
 
 
 def _check_block(role: str, schemas: dict, variant: str | None,
@@ -578,7 +673,10 @@ def _check(role: str, variant: str | None, text: str) -> tuple:
         if role in grammars:
             if variant is not None and variant not in grammars[role]:
                 raise KeyError(variant)
-            return check(role, grammars[role], variant, text)
+            values, problems = check(role, grammars[role], variant, text)
+            refused = tools_problem(text)
+            return (None, [*problems, refused]) if refused \
+                else (values, problems)
     raise KeyError(f"no digest schema for role {role!r}")
 
 
