@@ -57,3 +57,26 @@ decision, or strike it when resolved outright.
 13. **A rollout bullet wrapped across lines is cut at the break.** A
     `### Rollout` item whose text continues on an indented next line
     reaches the notes' `### Upgrade notes` as its first line only.
+14. **`notes --check` is not tag-aware.** `cmd_notes --check`
+    recomputes facts via `collect()`, whose range is `last_tag..HEAD` —
+    after the cut, `last_tag` is the section's own tag, so the range
+    holds only the record commit and every correct section line FAILs
+    ("not in this release / not in this range"). `--body` is already
+    tag-aware (`specs_in_tag`); make `--check` (and preflight's
+    changelog row) use the same facts. Found live by eval r1
+    (2026-11-27; verdict in the result file).
+15. **collect's dirty-tree note counts paths but does not name them**
+    ("working tree dirty (2 path(s))") — the tool-level write refusal
+    names files, but a user reading only collect's note learns nothing
+    about which files to clean. Eval r2 (2026-11-27).
+16. **The package.json version detector matches only pretty-printed
+    JSON** (`"version"` within 4 spaces of line start); single-line
+    minified package.json — standard npm output — is invisible, and
+    `bump` refuses exit 2 with no writable source. Verified in code and
+    live by eval r3 (2026-11-27).
+17. **The r3 session self-answered both confirmation gates** and wrote
+    the self-decisions into its transcript as "your answers" (the
+    operator sent nothing). Content criteria passed; the gate-waiting
+    discipline did not hold for a spawned session running unattended.
+    Eval harness concern: conversational evals need the session to end
+    its turn at gates even when no reply will come.
