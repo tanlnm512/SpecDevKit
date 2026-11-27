@@ -42,21 +42,41 @@ refuses the approval as malformed until the auditor is re-run; a
 signed record verifies on the BLOCK count it carries.
 
 An approval is a signature: --approve signs the record with an SSH key
-listed in the repo's approver list `specs/.approvers` (ssh
-allowed_signers: one `<principal> <key-type> <key-blob>` line per
-approver, `#` starts a comment) and writes
-specs/<name>/approvals/approval.md and approval.md.sig together — both
-or neither. The signed text is the record with LF line endings and
-exactly one trailing newline, so a CRLF checkout still verifies and any
-other change to the record breaks it. The record's `**Approved-by**`
+listed in the approver list (ssh allowed_signers: one `<principal>
+<key-type> <key-blob>` line per approver, `#` starts a comment) and
+writes specs/<name>/approvals/approval.md and approval.md.sig together
+— both or neither. The signed text is the record with LF line endings
+and exactly one trailing newline, so a CRLF checkout still verifies and
+any other change to the record breaks it. The record's `**Approved-by**`
 line carries the signing key's principal. --key defaults to the first
 of ~/.ssh/id_ed25519, ~/.ssh/id_ecdsa, ~/.ssh/id_rsa that exists;
 --force replaces an existing record.
 
+The approver list is read from a trust root the workspace cannot write,
+never from the working tree:
+  1. the machine list ~/.config/spec-dev-kit/approvers, wherever it
+     exists — the authority for --approve and --verify alike;
+  2. else in CI (the `CI` variable set to a non-empty value): the list
+     as it stands on the remote default branch — the target of
+     refs/remotes/origin/HEAD, else origin/main, else origin/master —
+     read with `git show` and never fetched;
+  3. else nothing signs or verifies: a local run without the machine
+     list refuses.
+A specs/.approvers in the working tree is only what CI commits. Verify
+refuses, naming the file, while any other file named `.approvers` sits
+under <repo-root>/specs/.
+
+--approve confirms on the terminal: the prompt names the spec and the
+docset fingerprint, and the exact phrase it prints must be typed on
+/dev/tty. With no controlling terminal, a different line, or an end of
+file, it exits 1 having written nothing.
+
 --verify refuses a record without a signature and one whose signature
-does not verify, unless the docset records its delivery — an unsigned
-record approved before signatures existed stays valid once delivered.
-It treats the Approved-at commit as history after delivery too: a
+does not verify, unless the remote default branch carries the record
+byte for byte — an unsigned record approved before signatures existed
+stays valid once delivered and pushed; a local commit and a
+`Delivered:` line prove nothing. It treats the Approved-at commit as
+history after delivery too: a
 squash-merge or rebase rewrites the anchor, and the delivery record
 owns the proof from there. It re-checks the folded review section's
 shape but never re-hashes the record — the signature covers it and the
@@ -69,10 +89,12 @@ Usage:
   freeze.py <spec-dir> --verify [--repo <path>]
   freeze.py -h | --help
 
---verify writes nothing.
+--verify writes nothing on a machine that holds the machine list; in CI
+it copies the remote list to a private temporary file for ssh-keygen.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
@@ -81,6 +103,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import digests
@@ -89,6 +112,10 @@ import specstate
 FROZEN_FILES = ("spec.md", "plan.md", "test.md", "tech-spec.md")
 NAMESPACE = "spec-dev-kit-approval"
 APPROVERS = Path("specs") / ".approvers"
+MACHINE_APPROVERS = Path("config") / "spec-dev-kit" / "approvers"
+REMOTE_HEAD = "refs/remotes/origin/HEAD"
+DEFAULT_BRANCHES = ("main", "master")
+TTY = "/dev/tty"
 DEFAULT_KEYS = ("id_ed25519", "id_ecdsa", "id_rsa")
 TINY_EVIDENCE_HEADING = "## Evidence"
 TASK_STATUS_LINE = re.compile(
@@ -401,19 +428,106 @@ def _keygen_problem() -> str | None:
     return None
 
 
-NO_LIST = ("no approver list (specs/.approvers) — create it with your "
-           "SSH public key, one `<principal> <key-type> <key-blob>` line "
-           "per approver: `ssh-keygen -y -f ~/.ssh/id_ed25519` prints yours")
+def _git(repo: Path, *args: str) -> bytes | None:
+    """A read-only git command's stdout, or None when it cannot run or
+    refuses."""
+    try:
+        run = subprocess.run(["git", "-C", str(repo), *args],
+                             capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return run.stdout if run.returncode == 0 else None
 
 
-def _approvers_file(spec_dir: Path, repo: Path) -> Path:
-    """The approver list: the nearest specs/.approvers at or above the
-    spec dir — an archived spec sits a level deeper than the default
-    repo root reaches — else the one --repo names."""
-    for parent in (spec_dir, *spec_dir.parents):
-        if (parent / APPROVERS).is_file():
-            return parent / APPROVERS
-    return repo / APPROVERS
+def _repo_root(spec_dir: Path, repo: Path) -> Path:
+    """The workspace root: git's toplevel for the spec dir, else the
+    --repo root."""
+    top = _git(spec_dir, "rev-parse", "--show-toplevel")
+    if top is None:
+        return repo
+    return Path(top.decode("utf-8", errors="replace").strip())
+
+
+def _remote_default(repo: Path) -> str | None:
+    """The remote default branch's full ref (refs/remotes/origin/<branch>)
+    — origin/HEAD's target, else origin/main, else origin/master — or
+    None when none resolves. Full, because git resolves a tag or a
+    branch ahead of the remote-tracking ref of the same short name, and
+    a session can make either."""
+    head = _git(repo, "symbolic-ref", "--quiet", REMOTE_HEAD)
+    targets = ([head.decode("utf-8", errors="replace").strip()] if head
+               else []) + [f"refs/remotes/origin/{name}"
+                           for name in DEFAULT_BRANCHES]
+    for ref in targets:
+        if ref.startswith("refs/remotes/origin/") and _git(
+                repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"):
+            return ref
+    return None
+
+
+def _short(ref: str) -> str:
+    return ref.removeprefix("refs/remotes/")
+
+
+LIST_LOCATION = ("~/.config/spec-dev-kit/approvers, or in CI the list on the "
+                "remote default branch")
+NO_LIST = ("no approver list on this machine "
+           "(~/.config/spec-dev-kit/approvers) — create it with your SSH "
+           "public key, one `<principal> <key-type> <key-blob>` line per "
+           "approver: `ssh-keygen -y -f ~/.ssh/id_ed25519` prints yours; a "
+           "workspace `specs/.approvers` is never an authority (CI reads "
+           "the list from the remote default branch)")
+NO_REMOTE = ("no remote default branch (the target of refs/remotes/origin/"
+             "HEAD, origin/main, origin/master) — CI reads the approver "
+             "list from it: fetch the remote (`git remote set-head origin "
+             "-a`), or create the machine list "
+             "~/.config/spec-dev-kit/approvers")
+
+
+@contextlib.contextmanager
+def _approvers(repo: Path) -> Iterator[Path | str]:
+    """The approver list as the file ssh-keygen reads — or why none can
+    be trusted. The one resolver for --approve and --verify: the machine
+    list ~/.config/spec-dev-kit/approvers wherever it exists; else in CI
+    the list on the remote default branch, copied to a private temporary
+    file for this block and never fetched; else nothing. The working
+    tree's specs/.approvers is never an authority, so no workspace edit
+    makes a key an approver."""
+    machine = Path.home() / MACHINE_APPROVERS
+    if machine.is_file():
+        yield machine
+        return
+    if not os.environ.get("CI"):
+        yield NO_LIST
+        return
+    ref = _remote_default(repo)
+    remote = _git(repo, "show", f"{ref}:{APPROVERS.as_posix()}") if ref else None
+    if remote is None:
+        yield NO_REMOTE if ref is None else (
+            f"no approver list on {_short(ref)} (`specs/.approvers` is "
+            "absent from the remote default branch) — commit it there, or "
+            "create the machine list ~/.config/spec-dev-kit/approvers")
+        return
+    with tempfile.NamedTemporaryFile("wb", prefix="approvers-") as copy:
+        copy.write(remote)
+        copy.flush()
+        yield Path(copy.name)
+
+
+def _nested_approvers(repo_root: Path) -> list[Path]:
+    """Every file named .approvers under specs/ but the root list: a
+    shadow, whatever it holds."""
+    specs, root_list = repo_root / "specs", repo_root / APPROVERS
+    return sorted(Path(base) / APPROVERS.name
+                  for base, _dirs, files in os.walk(specs)
+                  if APPROVERS.name in files
+                  and Path(base) / APPROVERS.name != root_list)
+
+
+def _shadow_problem(shadow: Path) -> str:
+    return (f"nested approver list {shadow} — a workspace list is never an "
+            "authority, and only <repo-root>/specs/.approvers may exist: "
+            "delete it")
 
 
 def _allowed_lines(approvers: Path) -> list[str]:
@@ -457,7 +571,6 @@ def _signer(spec_dir: Path, repo: Path,
     problem = _keygen_problem()
     if problem:
         return problem
-    approvers = _approvers_file(spec_dir, repo)
     if key:
         path = Path(key).expanduser()
         missing = f"no signing key at {path}"
@@ -471,20 +584,22 @@ def _signer(spec_dir: Path, repo: Path,
                    + ")")
     if path is None or not path.is_file():
         return missing
-    if not approvers.is_file():
-        return NO_LIST
     public = _public_half(path)
     if isinstance(public, str):
         return public
-    for line in _allowed_lines(approvers):
-        words = line.split()
-        if any(words[i:i + 2] == list(public)
-               for i in range(len(words) - 1)):
-            return path, words[0].split(",")[0]
-    return (f"the key {path} is not in {approvers} — add its public "
-            "half there as `<principal> <key-type> <key-blob>` "
-            "(`ssh-keygen -y -f <key>` prints it), or sign with a listed "
-            "key: --key <private-key>")
+    with _approvers(_repo_root(spec_dir, repo)) as approvers:
+        if isinstance(approvers, str):
+            return approvers
+        for line in _allowed_lines(approvers):
+            words = line.split()
+            if any(words[i:i + 2] == list(public)
+                   for i in range(len(words) - 1)):
+                return path, words[0].split(",")[0]
+        return (f"the key {path} is not in the approver list "
+                f"({LIST_LOCATION}) — add its public half there as "
+                "`<principal> <key-type> <key-blob>` (`ssh-keygen -y -f "
+                "<key>` prints it), or sign with a listed key: "
+                "--key <private-key>")
 
 
 def _staged(target: Path, data: bytes) -> Path:
@@ -519,6 +634,41 @@ def _write_pair(out: Path, tmp_record: Path, tmp_sig: Path) -> None:
         raise
 
 
+def _confirm(spec_dir: Path, fingerprint: str, principal: str) -> str | None:
+    """None once the owner types the phrase the terminal shows; else why
+    the approval stops. /dev/tty is the only channel that answers it: a
+    bare "y", a pipe on stdin or an end of file approves nothing."""
+    phrase = f"approve {spec_dir.name} {fingerprint}"
+    try:
+        terminal = os.open(TTY, os.O_RDWR)
+    except OSError:
+        return ("--approve runs only in the owner's own terminal — it asks "
+                "for a confirmation on /dev/tty, and this call has no "
+                "controlling terminal")
+    try:
+        os.write(terminal, (
+            f"\nApprove {spec_dir.name} (docset fingerprint {fingerprint}) "
+            f"as {principal}?\nType exactly: {phrase}\n"
+            "Anything else, or Ctrl-D, cancels.\n").encode("utf-8"))
+        # one line and no more: a raw read leaves whatever follows for
+        # the passphrase prompt ssh-keygen may put on the same terminal
+        typed = bytearray()
+        while not typed.endswith(b"\n"):
+            chunk = os.read(terminal, 1024)
+            if not chunk:
+                break
+            typed += chunk
+    except OSError as exc:
+        return f"the terminal did not answer ({exc}) — nothing was approved"
+    finally:
+        os.close(terminal)
+    line = typed.decode("utf-8", errors="replace")
+    if line.rstrip("\r\n") != phrase:
+        return (f"`{line.strip()}` was typed, not `{phrase}` — nothing was "
+                "approved: run again and type the phrase the prompt shows")
+    return None
+
+
 def approve(spec_dir: Path, repo: Path, force: bool = False,
             review: str | None = None, key: str | None = None) -> int:
     out = spec_dir / "approvals" / "approval.md"
@@ -531,13 +681,16 @@ def approve(spec_dir: Path, repo: Path, force: bool = False,
     if problem:
         print(f"FAIL: {problem}", file=sys.stderr)
         return 1
-    out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and not force:
         print(
             f"FAIL: {out} already exists — a replacement requires a fresh "
             "user approval and --force",
             file=sys.stderr,
         )
+        return 1
+    shadow = _nested_approvers(_repo_root(spec_dir, repo))
+    if shadow:
+        print(f"FAIL: {_shadow_problem(shadow[0])}", file=sys.stderr)
         return 1
     signer = _signer(spec_dir, repo, key)
     if isinstance(signer, str):
@@ -549,9 +702,15 @@ def approve(spec_dir: Path, repo: Path, force: bool = False,
         review_lines = fold_review(_review_text(spec_dir, review))
     sha = specstate.head_sha(repo) if specstate.git_available(repo) else "-"
     text = render(spec_dir, sha or "-", (principal,), review_lines)
-    print(f"approving {spec_dir.name} — docset fingerprint "
-          f"{docset_fingerprint(spec_dir)}, signing as {principal}\n{text}",
+    fingerprint = docset_fingerprint(spec_dir)
+    print(f"approving {spec_dir.name} — docset fingerprint {fingerprint}, "
+          f"signing as {principal}\n{text}",
           end="")
+    problem = _confirm(spec_dir, fingerprint, principal)
+    if problem:
+        print(f"FAIL: {problem}", file=sys.stderr)
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
     # the record is staged as a file and signed where it lies: ssh-keygen
     # then leaves stdin to the terminal, so a passphrase prompt works
     tmp_record = _staged(out, _canonical(text))
@@ -600,85 +759,77 @@ def _delivered(spec_dir: Path) -> bool:
 
 def _record_is_history(spec_dir: Path, repo: Path) -> bool:
     """True when an unsigned record is provably history: the docset is
-    delivered and a commit in this repo's ancestry — the delivery commit
-    or HEAD — carries the record byte for byte. A `Delivered:` line alone
-    proves nothing; any writer can add one."""
+    delivered and the remote default branch carries the record byte for
+    byte at the same path. HEAD and the claimed delivery sha prove
+    nothing — a commit is something a session can make — so with no
+    remote default branch an unsigned record is never an approval."""
     record = spec_dir / "approvals" / "approval.md"
     if not _delivered(spec_dir) or not record.exists():
         return False
-    try:
-        top = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10)
-        if top.returncode != 0:
-            return False
-        rel = record.resolve().relative_to(
-            Path(top.stdout.strip()).resolve()).as_posix()
-        current = _canonical(record.read_bytes().decode(
-            "utf-8", errors="replace"))
-        deliveries = [specstate.delivery_state(
-            (spec_dir / name).read_text(encoding="utf-8",
-                                        errors="replace"))[1]
-            for name in ("task.md", "spec.md") if (spec_dir / name).exists()]
-        refs = [sha for sha in deliveries
-                if sha and sha != "-" and _commit_exists(repo, sha)]
-        for ref in [*refs, "HEAD"]:
-            committed = subprocess.run(
-                ["git", "-C", str(repo), "show", f"{ref}:{rel}"],
-                capture_output=True, timeout=10)
-            if (committed.returncode == 0
-                    and _canonical(committed.stdout.decode(
-                        "utf-8", errors="replace")) == current):
-                return True
-    except (OSError, ValueError, subprocess.SubprocessError):
+    ref = _remote_default(repo)
+    if ref is None:
         return False
-    return False
+    try:
+        rel = record.resolve().relative_to(
+            _repo_root(spec_dir, repo).resolve()).as_posix()
+    except (OSError, ValueError):
+        return False
+    carried = _git(repo, "show", f"{ref}:{rel}")
+    if carried is None:
+        return False
+    return _canonical(carried.decode("utf-8", errors="replace")) == (
+        _canonical(record.read_bytes().decode("utf-8", errors="replace")))
 
 
 def signature_problem(spec_dir: Path, repo: Path) -> str | None:
     """Why the record's signature does not prove an approval, or None.
-    An unsigned record proves one only when a delivery commit carries it."""
+    An unsigned record proves one only when the remote default branch
+    carries it."""
     sig = spec_dir / "approvals" / "approval.md.sig"
     if not sig.exists():
         if _record_is_history(spec_dir, repo):
             return None
         return ("no signature (approvals/approval.md.sig) — an unsigned "
                 "record is not an approval, whatever its `Delivered:` line "
-                "says: the owner re-approves in their own terminal: "
+                "says: only the remote default branch carrying it makes it "
+                "history; the owner re-approves in their own terminal: "
                 "`freeze.py <spec-dir> --approve --force`")
-    approvers = _approvers_file(spec_dir, repo)
-    problem = _keygen_problem()
-    if problem is None and not approvers.is_file():
-        problem = NO_LIST
-    if problem:
-        return problem
     record = sig.with_name("approval.md")
     message = _canonical(
         record.read_bytes().decode("utf-8", errors="replace"))
-    detail = ""
-    for principal in _principals(approvers):
-        code, _, error = _ssh_keygen(
-            "-Y", "verify", "-f", str(approvers), "-I", principal,
-            "-n", NAMESPACE, "-s", str(sig), data=message)
-        if code == 0:
-            return None
-        detail = detail or error
-    return (f"signature does not verify ({detail or 'no approver listed'}) "
-            "— the record changed after signing, or its signer is not in "
-            "specs/.approvers: the owner re-approves in their own terminal: "
-            "`freeze.py <spec-dir> --approve --force`")
+    with _approvers(_repo_root(spec_dir, repo)) as approvers:
+        problem = _keygen_problem() or approvers
+        if isinstance(problem, str):
+            return problem
+        detail = ""
+        for principal in _principals(approvers):
+            code, _, error = _ssh_keygen(
+                "-Y", "verify", "-f", str(approvers), "-I", principal,
+                "-n", NAMESPACE, "-s", str(sig), data=message)
+            if code == 0:
+                return None
+            detail = detail or error
+        return (f"signature does not verify ({detail or 'no approver listed'}) "
+                "— the record changed after signing, or its signer is not in "
+                f"the approver list ({LIST_LOCATION}): the owner re-approves "
+                "in their own terminal: `freeze.py <spec-dir> --approve "
+                "--force`")
 
 
 def verify(spec_dir: Path, repo: Path) -> list[str]:
     """Return human-readable integrity problems; empty means green."""
     path = spec_dir / "approvals" / "approval.md"
+    shadows = [f"approval freeze: {_shadow_problem(shadow)}"
+               for shadow in _nested_approvers(_repo_root(spec_dir, repo))]
     if not path.exists():
-        return [f"approval freeze missing: {path.relative_to(spec_dir)}"]
+        return [f"approval freeze missing: {path.relative_to(spec_dir)}",
+                *shadows]
     text = path.read_text(encoding="utf-8", errors="replace")
     problems: list[str] = []
     signature = signature_problem(spec_dir, repo)
     if signature:
         problems.append(f"approval freeze: {signature}")
+    problems += shadows
     am = APPROVED_AT.search(text)
     if not am:
         problems.append("approval freeze: missing Approved-at")

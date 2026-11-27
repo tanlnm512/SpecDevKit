@@ -52,9 +52,12 @@ grants approval; the gate below refuses a red docset too.
 
 - **approve DONE** — spec.md `Status:` approved/active/done AND its
   approval freeze (`approvals/approval.md`, at every tier) signed by a
-  key in `specs/.approvers` (`approval.md.sig` — an approval is a
-  signature, D-053: a record the session could have written itself
-  fails verify); and
+  key in the approver list — the machine list
+  `~/.config/spec-dev-kit/approvers`, or in CI the list on the remote
+  default branch, never a workspace copy (`approval.md.sig` — an
+  approval is a signature: a record the session could have written
+  itself fails verify, and an unsigned one passes only where the remote
+  default branch carries it); and
 - **verify DONE** — `check.py <spec-dir>` exits 0.
 
 Anything less, the span entry **exits 4** printing the blocking
@@ -63,9 +66,9 @@ writes zero implementation files, and records an `intake_refusal`
 telemetry event under this skill's own name. Route the failure,
 never wave it through: not approved or verify red → `/spec-design`
 (the approve gate and node repairs are its own). The generated
-approval guard (spec-design D-072, a recommended tripwire) denies a
-session the writes that would forge either half; this gate stays the
-check.
+approval guard (a recommended tripwire) denies a session the writes
+that would forge either half and any `freeze.py --approve` it runs
+itself; this gate stays the check.
 
 ## The run (one engine, one span)
 

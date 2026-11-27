@@ -112,8 +112,10 @@ waves to a configurable `--runner`.
 **The freeze is the approval** (D-050, D-051, D-052) — and since
 D-071 an approval is a signature: a spec with `Status: approved` and
 no signed `approvals/approval.md` (`freeze.py --approve`, which the
-owner runs in their own terminal with an SSH key listed in
-`specs/.approvers`) fails `check.py` and `/spec-build` refuses it, at
+owner runs in their own terminal, typing the confirmation it asks for,
+with an SSH key listed in the machine approver list
+`~/.config/spec-dev-kit/approvers` — in CI, in the list on the remote
+default branch) fails `check.py` and `/spec-build` refuses it, at
 both tiers. Full tier also needs `approvals/review.md` — the orchestrator's
 record of the contract review, bound to the docset fingerprint, so a
 repair after the review forces a re-review. A tiny spec's freeze
@@ -338,14 +340,18 @@ that copies out:
   `REGISTER.md` under `~/.claude/spec-dev-kit/` and
   `~/.zcode/spec-dev-kit/` (`tools/hooks.py`, the installed
   `freeze.py` path baked in). It
-  denies sessions and spawned agents writes to `specs/**/approvals/**`
-  and `specs/.approvers`, a `spec.md` edit that sets `Status:
-  approved` while `freeze.py --verify` fails, and — where the harness
-  names the caller — the tester's read of `tech-spec.md`, `plan.md`,
-  `task.md`. The kit never edits a harness settings file: sync ends
-  with one `recommended:` line per installed guard naming the file to
-  paste its `REGISTER.md` into. It is a tripwire; the SSH signature is
-  the boundary (spec-design D-071, D-072, D-073).
+  denies sessions and spawned agents writes to `specs/**/approvals/**`,
+  `specs/.approvers` and the machine approver list
+  `~/.config/spec-dev-kit/approvers`, a `spec.md` edit that sets
+  `Status: approved` while `freeze.py --verify` fails, any shell call
+  that runs `freeze.py --approve` (the owner's own-terminal step), and
+  — where the harness names the caller — the tester's read of
+  `tech-spec.md`, `plan.md`, `task.md` by Read, Grep, Glob or a shell
+  command naming them. The kit never edits a harness settings file:
+  sync ends with one `recommended:` line per installed guard naming
+  the file to paste its `REGISTER.md` into. It is a tripwire; the
+  typed confirmation and the SSH signature are the boundary
+  (spec-design D-071, D-072, D-073).
 - **Droid and Kilo commands** — where `~/.factory/` or
   `~/.config/kilo/` exists, the same sync run installs the routers to
   `~/.factory/commands/` and `~/.config/kilo/command/` (gated on the
@@ -478,7 +484,7 @@ root:
 |---|---|
 | `scaffold.sh [--tier tiny\|full] <name> [root]` | create `specs/<name>/` (`tiny`: spec.md only, the default; `full`: the five contract templates), register in INDEX; refuses overwrite, requires kebab-case |
 | `check.py <spec-dir>` | the doc-set validator: 5 contract files, FR/NFR→T→TC traceability and TC ownership, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze integrity, constitution; `--code-state-only`, `--intent-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
-| `freeze.py <spec-dir>` | approval freeze: `--approve` writes and signs the approved-doc hash manifest after explicit sign-off, with an SSH key listed in `specs/.approvers` (existing manifests refuse overwrite; `--approve --force` represents a fresh approval; `approval.md.sig` carries the signature and `**Approved-by**` the signing principal); `--verify` is read-only and refuses an unsigned record that no commit in the repo's ancestry carries |
+| `freeze.py <spec-dir>` | approval freeze: `--approve` writes and signs the approved-doc hash manifest after explicit sign-off, on the owner's own terminal — it asks for `approve <name> <fingerprint>` to be typed, and signs with an SSH key listed in the approver list `~/.config/spec-dev-kit/approvers` (in CI, in the list on the remote default branch; a workspace `specs/.approvers` is never an authority) (existing manifests refuse overwrite; `--approve --force` represents a fresh approval; `approval.md.sig` carries the signature and `**Approved-by**` the signing principal); `--verify` is read-only and refuses an unsigned record that the remote default branch does not carry |
 | `index.py <spec-dir>` | render the spec's `specs/INDEX.md` line (status · type · tier · depends on) — the INDEX's only writer; `--all <specs-root>` renders every spec |
 | `audit.py <sub> <spec-dir>` | review instruments: `scope` (defaults to the approval-freeze SHA), `clean`, `proofs --run`, `mutate` (mutation testing over the changed files), `coverage` (line-coverage floor over the tasks' intended files), `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
 | `graph.py <spec-dir>` | the workflow engine: frontier report, `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads; `--native-agents` names the registered agent type and omits the brief it already carries — a round-4 fix payload keeps the brief and names its model step), `--run [--runner] [--dry-run] [--max-waves N]`, `--span intent\|shape\|execute\|full`, `--isolate worktree` (each implementer payload gets its own detached worktree under `<repo>/.spec-kit/worktrees/`, a snapshot of the main tree; `mark.py land` merges the delta back, `mark.py release` discards it — spec-build D-058), `--run --budget-spawns N` / `--budget-minutes N` with `--run` (the run budgets: 30 spawns and 120 minutes by default, counted from the run ledger — spawns per run and per spec, minutes per run — a spent one parks `AWAITING HUMAN: run budget`; `mark.py claim` takes the same two flags and refuses on the same line — spec-build D-059) |

@@ -72,8 +72,8 @@ REGISTER_NAME = "REGISTER.md"
 NAMES = (GUARD_NAME, REGISTER_NAME)
 
 MATCHERS = {
-    "claude": "Write|Edit|MultiEdit|NotebookEdit|Bash|Read",
-    "zcode": "Write|Edit|ApplyPatch|Bash|Read",
+    "claude": "Write|Edit|MultiEdit|NotebookEdit|Bash|Read|Grep|Glob",
+    "zcode": "Write|Edit|ApplyPatch|Bash|Read|Grep|Glob",
 }
 
 # The generated script's own docstring, verbatim.
@@ -92,34 +92,42 @@ call is allowed): tool_name; tool_input.file_path, .content,
 harness provides one (agent_type, subagent_type, agent_id, agent_name).
 Rules, the first to fire denying:
 
-P1  Approval records and the approver list are written only by
-    freeze.py --approve: a file-writing call (Write, Edit, MultiEdit,
-    NotebookEdit, ApplyPatch, or any call carrying content or
-    new_string) whose target lies under specs/<name>/approvals/ or is
-    specs/.approvers.
+P1  Approval records and the approver lists are the owner's to write:
+    a file-writing call (Write, Edit, MultiEdit, NotebookEdit,
+    ApplyPatch, or any call carrying content or new_string) whose
+    target lies under specs/<name>/approvals/, is specs/.approvers, or
+    is a machine approver list — a path ending spec-dev-kit/approvers.
 P2  `Status: approved` follows a verifying approval: a file-writing
     call on specs/<name>/spec.md whose new text sets **Status:** to
     approved, active or done is denied unless the installed
     `freeze.py <spec-dir> --verify` exits 0. Any other Status edit
     runs nothing.
-P3  The same two rules for the shell: a command naming one of those
-    paths is allowed only as a read-only use — every simple command one
-    of the read-only list or an invocation of the installed freeze.py,
-    no redirect that writes, no command substitution. This rule is a
-    tripwire, not a boundary: the signature on the approval record is
-    the boundary (spec-design D-071).
-P4  The tester is implementation-blind, best effort: a Read,
-    NotebookRead or view of specs/<name>/{tech-spec.md,plan.md,task.md}
-    is denied when the caller identity names the tester. With no
-    identity in the payload P4 allows and says nothing (spec-design
-    D-073).
+P3  The same rules for the shell: a command naming one of those paths
+    is allowed only as a read-only use — every simple command one of
+    the read-only list or the installed freeze.py run with --verify and
+    read-only options, no redirect that writes, no command
+    substitution. And no shell call approves: a simple command that
+    runs any script named freeze.py — directly or under a Python
+    interpreter, wherever it sits — with --approve is denied even when
+    it names no other guarded path. This rule is a tripwire, not a
+    boundary: the confirmation typed in the owner's terminal and the
+    signature on the approval record are the boundary (spec-design
+    D-071).
+P4  The tester is implementation-blind, best effort: when the caller
+    identity names the tester, a Read, NotebookRead or view, a Grep or
+    Glob whose path or pattern names one of specs/<name>/
+    {tech-spec.md,plan.md,task.md}, and any shell command naming one
+    of them are denied. With no identity in the payload P4 allows and
+    says nothing (spec-design D-073, amended by D-085).
 
-A call that carries none of the typed fields — ApplyPatch, or any tool
-whose input is raw text — is read by P1 and P2 as text alone: denied
-by P1 when its text mentions an approval path, by P2 when it names a
-specs/<name>/spec.md and holds a **Status:** line reading approved,
-active or done. That branch is a text tripwire, not a parse: every
-string value of the call is scanned and nothing is understood.
+A call that carries none of the typed fields — ApplyPatch, Grep, Glob,
+or any tool whose input is raw text — is read by P1 and P2 as text
+alone: denied by P1 when its text mentions an approval path, by P2
+when it names a specs/<name>/spec.md and holds a **Status:** line
+reading approved, active or done. That branch is a text tripwire, not
+a parse: every string value of the call is scanned and nothing is
+understood. A Grep or Glob is such a call, and P4 reads its path and
+pattern.
 
 Paths are matched on their components, case-insensitively, at any
 depth. A path this script cannot recognize is not seen.
@@ -132,6 +140,8 @@ FREEZE_PY = None
 # --- guard source: spec-kit-guard.py ---
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit", "ApplyPatch")
 READ_TOOLS = ("Read", "NotebookRead", "view")
+SEARCH_TOOLS = ("Grep", "Glob")
+SEARCH_FIELDS = ("path", "pattern")
 APPROVING_STATUS = ("approved", "active", "done")
 BLIND_FILES = ("tech-spec.md", "plan.md", "task.md")
 IDENTITY_FIELDS = ("agent_type", "subagent_type", "agent_id", "agent_name")
@@ -154,21 +164,29 @@ WRITE_OPTIONS = {
     "less": re.compile(r"-[oO]|--log-file|--LOG-FILE"),
 }
 PYTHON = re.compile(r"(?:.*/)?python(?:\d+(?:\.\d+)*)?")
+FREEZE_SCRIPT = "freeze.py"
+FREEZE_WRITE_FLAGS = ("--approve", "--force", "--review", "--key")
 OPERATOR_CHARS = "|&;<>(){}"
 NULL_TARGET = "/dev/null"
 PATH_IN_TEXT = re.compile(
     r"(?<![\w.-])(?:(?:\.|~)?/)?(?:[\w.~+@-]+/)*"
-    r"specs/[^\s'\"`|;&<>(){}]*", re.I)
+    r"(?:specs/[^\s'\"`|;&<>(){}]*|spec-dev-kit/approvers(?![\w.-]))",
+    re.I)
 
 REASONS = {
-    "P1": "spec-kit guard: P1 — approval records are written only by "
-          "freeze.py <spec-dir> --approve (spec-design D-072)",
+    "P1": "spec-kit guard: P1 — approval records and the approver lists "
+          "are the owner's to write: the record by `freeze.py <spec-dir> "
+          "--approve` in the owner's own terminal, the lists by hand "
+          "(spec-design D-084)",
     "P2": "spec-kit guard: P2 — Status: approved follows a verifying "
           "approval: freeze.py <spec-dir> --verify must pass first "
           "(spec-design D-072)",
+    "P3": "spec-kit guard: P3 — `freeze.py --approve` runs only in the "
+          "owner's own terminal: print the command for the owner and "
+          "wait; an agent never approves (spec-design D-084)",
     "P4": "spec-kit guard: P4 — the tester is implementation-blind: read "
           "spec.md only, never tech-spec.md, plan.md or task.md "
-          "(spec-design D-073)",
+          "(spec-design D-085)",
 }
 
 
@@ -178,9 +196,10 @@ def _lower_parts(path):
 
 
 def _is_approval_path(path):
-    """Under specs/<name>/approvals/, or specs/.approvers itself."""
+    """Under specs/<name>/approvals/, specs/.approvers itself, or a
+    machine approver list: a path ending spec-dev-kit/approvers."""
     low = _lower_parts(path)
-    return any(
+    return low[-2:] == ["spec-dev-kit", "approvers"] or any(
         low[i + 2:i + 3] == ["approvals"]
         or low[i + 1:i + 2] == [".approvers"] and len(low) == i + 2
         for i, part in enumerate(low) if part == "specs")
@@ -195,6 +214,11 @@ def _spec_dir_of(path, leafs):
         if part == "specs" and low[i + 2] in leafs and len(parts) == i + 3:
             return "/".join(parts[:i + 2])
     return None
+
+
+def _names_spec_file(text, leafs):
+    """Whether a text names specs/<name>/<leaf> for one of leafs."""
+    return any(_spec_dir_of(path, leafs) for path in _named_paths(text))
 
 
 def _new_texts(tool_input):
@@ -357,22 +381,37 @@ def _writes_by_option(argv):
             and any(option.fullmatch(word) for word in argv[1:]))
 
 
+def _freeze_script(argv):
+    """The script a simple command runs when it runs freeze.py — directly
+    or as a Python interpreter's script; None for any other command."""
+    if PYTHON.fullmatch(argv[0]) is not None:
+        if len(argv) < 2:
+            return None
+        argv = argv[1:]
+    return argv[0] if os.path.basename(argv[0]) == FREEZE_SCRIPT else None
+
+
 def _is_freeze_call(argv):
-    """The installed freeze.py, run directly or under a Python
-    interpreter: the one program besides the read-only list a guarded
+    """The installed freeze.py run to verify: directly or under a Python
+    interpreter, with --verify and none of the options that sign or
+    overwrite — the one program besides the read-only list a guarded
     path may be handed to."""
-    if not FREEZE_PY:
+    if not FREEZE_PY or _freeze_script(argv) != FREEZE_PY:
         return False
-    if argv[0] == FREEZE_PY:
-        return True
-    return (len(argv) > 1 and PYTHON.fullmatch(argv[0]) is not None
-            and argv[1] == FREEZE_PY)
+    return "--verify" in argv and not any(
+        flag in argv for flag in FREEZE_WRITE_FLAGS)
 
 
 def _named_paths(text):
     """Every specs/ path a text names — inside quotes, a --name=value
     option, a patch header or a python literal alike."""
     return [m.group().rstrip(".,") for m in PATH_IN_TEXT.finditer(text)]
+
+
+def _approves_with_freeze(argv):
+    """A simple command that runs a script named freeze.py with
+    --approve, wherever the script sits."""
+    return _freeze_script(argv) is not None and "--approve" in argv
 
 
 def _text_denial(tool_input):
@@ -395,16 +434,21 @@ def _text_denial(tool_input):
     return None
 
 
-def _shell_denial(command):
-    """P1 or P2 when a shell command names an approval path or a
-    spec.md in anything but a read-only use; None when it names neither
-    or reads only."""
+def _shell_denial(command, tester):
+    """The rule that denies a shell command: P3 when it runs
+    freeze.py --approve, P4 when the tester names one of the files it
+    is blind to, P1 or P2 when it names an approval path or a spec.md
+    in anything but a read-only use; None when it does neither."""
+    argvs, writes, substitutes = _parse(command)
+    if any(_approves_with_freeze(argv) for argv in argvs if argv):
+        return "P3"
+    if tester and _names_spec_file(command, BLIND_FILES):
+        return "P4"
     named = _named_paths(command)
     approvals = [path for path in named if _is_approval_path(path)]
     if not approvals and not any(
             _spec_dir_of(path, ("spec.md",)) for path in named):
         return None
-    argvs, writes, substitutes = _parse(command)
     reads_only = not writes and not substitutes and all(
         (_reads_only(argv) and not _writes_by_option(argv))
         or _is_freeze_call(argv) for argv in argvs if argv)
@@ -412,8 +456,8 @@ def _shell_denial(command):
 
 
 def decide(payload):
-    """The rule that denies the call — "P1", "P2" or "P4" — or None when
-    the call is allowed; the first rule in order to fire wins. Raises
+    """The rule that denies the call — "P1" to "P4" — or None when the
+    call is allowed; the first rule in order to fire wins. Raises
     TypeError on a payload that is not a JSON object."""
     if not isinstance(payload, dict):
         raise TypeError("hook payload is not a JSON object")
@@ -425,6 +469,13 @@ def decide(payload):
     if not isinstance(path, str):
         path = tool_input.get("notebook_path")
     command = tool_input.get("command")
+    tester = _names_tester(payload)
+    named = [path] if tool in READ_TOOLS else [
+        tool_input.get(field) for field in SEARCH_FIELDS] \
+        if tool in SEARCH_TOOLS else []
+    blind = tester and any(
+        isinstance(text, str) and _names_spec_file(text, BLIND_FILES)
+        for text in named)
     texts = _new_texts(tool_input)
     writing = (tool in WRITE_TOOLS or bool(texts)
                or isinstance(tool_input.get("edits"), list))
@@ -437,15 +488,12 @@ def decide(payload):
                 and not _verifies(spec_dir)):
             return "P2"
     if not any(isinstance(tool_input.get(key), str) for key in TYPED_FIELDS):
-        return _text_denial(tool_input)
+        return _text_denial(tool_input) or ("P4" if blind else None)
     if isinstance(command, str):
-        rule = _shell_denial(command)
+        rule = _shell_denial(command, tester)
         if rule:
             return rule
-    if (tool in READ_TOOLS and isinstance(path, str)
-            and _spec_dir_of(path, BLIND_FILES) and _names_tester(payload)):
-        return "P4"
-    return None
+    return "P4" if blind else None
 
 
 def run_hook():
@@ -512,13 +560,18 @@ What it does, and what it does not prove:
 
 - It denies every session and spawned agent the writes that forge an
   approval: anything under `specs/<name>/approvals/`, the approver
-  list `specs/.approvers`, and a `spec.md` edit that sets
+  lists (`specs/.approvers` and the machine list
+  `~/.config/spec-dev-kit/approvers`), a `spec.md` edit that sets
   `**Status**:` to `approved`, `active` or `done` while
-  `freeze.py <spec-dir> --verify` fails.
+  `freeze.py <spec-dir> --verify` fails — and any shell call that runs
+  `freeze.py --approve`, which only the owner runs, in their own
+  terminal, typing the confirmation it asks for.
 - The shell is held to a read-only allowlist on those paths. That rule
-  is a tripwire, not a boundary: the SSH signature on the approval
-  record is the boundary (spec-design D-071).
-- The tester is denied `tech-spec.md`, `plan.md` and `task.md` only
+  is a tripwire, not a boundary: the typed confirmation and the SSH
+  signature on the approval record are the boundary (spec-design
+  D-071).
+- The tester is denied `tech-spec.md`, `plan.md` and `task.md` — by
+  Read, by Grep or Glob, and by a shell command naming them — only
   where the harness names the caller in the hook payload; with no
   caller identity that rule allows and says nothing (spec-design
   D-073).
@@ -531,10 +584,16 @@ What it does, and what it does not prove:
   the owner's own `freeze.py <spec-dir> --approve`.
 
 Verify it live: in the new session, have it try
-`echo x >> specs/<name>/approvals/approval.md` — the call is denied and
-the reason line reads `{p1}`. Until a session shows that, the
-registration shape is an open assumption (HARNESS-FACTS.md): a harness
-that ignores it runs unguarded, and nothing here fails.
+`echo x >> specs/<name>/approvals/approval.md`, then
+`freeze.py specs/<name> --approve`. Both calls are denied, and their
+reason lines read:
+
+    {p1}
+    {p3}
+
+Until a session shows those, the registration shape is an open
+assumption (HARNESS-FACTS.md): a harness that ignores it runs
+unguarded, and nothing here fails.
 """
 
 
@@ -552,7 +611,7 @@ def render_register(target: str, outd: Path) -> bytes:
         harness={"claude": "Claude Code", "zcode": "ZCode"}[target],
         lead=LEADS[target],
         registration=registration(target, os.path.abspath(outd / GUARD_NAME)),
-        p1=REASONS["P1"]).encode()
+        p1=REASONS["P1"], p3=REASONS["P3"]).encode()
 
 
 def put(stage: Path, outd: Path, name: str):

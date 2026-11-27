@@ -130,8 +130,9 @@ re-run, until the span drains. Typical waves:
   designs from that evidence. Intake's facts are leads, not citations.
 - **qa** (tester) — test.md from spec.md alone, beside tech and plan;
   the tester never reads tech-spec.md, plan.md, or task.md — a rule
-  the registered approval guard also denies, where the harness names
-  the caller (D-073, best effort).
+  the registered approval guard also denies to every reading tool, by
+  Read, Grep, Glob or a shell command naming them, where the harness
+  names the caller (best effort).
 - **plan** (architect · plan lens) — milestones from the spec and the
   tech design.
 - **tasks** (architect · tasks lens) — task.md once test.md is final:
@@ -290,32 +291,39 @@ With verify green:
    far — and wait.
 5. **On the explicit yes** — hand the approve step to the user: print
    `scripts/freeze.py <spec-dir> --approve --review <review payload>`
-   for them to run in their own terminal, and wait. An approval is a
-   signature (D-071): `--approve` validates the payload, prints the
-   record, signs it with an SSH key listed in the repo's approver list
-   `specs/.approvers` (one `<principal> <key-type> <key-blob>` line
-   per approver — create it before a repo's first approval), and
-   writes the whole approve record — the `## Contract review` section
-   and the `## Freeze` manifest — into `approvals/approval.md` beside
-   its `approval.md.sig`; a full-tier record whose review section is
-   missing or invalid — no current fingerprint, no digest line, or a
-   BLOCK without its ruling line — is refused; a fingerprint alone is
-   not a review. When the user returns, run
-   `scripts/freeze.py <spec-dir> --verify`; only on `PASS` set spec.md
-   `Status: approved`, then refresh its INDEX line (`scripts/index.py
-   <spec-dir>`). Re-approving a corrected spec is the same five steps
-   with `--approve --force`. Recommend, once per repo, a CODEOWNERS
-   rule on `specs/.approvers` and `specs/**/approvals/`.
+   for them to run in their own terminal, and wait — never run it
+   yourself. An approval is a signature: `--approve` validates the
+   payload, prints the record, then asks the terminal to type
+   `approve <name> <fingerprint>` exactly — with no controlling
+   terminal, or any other line, it exits 1 having written nothing —
+   and signs the record with an SSH key listed in the approver list,
+   the machine list `~/.config/spec-dev-kit/approvers` (one
+   `<principal> <key-type> <key-blob>` line per approver — create it
+   before a machine's first approval; in CI the list is read from the
+   remote default branch, and a workspace `specs/.approvers` is never
+   an authority). It writes the whole approve record — the
+   `## Contract review` section and the `## Freeze` manifest — into
+   `approvals/approval.md` beside its `approval.md.sig`; a full-tier
+   record whose review section is missing or invalid — no current
+   fingerprint, no digest line, or a BLOCK without its ruling line —
+   is refused; a fingerprint alone is not a review. When the user
+   returns, run `scripts/freeze.py <spec-dir> --verify`; only on `PASS`
+   set spec.md `Status: approved`, then refresh its INDEX line
+   (`scripts/index.py <spec-dir>`). Re-approving a corrected spec is
+   the same five steps with `--approve --force`. Recommend, once per
+   repo, a CODEOWNERS rule on `specs/.approvers` (what CI reads) and
+   `specs/**/approvals/`, and a passphrase or hardware key.
 
 A non-answer ends the turn — never adopt approval or progress the
 status yourself. A `Status: approved` with no signed freeze is not an
 approval: `check.py` fails it and `/spec-build` refuses it. Where the
 owner registered it, the generated approval guard denies the session
-those writes before they land — a recommended tripwire
-(`tools/sync.sh` prints the registration line), not a second boundary
-(D-072). At `Tier: tiny` the auditor reads the one-file contract and
-the record carries no review section. Next step: `/spec-build <name>`.
-No implementer is ever spawned from here.
+those writes before they land, and denies any `freeze.py --approve`
+the session runs itself — a recommended tripwire (`tools/sync.sh`
+prints the registration line), not a second boundary. At `Tier: tiny`
+the auditor reads the one-file contract and the record carries no
+review section. Next step: `/spec-build <name>`. No implementer is
+ever spawned from here.
 
 ## Templates and scaffolding
 

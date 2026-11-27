@@ -14,7 +14,8 @@ run):
   to `/spec-define`), draft spec.md from a green intent if it is missing,
   then the frontier waves — tech ∥ qa → plan → tasks → verify — and the hard stop at the approve gate: run and record the
   contract review (save the payload; the owner runs `freeze.py
-  --approve --review <payload>` in their own terminal), present the
+  --approve --review <payload>` in their own terminal and types the
+  phrase it asks for — the session never runs it), present the
   digest, record the user's explicit yes (a verifying freeze, then
   `Status: approved`),
   hand off to `/spec-build <name>`.

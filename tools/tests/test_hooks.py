@@ -30,6 +30,17 @@ _spec.loader.exec_module(hooks)
 LEDGER = ".spec-dev-kit-deployed"
 APPROVAL = "specs/pay/approvals/approval.md"
 SPEC = "specs/pay/spec.md"
+MACHINE_LIST = str(Path("~") / ".config" / "spec-dev-kit" / "approvers")
+BLIND = ("tech-spec.md", "plan.md", "task.md")
+
+
+def grep(path=None, pattern="x", **identity):
+    return dict(identity, tool_name="Grep", tool_input={
+        "pattern": pattern, "path": path})
+
+
+def glob_(pattern, **identity):
+    return dict(identity, tool_name="Glob", tool_input={"pattern": pattern})
 
 
 def fake_freeze(home: Path, exit_code: int) -> Path:
@@ -116,6 +127,11 @@ SHELL_ROWS = (
     ("shasum " + APPROVAL + " >> specs/.approvers", "P1"),
     ("ssh-keygen -Y verify -f specs/.approvers -s " + APPROVAL + ".sig x", None),
     ("ssh-keygen -Y sign -f key " + APPROVAL, "P1"),
+    ("cat " + MACHINE_LIST, None),
+    ("head -n 1 x >> " + MACHINE_LIST, "P1"),
+    ("cp my-key ~/.config/spec-dev-kit/approvers", "P1"),
+    ("sed -i s/owner/agent/ " + MACHINE_LIST, "P1"),
+    ("cat ~/.config/spec-dev-kit/approvers.bak", None),
 )
 
 OTHER_SHELL_ROWS = (
@@ -149,6 +165,10 @@ TEXT_P1_ROWS = (
     (patch("/repo/specs/pay/approvals/approval.md.sig", "a", "b"), "P1"),
     ({"tool_name": "some-tool", "tool_input": {"text": "signers: Specs/.Approvers"}},
      "P1"),
+    (patch(MACHINE_LIST, "owner", "agent"), "P1"),
+    ({"tool_name": "some-tool", "tool_input": {
+        "text": "listed in ~/.config/spec-dev-kit/approvers.d/extra"}},
+     None),
     (patch("specs/pay/plan.md", "a", "b"), None),
     (patch("src/specs.md", "a", "b"), None),
     ({"tool_name": "some-tool", "tool_input": {
@@ -172,6 +192,9 @@ class GuardP1Tests(unittest.TestCase):
                               "new_source": "x"}),
             ("ApplyPatch", {"file_path": APPROVAL, "input": "patch"}),
             ("Write", {"file_path": "specs/.approvers", "content": "key\n"}),
+            ("Write", {"file_path": MACHINE_LIST, "content": "agent key\n"}),
+            ("Edit", {"file_path": "/home/me/.config/Spec-Dev-Kit/Approvers",
+                      "old_string": "owner", "new_string": "agent"}),
             ("Edit", {"file_path": "/repo/specs/pay/approvals/approval.md.sig",
                       "old_string": "a", "new_string": "b"}),
             ("Write", {"file_path": "./Specs/Pay/Approvals/Approval.md", "content": "x"}),
@@ -188,7 +211,10 @@ class GuardP1Tests(unittest.TestCase):
     def test_writes_outside_them_are_allowed(self):
         for path in ("specs/pay/spec.md", "specs/pay/plan.md", "specs/pay/approval.md",
                      "specs/approvals/x.md", "specs/pay/spec.md.bak",
-                     "my-specs/pay/approvals/x.md", "specs/.approvers.bak", "README.md"):
+                     "my-specs/pay/approvals/x.md", "specs/.approvers.bak", "README.md",
+                     "~/.config/spec-dev-kit/approvers.bak",
+                     "~/.config/spec-dev-kit/approvers.d/extra",
+                     "~/.config/spec-kit/approvers"):
             with self.subTest(path=path):
                 self.assertIsNone(self.guard["decide"](write(path, "x")))
 
@@ -301,7 +327,7 @@ class GuardP3Tests(unittest.TestCase):
         tail = " && cat " + APPROVAL
         for command in (f"python3 {installed} specs/pay --verify{tail}",
                         f"{installed} specs/pay --verify{tail}",
-                        f"python3 {installed} specs/pay --approve{tail}"):
+                        f"python3 {installed} specs/pay --verify --repo /repo{tail}"):
             with self.subTest(command=command):
                 self.assertIsNone(self.guard["decide"](shell(command)))
         for command in (f"python3 {stranger} specs/pay --verify{tail}",
@@ -309,6 +335,38 @@ class GuardP3Tests(unittest.TestCase):
                         f"python3 -c 'import sys' {installed}{tail}"):
             with self.subTest(command=command):
                 self.assertEqual(self.guard["decide"](shell(command)), "P1")
+        # the installed freeze.py is admitted to verify, never to approve
+        for command in (f"python3 {installed} specs/pay --approve{tail}",
+                        f"{installed} specs/pay --approve --force{tail}"):
+            with self.subTest(command=command):
+                self.assertEqual(self.guard["decide"](shell(command)), "P3")
+        # and only with --verify and read-only options beside it
+        for command in (f"python3 {installed} specs/pay --verify --force{tail}",
+                        f"python3 {installed} specs/pay --verify --key k{tail}",
+                        f"python3 {installed} specs/pay --review r --verify{tail}",
+                        f"python3 {installed} specs/pay{tail}"):
+            with self.subTest(command=command):
+                self.assertEqual(self.guard["decide"](shell(command)), "P1")
+        # no guarded path named and nothing to approve: not the guard's
+        self.assertIsNone(self.guard["decide"](shell(
+            f"python3 {installed} specs/pay --verify --force")))
+
+    def test_running_any_freeze_py_to_approve_is_denied(self):
+        # the approve step is the owner's own-terminal one: an agent's
+        # call names no record path, so no other rule would see it
+        for command in ("freeze.py specs/pay --approve --force",
+                        "./scripts/freeze.py specs/pay --approve --review r.md",
+                        "python3 /elsewhere/freeze.py specs/pay --approve",
+                        "/usr/bin/python3.12 $HOME/kit/freeze.py specs/pay "
+                        "--approve --key k",
+                        "cd specs/pay && python3 freeze.py . --approve"):
+            with self.subTest(command=command):
+                self.assertEqual(self.guard["decide"](shell(command)), "P3")
+        for command in ("python3 /elsewhere/freeze.py specs/pay --verify",
+                        "echo 'freeze.py specs/pay --approve' > handoff.txt",
+                        "cat specs/pay/approval.md"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.guard["decide"](shell(command)))
 
     def test_a_command_naming_no_guarded_path_is_not_judged(self):
         for command in ("", "echo x >> notes.md", "rm -rf specs/pay",
@@ -336,6 +394,45 @@ class GuardP4Tests(unittest.TestCase):
                 {"tool_name": tool, "agent_type": "tester",
                  "tool_input": {"file_path": "/repo/specs/pay/task.md"}}), "P4")
 
+    def test_the_tester_is_denied_grep_glob_and_the_shell_on_those_files(self):
+        tester = {"agent_type": "spec-tester"}
+        searches = (
+            grep("specs/pay/plan.md", **tester),
+            grep(pattern="specs/pay/task.md", path=".", **tester),
+            grep(None, "specs/pay/tech-spec.md", agent_name="tester"),
+            glob_("specs/pay/task.md", **tester),
+            glob_("/repo/specs/pay/tech-spec.md", subagent_type="Tester"),
+        )
+        commands = tuple(
+            (command, "P4") for command in (
+                "cat specs/pay/plan.md", "head -n 3 specs/pay/task.md",
+                "grep -n x specs/pay/tech-spec.md",
+                "echo y >> specs/pay/plan.md", "cp specs/pay/task.md /tmp/t.md",
+                "cat $(cat specs/pay/tech-spec.md)",
+                "rg ok specs/pay/plan.md specs/pay/spec.md")) + tuple(
+            (command, None) for command in (
+                "cat specs/pay/spec.md", "cat specs/pay/test.md",
+                "python3 check.py specs/pay", "ls specs/pay/plan.md.bak",
+                "cd specs/pay && cat plan.md"))
+        for payload in searches:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.guard["decide"](payload), "P4")
+        for command, expected in commands:
+            with self.subTest(command=command):
+                payload = {"tool_name": "Bash", "agent_type": "tester",
+                           "tool_input": {"command": command}}
+                self.assertEqual(self.guard["decide"](payload), expected)
+        # blindness is the tester's rule alone
+        for payload in (grep("specs/pay/plan.md"),
+                        grep("specs/pay/plan.md", agent_type="spec-developer"),
+                        glob_("specs/pay/plan.md", agent_type="contester"),
+                        {"tool_name": "Bash", "agent_type": "spec-architect",
+                         "tool_input": {"command": "cat specs/pay/plan.md"}},
+                        {"tool_name": "Bash", "tool_input": {
+                            "command": "cat specs/pay/plan.md"}}):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self.guard["decide"](payload))
+
     def test_every_other_read_is_allowed(self):
         for payload in (read("specs/pay/tech-spec.md"),
                         read("specs/pay/spec.md", agent_type="spec-tester"),
@@ -343,8 +440,9 @@ class GuardP4Tests(unittest.TestCase):
                         read("specs/pay/tech-spec.md", agent_type="contester"),
                         read("specs/pay/notes/tech-spec.md", agent_type="tester"),
                         read("specs/pay/tech-spec.md", agent_type=["tester"]),
-                        {"tool_name": "Grep", "agent_type": "tester",
-                         "tool_input": {"pattern": "x", "path": "specs/pay/plan.md"}}):
+                        grep("specs/pay", "x", agent_type="tester"),
+                        grep("specs/pay/spec.md", "plan.md", agent_type="tester"),
+                        glob_("specs/pay/*.md", agent_type="tester")):
             with self.subTest(payload=payload):
                 self.assertIsNone(self.guard["decide"](payload))
 
@@ -407,6 +505,7 @@ class GuardScriptTests(unittest.TestCase):
                               (patch(APPROVAL, "a", "b"), "P1"),
                               (edit(SPEC, "**Status**: draft", "**Status**: approved"), "P2"),
                               (shell("echo x >> " + APPROVAL), "P1"),
+                              (shell("freeze.py specs/pay --approve --force"), "P3"),
                               (read("specs/pay/task.md", agent_type="tester"), "P4")):
             with self.subTest(rule=rule):
                 result = self.hook(json.dumps(payload))
@@ -465,12 +564,12 @@ class GeneratorTests(unittest.TestCase):
     def test_registration_text_is_literal_per_target(self):
         for target, settings, expected in (
                 ("claude", "~/.claude/settings.json",
-                 '{{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|Read", "hooks": '
-                 '[{{"type": "command", "command": "python3 \\"{guard}\\""}}]}}'),
+                 '{{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|Read|Grep|Glob", '
+                 '"hooks": [{{"type": "command", "command": "python3 \\"{guard}\\""}}]}}'),
                 ("zcode", "~/.zcode/cli/config.json",
                  '"hooks": {{"enabled": true, "events": {{"PreToolUse": [{{"matcher": '
-                 '"Write|Edit|ApplyPatch|Bash|Read", "hooks": [{{"type": "process", '
-                 '"command": "python3", "args": ["{guard}"]}}]}}]}}}}')):
+                 '"Write|Edit|ApplyPatch|Bash|Read|Grep|Glob", "hooks": [{{"type": '
+                 '"process", "command": "python3", "args": ["{guard}"]}}]}}]}}}}')):
             with self.subTest(target=target):
                 out = self.tmp / target
                 self.run_gen(target, "/home/me/freeze.py", out)
@@ -481,6 +580,7 @@ class GeneratorTests(unittest.TestCase):
                 self.assertIn(settings, text)
                 self.assertIn(hooks.REASONS["P1"], text)
                 self.assertIn("`echo x >> specs/<name>/approvals/approval.md`", text)
+                self.assertIn(hooks.REASONS["P3"], text)
                 # five lines on what it does and does not prove
                 self.assertEqual(text.count("\n- "), 5)
 
