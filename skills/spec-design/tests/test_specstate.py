@@ -1009,6 +1009,29 @@ class DigestVouchTests(unittest.TestCase):
         found = specstate.digests_on_file(self.spec)["T001"]
         self.assertEqual((found["state"], found["wave"]), ("valid", 2))
 
+    def test_a_vouched_line_over_a_refused_body_is_malformed_not_a_crash(self):
+        # a digest the previous kit vouched (its line was appended when
+        # the old grammar accepted the body), read after a grammar
+        # tightening: the line still verifies, the body no longer
+        # parses — a malformed sighting, never a reader crash
+        old_grammar = GREEN_DIGEST.replace(
+            "note none\n", "note none · extra\n")
+        path = self.digest(2, "implementer-T001.md", old_grammar)
+        row = specstate.ledger_row(
+            "spec-design", "digest", wave=2, stem="implementer-T001",
+            role="implementer", digest="0" * 12)
+        line = specstate.provenance_line(row)
+        path.write_text(old_grammar + line + "\n", encoding="utf-8")
+        row["digest"] = specstate.digest_sha(
+            path.read_text(encoding="utf-8"))
+        specstate.ledger_event(self.spec, row)
+        self.assertEqual(
+            specstate.digests_on_file(self.spec)["T001"]["state"],
+            "malformed")
+        seen_lines = specstate.sweep_digests(self.spec, "spec-design")
+        self.assertTrue(seen_lines)
+        self.assertIn("malformed", seen_lines[0]["state"])
+
     def test_the_ledger_names_the_latest_not_the_highest_wave(self):
         specstate.ledger_event(self.spec, specstate.ledger_row(
             "spec-design", "wave", wave=2, stem="implementer-T001",

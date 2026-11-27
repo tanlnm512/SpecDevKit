@@ -12,13 +12,19 @@ round opens and how round 4's `Model:` line is honored stay in SKILL.md
 You are the sole status writer; developers return digests and never
 touch task.md. Every transition is one `scripts/mark.py` verb — never
 a hand edit — which checks the current marker, takes the spec's
-`.task.lock`, and refuses anything else:
+`.task.lock`, and refuses anything else. It also refuses to write
+while the run ledger's row chain is broken — a row appended or edited
+by hand (`specs/<name>/runs/ledger.jsonl`, each row chained to the one
+before it by a `prev` hash): repair or truncate the ledger, then run
+the verb again. `land` sweeps the digest tree inside its own lock
+hold, so under a held `.task.lock` it always refuses (exit 5, nothing
+written) instead of proceeding on an unswept digest state:
 
 | Entry reads | Event | The mark.py verb |
 |-------------|-------|------------------|
 | `- [ ] T###` (pending) | its payload's wave is claimed | `mark.py claim <spec> --wave <wave-dir> [--run-id ID]` — writes `(in-progress)` + the claim stamp sub-line `  - claimed <UTC ISO> — run <id>` on exactly the wave's `implementer-T###.md` tasks |
-| `(in-progress)` | digest `implemented` or `already-satisfied`, and `audit.py proofs <spec> --run --task T###` is green | `mark.py land <spec> T###` — writes `(implemented)` in place of the claim, the stamp gone |
-| `(in-progress) (fix n/5)` | the round landed and verified | `mark.py land <spec> T### --resolution "<text>"` — writes `(implemented) (fixed n/5)`, the round's close sub-line `fixed <n> — <resolution> — <proof>` appended |
+| `(in-progress)` | digest `implemented` or `already-satisfied`, and `audit.py proofs <spec> --run --task T###` is green | `mark.py land <spec> T###` — an `unverified` digest (no `wave` or `claim` row records it, nothing vouches it) is refused like a malformed one, the entry stays claimed; writes `(implemented)` in place of the claim, the stamp gone |
+| `(in-progress) (fix n/5)` | the round landed and verified | `mark.py land <spec> T### --resolution "<text>"` — or, the headless path, `mark.py land <spec> T### --resolution-from-digest`, which composes the resolution from the digest it validated; a hand-written `--resolution` holding an em dash or a line break is refused — writes `(implemented) (fixed n/5)`, the round's close sub-line `fixed <n> — <resolution> — <proof>` appended |
 | `(in-progress)` | digest `blocked:why` | `mark.py release <spec> T### --reason "<text>"` — claim and stamp cleared; rule (D-###) and re-spawn, or route to `/spec-design` — no fix round. A typed deviation names the route (D-043): `scope:<paths>` → widen `Touches:` under the ruling and re-emit; `spec-defect:<why>` → `/spec-design` |
 | `(in-progress)` or `(implemented)` | it came back wrong | `mark.py fail <spec> T### --evidence <file> --digest "<line>"` — writes `(fix n/5)` (in place of the claim, or beside `(implemented)`) plus the round's open sub-line `fix <n> — <digest>`, evidence verbatim into `notes/T###.md` |
 | `(implemented)` | delivery pass green and the user's yes | `- [x]` + proof note, by `tick.py` (it also strips the stamp) |
@@ -86,7 +92,10 @@ claims. Settle each one before spawning anything that shares its
 files. Step 0 reads each claimed task's digest column
 (`digest on file: …`): an `implemented` digest → `mark.py land` (it
 re-runs the proofs); a `blocked:` digest → `mark.py release` and rule;
-no digest → read the diff as below:
+an `unverified` digest — no `wave` or `claim` row records it, no
+provenance line — is refused at `land` (the entry stays claimed):
+re-emit the task and re-spawn its payload; no digest → read the diff
+as below:
 
 1. Read `git status` and `git diff -- <the task's Touches files>`
    to see what the dead developer left.
@@ -101,4 +110,10 @@ Under `--isolate worktree` (D-058) that work sits in the worktree
 `--explain execute` names with its path, not in the main tree: read
 the diff there (`git -C <worktree> diff`), `mark.py land` merges it,
 and `mark.py release` discards it with the worktree — the next emit
-re-spawns the task in a fresh one.
+re-spawns the task in a fresh one. Before the proofs, `land` refuses
+while the main tree holds an uncommitted change made since the
+worktree was cut that is neither committed since nor merged by one of
+this spec's landings — each landing records what it merged in
+`.spec-kit/landed/<spec>.json` — nothing written, the task left
+claimed and the worktree kept: move the work into the worktree, or
+commit or stash what is not this task's, and land again.

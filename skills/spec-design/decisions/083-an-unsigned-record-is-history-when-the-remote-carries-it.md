@@ -31,13 +31,15 @@ consequence in spec-build's D-053 is unchanged):
 4. **D-071 paragraph 6 is amended.** "A commit in this repo's ancestry
    carries it" becomes "the remote default branch carries it".
 
-**Consequences**: the forgery now needs a push to the remote default
-branch — an outward action the kit takes only on the user's explicit
-yes (ADR-014), and one most remotes gate by protection or review. What
-this decision reads is the local remote-tracking ref, which a shell
-can move without the remote (`git update-ref`); closing that would
-take a network read or a guard on ref-moving git commands, and neither
-is made here. It costs: a delivered spec with an unsigned record verifies only where its
+**Consequences**: the forgery needs the record on the default branch's
+remote-tracking ref — which this decision reads locally, so one local
+`git update-ref refs/remotes/origin/<branch>` moves it without any
+outward action: a session that runs that command defeats the
+grandfather, and the machine list does not shield it. The protection
+holds against a session that does not also move git refs; closing it
+would take a network read inside the gate or a guard on ref-moving git
+commands, and neither is made here — the release notes carry the limit.
+It costs: a delivered spec with an unsigned record verifies only where its
 record has reached the remote default branch, so a repo that never had
 a remote re-approves such specs once, by hand, before their next
 execute, release or archive; and a checkout whose remote-tracking refs

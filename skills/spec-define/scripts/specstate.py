@@ -1103,6 +1103,20 @@ def _refusal(path: Path, wave: int, rows: list[dict],
         if unvouched:
             return RefusedDigest(DIGEST_MALFORMED, UNVERIFIED, unvouched,
                                  set())
+        # the line itself predates the grammar read: validate the body,
+        # so a vouched file whose body the current schema refuses is a
+        # malformed sighting, never a crash beside the readers
+        body = "\n".join(ln for ln in text.split("\n")
+                         if not ln.startswith(PROVENANCE_KEY + ":"))
+        request = next((row for row in reversed(rows)
+                        if row.get("event") == "wave"
+                        and row.get("wave") == wave
+                        and row.get("stem") == path.stem), {})
+        role, variant = digest_schema(path.stem, request.get("lens"))
+        problems = digests.validate(role, variant, body)
+        if problems:
+            return RefusedDigest(DIGEST_MALFORMED, DIGEST_MALFORMED,
+                                 problems, set())
         return None
     request = next((row for row in reversed(rows)
                     if row.get("event") == "wave"

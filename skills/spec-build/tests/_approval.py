@@ -61,7 +61,7 @@ def _public(key: Path) -> str:
 @functools.cache
 def machine_list() -> Path:
     """The machine approver list, naming the fixture key."""
-    path = HOME / "config" / "spec-dev-kit" / "approvers"
+    path = HOME / ".config" / "spec-dev-kit" / "approvers"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"{PRINCIPAL} {_public(signing_key())}\n",
                     encoding="utf-8")

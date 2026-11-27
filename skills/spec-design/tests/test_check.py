@@ -498,7 +498,7 @@ class ApprovalSignatureTests(unittest.TestCase):
     def _machine_list(self, home, principal, key):
         """A machine whose approver list names `key` as `principal`."""
         self.home = home
-        path = home / "config" / "spec-dev-kit" / "approvers"
+        path = home / ".config" / "spec-dev-kit" / "approvers"
         path.parent.mkdir(parents=True)
         path.write_text(
             f"{principal} "
@@ -630,6 +630,20 @@ class ApprovalSignatureTests(unittest.TestCase):
             [*self.approve_argv(), "--force"], env={"HOME": str(self.home)})
         self.assertEqual(code, 1, shown)
         self.assertIn("no approver list", shown)
+
+    def test_the_probed_machine_list_is_the_documented_path(self):
+        parts = check.freeze.MACHINE_APPROVERS.parts
+        self.assertEqual(
+            parts,
+            (".config", "spec-dev-kit", "approvers"),
+            "freeze probes a path the shipped instructions do not name")
+        for line in (check.freeze.NO_LIST, check.freeze.NO_REMOTE,
+                     check.freeze.LIST_LOCATION):
+            self.assertIn("~/.config/spec-dev-kit/approvers", line)
+        self.assertEqual(
+            Path("~/.config/spec-dev-kit/approvers").expanduser(),
+            Path.home() / check.freeze.MACHINE_APPROVERS,
+            "the documented path and the probed path differ")
 
     def test_ci_verifies_against_the_list_on_the_remote_default_branch(self):
         self._approve()

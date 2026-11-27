@@ -112,7 +112,7 @@ import specstate
 FROZEN_FILES = ("spec.md", "plan.md", "test.md", "tech-spec.md")
 NAMESPACE = "spec-dev-kit-approval"
 APPROVERS = Path("specs") / ".approvers"
-MACHINE_APPROVERS = Path("config") / "spec-dev-kit" / "approvers"
+MACHINE_APPROVERS = Path(".config") / "spec-dev-kit" / "approvers"
 REMOTE_HEAD = "refs/remotes/origin/HEAD"
 DEFAULT_BRANCHES = ("main", "master")
 TTY = "/dev/tty"

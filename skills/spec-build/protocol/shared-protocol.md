@@ -22,11 +22,14 @@ to the session that spawned you.
 
 Your reply opens with one line, and so does your digest file, above
 its `digest:` line: `tools: <the tools you actually hold,
-comma-separated>`. Report what you hold, never what you were told you
-hold; a tool you cannot see is absent. The orchestrator refuses a
-report that lacks a tool your role requires — a failed spawn, never a
-fix round. Nothing else is required: a missing tool that is not
-required only narrows the work, so say so in your digest.
+comma-separated>`. It is the literal first line, with nothing before
+it — no greeting, no heading; blank lines and one opening code fence
+are tolerated — and a name on it never holds ` · `. Report what you
+hold, never what you were told you hold; a tool you cannot see is
+absent. The orchestrator refuses a report that lacks a tool your role
+requires — a failed spawn, never a fix round. Nothing else is required:
+a missing tool that is not required only narrows the work, so say so
+in your digest.
 
 Every returned digest is validated against its schema
 (`scripts/digests.py`) before anything is read from it: a field

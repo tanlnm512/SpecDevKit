@@ -51,3 +51,11 @@ refusal even when `git status` shows it. Pinned by spec-build's `tests/test_work
 `IsolatedWorktreeTests::test_land_refuses_the_work_left_in_the_main_tree`,
 `::test_land_refuses_a_main_tree_edited_since_the_cut` and
 `::test_a_wave_mates_landing_does_not_refuse_the_next_one`.
+
+Two limits recorded with it: the record is plain JSON, never
+authenticated — a landing entry forged to name the drifted paths'
+current blobs stands the check down, which adds nothing committing
+those paths (the way on above) does not already grant; and it is keyed
+by bare spec name, so a spec re-created after archive inherits the old
+landings — they excuse only content-exact matches, and the asymmetry
+with the claim registry's `archive/<name>` keys is accepted.
