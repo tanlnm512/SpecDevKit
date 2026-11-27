@@ -1185,6 +1185,24 @@ class Gate009HeadlessExecuteTests(unittest.TestCase):
         self.assertEqual(models.read_text(encoding="utf-8").split(),
                          ["sonnet", "sonnet"], r.stdout + r.stderr)
 
+    def test_a_fix_round_lands_from_a_headless_wave(self):
+        # nobody is there to write a --resolution: the landing closes the
+        # round citing the digest file it validated
+        spec = hand_docset(self._tmp / "fix2", "approved")
+        edit_tasks(spec, ("- [ ] T001 implement",
+                          "- [ ] T001 (fix 2/5) implement\n"
+                          "  - fix 2 \u2014 E   AssertionError: shout('hi') "
+                          "== 'hi'"))
+        r = run_graph(spec, "--span", "execute", "--run",
+                      "--runner", self._write_runner(blocked=False),
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented) (round 2 closed)", r.stdout)
+        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+        tasks = (spec / "task.md").read_text(encoding="utf-8")
+        self.assertIn("(implemented) (fixed 2/5)", tasks)
+        self.assertIn("\u2014 headless round 2: digest digests/", tasks)
+
     def test_a_package_without_mark_py_still_refuses(self):
         # the lift is scoped to packages that ship mark.py: a package
         # with the same graph.py but no scripts/mark.py keeps the D-038

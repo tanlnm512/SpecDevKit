@@ -19,8 +19,13 @@ alone — and a spent one parks
     telemetry event;
   - the minutes run from the first claim to the kit's clock
     (`specstate.utc_now`), which one test moves — nothing sleeps;
-  - a claim that refuses on a budget stops a headless wave nonzero,
-    never as a wave merely deferred;
+  - the budget is a ceiling: a wave whose claims would take a spawn
+    budget past its limit is refused whole — exit 1, the lines naming
+    the wave's need, what remains and the shortfall — and the run parks
+    before that wave with the same lines, never emitting or claiming
+    it; a wave that fits to the last spawn is claimed whole;
+  - a budget refusal that still meets the claim inside a headless wave
+    is the budget stop, exit 0, never a runner failure;
   - the flags are claim's and --run's alone, and refuse a negative
     number.
 
@@ -47,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from test_claim_registry import (  # noqa: E402
     DIGEST,
     MARK,
+    record_approval,
     run,
     wave,
 )
@@ -64,6 +70,26 @@ T0 = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
 MINUTE = datetime.timedelta(minutes=1)
 RUN_LINE = "AWAITING HUMAN: run budget — spawns in this run used 1 of 1"
 SPEC_LINE = "AWAITING HUMAN: run budget — spawns in this spec used 1 of 1"
+WAVE_LINE = ("AWAITING HUMAN: run budget — spawns in this run would use "
+             "4 of 2")
+NEED_LINE = "   this wave needs 4 spawns of the 2 remaining: 2 short"
+
+
+def four_tasks(task_md: str) -> str:
+    """The scratch repo's two-task holder as four runnable tasks on four
+    disjoint files: one wave, four spawns."""
+    return task_md.replace("| 1     | 2     | 0    |          |",
+                           "| 1     | 4     | 0    |          |") \
+        .replace("| **Σ** | 2     | 0    |          |",
+                 "| **Σ** | 4     | 0    |          |") \
+        .replace(
+            "- [ ] T002 (after T001) pin punctuation behavior with a test (FR-002)",
+            "- [ ] T002 pin punctuation behavior with a test (FR-002)\n"
+            "  - Touches:\n    - `src/other.py`\n"
+            "- [ ] T003 document the shout helper (FR-001)\n"
+            "  - Touches:\n    - `docs/shout.md`\n"
+            "- [ ] T004 guard the shout helper (FR-002)\n"
+            "  - Touches:\n    - `src/guard.py`")
 
 
 def seed(spec_dir: Path, *rows: dict,
@@ -259,7 +285,62 @@ class RunBudgetTests(unittest.TestCase):
         self.assertEqual([row["ts"] for row in self.claims()],
                          [T0.isoformat(), (T0 + 119 * MINUTE).isoformat()])
 
-    def test_a_refusal_from_the_claim_stops_the_headless_wave_nonzero(self):
+    def wide(self) -> None:
+        """The spec's tasks as four runnable ones on disjoint files,
+        approved afresh so the execute span opens."""
+        holder = self.spec / "task.md"
+        write(holder, four_tasks(holder.read_text(encoding="utf-8")))
+        record_approval(self.spec)
+
+    def test_a_wave_past_the_budget_is_refused_whole(self):
+        self.wide()
+        before = self.registry.read_bytes() if self.registry.exists() else None
+        r = run(MARK, "claim", self.spec, "--wave",
+                wave(self.spec, "T001", "T002", "T003", "T004"),
+                "--run-id", "r-aaaa", "--budget-spawns", "2", tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual([ln for ln in r.stdout.splitlines()
+                          if ln.startswith("AWAITING HUMAN: run budget")],
+                         [WAVE_LINE])
+        self.assertIn("   also over: spawns in this spec would use 4 of 2",
+                      r.stdout)
+        self.assertIn(NEED_LINE, r.stdout)
+        self.assertIn("ways on: raise a budget", r.stdout)
+        self.assertIn("refused: the wave would spend past the run budget "
+                      "(nothing claimed)", r.stdout)
+        self.assertNotIn("(in-progress)", self.tasks())
+        self.assertEqual(self.claims(), [])
+        self.assertEqual(
+            self.registry.read_bytes() if self.registry.exists() else None,
+            before)
+
+        # a wave that fits — to the last spawn — is claimed whole
+        r = run(MARK, "claim", self.spec, "--wave",
+                wave(self.spec, "T001", "T002", "T003", "T004"),
+                "--run-id", "r-aaaa", "--budget-spawns", "4", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("claimed 4: T001, T002, T003, T004", r.stdout)
+        self.assertNotIn("run budget", r.stdout)
+        self.assertEqual([row["task"] for row in self.claims()],
+                         ["T001", "T002", "T003", "T004"])
+
+    def test_the_run_stops_before_a_wave_past_the_budget(self):
+        self.wide()
+        r = self.run_loop("r-aaaa", "--budget-spawns", "2")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(WAVE_LINE, r.stdout)
+        self.assertIn(NEED_LINE, r.stdout)
+        self.assertEqual(self.payloads(), [])
+        self.assertEqual(self.claims(), [])
+        self.assertEqual([row["event"] for row in self.rows()],
+                         ["run_start", "run_end"])
+        self.assertEqual(self.rows()[-1]["outcome"], "run_budget")
+
+    def test_a_budget_refusal_inside_a_headless_wave_is_the_budget_stop(
+            self):
+        # the loop counts before the wave; a budget crossed while the
+        # wave was written still meets the claim's refusal, which the
+        # loop reports as the budget stop — never as a runner failure
         self.assertEqual(self.run_loop("r-aaaa", "--budget-spawns", "1")
                          .returncode, 0)
         ran = self._tmp / "runner-ran"
@@ -273,15 +354,14 @@ class RunBudgetTests(unittest.TestCase):
         said, errors = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(said), \
                 contextlib.redirect_stderr(errors):
-            rc = graph._headless_execute_wave(
+            rc, reason = graph._headless_execute_wave(
                 self.spec, [graph.WrittenPayload(payload, "implementer",
                                                  "execute", "sonnet")],
                 f"{sys.executable} {runner}", 1, "r-aaaa",
                 budget_spawns=1)
-        self.assertEqual(rc, graph.RUNNER_FAILED_EXIT)
+        self.assertEqual((rc, reason), (0, "run_budget"), said.getvalue())
         self.assertIn(RUN_LINE, said.getvalue())
-        self.assertIn("the wave's claim was refused (exit 1)",
-                      said.getvalue())
+        self.assertNotIn("claim was refused", said.getvalue())
         self.assertFalse(ran.exists())
         self.assertNotIn("(in-progress)", self.tasks())
         self.assertEqual(len(self.claims()), 1)

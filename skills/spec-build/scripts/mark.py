@@ -17,7 +17,9 @@ Verbs and the transitions they own (the D-034 table, executable):
 
   mark.py claim   <spec-dir> --wave <wave-dir> [--run-id ID] [--harness NAME]
                   [--budget-spawns N] [--budget-minutes N]
-  mark.py land    <spec-dir> T### [--resolution "<text>"] [--digest "<line>"] [--allow-pending]
+  mark.py land    <spec-dir> T### [--resolution "<text>"
+                  | --resolution-from-digest]
+                  [--digest "<line>"] [--allow-pending]
   mark.py release <spec-dir> T### --reason "<text>"
   mark.py fail    <spec-dir> T### --evidence <file> --digest "<line>"
   mark.py drop    <spec-dir> T### --decision D-###
@@ -55,7 +57,14 @@ task's proofs ran, land refuses unless `--allow-pending` says the
 tests are written by a later task (or the environment cannot be
 supplied) — the landing is then an unproven `(implemented)`, and the
 delivery pass (dod gate 1) stays red until the pending proofs run or
-the env-blocked ones are ruled. fail copies the digest verbatim from the recorded
+the env-blocked ones are ruled. An open round closes with
+`--resolution "<what closed it>"`, or with `--resolution-from-digest`
+where nobody is there to write one: the resolution then only cites the
+digest file the landing validated — `headless round n: digest <path>
+(<sha12>) reports <status>` — and is refused when no file is on
+record. A resolution holding an em dash or a line break is refused
+(exit 2, nothing written): the round's close sub-line splits on the
+first ` — `. fail copies the digest verbatim from the recorded
 evidence and refuses a digest that is not a substring of it; a
 superseded in-flight round closes as `fixed n — failed again — …` so
 the checker's pairing gate stays green; round 3 points at
@@ -100,11 +109,13 @@ Claims are checked against every other spec's live claims in the repo
 `specs/.claims/registry.json` under one repo-level lock,
 `specs/.claims.lock`, taken outside the spec's `.task.lock` and never
 inside it. A wave task whose `Touches:` overlap a live entry of another
-spec — live while that spec's task still reads `(in-progress)` — is
+spec — live while that spec's task still reads `(in-progress)` or sits
+in a fix round, the cap included, since a failed task keeps its
+half-done edits in the tree — is
 dropped from the wave and printed `deferred: T### (shares <path> with
 <other-spec>/T###)`; the rest is claimed. `land`, `release`, `drop` and
 tick.py remove the spec's entry, and rows whose task is no longer
-claimed are swept on the next claim. A registry that cannot be read or
+open are swept on the next claim. A registry that cannot be read or
 parsed is refused, never read as empty: remove or repair it.
 
 A run budget is spent — 30 implementer spawns or 120 wall-clock
@@ -116,7 +127,11 @@ again over the spec's whole ledger, the minutes over this run alone
 since its first claim — a spec resumed hours or days later under a new
 run id is never refused on minutes. So the budget holds however the
 run is driven; `--budget-spawns N` and `--budget-minutes N` raise or
-lower one on the claim, and 0 lifts it. Tokens are not budgeted: no
+lower one on the claim, and 0 lifts it. The budget is a ceiling, not a
+line to cross: a wave whose claims would take a spawn budget past its
+limit is refused whole, exit 1 — `AWAITING HUMAN: run budget — <what>
+would use <n> of <n>`, then the wave's need, what remains and the
+shortfall — never cut down to what fits. Tokens are not budgeted: no
 harness reports them to the kit. A refusal claims nothing and writes
 nothing.
 
@@ -127,7 +142,15 @@ worktree present, land runs the proofs in the worktree, folds its whole
 delta — tracked and untracked, binary included — into the main tree
 with `git apply` to the working tree alone (nothing staged, nothing
 committed, the index untouched), removes the worktree, and lands as
-usual. A delta the main tree will not take clean is refused with exit
+usual. Before the proofs, land refuses — exit 1, nothing written, the
+task stays claimed — while the main tree holds an uncommitted change
+its proofs never saw: one made there since the worktree was cut,
+outside what this spec's landings merged and outside the spec's own
+dir. The paths are named; move the work into the worktree, or commit
+or stash what is not the task's, and land again. What the main tree
+held at the cut was in the proof's tree, and what a landing merged was
+proven in its own worktree — neither refuses. A delta the main tree
+will not take clean is refused with exit
 1, naming both trees and the conflicting paths: nothing is written, the
 worktree stays and the task stays claimed — settle by hand, then land
 again or release. release and drop remove the worktree, so its work is
@@ -138,7 +161,9 @@ warning names it and the by-hand command.
 Usage: mark.py <verb> …        (see the verb lines above)
 Exit:  0 = done · 1 = transition refused (current marker, wanted
        transition, and the allowed ones printed), or a run budget spent
-       (nothing claimed) · 2 = usage ·
+       (nothing claimed), or an isolated landing over main-tree work
+       its proofs never ran on (nothing written) · 2 = usage, or a
+       --resolution the round's close sub-line cannot hold ·
        5 = lock busy (another writer holds .task.lock or .claims.lock)
 """
 from __future__ import annotations
@@ -353,8 +378,8 @@ def claim(spec_dir: Path, wave_dir: Path, run_id: str | None,
     from the wave and printed `deferred` (D-057); the rest is claimed.
     The registry lock is taken outside the spec's task lock, never the
     reverse. A spent run budget (D-059) refuses first, under the same
-    locks the claim would write under: nothing claimed, nothing
-    written."""
+    locks the claim would write under, and so does a wave whose claims
+    would spend past one: nothing claimed, nothing written."""
     holder = _status_holder(spec_dir)
     if not holder.is_file():
         print(f"no {holder.name} under {spec_dir}", file=sys.stderr)
@@ -404,6 +429,13 @@ def claim(spec_dir: Path, wave_dir: Path, run_id: str | None,
                       "re-emit and claim the fresh wave (nothing claimed)")
                 return 1
             ids = [tid for tid in ids if tid not in dropped]
+            over = specstate.budget_overrun(spec_dir, run_id, budget_spawns,
+                                            len(ids))
+            if over:
+                print("\n".join(over))
+                print("refused: the wave would spend past the run budget "
+                      "(nothing claimed)")
+                return 1
             for tid, why in sorted(dropped.items()):
                 print(f"deferred: {tid} ({why})")
             try:
@@ -465,10 +497,13 @@ def _stamp_line(run_id: str) -> str:
 # --- land ----------------------------------------------------------------
 
 def land(spec_dir: Path, task_id: str, resolution: str | None,
-         digest: str | None, allow_pending: bool = False) -> int:
+         digest: str | None, allow_pending: bool = False,
+         resolution_from_digest: bool = False) -> int:
     """(implemented) in place of the claim — gated on the developer
     digest and a green scoped proofs run. On red proofs nothing is
-    written and the fail command is printed."""
+    written and the fail command is printed. An open round takes its
+    resolution from `resolution`, or — `resolution_from_digest` — from
+    the digest file the landing validated."""
     holder = _status_holder(spec_dir)
     if not holder.is_file():
         print(f"no {holder.name} under {spec_dir}", file=sys.stderr)
@@ -561,6 +596,22 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
                       file=sys.stderr)
                 return 1
 
+            open_round = entry.fix_round
+            if open_round is not None and resolution_from_digest:
+                if dig is None:
+                    print(f"refused: round {open_round} is open and "
+                          "--resolution-from-digest has no digest file to "
+                          "cite — none is on file under digests/; land with "
+                          "--resolution \"<what closed it>\"", file=sys.stderr)
+                    return 2
+                resolution = _cited_resolution(spec_dir, open_round, dig)
+
+            if isolated:
+                refused = _refuse_unproven_main_tree(task_id, repo, worktree,
+                                                     spec_dir)
+                if refused is not None:
+                    return refused
+
             print(f"proofs for {task_id}: running its TC commands"
                   + (f" in the worktree {worktree}" if isolated else ""))
             d = audit.proofs_data(spec_dir, worktree if isolated else repo,
@@ -625,7 +676,6 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
                           f"pending ({', '.join(sorted(pending))}) — the "
                           "delivery pass needs them", file=sys.stderr)
 
-            open_round = entry.fix_round
             if open_round is not None and not resolution:
                 print(f"refused: round {open_round} is open — land needs "
                       f"--resolution \"<what closed it>\"", file=sys.stderr)
@@ -675,6 +725,43 @@ def land(spec_dir: Path, task_id: str, resolution: str | None,
     return 0
 
 
+def _cited_resolution(spec_dir: Path, round_no: int, seen: dict) -> str:
+    """The resolution a headless landing closes a round with: where the
+    digest file is and what it reported, never a description of the fix
+    — the sha12 is the one the landing's ledger row records."""
+    path = Path(seen["path"]).relative_to(spec_dir).as_posix()
+    return (f"headless round {round_no}: digest {path} "
+            f"({_digest_sha(seen['path'])}) reports {seen['status']}")
+
+
+def _refuse_unproven_main_tree(task_id: str, repo: Path, worktree: Path,
+                               spec_dir: Path) -> int | None:
+    """Refuse a landing whose proofs would run on the worktree while the
+    main tree holds work they never saw: None when the main tree is as
+    the worktree was cut from it, apart from what this spec landed."""
+    try:
+        unproven = specstate.worktree_unproven(repo, worktree, spec_dir)
+    except specstate.WorktreeError as exc:
+        print(f"refused: {task_id}'s worktree cannot be read — {exc}\n"
+              f"  worktree: {worktree}\n  main tree: {repo}\n"
+              "nothing was written; the task stays claimed",
+              file=sys.stderr)
+        return 1
+    if not unproven:
+        return None
+    print(f"refused: {task_id} cannot land — the main tree changed since "
+          f"its worktree was cut, outside what this spec landed, so its "
+          f"proofs never ran on it — {len(unproven)} path(s):",
+          file=sys.stderr)
+    for path in unproven:
+        print(f"  {path}", file=sys.stderr)
+    print(f"  worktree: {worktree}\n  main tree: {repo}\n"
+          "nothing was written; the worktree stays and the task stays "
+          "claimed — move the work into the worktree, or commit or stash "
+          "what is not this task's, and land again", file=sys.stderr)
+    return 1
+
+
 def _merge_worktree(task_id: str, repo: Path, worktree: Path) -> int | None:
     """Fold the worktree's delta into the main tree and remove the
     worktree (D-058): None once done, 1 when the main tree would not
@@ -701,8 +788,9 @@ def _merge_worktree(task_id: str, repo: Path, worktree: Path) -> int | None:
         return 1
     done = (f"{len(merged)} path(s) merged into {repo} — working tree "
             "only: nothing staged, nothing committed" if merged else
-            "nothing to merge — the worktree holds no change (a developer "
-            "that worked in the main tree left its edits there)")
+            "nothing to merge — the worktree holds no change (the task "
+            "needed none: already-satisfied, or a proof green without an "
+            "edit)")
     left = specstate.worktree_remove(repo, worktree)
     if left is None:
         print(f"worktree {worktree}: {done}; worktree removed")
@@ -1037,7 +1125,7 @@ def main(argv=None) -> int:
     flags = {"--wave", "--run-id", "--resolution", "--digest",
              "--reason", "--evidence", "--decision", "--harness",
              "--budget-spawns", "--budget-minutes"}
-    switches = {"--allow-pending"}
+    switches = {"--allow-pending", "--resolution-from-digest"}
     it = iter(args)
     for a in it:
         if a in switches:
@@ -1087,9 +1175,19 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
     if verb == "land":
-        return land(Path(positional[0]), positional[1],
-                    opts.get("--resolution"), opts.get("--digest"),
-                    "--allow-pending" in opts)
+        given = opts.get("--resolution")
+        if given is not None and any(ch in given for ch in "\r\n\u2014"):
+            print("--resolution may carry no em dash and no line break — "
+                  "the round's close sub-line splits on the first ` — `\n"
+                  + USAGE, file=sys.stderr)
+            return 2
+        if given is not None and "--resolution-from-digest" in opts:
+            print("--resolution and --resolution-from-digest both name the "
+                  "resolution — give one\n" + USAGE, file=sys.stderr)
+            return 2
+        return land(Path(positional[0]), positional[1], given,
+                    opts.get("--digest"), "--allow-pending" in opts,
+                    "--resolution-from-digest" in opts)
     if verb == "release":
         if "--reason" not in opts:
             print(USAGE, file=sys.stderr)

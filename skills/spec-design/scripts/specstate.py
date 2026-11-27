@@ -791,6 +791,21 @@ def ledger_event(spec_dir: Path | str, *rows: dict) -> bool:
 BUDGET_SPAWNS = 30
 BUDGET_MINUTES = 120
 BUDGET_STOP = "AWAITING HUMAN: run budget — "
+BUDGET_STOP_TAIL = (
+    "   why it matters (medium): the budget is the ceiling an "
+    "unattended",
+    "   run may spend — past it every spawn may be a task failing "
+    "again,",
+    "   costing time and tokens the kit cannot count; a spec with "
+    "more",
+    "   tasks than the budget needs a higher one",
+    "   ways on: raise a budget with --budget-spawns N / "
+    "--budget-minutes N",
+    "   on the next run or claim (0 lifts it), or adjudicate the "
+    "tasks",
+    "   that keep failing (mark.py fail with the evidence, "
+    "release, or",
+    "   drop with a D-###) before running again")
 
 
 def utc_now() -> datetime.datetime:
@@ -862,22 +877,36 @@ def budget_stop(spec_dir: Path | str, run_id: str | None,
     lines = [f"{BUDGET_STOP}{what} used {used} of {limit}"]
     lines += [f"   also spent: {what} used {used} of {limit}"
               for what, used, limit in over[1:]]
-    lines += [
-        "   why it matters (medium): the budget is the ceiling an "
-        "unattended",
-        "   run may spend — past it every spawn may be a task failing "
-        "again,",
-        "   costing time and tokens the kit cannot count; a spec with "
-        "more",
-        "   tasks than the budget needs a higher one",
-        "   ways on: raise a budget with --budget-spawns N / "
-        "--budget-minutes N",
-        "   on the next run or claim (0 lifts it), or adjudicate the "
-        "tasks",
-        "   that keep failing (mark.py fail with the evidence, "
-        "release, or",
-        "   drop with a D-###) before running again"]
-    return lines
+    return lines + list(BUDGET_STOP_TAIL)
+
+
+def budget_overrun(spec_dir: Path | str, run_id: str | None,
+                   spawns: int, needed: int,
+                   now: datetime.datetime | None = None) -> list[str]:
+    """The lines for a wave whose `needed` spawns would take a spawn
+    budget past its limit — empty while the wave fits, in every budget.
+    The first line names the first budget the wave would pass, the
+    run's spawns before the spec's, as `would use <n> of <limit>`;
+    then one line for the wave's need, what remains and the shortfall;
+    then why it matters and the ways on. Minutes are never compared: no
+    wave can be cut to the time it will take."""
+    if not needed:
+        return []
+    spent = budget_spent(spec_dir, run_id, now)
+    over = [(f"spawns in this {scope}", spent[scope]["spawns"] + needed,
+             spawns, spawns - spent[scope]["spawns"])
+            for scope in ("run", "spec")
+            if spawns and spent[scope]["spawns"] + needed > spawns]
+    if not over:
+        return []
+    what, would, limit, left = over[0]
+    lines = [f"{BUDGET_STOP}{what} would use {would} of {limit}"]
+    lines += [f"   also over: {what} would use {would} of {limit}"
+              for what, would, limit, _left in over[1:]]
+    spawn = "spawn" if needed == 1 else "spawns"
+    lines.append(f"   this wave needs {needed} {spawn} of the {left} "
+                 f"remaining: {needed - left} short")
+    return lines + list(BUDGET_STOP_TAIL)
 
 
 def digest_schema(stem: str,
@@ -1544,7 +1573,9 @@ def _lock_file(lock: Path, timeout: float, kind: str,
 # could edit one file. The registry names every claimed task in the repo:
 # mark.py's verbs write it, graph.py reads it. It is a cache, never status
 # — a row is live only while its spec's status holder still shows the task
-# (in-progress); a row whose task does not is stale.
+# (in-progress) or in a fix round; a row whose task does not is stale. A
+# failed task keeps its half-done edits in the tree, so its round holds its
+# files like a claim does.
 # ---------------------------------------------------------------------------
 
 CLAIMS_DIR = ".claims"
@@ -1624,14 +1655,17 @@ def claims_read(spec_dir: Path | str) -> dict:
 
 
 def claims_live(spec_dir: Path | str, rows: dict) -> dict:
-    """The rows whose task still reads `(in-progress)` in its own spec's
-    status holder — the docs stay the only status."""
+    """The rows whose task is still open on its own spec's status holder —
+    `(in-progress)`, or in a fix round, the cap included — the docs stay
+    the only status."""
     root = claims_root(spec_dir)
     return {key: row for key, row in rows.items()
             if _claim_open(root, key)}
 
 
 def _claim_open(root: Path, key: str) -> bool:
+    """Open: claimed, or in a fix round — the cap included; never done or
+    struck."""
     spec, task_id = key.rsplit("/", 1)
     spec_dir = root / spec
     spec_md, task_md = spec_dir / "spec.md", spec_dir / "task.md"
@@ -1642,7 +1676,8 @@ def _claim_open(root: Path, key: str) -> bool:
             encoding="utf-8", errors="replace"))
     except OSError:
         return False
-    return any(e.id == task_id and e.claimed for e in entries)
+    return any(e.id == task_id and not (e.done or e.struck)
+               and (e.claimed or e.fix_round is not None) for e in entries)
 
 
 def claims_held(spec_dir: Path | str) -> dict:
@@ -1733,6 +1768,11 @@ def _lock_owner(lock: Path) -> str | None:
 
 ISOLATE_DIR = ".spec-kit"
 WORKTREES_DIR = "worktrees"
+# What this spec's landings merged into the main tree, one file per
+# spec: a landing proves its worktree, never the main tree it joins, so
+# the next landing reads the main tree against its own cut and needs to
+# tell that work from an edit nobody proved.
+LANDED_DIR = "landed"
 WORKTREE_ID = re.compile(r"^T\d{3}$")
 SNAPSHOT_FILE = "spec-kit-snapshot"
 SNAPSHOT_MESSAGE = "spec-kit worktree snapshot"
@@ -1808,13 +1848,20 @@ def worktrees_present(repo: Path | str, spec_name: str) -> dict[str, Path]:
             if WORKTREE_ID.fullmatch(p.name) and p.is_dir()}
 
 
-def worktree_snapshot(repo: Path | str) -> str:
-    """A commit holding the main working tree as it stands — tracked edits
-    and deletions, untracked files too, ignored ones excluded — parented
-    on HEAD (a root commit where HEAD is unborn)."""
+def _working_tree(repo: Path | str) -> str:
+    """The tree of the main working tree as it stands, taken through a
+    scratch index: tracked edits and deletions, untracked files too,
+    ignored ones excluded."""
     with _scratch_index("spec-kit-index-") as env:
         _git(repo, "add", "-A", env=env)
-        tree = _sha(_git(repo, "write-tree", env=env))
+        return _sha(_git(repo, "write-tree", env=env))
+
+
+def worktree_snapshot(repo: Path | str) -> str:
+    """A commit holding the main working tree as it stands — tracked
+    edits and deletions, untracked files too, ignored ones excluded —
+    parented on HEAD (a root commit where HEAD is unborn)."""
+    tree = _working_tree(repo)
     try:
         parents = ["-p", _sha(_git(repo, "rev-parse", "--verify", "HEAD"))]
     except WorktreeError:
@@ -1877,6 +1924,117 @@ def worktree_refresh(repo: Path | str, path: Path) -> None:
     worktree_create(repo, path)
 
 
+def _tree_diff(repo: Path | str, before: str, after: str
+               ) -> dict[str, str | None]:
+    """`{path: "<mode> <blob sha>"}` for every path tree `after` holds
+    differently from tree `before` — None where `after` lacks it."""
+    raw = _git(repo, "diff", "--raw", "--no-abbrev", "--no-renames", "-z",
+               before, after).stdout
+    fields = raw.decode("utf-8", "surrogateescape").split("\0")
+    changed: dict[str, str | None] = {}
+    for meta, path in zip(fields[::2], fields[1::2]):
+        if meta:
+            _old, mode, _old_sha, sha, _status = meta[1:].split(" ")
+            changed[path] = None if mode == "0" * 6 else f"{mode} {sha}"
+    return changed
+
+
+def landings_path(repo: Path | str, spec_name: str) -> Path:
+    return Path(repo) / ISOLATE_DIR / LANDED_DIR / f"{spec_name}.json"
+
+
+def landings_read(repo: Path | str, spec_name: str
+                  ) -> dict[str, dict[str, str | None]]:
+    """What each landing of the spec merged into the main tree, by task:
+    `{path: "<mode> <blob sha>"}`, None where the landing deleted the
+    path. A file that is missing or cannot be parsed reads as no
+    landings: the next landing then names every such path — the
+    refusing side, never a landing over unproven work."""
+    try:
+        rows = json.loads(
+            landings_path(repo, spec_name).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(rows, dict):
+        return {}
+    return {task: landing for task, landing in rows.items()
+            if isinstance(landing, dict)}
+
+
+def _record_landing(repo: Path | str, worktree: Path | str, base: str,
+                    merged: list[str]) -> None:
+    """Fold what the merge just left in the main tree at the delta's
+    paths into the spec's landings, content-exact. A record that cannot
+    be written is reported and never undoes the merge."""
+    spec_name = Path(worktree).parent.name
+    merged_set = set(merged)
+    landing = {path: entry for path, entry in _tree_diff(
+        repo, base, _working_tree(repo)).items() if path in merged_set}
+    path = landings_path(repo, spec_name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        fd = os.open(str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({**landings_read(repo, spec_name),
+                       Path(worktree).name: landing}, f, indent=2,
+                      sort_keys=True)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"warning: landings not recorded — {exc}; the next landing "
+              "refuses on these paths until they are committed",
+              file=sys.stderr)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+
+
+def _run_state_prefixes(repo: Path | str, spec_dir: Path | str
+                        ) -> tuple[str, ...]:
+    """The paths, relative to the repository, under which a change in
+    the main tree is run state: the spec's own dir and the kit's
+    `.spec-kit/`."""
+    top = Path(os.path.realpath(_sha(
+        _git(repo, "rev-parse", "--show-toplevel"))))
+    prefixes = []
+    for path in (Path(spec_dir), Path(repo) / ISOLATE_DIR):
+        real = Path(os.path.realpath(path))
+        if top not in real.parents:
+            raise WorktreeError(f"{path} is not inside the repository {top}")
+        prefixes.append(real.relative_to(top).as_posix() + "/")
+    return tuple(prefixes)
+
+
+def worktree_unproven(repo: Path | str, worktree: Path | str,
+                      spec_dir: Path | str) -> list[str]:
+    """The main tree's uncommitted changes an isolated landing must
+    refuse: the paths that differ from the snapshot the worktree was cut
+    from, are not committed since, and no landing of the spec merged —
+    work the worktree's proofs never ran on. What the main tree held at
+    the cut was in the proof's tree, a landing's own delta was proven in
+    its worktree, and run state is never named."""
+    base = worktree_base(worktree)
+    drift = _tree_diff(repo, base, _working_tree(repo))
+    if not drift:
+        return []
+    committed: dict[str, str | None] = {}
+    with contextlib.suppress(WorktreeError):
+        committed = _tree_diff(
+            repo, base, _sha(_git(repo, "rev-parse", "--verify", "--quiet",
+                                  "HEAD^{tree}")))
+    proven = set(committed.items()) | {
+        (path, entry)
+        for landing in landings_read(repo, Path(worktree).parent.name).values()
+        for path, entry in landing.items()}
+    run_state = _run_state_prefixes(repo, spec_dir)
+    return sorted(path for path, entry in drift.items()
+                  if (path, entry) not in proven
+                  and not path.startswith(run_state))
+
+
 def worktree_merge(repo: Path | str, worktree: Path | str
                    ) -> tuple[list[str], list[str]]:
     """Fold the worktree's delta against its snapshot — tracked edits,
@@ -1884,10 +2042,11 @@ def worktree_merge(repo: Path | str, worktree: Path | str
     working tree: (paths merged, paths refused). An empty delta merges
     nothing and refuses nothing. The tree alone is written: the index,
     HEAD and every branch stay as they are, so the work lands as
-    uncommitted changes, exactly where a shared-tree task's would. A
-    delta the tree would not take clean writes nothing and names the
-    touched paths `git apply --check` refused (git's own error lines
-    when none of them matches)."""
+    uncommitted changes, exactly where a shared-tree task's would; what
+    the merge left at those paths is recorded for the next landing's
+    check (`worktree_unproven`). A delta the tree would not take clean
+    writes nothing and names the touched paths `git apply --check`
+    refused (git's own error lines when none of them matches)."""
     base = worktree_base(worktree)
     with tempfile.TemporaryDirectory(prefix="spec-kit-delta-") as tmp, \
             _scratch_index("spec-kit-index-") as env:
@@ -1917,6 +2076,7 @@ def worktree_merge(repo: Path | str, worktree: Path | str
                     for err in errors)]
                 return [], refused or [e.strip() for e in errors]
             _git(top, *PATCH_OPTIONS, str(patch))
+            _record_landing(repo, worktree, base, paths)
     return paths, []
 
 

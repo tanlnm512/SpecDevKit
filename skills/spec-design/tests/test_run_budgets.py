@@ -16,7 +16,12 @@ ways on.
     sleeps — so a spec resumed hours after its first claim is never
     stopped on minutes under a new run id;
   - 0 lifts a budget, a wave that claims nothing is never stopped, and
-    the flags need --run and refuse a negative number.
+    the flags need --run and refuse a negative number;
+  - the budget is a ceiling: a wave whose implementer payloads would
+    take a spawn budget past its limit parks before that wave with
+    `<what> would use <n> of <n>` and the wave's need, what remains
+    and the shortfall — nothing emitted — and a wave that fits to the
+    last spawn is emitted whole.
 
 This package ships no mark.py, so the loop runs here on the print
 runner with the developer brief stood in; spec-build's byte-identical
@@ -38,8 +43,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from test_graph import (  # noqa: E402
+    APPROVED_TASKS,
     approved_fixture,
     grounding_fixture,
+    record_approval,
+    write,
 )
 from test_worktrees import in_process  # noqa: E402
 import graph as engine  # noqa: E402 - the master, by name
@@ -50,6 +58,17 @@ T0 = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
 HOUR = datetime.timedelta(hours=1)
 MINUTE = datetime.timedelta(minutes=1)
 CLAIM = {"skill": "spec-build", "event": "claim", "role": "implementer"}
+# the approved fixture's tasks as four runnable ones on disjoint files:
+# one wave, four implementer payloads
+FOUR_RUNNABLE_TASKS = APPROVED_TASKS.replace(
+    "- [ ] T002 (after T001) wire the caller `repo/test_calc.py` (FR-001)",
+    "- [ ] T002 [P] wire the caller `repo/app.py` (FR-001)").replace(
+    "- [ ] T003 (fix 5/5) rescue the stalled refactor (FR-002)",
+    "- [ ] T003 [P] write the calc guide `docs/calc.md` (FR-002)\n"
+    "- [ ] T004 [P] note the multiply in `README.md` (FR-002)").replace(
+    "| 1     | 3     | 0 |          |",
+    "| 1     | 4     | 0 |          |").replace(
+    "| **Σ** | 3     | 0 |          |", "| **Σ** | 4     | 0 |          |")
 
 
 def seed(spec_dir: Path, *rows: dict,
@@ -225,6 +244,41 @@ class BudgetStopTests(unittest.TestCase):
         for ln in lines:
             self.assertLessEqual(len(ln), 72, ln)
 
+    def test_a_wave_past_the_budget_is_named_with_its_need_and_the_rest(
+            self):
+        seed(self.spec, *({"run": "r-aaaa", "task": f"T{i:03}"}
+                          for i in range(2)), at=T0 - 2 * HOUR)
+
+        def over(spawns: int, needed: int) -> list[str]:
+            return specstate.budget_overrun(self.spec, "r-aaaa", spawns,
+                                            needed, T0)
+
+        for spawns, needed in ((6, 4), (3, 1), (0, 4), (4, 0)):
+            self.assertEqual(over(spawns, needed), [], (spawns, needed))
+        lines = over(4, 4)
+        self.assertEqual(lines[:3], [
+            "AWAITING HUMAN: run budget — spawns in this run would use "
+            "6 of 4",
+            "   also over: spawns in this spec would use 6 of 4",
+            "   this wave needs 4 spawns of the 2 remaining: 2 short"])
+        # then the spent stop's own why and ways on, word for word
+        why = ("   why it matters (medium): the budget is the ceiling an "
+               "unattended")
+        spent = self.stop(2, 0)
+        self.assertEqual(lines[3:], spent[spent.index(why):])
+        for ln in lines:
+            self.assertLessEqual(len(ln), 72, ln)
+
+        # the run's budget fits the wave, the spec's does not
+        seed(self.spec, *({"run": "r-old", "task": f"T{i:03}"}
+                          for i in range(3)), at=T0 - 5 * HOUR)
+        lines = over(6, 4)
+        self.assertEqual(lines[:2], [
+            "AWAITING HUMAN: run budget — spawns in this spec would use "
+            "9 of 6",
+            "   this wave needs 4 spawns of the 1 remaining: 3 short"])
+        self.assertEqual(over(6, 1), [])
+
 
 class RunBudgetLoopTests(unittest.TestCase):
 
@@ -325,6 +379,35 @@ class RunBudgetLoopTests(unittest.TestCase):
         self.assertEqual(budget_line(out), "AWAITING HUMAN: run budget — "
                                             "minutes in this run used 540 "
                                             "of 120")
+
+    def test_a_wave_past_the_remaining_budget_parks_before_it_is_emitted(
+            self):
+        holder = self.spec / "task.md"
+        write(holder, FOUR_RUNNABLE_TASKS)
+        record_approval(self.spec)
+        seed(self.spec, {"run": "r-aaaa", "task": "T001"}, at=T0 - HOUR)
+
+        # two spawns remain and the wave needs four
+        rc, out = self.loop(spawns=3)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(budget_line(out), "AWAITING HUMAN: run budget — "
+                                            "spawns in this run would use "
+                                            "5 of 3")
+        self.assertIn("   this wave needs 4 spawns of the 2 remaining: "
+                      "2 short", out)
+        self.assertIn("ways on: raise a budget", out)
+        self.assertEqual(payloads(self.spec), [])
+        self.assertEqual([row["event"] for row in self.rows()],
+                         ["claim", "run_start", "run_end"])
+        self.assertEqual(self.rows()[-1]["outcome"], "run_budget")
+
+        # to the last spawn the wave fits and is emitted whole
+        rc, out = self.loop(spawns=5)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("run budget", out)
+        self.assertEqual([p.name for p in payloads(self.spec)],
+                         [f"implementer-T{i:03}.md" for i in range(1, 5)])
+        self.assertEqual(self.rows()[-1]["outcome"], "wave_emitted")
 
     def test_a_wave_that_claims_nothing_is_never_stopped(self):
         self.spec = grounding_fixture(self._tmp / "bare", "demo")

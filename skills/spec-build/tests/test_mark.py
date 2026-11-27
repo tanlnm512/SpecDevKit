@@ -606,6 +606,77 @@ class LandProofGateTests(unittest.TestCase):
         self.assertRegex(block, rf"- fixed 1 {EM} guard the empty case "
                          rf"{EM} audit\.py proofs --task T001 green")
 
+    def open_round_two(self, name: str) -> Path:
+        """An approved docset whose T001 is claimed in an open fix
+        round 2, round 1 closed under it."""
+        spec = hand_fixture(self._tmp, name)
+        entry = "- [ ] T001 implement the shout helper in the module (FR-001)"
+        edit_tasks(spec, (entry, entry.replace(
+            "T001 ", f"T001 (fix 2/5) ")
+            + f"\n  - fix 1 {EM} E   AssertionError: shout('hi') == 'hi'"
+            + f"\n  - fixed 1 {EM} guard the empty case {EM} audit.py "
+            "proofs --task T001 green"
+            + f"\n  - fix 2 {EM} E   TypeError: shout(None) crashed"))
+        make_wave(spec, "T001")
+        r = run_mark(spec, "claim", "--wave",
+                     str(spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return spec
+
+    def test_a_headless_landing_closes_the_round_citing_its_digest(self):
+        spec = self.open_round_two("cited")
+        before = (spec / "task.md").read_bytes()
+        # the --digest override is an attestation, not a file to cite
+        r = run_mark(spec, "land", "T001", "--resolution-from-digest",
+                     "--digest", "digest: task T001 · status implemented",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("refused: round 2 is open and --resolution-from-digest "
+                      "has no digest file to cite", r.stderr)
+        self.assertEqual((spec / "task.md").read_bytes(), before)
+
+        body = (TOOLS + "digest: task T001 · status implemented · files 2 · "
+                "commit-line feat(x): T001 guard (FR-001) · deviation "
+                "none · note none\n")
+        path = spec / "digests" / "wave-4" / "implementer-T001.md"
+        path.parent.mkdir(parents=True)
+        write(path, body)
+        r = run_mark(spec, "land", "T001", "--resolution-from-digest",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented) (round 2 closed)", r.stdout)
+        block = entry_text(spec, "T001")
+        self.assertIn("(implemented) (fixed 2/5)", block.splitlines()[0])
+        # the cited sha12 is the digest's own content, provenance line
+        # stripped — what the landing's ledger row records
+        self.assertIn("provenance:", path.read_text(encoding="utf-8"))
+        cited = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        self.assertEqual(specstate.fix_rounds(block)[1], specstate.FixRound(
+            2, "E   TypeError: shout(None) crashed",
+            f"headless round 2: digest digests/wave-4/implementer-T001.md "
+            f"({cited}) reports implemented",
+            "audit.py proofs --task T001 green", True))
+        rows = [json.loads(line) for line in
+                (spec / "runs" / "ledger.jsonl").read_text(
+                    encoding="utf-8").splitlines()]
+        self.assertEqual([row["digest"] for row in rows
+                          if row["event"] == "land"], [cited])
+        checked = subprocess.run(
+            [sys.executable, str(SCRIPTS / "check.py"), str(spec)],
+            capture_output=True, text=True, timeout=300)
+        self.assertNotIn("fix rounds:", checked.stdout, checked.stdout)
+
+    def test_a_resolution_the_close_line_cannot_hold_is_refused(self):
+        spec = self.open_round_two("dashed")
+        before = (spec / "task.md").read_bytes()
+        for text in (f"guard {EM} the empty case", "guard\nthe empty case"):
+            r = run_mark(spec, "land", "T001", "--resolution", text,
+                         "--digest", "digest: task T001 · status implemented",
+                         tel=self.tel)
+            self.assertEqual(r.returncode, 2, (text, r.stdout, r.stderr))
+            self.assertIn("--resolution may carry no em dash", r.stderr)
+        self.assertEqual((spec / "task.md").read_bytes(), before)
+
 
 class ClaimWaveTests(unittest.TestCase):
     """claim --wave's own contract: exactly the wave's files, the

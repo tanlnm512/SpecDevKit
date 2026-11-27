@@ -19,7 +19,11 @@ mark.py closes the task from there:
     it;
   - a headless `--run --isolate worktree` lands every task from its
     worktree — a later wave's cut from the tree the earlier landing
-    changed — and parks at tick-commit.
+    changed — and parks at tick-commit;
+  - land proves the worktree, so it refuses while the main tree holds
+    an uncommitted change the proofs never saw — one made there since
+    the cut, outside what this spec landed; what the tree held at the
+    cut, a wave-mate's landed delta and run state never refuse.
 
 Fixtures are one hand-authored docset in a scratch git repository whose
 main tree holds uncommitted work and one staged file; T001's proof is
@@ -28,6 +32,7 @@ green only in a tree that holds its work.
 
 import contextlib
 import io
+import json
 import os
 import shutil
 import stat
@@ -43,6 +48,7 @@ from test_claim_registry import (  # noqa: E402
     BARE_T001,
     CONSTITUTION,
     DIGEST,
+    DISJOINT_TASKS,
     HAND_PLAN,
     HAND_RESEARCH,
     HAND_SPEC,
@@ -51,6 +57,7 @@ from test_claim_registry import (  # noqa: E402
     HAND_TEST,
     MARK,
     TOUCHING_T001,
+    ledger_events,
     record_approval,
     run,
     run_graph,
@@ -67,7 +74,8 @@ TREE_PROOF = HAND_TEST.replace(
     "- **Pass condition**: `grep -q shout src/greet.py` exits 0")
 
 # The headless developer: it works in the tree the payload names, and
-# its second task records whether that tree holds the first one's work.
+# its second task records, in the spec's run state, whether that tree
+# holds the first one's work.
 RUNNER = """import re, sys
 from pathlib import Path
 
@@ -87,7 +95,7 @@ if tid == "T001":
                      + "\\n\\ndef shout(text):\\n    return text.upper()\\n",
                      encoding="utf-8")
 else:
-    (spec_dir.parent / f".saw-shout-{tid}").write_text(
+    (spec_dir / f".saw-shout-{tid}").write_text(
         str("def shout" in greet.read_text(encoding="utf-8")),
         encoding="utf-8")
 digests = spec_dir / "digests" / f"wave-{wave}"
@@ -243,12 +251,15 @@ class IsolatedWorktreeTests(unittest.TestCase):
         self.assertNotIn("(implemented)", (self.spec / "task.md")
                          .read_text(encoding="utf-8"))
 
-        # fixed in the main tree alone: still red — the worktree is proven
+        # fixed in the main tree alone: refused before the proofs —
+        # work the worktree's proofs never ran on does not land
         write(self.greet, LANDED + "\n\ndef shout(text):\n"
                   "    return text.upper()\n")
         r = self.land()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("proofs red for T001", r.stdout)
+        self.assertIn("proofs never ran on it — 1 path(s):\n  src/greet.py",
+                      r.stderr)
+        self.assertNotIn("proofs for T001", r.stdout)
         self.assertTrue(self.worktree.is_dir())
 
         # fixed where the developer works: green there, landed from there
@@ -265,9 +276,13 @@ class IsolatedWorktreeTests(unittest.TestCase):
             self):
         self.claimed()
         done = self.develop()
-        # the main tree moved on two of the delta's paths since the snapshot
+        # the main tree moved on two of the delta's paths since the
+        # snapshot — committed by someone else, so the refusal is the
+        # delta's, not the unproven work's
         write(self.greet, "def whisper(text):\n    return text\n")
         write(self.repo / "src" / "shout.py", "someone else's shout\n")
+        git(self.repo, "add", "src/greet.py", "src/shout.py")
+        git(self.repo, "commit", "-qm", "someone else's shout")
         index = (self.repo / ".git" / "index").read_bytes()
 
         r = self.land()
@@ -362,11 +377,94 @@ class IsolatedWorktreeTests(unittest.TestCase):
             refused = mark._merge_worktree("T001", self.repo, self.worktree)
         self.assertIsNone(refused)
         self.assertIn(f"worktree {self.worktree}: nothing to merge — the "
-                      "worktree holds no change (a developer that worked in "
-                      "the main tree left its edits there); worktree removed",
+                      "worktree holds no change (the task needed none: "
+                      "already-satisfied, or a proof green without an "
+                      "edit); worktree removed",
                       out.getvalue())
         self.assertFalse(self.worktree.exists())
         self.assertEqual(self.greet.read_text(encoding="utf-8"), LANDED)
+
+    def test_land_refuses_the_work_left_in_the_main_tree(self):
+        # green where the proofs run: only the main tree's edit tells
+        # this landing from an unproven one
+        shout = LANDED + "\n\ndef shout(text):\n    return text.upper()\n"
+        write(self.greet, shout)
+        self.claimed()
+        write(self.greet, shout.replace("upper()", "upper() + '!'"))
+
+        r = self.land()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("landed", r.stdout)
+        self.assertIn(
+            "refused: T001 cannot land — the main tree changed since its "
+            "worktree was cut, outside what this spec landed, so its "
+            "proofs never ran on it — 1 path(s):\n"
+            "  src/greet.py\n"
+            f"  worktree: {self.worktree}\n  main tree: {self.repo}\n"
+            "nothing was written; the worktree stays and the task stays "
+            "claimed — move the work into the worktree, or commit or stash "
+            "what is not this task's, and land again", r.stderr)
+        self.assertIn("(in-progress)", (self.spec / "task.md")
+                      .read_text(encoding="utf-8"))
+        self.assertTrue(self.worktree.is_dir())
+        self.assertNotIn("land", ledger_events(self.spec))
+
+        # the main tree as it was cut: the worktree holds no change and
+        # the landing needs no delta
+        write(self.greet, shout)
+        r = self.land()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented)", r.stdout)
+
+    def test_land_refuses_a_main_tree_edited_since_the_cut(self):
+        self.claimed()
+        self.develop()
+        # someone else's uncommitted work beside the task's — untracked
+        # and tracked
+        write(self.repo / "notes-unrelated.md", "a note\n")
+        write(self.repo / "stale.txt", "back\n")
+
+        r = self.land()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("proofs never ran on it — 2 path(s):\n"
+                      "  notes-unrelated.md\n  stale.txt\n", r.stderr)
+        self.assertIn("commit or stash", r.stderr)
+        self.assertNotIn("landed", r.stdout)
+        self.assertNotIn("shout", self.greet.read_text(encoding="utf-8"))
+        self.assertIn("(in-progress)", (self.spec / "task.md")
+                      .read_text(encoding="utf-8"))
+        self.assertTrue(self.worktree.is_dir())
+
+        # settled — committed — and the same landing goes through
+        git(self.repo, "add", "notes-unrelated.md", "stale.txt")
+        git(self.repo, "commit", "-qm", "an unrelated note")
+        r = self.land()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented)", r.stdout)
+        self.assertIn("def shout", self.greet.read_text(encoding="utf-8"))
+
+    def test_a_wave_mates_landing_does_not_refuse_the_next_one(self):
+        # two file-disjoint tasks in one wave: both worktrees are cut
+        # before either lands, so the first landing's delta sits in the
+        # main tree when the second lands — work this spec proved
+        write(self.spec / "task.md", DISJOINT_TASKS)
+        record_approval(self.spec)
+        runner = write(self._tmp / "runner.py", RUNNER)
+
+        r = run_graph(self.spec, "--span", "execute", "--run", "--isolate",
+                      "worktree", "--runner",
+                      f"{sys.executable} {runner} {{prompt_file}}",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("cannot land", r.stderr)
+        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+        tasks = (self.spec / "task.md").read_text(encoding="utf-8")
+        self.assertEqual(tasks.count("(implemented)"), 2, tasks)
+        self.assertIn("def shout", self.greet.read_text(encoding="utf-8"))
+        landed = json.loads((self.repo / ".spec-kit" / "landed" / "alpha.json")
+                            .read_text(encoding="utf-8"))
+        blob = git(self.repo, "hash-object", "src/greet.py")
+        self.assertEqual(landed["T001"], {"src/greet.py": f"100644 {blob}"})
 
     def test_land_reads_the_digest_written_in_the_main_tree(self):
         payload = self.claimed()
@@ -378,6 +476,9 @@ class IsolatedWorktreeTests(unittest.TestCase):
                        "digest: task T001 · status implemented · files 2 · "
                        "commit-line feat: T001 · deviation none · note "
                        "none\n")
+        # run state the round leaves in the main tree's spec dir
+        (self.spec / "notes").mkdir()
+        write(self.spec / "notes" / "T001.md", "# Notes: T001\n")
 
         r = run(MARK, "land", self.spec, "T001", tel=self.tel)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -440,7 +541,7 @@ class IsolatedWorktreeTests(unittest.TestCase):
         self.assertIn("def shout", self.greet.read_text(encoding="utf-8"))
         # the second wave's worktree was cut from a main tree that
         # already held the first landing, still uncommitted
-        self.assertEqual((self.spec.parent / ".saw-shout-T002")
+        self.assertEqual((self.spec / ".saw-shout-T002")
                          .read_text(encoding="utf-8"), "True")
         self.assertFalse((self.repo / ".spec-kit" / "worktrees").exists())
         self.assertEqual(git(self.repo, "worktree", "list", "--porcelain")

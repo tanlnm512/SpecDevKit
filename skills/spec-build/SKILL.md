@@ -92,9 +92,11 @@ before that round is claimed. Two run budgets bound it
 spec, minutes per run, with `--budget-spawns N` and `--budget-minutes
 N` to raise, lower or lift one with `0` — and a spent one parks
 `AWAITING HUMAN: run budget — <what> used <n> of <n>` before the wave
-(`mark.py claim` refuses on the same line). Anything else — a blocked
-or missing digest, red proofs, a failed runner — leaves the tasks
-CLAIMED and stops `AWAITING ORCHESTRATOR: execute` for you to settle.
+(`mark.py claim` refuses on the same line); so does a wave whose
+claims would spend past one, before it is written. Anything else — a
+blocked or missing digest, red proofs, a failed runner — leaves the
+tasks CLAIMED and stops `AWAITING ORCHESTRATOR: execute` for you to
+settle.
 Every payload opens with the `tools:` ask: a digest file whose
 report lacks a file writer or Bash is a failed spawn — `land` refuses
 it, no round opens, and the task is released and spawned again on a
@@ -109,7 +111,10 @@ Add `--isolate worktree` and each implementer works in its own
 detached worktree under `<repo>/.spec-kit/worktrees/<spec>/<T###>/`,
 a snapshot of the main tree: `mark.py land` runs its proofs there and
 merges the tree's delta into the main tree — working tree only, the
-index untouched. A delta the main tree will not take clean is refused
+index untouched. It refuses while the main tree holds an uncommitted
+change made there since the cut that this spec's landings did not
+merge — work its proofs never ran on. A delta the main tree will not
+take clean is refused
 with the conflicting paths named: the task stays claimed and its
 worktree stays until you settle the tree by hand and land again, or
 `release` — which discards the worktree with the work. The payload's

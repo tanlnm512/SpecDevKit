@@ -9,10 +9,13 @@ wave any task whose Touches: overlap a live claim of another spec.
     printed `deferred: T### (shares <path> with <spec>/T###)`; the rest
     of the wave is claimed, and once that task lands the same claim
     succeeds;
-  - a stale row — its task no longer (in-progress) — is swept and defers
-    nothing;
+  - a stale row — its task no longer claimed and in no fix round — is
+    swept and defers nothing;
   - a task naming no files defers against another spec's open task that
     names none;
+  - a failed task keeps its files through its fix round and at the cap
+    — its half-done edits sit in the tree — until it lands or is
+    dropped;
   - land, release, drop and tick remove the spec's row;
   - a held registry lock exits 5, a damaged one exits 1 naming the file,
     and neither writes anything;
@@ -197,6 +200,43 @@ class ClaimRegistryTests(unittest.TestCase):
                     encoding="utf-8").splitlines()]
         self.assertEqual([(row["event"], row["task"], row["run"])
                           for row in rows], [("claim", "T001", "r-bbbb")])
+
+    def test_a_failed_task_keeps_its_files_until_it_leaves(self):
+        a, b = two_specs(self._tmp)
+        self.assertEqual(self.claim(a, "r-aaaa").returncode, 0)
+        digest = "E   AssertionError: shout('hi') == 'hi'"
+        evidence = write(self._tmp / "ev.txt",
+                         f"$ pytest -k shout\n{digest}\n")
+        r = run(MARK, "fail", a, "T001", "--evidence", str(evidence),
+                "--digest", digest, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("(fix 1/5)", (a / "task.md").read_text(encoding="utf-8"))
+        w = wave(b, "T001")
+
+        def beta_claims() -> subprocess.CompletedProcess:
+            return run(MARK, "claim", b, "--wave", w, "--run-id", "r-bbbb",
+                       tel=self.tel)
+
+        r = beta_claims()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("deferred: T001 (shares src/greet.py with alpha/T001)",
+                      r.stdout)
+        self.assertIn("nothing claimed", r.stdout)
+        self.assertEqual(sorted(self.rows()), ["alpha/T001"])
+
+        # the cap holds its files while the user adjudicates
+        holder = a / "task.md"
+        write(holder, holder.read_text(encoding="utf-8").replace(
+            "(fix 1/5)", "(fix 5/5)"))
+        self.assertEqual(specstate.claims_held(b),
+                         {"alpha/T001": ["src/greet.py"]})
+
+        r = run(MARK, "drop", a, "T001", "--decision", "D-001", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = beta_claims()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("claimed 1: T001", r.stdout)
+        self.assertNotIn("deferred", r.stdout)
 
     def test_the_rest_of_the_wave_is_claimed_without_the_task(self):
         a, b = two_specs(self._tmp, second=DISJOINT_TASKS)
@@ -457,11 +497,11 @@ class ClaimRegistryTests(unittest.TestCase):
 
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
-            rc = graph._headless_execute_wave(
+            rc, reason = graph._headless_execute_wave(
                 b, [graph.WrittenPayload(payloads[0], "implementer",
                                          "execute", "sonnet")],
                 f"{sys.executable} {runner}", 1, "r-head")
-        self.assertIsNone(rc)
+        self.assertEqual((rc, reason), (None, None))
         self.assertFalse(ran.exists())
         self.assertNotIn("(in-progress)", (b / "task.md").read_text(
             encoding="utf-8"))

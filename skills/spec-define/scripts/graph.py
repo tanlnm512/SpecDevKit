@@ -121,7 +121,9 @@ Modes:
                  gates are never auto-satisfied and this loop mutates no
                  doc state of its own EXCEPT through mark.py, the single
                  marker writer (the headless execute wave: mark.py
-                 claims, the runner runs, mark.py lands — spec-build
+                 claims, the runner runs, mark.py lands — an open fix
+                 round closing with a resolution that cites its digest
+                 file — spec-build
                  D-041; where this package ships no mark.py a custom
                  runner is refused with exit 2 before any invocation,
                  spec-build D-038); run the mechanical verify node
@@ -190,7 +192,10 @@ Modes:
                  that holds work as it is (a fix round continues there),
                  and removes the worktrees of tasks no longer open.
                  mark.py land runs the proofs in the worktree and merges
-                 its delta into the main tree, working tree only;
+                 its delta into the main tree, working tree only, and
+                 refuses while the main tree holds an uncommitted change
+                 made there since the cut that this spec's landings did
+                 not merge — work those proofs never ran on;
                  mark.py release and drop discard it. Outside a git
                  repository
                  the flag refuses with exit 2, nothing written; --dry-run
@@ -209,6 +214,12 @@ Modes:
                  before the wave, claiming nothing; `mark.py claim`
                  takes the same two flags and refuses on the same
                  line, so the budget holds however the run is driven.
+                 The budget is a ceiling: a wave whose implementer
+                 payloads would take a spawn budget past its limit
+                 parks the same way before it is written — `<what>
+                 would use <n> of <n>`, then the wave's need, what
+                 remains and the shortfall — and the claim refuses that
+                 wave whole; minutes are never foreseen or cut.
                  Tokens are not budgeted: no harness reports them to
                  the kit.
 
@@ -2253,19 +2264,25 @@ def _headless_execute_wave(spec_dir: Path, written: list[WrittenPayload],
                            run_id: str | None,
                            harness: str = specstate.UNKNOWN_HARNESS,
                            budget_spawns: int = specstate.BUDGET_SPAWNS,
-                           budget_minutes: int = specstate.BUDGET_MINUTES) -> int | None:
+                           budget_minutes: int = specstate.BUDGET_MINUTES
+                           ) -> tuple[int | None, str | None]:
     """One headless execute wave (spec-build D-041): mark.py claims the
     wave, the runner runs the payloads (batched --parallel at a time —
     schedule_wave already made the wave file-disjoint), then mark.py
-    lands each task whose digest reports implemented. Returns None to
-    continue the loop (every task landed), or an exit code to stop:
-    RUNNER_FAILED_EXIT when the claim or a runner fails — a claim that
-    refuses on a spent run budget (spec-build D-059) among them, never
-    a deferred wave, which is exit 0 — 0 with AWAITING ORCHESTRATOR
-    when any task is left claimed (blocked digest, no digest, red
-    proofs) — fix rounds and adjudication stay with the orchestrator.
-    The run's two budgets ride the claim command, so the claim counts
-    against what the loop counted."""
+    lands each task whose digest reports implemented — an open fix
+    round closing with a resolution that cites its digest file
+    (`--resolution-from-digest`), since nobody is there to write one.
+    Returns the loop's (exit code, stop reason), or (None, None) to go
+    on — every task landed, or the claim took nothing because another
+    spec's claim held the whole wave off. RUNNER_FAILED_EXIT,
+    `runner_failed`: a runner failed. 0, `run_budget`: the claim
+    refused on a run budget, spent or one the wave would spend past —
+    the stop the loop would have parked on before the wave, its lines
+    the claim's own, never a runner failure. 0, `tasks_held`: a task
+    is left claimed (blocked digest, no digest, red proofs) — fix
+    rounds and adjudication stay with the orchestrator. The run's two
+    budgets ride the claim command, so the claim counts against what
+    the loop counted."""
     mark = SKILL_DIR / "scripts" / "mark.py"
     wave_dir = written[0].path.parent
     ids = sorted({payload.path.stem.replace("implementer-", "")
@@ -2283,10 +2300,14 @@ def _headless_execute_wave(spec_dir: Path, written: list[WrittenPayload],
     sys.stdout.write(r.stdout)
     sys.stderr.write(r.stderr)
     if r.returncode != 0:
+        if specstate.BUDGET_STOP in r.stdout:
+            print("stopping: the wave's claim refused on the run budget — "
+                  "nothing was claimed; the stop's lines are above")
+            return 0, "run_budget"
         print(f"stopping: the wave's claim was refused (exit "
               f"{r.returncode}) — settle the tasks mark.py named, then "
               "re-run; no later wave starts")
-        return RUNNER_FAILED_EXIT
+        return RUNNER_FAILED_EXIT, "runner_failed"
     # a task another spec's claim held off was dropped by the claim
     # (mark.py prints it deferred): only what the claim took may run
     m = re.search(r"^claimed \d+: (.*)$", r.stdout, re.M)
@@ -2295,7 +2316,7 @@ def _headless_execute_wave(spec_dir: Path, written: list[WrittenPayload],
         written = [payload for payload in written if payload.node != "execute"
                    or payload.path.stem.replace("implementer-", "") in ids]
     if not ids or "nothing claimed" in r.stdout:
-        return None
+        return None, None
     this_run = run_id
     m = re.search(r"run id: (r-\S+)", r.stdout)
     if m:
@@ -2324,12 +2345,13 @@ def _headless_execute_wave(spec_dir: Path, written: list[WrittenPayload],
               "wave's tasks stay CLAIMED; settle them "
               "(mark.py land on a green digest, or mark.py release), "
               "then re-run. No later wave starts.")
-        return RUNNER_FAILED_EXIT
+        return RUNNER_FAILED_EXIT, "runner_failed"
     print(f"   headless: landing {len(ids)} task(s)")
     held: list[str] = []
     for tid in ids:
         r = subprocess.run(
-            [sys.executable, str(mark), "land", str(spec_dir), tid],
+            [sys.executable, str(mark), "land", str(spec_dir), tid,
+             "--resolution-from-digest"],
             capture_output=True, text=True)
         sys.stdout.write(r.stdout)
         if r.returncode != 0:
@@ -2348,8 +2370,8 @@ def _headless_execute_wave(spec_dir: Path, written: list[WrittenPayload],
               "deviation names its route (D-043): scope: → widen "
               "Touches under the D-### and re-emit; spec-defect: → "
               "/spec-design — neither opens a fix round")
-        return 0
-    return None
+        return 0, "tasks_held"
+    return None, None
 
 
 def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
@@ -2400,7 +2422,9 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
     wave that would claim, the loop counts the spawns over this run
     and over the spec's whole ledger and the minutes over this run
     alone, and a spent one parks AWAITING HUMAN before the wave, exit
-    0, the `run_end` row saying `run_budget`. A digest the sweep
+    0, the `run_end` row saying `run_budget` — and so does a wave
+    whose implementer payloads would take a spawn budget past its
+    limit. A digest the sweep
     refuses holds its node; the loop stops before the wave after it,
     exit 0, the `run_end` row saying `digest_refused`. A wave holding
     the fix round that runs a model step needs a template with
@@ -2488,8 +2512,11 @@ def _run_loop(spec_dir: Path, repo_override: str | None, runner: str,
                     wave=waves_done + 1)
             return 0, "held", "execute"
         if any(item["node"] == "execute" for item in payloads):
+            needed = sum(item["node"] == "execute" for item in payloads)
             stop = specstate.budget_stop(spec_dir, run_id, budget_spawns,
-                                         budget_minutes)
+                                         budget_minutes) \
+                or specstate.budget_overrun(spec_dir, run_id,
+                                            budget_spawns, needed)
             if stop:
                 print("\n".join(stop))
                 return 0, "run_budget", None
@@ -2535,11 +2562,12 @@ def _run_loop(spec_dir: Path, repo_override: str | None, runner: str,
                       "land tasks (spec-build § Task markers) — use the "
                       "print runner and spawn them yourself")
                 return EXECUTE_RUNNER_REFUSED_EXIT, "execute_refused", None
-            rc = _headless_execute_wave(spec_dir, written, runner,
-                                        parallel, run_id, harness,
-                                        budget_spawns, budget_minutes)
+            rc, reason = _headless_execute_wave(spec_dir, written, runner,
+                                                parallel, run_id, harness,
+                                                budget_spawns,
+                                                budget_minutes)
             if rc is not None:
-                return rc, ("tasks_held" if rc == 0 else "runner_failed"), None
+                return rc, reason, None
             waves_done += 1
             if max_waves is not None and waves_done >= max_waves:
                 print(f"stopping: --max-waves {max_waves} bound reached "
