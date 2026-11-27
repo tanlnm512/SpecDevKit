@@ -2,6 +2,7 @@
 
 ADRs are append-only. The split reused four numbers, so a bare
 `D-002`, `D-003`, `D-005`, or `D-006` is ambiguous — cite the file.
+`D-077` was never recorded — a gap in the numbering, not a missing file.
 
 | ID | File | Era |
 |----|------|-----|

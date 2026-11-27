@@ -7,8 +7,8 @@ description: >-
   errors, broken edge cases, wrong or missing error handling, concurrency
   hazards, broken contracts between caller and callee. Read-only: findings are
   the deliverable; never edits, never re-runs the repo's test suites (the
-  mechanical gate owns those). Spawn from the spec-review skill, or
-  directly for a correctness-only pass.
+  mechanical gate owns those). Spawn from the spec-review skill — you
+  hold no shell, so it hands you the diff as a file.
 model: inherit
 tools: Read, Grep, Glob
 disallowedTools:

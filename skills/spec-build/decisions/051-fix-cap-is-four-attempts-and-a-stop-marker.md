@@ -1,4 +1,4 @@
-# D-051: the fix cap is four attempts and a stop marker — and round 4's payload carries its model step
+# D-051: four fix rounds spawn, the fifth failure stops — and round 4's payload carries its model step
 
 Two texts stated the fix cap and neither matched the engine. The
 developer's budget said "Fix rounds: at most 5 per task" and SKILL.md's

@@ -116,7 +116,7 @@ python3 <skill_dir>/scripts/graph.py specs/<name> --run --span shape
 ```
 
 Pass `--harness <your harness name>` with `--run` and `--emit-spawns`:
-the spec's run ledger (`specs/<name>/runs/ledger.jsonl`, D-075) records
+the spec's run ledger (`specs/<name>/runs/ledger.jsonl`) records
 it beside every payload it writes, and it survives archive.
 
 The frontier is the only scheduler. Loop: run → spawn the printed
@@ -221,7 +221,7 @@ constitution step's `constitution.md` by `--repair constitution`):
    their artifact to disk and return only a digest.
 3. Validate every returned digest against its schema before reading
    it (protocol/shared-protocol.md) — a malformed one goes back to the
-   same agent. Every payload opens with the `tools:` ask (D-076): a
+   same agent. Every payload opens with the `tools:` ask: a
    reply or digest file whose report lacks a tool its role requires —
    a file writer, Read for the auditor — is a failed spawn, refused
    and never a fix round; spawn again on a type or harness that holds

@@ -9,7 +9,8 @@ description: >-
   secrets and token handling, unsafe deserialization, permission changes,
   destructive operations. Read-only: findings are the deliverable; never
   edits, never re-runs the repo's test suites. Spawn from the
-  spec-review skill, or directly for a security-only pass.
+  spec-review skill — you hold no shell, so it hands you the diff as a
+  file.
 model: inherit
 tools: Read, Grep, Glob
 disallowedTools:

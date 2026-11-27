@@ -134,7 +134,7 @@ writes payloads for the runnable tasks, in task-id order, whose
 `Touches:` files overlap no wave-mate's and no `(in-progress)`
 task's, and prints `deferred: T### (shares <path> with T###)` for
 the rest. A task with no parseable `Touches:` runs alone. Claims are
-checked against every spec's live claims in the repo (D-057): a task
+checked against every spec's live claims in the repo: a task
 whose `Touches:` overlap a task another spec still holds
 `(in-progress)` is deferred with `shares <path> with <spec>/T###` —
 printed by the emit, and enforced again by `claim`, which claims the
@@ -145,7 +145,7 @@ rest of the wave and drops that task. Per round:
    or refuses a wave the frontier has outgrown.
 2. Spawn exactly the emitted payloads in ONE message — one developer
    each; deferred and chained tasks come up on a later emit.
-   **`Mode: fast`** (tiny only, D-066): spawn nothing — implement
+   **`Mode: fast`** (tiny only): spawn nothing — implement
    each payload yourself in task-id order, following its developer
    brief (digest file included); steps 3–4 are unchanged.
 3. Collect digests. Validate each against its schema before reading
@@ -153,7 +153,7 @@ rest of the wave and drops that task. Per round:
    goes back to the same developer. A reported deviation → append the
    D-### to tech-spec.md immediately (append-only; reconcile sibling
    docs quoting the old value in the same pass). A TYPED deviation names
-   its route (D-043): `scope:<paths>` → widen that task's `Touches:`
+   its route: `scope:<paths>` → widen that task's `Touches:`
    under the D-### and re-emit it (no fix round — the work was never
    wrong); `spec-defect:<why>` → `mark.py release` and route to
    `/spec-design` (no fix round, no stronger model — a retry of a
@@ -214,10 +214,16 @@ the evidence file, so:
    evidence either way. The developer may append what it tried to
    the same note: its one exception to "never touch specs/".
 
-Rounds 1–3 run on the brief's model. Round 3 failing suspects the
+Four rounds spawn, the fifth failure stops. Rounds 1–3 run on the
+brief's model. A task failing on the same command in consecutive
+rounds is the earlier signal — its line prints `[watch: same failing
+command …]` from the second one, and the third prints
+`same-signature:` from `mark.py fail` — and the same-signature rule
+applies from there, not only at the cap: read it then in
+`contracts/execution.md` § Fix rounds. Round 3 failing suspects the
 plan: repair the area's tech/tasks docs through `/spec-design` before
-round 4 — the last attempt — which goes to a fresh developer one model
-step up; its payload's `Model:` line says so.
+round 4 — the last round that spawns — which goes to a fresh developer
+one model step up; its payload's `Model:` line says so.
 Honor that line by harness: (i) a spawn-time model override on the
 registered `spec-developer` type where the harness's spawn call allows
 it; (ii) otherwise a general-purpose agent on the stronger model,

@@ -97,7 +97,8 @@ execute — D-037):
 3. **Recompute and repeat** until the graph completes (archive).
 
 Loop edges are first-class: the clarify loop (open `NEEDS CLARIFICATION`
-markers hold the spec), fix rounds capped at 4 per task (`(fix n/5)` open in
+markers hold the spec), fix rounds capped at 4 per task — four rounds
+spawn, the fifth failure stops (`(fix n/5)` open in
 task.md, `(fixed n/5)` once the round lands, `(fix 5/5)` the stop marker), re-briefs on gap digests, and converge (Code state staleness →
 delta re-ground → `audit.py converge` → appended tasks re-enter execute).
 

@@ -9,7 +9,8 @@ description: >-
   test covering it, tests that cannot fail. Never pure style or formatting
   (the repo's checks own those). Read-only: findings are the deliverable;
   never edits, never re-runs the repo's test suites. Spawn from the
-  spec-review skill, or directly for a quality-only pass.
+  spec-review skill — you hold no shell, so it hands you the diff as a
+  file.
 model: inherit
 tools: Read, Grep, Glob
 disallowedTools:
