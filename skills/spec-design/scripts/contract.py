@@ -45,23 +45,28 @@ NODE_TABLE = [
     ("tech", "agent",
      "spec done AND research resolved (either form)",
      "tech-spec.md filled AND `check.py <spec-dir> --code-state-only` "
-     "exits 0"),
+     "exits 0 — counts only while its spawn's digest on file is not "
+     "refused"),
     ("plan", "agent",
      "spec + tech done",
-     "plan.md exists, non-empty, filled"),
+     "plan.md exists, non-empty, filled — counts only while its spawn's "
+     "digest on file is not refused"),
     ("qa", "agent",
      "spec done (reads spec.md only — blind to tech/plan, parallel-safe)",
-     "test.md exists, non-empty, filled"),
+     "test.md exists, non-empty, filled — counts only while its spawn's "
+     "digest on file is not refused"),
     ("tasks", "agent",
      "plan + tech + qa done",
-     "task.md exists, non-empty, filled"),
+     "task.md exists, non-empty, filled — counts only while its spawn's "
+     "digest on file is not refused"),
     ("verify", "mechanical",
      "tech, plan, qa, tasks all done",
      "`check.py <spec-dir>` exits 0"),
     ("approve", "human",
      "verify done (HUMAN gate)",
-     "spec.md Status: approved (or later) AND the approval freeze "
-     "recorded (`approvals/approval.md`, at every tier)"),
+     "spec.md Status: approved (or later) AND its signed approval "
+     "record verifying (`approvals/approval.md` + `approval.md.sig`, at "
+     "every tier)"),
     ("execute", "mechanical",
      "approved",
      "every task entry implemented (no fix round open), ticked [x], or "

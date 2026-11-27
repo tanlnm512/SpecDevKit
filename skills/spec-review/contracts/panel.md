@@ -191,7 +191,14 @@ expected answer for a clean target.
 | Fresh-eyes fix reviewer | never | NEW defects only | no | no |
 
 Confirmation is intent-blind on purpose: the confirmer verifies from
-the code alone, with no access to the stated-intent channel.
+the code alone, with no access to the stated-intent channel. The
+confirmer and the fix verifier are briefs —
+`agents/spec-review-confirmer.md` and
+`agents/spec-review-verifier.md` — whose bodies are their stages'
+system prompts (D-027). No reader holds a shell (D-028): the oracle
+writes the diff, the change to one path and the file lists into the
+run folder, and a reader ask names those files — the fixer is the
+panel's one author.
 
 The fixer is guarded per round: HEAD and the stash-list length are
 snapshotted before its turn (`fix-snapshot`) and re-checked after it

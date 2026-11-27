@@ -131,6 +131,17 @@ orchestrator does the same work inline, under the same brief.
 
 ## Digests and what the orchestrator checks
 
+Every returned digest is validated against its mode's grammar
+before anything is read from it — `python3
+<skill_dir>/scripts/digests.py validate integrator <pr-text |
+threads> --require-tools`: exit 0 valid, exit 1 with the
+problems, exit 3 when the reply's first line, its `tools:` report,
+lacks Read (the grammar ignores that line). A malformed digest is
+a fix-and-run-again refusal: hand the problems back to the same
+mode and re-spawn it. Exit 3 is a failed spawn: no fix round —
+spawn again on a type or harness that holds Read. No body,
+classification, or draft is read from either.
+
 **pr-text** — `title:`, `body:`, `changed:`, `flags:`. Before the
 preview, the orchestrator checks the returned body against the
 script's: every requirement id, task id, TC id, sha, command, file

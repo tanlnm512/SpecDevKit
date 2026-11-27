@@ -22,9 +22,8 @@ conditions are deterministic one-liners (land's proofs gate). Every CLI
 run gets its own telemetry dir.
 """
 
-import contextlib
 import datetime
-import io
+import hashlib
 import json
 import os
 import re
@@ -44,12 +43,16 @@ from test_execute_gates import (  # noqa: E402
     TINY_SPEC,
     copy_fixture,
     edit_tasks,
+    facts,
+    freeze,
     hand_docset,
     record_approval,
+    run_graph,
     set_status,
     write,
 )
-import freeze  # noqa: E402
+import _approval  # noqa: E402
+import digests  # noqa: E402
 import specstate  # noqa: E402
 
 SKILL = Path(__file__).resolve().parents[1]
@@ -57,6 +60,9 @@ SCRIPTS = SKILL / "scripts"
 MARK = SCRIPTS / "mark.py"
 
 EM = "\u2014"
+# a developer digest file opens with its capability handshake report
+TOOLS = "tools: Read, Write, Bash\n"
+REPORTED = "Bash, Read, Write"
 
 # The fixture entries' FULL first lines (T1/T2 from test_execute_gates are
 # prefixes — a prefix replace would glue a stamp mid-line)
@@ -280,11 +286,41 @@ class TransitionTableTests(unittest.TestCase):
         self.assertIn("verbatim", r.stderr)
         self.assertNotIn("(fix", entry_text(self.spec, "T001"))
 
+    def frontier_state(self, spec_dir: Path, task_id: str) -> str:
+        """The engine's view of one task — what decides whether the next
+        emit re-spawns it."""
+        import graph  # the replica closure shares the master's behavior
+        tasks = graph.task_frontier(specstate.task_entries(
+            (spec_dir / "task.md").read_text(encoding="utf-8")))
+        return next(t["state"] for t in tasks if t["id"] == task_id)
+
     def test_table_fail_refuses_past_the_cap(self):
-        edits = [(T1, T1.replace("[P]", "[P] (fix 5/5)")
-                  + f"\n  - fix 5 {EM} d5")]
-        edit_tasks(self.spec, *edits)
+        # the engine's arithmetic end to end: each of the first four
+        # failures leaves a round the engine re-spawns, the fifth writes
+        # the stop marker, and nothing above it is a round
+        edit_tasks(self.spec, (T1, T1.replace("[P]", "[P] (in-progress)")))
         evidence = self._tmp / "ev.txt"
+        after_fail = []
+        for n in range(1, 6):
+            write(evidence, f"$ pytest -k multiply\nE   failure {n}\n")
+            r = run_mark(self.spec, "fail", "T001", "--evidence", str(evidence),
+                         "--digest", f"E   failure {n}", tel=self.tel)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            after_fail.append(self.frontier_state(self.spec, "T001"))
+            self.assertIn(f"(fix {n}/5)",
+                          entry_text(self.spec, "T001").splitlines()[0])
+            if n < 5:
+                # the round's re-spawn: the next wave claims the task
+                claim = run_mark(self.spec, "claim", "--wave",
+                                 str(make_wave(self.spec, "T001")),
+                                 tel=self.tel)
+                self.assertEqual(claim.returncode, 0,
+                                 claim.stdout + claim.stderr)
+        self.assertEqual(after_fail, ["runnable"] * 4 + ["at-fix-cap"])
+        claim = run_mark(self.spec, "claim", "--wave",
+                         str(make_wave(self.spec, "T001")), tel=self.tel)
+        self.assertEqual(claim.returncode, 1, claim.stdout + claim.stderr)
+        self.assertIn("stale wave: T001: at-fix-cap", claim.stdout)
         write(evidence, "E   yet another failure")
         r = run_mark(self.spec, "fail", "T001", "--evidence", str(evidence),
                      "--digest", "E   yet another failure", tel=self.tel)
@@ -294,7 +330,7 @@ class TransitionTableTests(unittest.TestCase):
     def test_table_fail_announces_round_guidance(self):
         for start, n, fragment in (
                 (2, 3, "/spec-design before round 4"),
-                (3, 4, "spawn one tier up"),
+                (3, 4, "spawn one model step up"),
                 (4, 5, "the cap")):
             spec = self.fresh(
                 (T1F, T1F.replace(
@@ -418,7 +454,7 @@ class LandProofGateTests(unittest.TestCase):
         digests = spec / "digests" / "wave-4"
         digests.mkdir(parents=True)
         write(digests / "implementer-T001.md",
-              "digest: task T001 · status implemented · files 2 · "
+              TOOLS + "digest: task T001 · status implemented · files 2 · "
               "commit-line feat(x): T001 shout (FR-001) · deviation none · "
               "note none\n")
         r = run_mark(spec, "land", "T001", tel=self.tel)
@@ -434,7 +470,7 @@ class LandProofGateTests(unittest.TestCase):
         digests = spec / "digests" / "wave-4"
         digests.mkdir(parents=True)
         write(digests / "implementer-T001.md",
-              "digest: task T001 · status blocked: no failure evidence · "
+              TOOLS + "digest: task T001 · status blocked: no failure evidence · "
               "files 0 · commit-line none · deviation none · note none\n")
         r = run_mark(spec, "land", "T001",
                      "--digest", "digest: task T001 · status implemented",
@@ -446,23 +482,27 @@ class LandProofGateTests(unittest.TestCase):
 
     def test_a_typed_deviation_digest_names_its_route(self):
         # D-043: the deviation prefix routes mechanically — scope widens
-        # Touches, spec-defect goes to /spec-design; an untyped value keeps
-        # the free-form ruling
+        # Touches, spec-defect goes to /spec-design; an untyped value is
+        # a malformed digest (D-054), never parsed by half
         def digest_file(spec, deviation):
             digests = spec / "digests" / "wave-4"
             digests.mkdir(parents=True, exist_ok=True)
             write(digests / "implementer-T001.md",
-                  "digest: task T001 · status blocked: cannot finish · "
+                  TOOLS + "digest: task T001 · status blocked: cannot finish · "
                   f"files 0 · commit-line none · deviation {deviation} · "
                   "note none\n")
-        parsed = specstate._parse_digest_line(
+        parsed = digests.parse(
+            "developer", None,
             "digest: task T001 · status blocked: cannot finish · files 0 · "
             "commit-line none · deviation spec-defect: FR-003 contradicts "
             "tech-spec.md § Code state · note none")
         self.assertEqual(parsed["deviation_kind"], "spec-defect")
-        self.assertIsNone(specstate._parse_digest_line(
-            "digest: task T001 · status blocked · deviation needs a "
-            "ruling").get("deviation_kind"))
+        untyped = ("digest: task T001 · status blocked · deviation needs a "
+                   "ruling")
+        self.assertIsNone(digests.parse("developer", None, untyped))
+        self.assertEqual(digests.validate("developer", None, untyped), [
+            "`status` expects `implemented`, `already-satisfied` or "
+            "`blocked:<why>`, got `blocked`", "`files` missing"])
         for deviation, route in (
                 ("scope: repo/calc.py needs repo/eval.py too",
                  "widen the entry's Touches"),
@@ -479,19 +519,69 @@ class LandProofGateTests(unittest.TestCase):
                 self.assertIn("blocked digest", r.stderr)
                 self.assertIn(route, r.stderr)
 
-    def test_a_foreign_tasks_digest_file_is_ignored(self):
-        # the digest line's task field must match — a stem can lie
-        spec = hand_fixture(self._tmp, "foreign")
+    def test_a_malformed_digest_file_refuses_and_no_override_talks_over_it(self):
+        # a digest file is valid, malformed, or absent: one that exists
+        # but fails the schema is refused by name and its problems —
+        # never read as absent, never talked over by --digest (D-054)
+        spec = hand_fixture(self._tmp, "malformed")
         make_wave(spec, "T001")
         run_mark(spec, "claim", "--wave", str(spec / "spawns" / "wave-4"),
                  tel=self.tel)
-        digests = spec / "digests" / "wave-4"
-        digests.mkdir(parents=True)
-        write(digests / "implementer-T001.md",
-              "digest: task T002 · status implemented · files 1\n")
+        path = spec / "digests" / "wave-4" / "implementer-T001.md"
+        path.parent.mkdir(parents=True)
+        write(path, "digest: task T001 · status implemented · files 2 · "
+              "note none\n")
+        for extra in ((), ("--digest", "digest: task T001 · status implemented")):
+            with self.subTest(override=bool(extra)):
+                r = run_mark(spec, "land", "T001", *extra, tel=self.tel)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn(f"refused: malformed digest at {path} — "
+                              "`commit-line` missing — fix and run again: "
+                              "re-spawn the developer with the same payload "
+                              "to rewrite its digest file", r.stderr)
+                self.assertNotIn("override", r.stderr)
+                self.assertIn("(in-progress)", entry_text(spec, "T001"))
+
+        # an empty file and a wrong task are the same refusal
+        write(path, "")
         r = run_mark(spec, "land", "T001", tel=self.tel)
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("none on file", r.stderr)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("malformed digest at", r.stderr)
+        self.assertIn("no `digest:` line", r.stderr)
+        write(path, "digest: task T002 · status implemented · files 1 · "
+              "commit-line none · deviation none · note none\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("names task T002, not T001", r.stderr)
+        self.assertNotIn("none on file", r.stderr)
+        self.assertIn("(in-progress)", entry_text(spec, "T001"))
+
+        # repaired, the same file lands with no override
+        write(path, TOOLS + "digest: task T001 · status implemented · files 1 · "
+              "commit-line feat(x): T001 shout (FR-001) · deviation "
+              "none · note none\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented)", r.stdout)
+
+    def test_the_newest_digest_file_decides_even_when_malformed(self):
+        # a fix-round file in a later wave is the current digest: an
+        # earlier wave's green one never lands over it
+        spec = hand_fixture(self._tmp, "newest")
+        make_wave(spec, "T001")
+        run_mark(spec, "claim", "--wave", str(spec / "spawns" / "wave-4"),
+                 tel=self.tel)
+        earlier = spec / "digests" / "wave-4" / "implementer-T001.md"
+        earlier.parent.mkdir(parents=True)
+        write(earlier, "digest: task T001 · status implemented · files 1 · "
+              "commit-line x · deviation none · note none\n")
+        later = spec / "digests" / "wave-6" / "implementer-T001.md"
+        later.parent.mkdir(parents=True)
+        write(later, "digest: task T001 · status implemented · files 1\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(f"malformed digest at {later}", r.stderr)
+        self.assertIn("(in-progress)", entry_text(spec, "T001"))
 
     def test_an_open_round_needs_a_resolution(self):
         spec = hand_fixture(self._tmp, "round")
@@ -515,6 +605,103 @@ class LandProofGateTests(unittest.TestCase):
         self.assertIn("(fixed 1/5)", block.splitlines()[0])
         self.assertRegex(block, rf"- fixed 1 {EM} guard the empty case "
                          rf"{EM} audit\.py proofs --task T001 green")
+
+    def open_round_two(self, name: str) -> Path:
+        """An approved docset whose T001 is claimed in an open fix
+        round 2, round 1 closed under it."""
+        spec = hand_fixture(self._tmp, name)
+        entry = "- [ ] T001 implement the shout helper in the module (FR-001)"
+        edit_tasks(spec, (entry, entry.replace(
+            "T001 ", f"T001 (fix 2/5) ")
+            + f"\n  - fix 1 {EM} E   AssertionError: shout('hi') == 'hi'"
+            + f"\n  - fixed 1 {EM} guard the empty case {EM} audit.py "
+            "proofs --task T001 green"
+            + f"\n  - fix 2 {EM} E   TypeError: shout(None) crashed"))
+        make_wave(spec, "T001")
+        r = run_mark(spec, "claim", "--wave",
+                     str(spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return spec
+
+    def test_a_headless_landing_closes_the_round_citing_its_digest(self):
+        spec = self.open_round_two("cited")
+        before = (spec / "task.md").read_bytes()
+        # the --digest override is an attestation, not a file to cite
+        r = run_mark(spec, "land", "T001", "--resolution-from-digest",
+                     "--digest", "digest: task T001 · status implemented",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("refused: round 2 is open and --resolution-from-digest "
+                      "has no digest file to cite", r.stderr)
+        self.assertEqual((spec / "task.md").read_bytes(), before)
+
+        body = (TOOLS + "digest: task T001 · status implemented · files 2 · "
+                "commit-line feat(x): T001 guard (FR-001) · deviation "
+                "none · note none\n")
+        path = spec / "digests" / "wave-4" / "implementer-T001.md"
+        path.parent.mkdir(parents=True)
+        write(path, body)
+        r = run_mark(spec, "land", "T001", "--resolution-from-digest",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented) (round 2 closed)", r.stdout)
+        block = entry_text(spec, "T001")
+        self.assertIn("(implemented) (fixed 2/5)", block.splitlines()[0])
+        # the cited sha12 is the digest's own content, provenance line
+        # stripped — what the landing's ledger row records
+        self.assertIn("provenance:", path.read_text(encoding="utf-8"))
+        cited = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        self.assertEqual(specstate.fix_rounds(block)[1], specstate.FixRound(
+            2, "E   TypeError: shout(None) crashed",
+            f"headless round 2: digest digests/wave-4/implementer-T001.md "
+            f"({cited}) reports implemented",
+            "audit.py proofs --task T001 green", True))
+        rows = [json.loads(line) for line in
+                (spec / "runs" / "ledger.jsonl").read_text(
+                    encoding="utf-8").splitlines()]
+        self.assertEqual([row["digest"] for row in rows
+                          if row["event"] == "land"], [cited])
+        checked = subprocess.run(
+            [sys.executable, str(SCRIPTS / "check.py"), str(spec)],
+            capture_output=True, text=True, timeout=300)
+        self.assertNotIn("fix rounds:", checked.stdout, checked.stdout)
+
+    def test_a_resolution_the_close_line_cannot_hold_is_refused(self):
+        spec = self.open_round_two("dashed")
+        before = (spec / "task.md").read_bytes()
+        for text in (f"guard {EM} the empty case", "guard\nthe empty case"):
+            r = run_mark(spec, "land", "T001", "--resolution", text,
+                         "--digest", "digest: task T001 · status implemented",
+                         tel=self.tel)
+            self.assertEqual(r.returncode, 2, (text, r.stdout, r.stderr))
+            self.assertIn("--resolution may carry no em dash", r.stderr)
+        self.assertEqual((spec / "task.md").read_bytes(), before)
+
+    def test_a_digest_no_request_row_vouches_refuses_the_landing(self):
+        # the sweep vouches a digest only where the ledger records the
+        # request — the wave or claim row of ITS wave and stem. A file
+        # placed at a wave the task was never claimed in carries no
+        # provenance line and lands nothing; the entry stays claimed
+        spec = hand_fixture(self._tmp, "unvouched")
+        make_wave(spec, "T001")
+        claimed = run_mark(spec, "claim", "--wave",
+                           str(spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(claimed.returncode, 0, claimed.stdout + claimed.stderr)
+        path = digest_file(spec, 6, GREEN_DIGEST + "\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(f"refused: unverified digest at {path}", r.stderr)
+        self.assertIn("no ledger row records its digest", r.stderr)
+        self.assertIn("fix and run again", r.stderr)
+        self.assertNotIn("provenance:", path.read_text(encoding="utf-8"))
+        self.assertIn("(in-progress)", entry_text(spec, "T001"))
+        rows = [json.loads(line) for line in
+                (spec / "runs" / "ledger.jsonl").read_text(
+                    encoding="utf-8").splitlines()]
+        self.assertEqual([row["event"] for row in rows],
+                         ["claim", "digest_malformed"])
+        self.assertEqual((rows[-1]["outcome"], rows[-1]["wave"]),
+                         ("unverified", 6))
 
 
 class ClaimWaveTests(unittest.TestCase):
@@ -618,6 +805,40 @@ class LockTests(unittest.TestCase):
         self.assertIn("stale task lock", r.stderr)
         self.assertFalse(lock.exists())
 
+    def test_land_with_a_held_lock_refuses_and_writes_nothing(self):
+        make_wave(self.spec, "T001")
+        claimed = run_mark(self.spec, "claim", "--wave",
+                           str(self.spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(claimed.returncode, 0, claimed.stdout + claimed.stderr)
+        digest = (self.spec / "digests" / "wave-4" / "implementer-T001.md")
+        digest.parent.mkdir(parents=True)
+        write(digest, GREEN_DIGEST + "\n")
+        holder = (
+            "import sys, time\n"
+            f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
+            "import specstate\n"
+            f"with specstate.task_lock({str(self.spec)!r}):\n"
+            "    print('held', flush=True)\n"
+            "    time.sleep(8)\n")
+        hpath = self._tmp / "holder.py"
+        write(hpath, holder)
+        p = subprocess.Popen([sys.executable, str(hpath)],
+                             stdout=subprocess.PIPE, text=True)
+        self.addCleanup(p.wait)
+        try:
+            self.assertEqual(p.stdout.readline().strip(), "held")
+            r = run_mark(self.spec, "land", "T001", tel=self.tel)
+            self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+            self.assertIn("lock busy", r.stderr)
+        finally:
+            p.kill()
+        self.assertIn("(in-progress)", entry_text(self.spec, "T001"))
+        self.assertNotIn("provenance:", digest.read_text(encoding="utf-8"))
+        ledger = json.loads(
+            (self.spec / "runs" / "ledger.jsonl").read_text(
+                encoding="utf-8").splitlines()[-1])
+        self.assertEqual(ledger["event"], "claim")
+
 
 class TickStampTests(unittest.TestCase):
     """tick.py strips exactly the ticked entry's stamp — another claimed
@@ -663,8 +884,7 @@ class TinyTierTests(unittest.TestCase):
         self.spec = self._tmp / "specs" / "tiny"
         self.spec.mkdir(parents=True)
         write(self.spec / "spec.md", TINY_SPEC)
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(freeze.record(self.spec, self._tmp), 0)
+        _approval.approve(self.spec, self._tmp)
 
     def test_a_stamped_claim_keeps_the_freeze_verifiable(self):
         r = run_mark(self.spec, "claim", "--wave",
@@ -768,6 +988,356 @@ class SameSignatureTests(unittest.TestCase):
         self.assertIn("same failing command has failed 3 rounds "
                       "($ pytest -k mul)", cap["reason"])
         self.assertIn("/spec-design", cap["reason"])
+
+
+GREEN_DIGEST = (TOOLS + "digest: task T001 · status implemented · files 2 · "
+                "commit-line feat(x): T001 shout (FR-001) · deviation none · "
+                "note none")
+BROKEN_DIGEST = ("digest: task T001 · status implemented · files 2 · "
+                 "note none\n")
+TS = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00"
+LINE = ("provenance: run {run} · role implementer · lens {lens} · "
+        "model {model} · harness {harness} · payload {payload} · "
+        "input {input} · recorded {ts} · tools-reported " + REPORTED + "\n")
+UNJOINED = dict(run="none", lens="none", model="none", payload="none",
+                input="none", harness="unknown")
+REQUEST = dict(run="r-ab12", lens="build", model="sonnet", harness="zcode",
+               payload="3fa9c21d4e5b", input="9b8c7d6e5f4a")
+
+
+def sha12(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def chain_hash(row: dict) -> str:
+    """The hash a ledger row chains from, computed here from the
+    definition — sha256-12 of the row's sorted-key JSON without the
+    chain fields — never with the code under test."""
+    payload = {k: row[k] for k in sorted(row) if k not in ("prev", "chain")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True)
+                          .encode("utf-8")).hexdigest()[:12]
+
+
+def digest_file(spec: Path, wave: int, text: str) -> Path:
+    path = spec / "digests" / f"wave-{wave}" / "implementer-T001.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write(path, text)
+    return path
+
+
+class RunLedgerTests(unittest.TestCase):
+    """The run ledger (D-055): specs/<name>/runs/ledger.jsonl takes one
+    row per orchestrator event — every verb, inside the lock hold that
+    wrote the marker — and is never status. Before land and fail read a
+    digest, the provenance sweep gives every valid digest file the one
+    line a ledger row vouches for, built from the wave row that recorded
+    the payload; a malformed file, or one whose line no row vouches for,
+    is left as it is and recorded as `digest_malformed`."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="mark-ledger-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+
+    def claim(self, spec: Path, *tids: str, harness: str = "") -> Path:
+        wave = make_wave(spec, *tids)
+        extra = ("--harness", harness) if harness else ()
+        r = run_mark(spec, "claim", "--wave", str(wave), "--run-id",
+                     "r-ab12", *extra, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return wave
+
+    def rows(self, spec: Path) -> list[dict]:
+        return specstate.ledger_rows(spec)
+
+    def test_claim_appends_one_row_per_task_with_the_requests_facts(self):
+        spec = copy_fixture(self._tmp, "claim")
+        set_status(spec, "approved")
+        self.assertFalse((spec / "runs").exists())
+        self.claim(spec, "T001", "T002", harness="claude-code")
+        rows = self.rows(spec)
+        self.assertEqual([row["event"] for row in rows], ["claim", "claim"])
+        for row, tid in zip(rows, ("T001", "T002")):
+            self.assertRegex(row["ts"], TS)
+            self.assertEqual(facts(row), {
+                "skill": "spec-build", "event": "claim", "run": "r-ab12",
+                "wave": 4, "task": tid, "role": "implementer",
+                "lens": "build", "stem": f"implementer-{tid}",
+                "payload": sha12("payload\n"), "model": "sonnet",
+                "harness": "claude-code"})
+        self.assertEqual(list(rows[0]), [
+            "ts", "skill", "event", "run", "wave", "task", "role", "lens",
+            "stem", "payload", "model", "harness", "prev"])
+
+        # ungiven, the harness is `unknown`; the flag is claim's alone
+        spec = hand_fixture(self._tmp, "unknown")
+        self.claim(spec, "T001")
+        self.assertEqual(self.rows(spec)[0]["harness"], "unknown")
+        r = run_mark(spec, "land", "T001", "--harness", "zcode",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--harness is claim's flag", r.stderr)
+
+    def test_land_appends_its_row_beside_the_digest_row_the_sweep_wrote(self):
+        # the sha is the digest's own, taken before the line was appended
+        for body, hashed in ((GREEN_DIGEST, GREEN_DIGEST + "\n"),
+                             (GREEN_DIGEST + "\n", GREEN_DIGEST + "\n")):
+            with self.subTest(trailing_newline=body.endswith("\n")):
+                spec = hand_fixture(self._tmp, f"land{len(body)}")
+                self.claim(spec, "T001")
+                path = digest_file(spec, 4, body)
+                r = run_mark(spec, "land", "T001", tel=self.tel)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                rows = self.rows(spec)
+                self.assertEqual([row["event"] for row in rows],
+                                 ["claim", "digest", "land"])
+                self.assertEqual(facts(rows[1]), {
+                    "skill": "spec-build", "event": "digest", "wave": 4,
+                    "task": "T001", "role": "implementer",
+                    "stem": "implementer-T001", "harness": "unknown",
+                    "digest": sha12(hashed), "outcome": "implemented",
+                    "tools-reported": REPORTED})
+                self.assertEqual(facts(rows[2]), {
+                    "skill": "spec-build", "event": "land", "run": "r-ab12",
+                    "wave": 4, "task": "T001", "role": "implementer",
+                    "stem": "implementer-T001", "digest": sha12(hashed),
+                    "outcome": "implemented"})
+                self.assertEqual(path.read_text(encoding="utf-8"), (
+                    hashed + LINE.format(ts=rows[1]["ts"], **UNJOINED)))
+
+    def test_land_refuses_a_digest_whose_report_lacks_a_required_tool(self):
+        # D-056: the file must report a file writer and Bash. Without
+        # them it is a failed spawn — the task stays claimed, no round
+        # opens, --digest does not talk over it, one content is recorded
+        # once — and a report that covers them lands with no marker
+        green = GREEN_DIGEST.split("\n", 1)[1]
+        cases = (("tools: Read, Write\n", "Read, Write", "Bash"),
+                 ("tools: Read, Bash\n", "Bash, Read", "Write or Edit"),
+                 ("", None, "Write or Edit, Bash"))
+        for n, (report, names, required) in enumerate(cases):
+            for extra in ((), ("--digest",
+                              "digest: task T001 · status implemented")):
+                with self.subTest(report=report, override=bool(extra)):
+                    spec = hand_fixture(self._tmp, f"handshake{n}{len(extra)}")
+                    self.claim(spec, "T001")
+                    path = digest_file(spec, 4, report + green)
+                    refusal = (
+                        "refused: capability handshake failed: developer "
+                        f"reported tools `{names or 'none'}` — the developer "
+                        f"role requires `{required}` — spawn again on a type "
+                        f"or harness that holds `{required}`; a failed spawn, "
+                        f"not a fix round — the digest file at {path} lands "
+                        "nothing: `mark.py release` T001 --reason \"blocked: "
+                        "capability handshake failed\", then re-emit and "
+                        "spawn it again\n")
+                    for _ in range(2):
+                        r = run_mark(spec, "land", "T001", *extra, tel=self.tel)
+                        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                        self.assertIn(refusal, r.stderr)
+                    block = entry_text(spec, "T001")
+                    self.assertIn("(in-progress)", block)
+                    self.assertNotIn("(implemented)", block)
+                    self.assertNotIn("(fix ", block)
+                    rows = self.rows(spec)
+                    self.assertEqual([row["event"] for row in rows],
+                                     ["claim", "digest", "capability_missing"])
+                    row = rows[-1]
+                    wanted = {
+                        "skill": "spec-build", "event": "capability_missing",
+                        "run": "r-ab12", "wave": 4, "task": "T001",
+                        "role": "implementer", "stem": "implementer-T001",
+                        "digest": sha12(report + green + "\n"),
+                        "outcome": required}
+                    if names:
+                        wanted["tools-reported"] = names
+                    self.assertEqual(facts(row), wanted)
+                    self.assertEqual(rows[1].get("tools-reported"), names)
+
+        # a report that covers both requirements lands, whatever its case
+        # and whichever writer it names — with no fix-round marker
+        spec = hand_fixture(self._tmp, "handshake-green")
+        self.claim(spec, "T001")
+        digest_file(spec, 4, "tools: read, bash, edit, grep\n" + green)
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented)", r.stdout)
+        self.assertNotIn("(fix ", entry_text(spec, "T001"))
+        self.assertEqual([row["event"] for row in self.rows(spec)],
+                         ["claim", "digest", "land"])
+
+    def test_the_line_is_built_from_the_wave_row_that_recorded_the_payload(
+            self):
+        spec = hand_fixture(self._tmp, "joined")
+        specstate.ledger_event(spec, specstate.ledger_row(
+            "spec-build", "wave", wave=4, node="execute", role="implementer",
+            stem="implementer-T001", **REQUEST))
+        self.claim(spec, "T001")
+        path = digest_file(spec, 4, GREEN_DIGEST + "\n")
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        rows = self.rows(spec)
+        self.assertEqual([row["event"] for row in rows],
+                         ["wave", "claim", "digest", "land"])
+        self.assertEqual(facts(rows[2]), dict(
+            REQUEST, skill="spec-build", event="digest", wave=4, task="T001",
+            role="implementer", stem="implementer-T001",
+            digest=sha12(GREEN_DIGEST + "\n"), outcome="implemented",
+            **{"tools-reported": REPORTED}))
+        self.assertEqual(path.read_text(encoding="utf-8"), (
+            GREEN_DIGEST + "\n"
+            + LINE.format(ts=rows[2]["ts"], **REQUEST)))
+
+        # swept once: a later report appends neither a line nor a row
+        run_graph(spec, tel=self.tel)
+        self.assertEqual(path.read_text(encoding="utf-8").count("provenance:"),
+                         1)
+        self.assertEqual(len(self.rows(spec)), 4)
+
+    def test_the_ledger_is_append_only_under_repeated_verbs(self):
+        spec = hand_fixture(self._tmp, "repeat")
+        so_far = b""
+        for _ in range(2):
+            self.claim(spec, "T001")
+            r = run_mark(spec, "release", "T001", "--reason",
+                         "orphan: dead session", tel=self.tel)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            raw = specstate.ledger_path(spec).read_bytes()
+            self.assertTrue(raw.startswith(so_far), "an earlier row changed")
+            so_far = raw
+        rows = self.rows(spec)
+        self.assertEqual([row["event"] for row in rows],
+                         ["claim", "release", "claim", "release"])
+        self.assertEqual(facts(rows[1]), {
+            "skill": "spec-build", "event": "release", "run": "r-ab12",
+            "task": "T001", "role": "implementer",
+            "stem": "implementer-T001", "outcome": "orphan"})
+        self.assertEqual(facts(rows[3]), facts(rows[1]))
+
+    def test_a_broken_ledger_chain_refuses_the_verbs_nothing_written(self):
+        # each row chains to the row_hash of the line before it; a row
+        # appended by hand breaks the chain, and no verb writes a marker
+        # onto a ledger whose tail no longer chains
+        spec = hand_fixture(self._tmp, "chained")
+        make_wave(spec, "T001")
+        legacy = {"ts": "2026-11-13T10:00:00+00:00", "skill": "spec-build",
+                  "event": "claim", "run": "r-old", "wave": 1, "task": "T000",
+                  "stem": "implementer-T000"}
+        chained = {"ts": "2026-11-13T10:01:00+00:00", "skill": "spec-build",
+                   "event": "claim", "run": "r-new", "wave": 2, "task": "T000",
+                   "stem": "implementer-T000",
+                   "prev": chain_hash(legacy)}
+        ledger = specstate.ledger_path(spec)
+        ledger.parent.mkdir(parents=True)
+        write(ledger, json.dumps(legacy) + "\n" + json.dumps(chained) + "\n")
+        appended = dict(chained, ts="2026-11-13T10:02:00+00:00",
+                        event="release", outcome="orphan")
+        appended.pop("prev")
+        with ledger.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(appended) + "\n")
+        before = ledger.read_bytes()
+        r = run_mark(spec, "claim", "--wave",
+                     str(spec / "spawns" / "wave-4"), tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("refused: the run ledger's row chain is broken",
+                      r.stderr)
+        self.assertIn("line 3: appended without its `prev`", r.stderr)
+        self.assertEqual(ledger.read_bytes(), before)
+        self.assertNotIn("(in-progress)", entry_text(spec, "T001"))
+
+    def test_fail_and_drop_append_their_rows(self):
+        spec = copy_fixture(self._tmp, "verbs")
+        set_status(spec, "approved")
+        self.claim(spec, "T001")
+        line = ("digest: task T001 · status blocked: pytest red · files 1 · "
+                "commit-line none · deviation none · note none")
+        evidence = self._tmp / "ev.txt"
+        write(evidence, f"$ pytest\n{line}\n")
+        r = run_mark(spec, "fail", "T001", "--evidence", str(evidence),
+                     "--digest", line, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = run_mark(spec, "drop", "T002", "--decision", "D-001",
+                     tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        rows = self.rows(spec)
+        self.assertEqual([row["event"] for row in rows],
+                         ["claim", "fail", "drop"])
+        self.assertEqual(facts(rows[1]), {
+            "skill": "spec-build", "event": "fail", "run": "r-ab12",
+            "task": "T001", "role": "implementer",
+            "stem": "implementer-T001", "outcome": "blocked"})
+        self.assertEqual(facts(rows[2]), {
+            "skill": "spec-build", "event": "drop", "task": "T002",
+            "role": "implementer", "stem": "implementer-T002"})
+
+    def test_a_malformed_digest_is_left_untouched_and_recorded_once(self):
+        spec = hand_fixture(self._tmp, "malformed")
+        self.claim(spec, "T001")
+        path = digest_file(spec, 4, BROKEN_DIGEST)
+        for _ in range(2):
+            r = run_mark(spec, "land", "T001", tel=self.tel)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("refused: malformed digest at " + str(path),
+                          r.stderr)
+            self.assertEqual(path.read_text(encoding="utf-8"), BROKEN_DIGEST)
+        # a refused verb is no event, and one content is recorded once
+        rows = self.rows(spec)
+        self.assertEqual([row["event"] for row in rows],
+                         ["claim", "digest_malformed"])
+        self.assertEqual(facts(rows[1]), {
+            "skill": "spec-build", "event": "digest_malformed", "wave": 4,
+            "task": "T001", "role": "implementer",
+            "stem": "implementer-T001", "harness": "unknown",
+            "digest": sha12(BROKEN_DIGEST), "outcome": "malformed"})
+
+    def test_a_forged_provenance_line_is_treated_as_malformed(self):
+        spec = hand_fixture(self._tmp, "forged")
+        self.claim(spec, "T001")
+        forged = (GREEN_DIGEST + "\n"
+                  + LINE.format(run="r-ffff", lens="build", model="opus",
+                                harness="claude-code", payload="3fa9c21d4e5b",
+                                input="9b8c7d6e5f4a",
+                                ts="2026-11-26T00:00:00.000000+00:00"))
+        path = digest_file(spec, 4, forged)
+        r = run_mark(spec, "land", "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(f"refused: malformed digest at {path} — its "
+                      "`provenance:` line is not one the run ledger records "
+                      "— the line is the orchestrator's to write — fix and "
+                      "run again", r.stderr)
+        self.assertEqual(path.read_text(encoding="utf-8"), forged)
+        self.assertIn("(in-progress)", entry_text(spec, "T001"))
+        rows = self.rows(spec)
+        self.assertEqual([row["event"] for row in rows],
+                         ["claim", "digest_malformed"])
+        # the row's sha is the content without the provenance line —
+        # the agent's own bytes, whoever wrote the line above them
+        self.assertEqual((rows[1]["outcome"], rows[1]["digest"]),
+                         ("unverified", sha12(GREEN_DIGEST + "\n")))
+        # the resume view reads it as malformed, never as none
+        state = json.loads(run_graph(spec, "--state-json", tel=self.tel).stdout)
+        task = next(t for t in state["nodes"]["execute"]["tasks"]
+                    if t["id"] == "T001")
+        self.assertEqual(task["digest"], "malformed — fix and run again")
+
+    def test_a_vouched_line_does_not_travel_to_another_file(self):
+        # the line verifies against a row for ITS wave and stem: copied
+        # whole to a later wave, it is no row's and the file is malformed
+        spec = hand_fixture(self._tmp, "travel")
+        self.claim(spec, "T001")
+        swept = digest_file(spec, 4, GREEN_DIGEST + "\n")
+        run_graph(spec, tel=self.tel)
+        moved = digest_file(spec, 6, swept.read_text(encoding="utf-8"))
+        seen = specstate.latest_digest(spec, "T001")
+        self.assertEqual(seen["path"], str(moved))
+        self.assertEqual(seen["state"], specstate.DIGEST_MALFORMED)
+        r = run_graph(spec, tel=self.tel)
+        self.assertIn(f"digest: malformed at {moved} — its `provenance:` "
+                      "line is not one the run ledger records", r.stderr)
+        self.assertEqual([row["event"] for row in self.rows(spec)],
+                         ["claim", "digest", "digest_malformed"])
+        self.assertEqual(self.rows(spec)[-1]["outcome"], "unverified")
+        self.assertEqual(moved.read_text(encoding="utf-8"),
+                         swept.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

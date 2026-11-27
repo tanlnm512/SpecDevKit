@@ -1,7 +1,7 @@
 {
   "name": "spec-release",
-  "version": "0.1.1",
-  "description": "Cuts a release from work that is already merged and delivered \u2014 the suite's release phase.",
+  "version": "0.2.0",
+  "description": "Cuts a release from work that is already merged and delivered \u2014 collects what landed, proposes the SemVer bump, writes the changelog and release notes, then tags and publishes on the user's yes.",
   "author": {
     "name": "Stanley",
     "email": "minhtan512@gmail.com"

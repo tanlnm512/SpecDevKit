@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "spec-build",
-      "description": "Builds an approved spec \u2014 the suite's back half.",
+      "description": "Builds an approved spec to a delivered commit \u2014 runs developer agents over its open tasks and proves the whole plan in one delivery pass; commits only on the user's yes.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
@@ -44,7 +44,7 @@
     },
     {
       "name": "spec-discover",
-      "description": "Five-stage idea discovery and pressure-testing \u2014 the pre-spec front door of the suite, for when WHETHER to build it or WHICH version is still open.",
+      "description": "Idea discovery and pressure-testing \u2014 for when WHETHER to build it or WHICH version is still open \u2014 ends in an idea brief ready for /spec-define.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
@@ -55,7 +55,7 @@
     },
     {
       "name": "spec-release",
-      "description": "Cuts a release from work that is already merged and delivered \u2014 the suite's release phase.",
+      "description": "Cuts a release from work that is already merged and delivered \u2014 collects what landed, proposes the SemVer bump, writes the changelog and release notes, then tags and publishes on the user's yes.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"
@@ -77,7 +77,7 @@
     },
     {
       "name": "spec-ship",
-      "description": "Takes a delivered spec from its commit to a merged pull request \u2014 the suite's integration phase.",
+      "description": "Takes a delivered spec from its commit to a merged pull request \u2014 pushes the branch, drafts the PR, reads CI, and drafts the replies to review comments.",
       "author": {
         "name": "Stanley",
         "email": "minhtan512@gmail.com"

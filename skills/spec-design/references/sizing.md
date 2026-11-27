@@ -11,13 +11,13 @@ header comment has the rules; absent reads feature):
   authoring nodes, the task list lives in spec.md § Tasks, the one
   file is the contract. Absent means full (the seven-file docset);
   growing a tiny spec later is `migrate.py grow`. Tiny is approved
-  and frozen like full: `freeze.py --record` writes
+  and frozen like full: `freeze.py --approve` writes
   `approvals/approval.md` and is required before execute — a bare
   `Status: approved` fails `check.py`. Only the record's
-  `## Contract review` section is waived at tiny (`--record` without
+  `## Contract review` section is waived at tiny (`--approve` without
   `--review`). The freeze covers § Tasks:
   status markers move freely, but an added, edited, or struck task
-  or requirement is a re-approval (`--record --force`).
+  or requirement is a re-approval (`--approve --force`).
 - **`Effort: standard`** (the template default) — one merged architect
   payload authors tech then plan, with the tester separate in the same
   wave; tasks follows as its own spawn once test.md exists. Use for work

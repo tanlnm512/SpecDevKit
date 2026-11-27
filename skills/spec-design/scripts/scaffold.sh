@@ -85,8 +85,10 @@ python3 "$skill_dir/scripts/index.py" "$target" > /dev/null
 # per repo; filled WITH the user — read at approval, carried in every
 # implementer payload.
 constitution="$root/specs/CONSTITUTION.md"
+first_spec=0
 if [[ ! -e "$constitution" ]]; then
   cp "$skill_dir/templates/constitution.md" "$constitution"
+  first_spec=1
 fi
 
 echo "Scaffolded $target (tier: $tier)"
@@ -113,4 +115,16 @@ if [ "$tier" = tiny ]; then
   echo "         python3 <spec-build skill_dir>/scripts/migrate.py grow $target"
 else
   echo "      2) spawn the analysis wave (see SKILL.md § The run)"
+fi
+if [ "$first_spec" = 1 ]; then
+  # the approval trust root: recommended, never written
+  echo "Recommend: before the first approval, create the machine approver list"
+  echo "           ~/.config/spec-dev-kit/approvers — one <principal> <key-type>"
+  echo "           <key-blob> line per approver (ssh-keygen -y -f ~/.ssh/id_ed25519"
+  echo "           prints yours). A workspace specs/.approvers is never an"
+  echo "           authority; CI reads its copy from the remote default branch,"
+  echo "           so commit it there and protect it with a CODEOWNERS rule"
+  echo "           (CODEOWNERS at the repo root, .github/, or docs/):"
+  echo "           specs/.approvers        @<your-handle>"
+  echo "           specs/**/approvals/     @<your-handle>"
 fi

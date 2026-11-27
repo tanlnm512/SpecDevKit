@@ -3,9 +3,7 @@ squash-merge orphans the commit `Delivered: commit @ <sha>` names;
 `tick.py --redeliver` re-points the record and check.py goes green
 again."""
 
-import contextlib
 import importlib.util
-import io
 import os
 import shutil
 import subprocess
@@ -16,6 +14,9 @@ from pathlib import Path
 
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL / "scripts"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _approval import approve  # noqa: E402
+
 EXAMPLE = SKILL / "examples" / "mini-spec"
 
 _freeze_spec = importlib.util.spec_from_file_location(
@@ -61,12 +62,13 @@ class RedeliverTests(unittest.TestCase):
     def deliver(self) -> str:
         """Approve, land, tick, C1, then the C2 delivery record."""
         (self.spec / "approvals").mkdir()
-        (self.spec / "approvals" / "review.md").write_text(
+        review = self.spec / "approvals" / "review.md"
+        review.write_text(
             f"Docset fingerprint: {freeze.docset_fingerprint(self.spec)}\n"
+            "tools: Read, Grep, Glob\n"
             "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
             encoding="utf-8")
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(freeze.record(self.spec, self.root), 0)
+        approve(self.spec, self.root, review=str(review))
         self.edit("spec.md", "**Status**: draft", "**Status**: approved")
         self.edit("task.md", "T001 [P] Implement",
                   "T001 [P] (implemented) Implement")

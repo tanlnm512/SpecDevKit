@@ -4,6 +4,17 @@ Release history. The skill began life 2026-11-11 as the integration
 phase of the SpecDevKit suite: the span spec-build leaves to the user
 — from the delivered commit to a merged pull request.
 
+## 0.2.0 — 2026-11-27
+
+The digest contract tightens: the tools report is read from the
+reply's first line alone (blank lines and one opening fence aside), a
+reported name holds no ` · `, a line's last key absorbs nothing, and
+the integrator's `summary:` must count its thread blocks.
+
+Migration: an integrator reply that opens with anything but its
+`tools:` line now fails the capability handshake like one that carries
+no report; a `threads` digest whose summary disagrees with its thread
+blocks is malformed; re-spawn the role.
 ## 0.1.1 — 2026-11-13
 
 - The run contract is pinned by a 34-test suite: the stage table

@@ -22,7 +22,9 @@ dialects, manifests) is generated under `tools/` (C-03).
 - Skill suites: `skills/<name>/tests/run.sh` for all seven skills
 - Tooling suite: `tools/tests/run.sh`
 - Generated-surface drift: `python3 tools/drift-check.py` (contract,
-  manifests, kit-rules, parity, diagrams, examples, personas)
+  manifests, kit-rules, parity, diagrams, examples, personas, evals,
+  descriptions). A SKILL.md `description:` is budgeted at 600
+  characters — WARN above, FAIL above the 1024 loader cap.
 - Docset contract: `python3 skills/spec-design/scripts/check.py
   skills/spec-design/examples/mini-spec/specs/mini-spec`
 - Install to machine harness roots + verify: `bash tools/sync.sh`, then
@@ -37,15 +39,19 @@ dialects, manifests) is generated under `tools/` (C-03).
   - `plugin.json` / `marketplace.json` ← `tools/plugin-manifest.py`
   - the `§ Engineering rules` sections in
     `skills/spec-build/agents/developer.md` and
-    `skills/spec-review/agents/review-fixer.md` ←
+    `skills/spec-review/agents/spec-review-fixer.md` ←
     `rules/engineering-rules.md` via `tools/kit-rules.py`, and their
     `§ Budgets` sections ← `rules/agent-limits.md` (same tool)
     (`tools/sync.sh` also refreshes them before every install)
+  - the installed approval guard (`spec-kit-guard.py` and `REGISTER.md`
+    under a harness's `spec-dev-kit/`) ← `tools/hooks.py` —
+    machine-installed, never committed; `tools/sync.sh --check` verifies it
 - **Agent briefs live in `skills/<skill>/agents/`** (roles only — the
   lens/protocol prose they point at lives in `protocol/`, D-049) — root
   `agents/` copies are generated views. Each skill ships only the archetypes its
   span spawns (intent: analyst · shape: analyst, architect, tester, auditor ·
-  execute: developer, auditor · ship: integrator · release:
+  execute: developer, auditor · review: scout, correctness, security,
+  quality, fixer, confirmer, verifier · ship: integrator · release:
   release-manager); a brief shipped twice stays
   byte-identical (`tools/tests/test_parity.py`). The per-harness
   workflow dialects are retired (D-035/D-016): the shared review oracle

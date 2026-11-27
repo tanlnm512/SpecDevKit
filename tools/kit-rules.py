@@ -11,7 +11,7 @@ kit's spawn channels already load:
                                                      archetype — the only
                                                      spec-suite role that
                                                      writes code or tests)
-  skills/spec-review/agents/review-fixer.md
+  skills/spec-review/agents/spec-review-fixer.md
                                                      (the fix loop's
                                                       author agent)
 
@@ -41,7 +41,7 @@ BUDGETS_HEADING = "## Budgets (kit-enforced)"
 CARRIERS = (
     (PKG_ROOT / "skills" / "spec-build" / "agents" / "developer.md",
      "spec-build developer"),
-    (PKG_ROOT / "skills" / "spec-review" / "agents" / "review-fixer.md",
+    (PKG_ROOT / "skills" / "spec-review" / "agents" / "spec-review-fixer.md",
      "spec-review fixer"),
 )
 

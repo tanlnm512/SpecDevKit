@@ -2,6 +2,7 @@
 
 ADRs are append-only. The split reused four numbers, so a bare
 `D-002`, `D-003`, `D-005`, or `D-006` is ambiguous — cite the file.
+`D-077` was never recorded — a gap in the numbering, not a missing file.
 
 | ID | File | Era |
 |----|------|-----|
@@ -14,4 +15,4 @@ ADRs are append-only. The split reused four numbers, so a bare
 | D-006 | `006-parallel-by-default.md` | monolith — parallel waves |
 | D-006 | `006-command-rename-spec-gen-alias-removal.md` | split — `/spec-gen` rename |
 
-New decisions continue from the highest number (D-067 is the latest).
+New decisions continue from the highest number (D-097 is the latest).

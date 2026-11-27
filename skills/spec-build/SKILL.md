@@ -1,19 +1,16 @@
 ---
 name: spec-build
 description: >-
-  Builds an approved spec — the suite's back half. Runs developer agents
-  over the open tasks of an approved task.md (written by /spec-design
-  or by hand) in waves that never share a file, retries a failed task
-  up to the fix cap, proves the whole plan in one delivery pass (test-case
-  proofs, the repo's regression checks, review), and commits only on
-  the user's yes. Refuses a spec that is not approved and check-green;
-  never authors or approves. Use when the user says "build/execute an
-  approved spec", "resume the spec", names a T### task, or asks for a
-  spec's proofs, scope diff, or delivery — not for general code review
-  (spec-review).
+  Builds an approved spec to a delivered commit — runs developer
+  agents over its open tasks and proves the whole plan in one
+  delivery pass; commits only on the user's yes. Refuses a spec
+  that is not approved and check-green; never authors or approves.
+  Use when the user says "build/execute an approved spec", "resume
+  the spec", names a T### task, or asks for a spec's proofs, scope
+  diff, or delivery — not for general code review (spec-review).
 metadata:
   owner: platform-core
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # spec-build — execution: approved docset → delivered commit
@@ -41,7 +38,8 @@ any node's ready/done conditions and why it sits where it sits.
 - **Execution asks** — "execute/build <spec>", a T### task named,
   "run the proofs", "scope diff", "ship it": the run below.
 - **Resume** — a session killed mid-execute: the same invocation,
-  then § Resume — the markers in task.md are the whole state.
+  then `contracts/execution.md` § Resume — the markers in task.md
+  are the whole state.
 
 Not here: anything before approval — authoring waves, doc repair,
 re-approval (`/spec-design`), intake (`/spec-define`). This skill
@@ -53,7 +51,13 @@ grants approval; the gate below refuses a red docset too.
 `--span execute` refuses to start unless the docset has both:
 
 - **approve DONE** — spec.md `Status:` approved/active/done AND its
-  approval freeze (`approvals/approval.md`, at every tier); and
+  approval freeze (`approvals/approval.md`, at every tier) signed by a
+  key in the approver list — the machine list
+  `~/.config/spec-dev-kit/approvers`, or in CI the list on the remote
+  default branch, never a workspace copy (`approval.md.sig` — an
+  approval is a signature: a record the session could have written
+  itself fails verify, and an unsigned one passes only where the remote
+  default branch carries it); and
 - **verify DONE** — `check.py <spec-dir>` exits 0.
 
 Anything less, the span entry **exits 4** printing the blocking
@@ -61,7 +65,10 @@ gate and its reason (`--run|--emit-spawns --span execute` alike),
 writes zero implementation files, and records an `intake_refusal`
 telemetry event under this skill's own name. Route the failure,
 never wave it through: not approved or verify red → `/spec-design`
-(the approve gate and node repairs are its own).
+(the approve gate and node repairs are its own). The generated
+approval guard (a recommended tripwire) denies a session the writes
+that would forge either half and any `freeze.py --approve` it runs
+itself; this gate stays the check.
 
 ## The run (one engine, one span)
 
@@ -77,12 +84,42 @@ tick-commit); the run parks there by design. A custom `--runner`
 DRIVES execute headlessly: per wave, `mark.py claim` → the
 runner runs the payloads (batched `--parallel N`) → `mark.py land` for
 each task whose digest reports implemented → the loop continues to the
-tick-commit gate and parks `AWAITING HUMAN`. Anything else — a blocked
-or missing digest, red proofs, a failed runner — leaves the tasks
-CLAIMED and stops `AWAITING ORCHESTRATOR: execute` for you to settle.
+tick-commit gate and parks `AWAITING HUMAN`. A template's `{model}`
+takes the brief's model, and `<model>+1` on the fix round that runs a
+model step; a template without `{model}` stops `AWAITING ORCHESTRATOR`
+before that round is claimed. Two run budgets bound it
+— 30 spawns and 120 minutes by default; spawns count per run and per
+spec, minutes per run, with `--budget-spawns N` and `--budget-minutes
+N` to raise, lower or lift one with `0` — and a spent one parks
+`AWAITING HUMAN: run budget — <what> used <n> of <n>` before the wave
+(`mark.py claim` refuses on the same line); so does a wave whose
+claims would spend past one, before it is written. Anything else — a
+blocked or missing digest, red proofs, a failed runner — leaves the
+tasks CLAIMED and stops `AWAITING ORCHESTRATOR: execute` for you to
+settle.
+Every payload opens with the `tools:` ask: a digest file whose
+report lacks a file writer or Bash is a failed spawn — `land` refuses
+it, no round opens, and the task is released and spawned again on a
+type or harness that holds the tool.
 Where mark.py does not ship (other packages' graph.py copies), a custom
 runner is refused: use the default print runner and spawn the payloads
-yourself.
+yourself. Pass `--harness <your harness name>` on every `--run` and
+`--emit-spawns` (and on `mark.py claim` when you claim by hand): the
+spec's run ledger (`specs/<name>/runs/ledger.jsonl`) records it
+beside each payload it spawns, and `retro.md` keeps the record.
+Add `--isolate worktree` and each implementer works in its own
+detached worktree under `<repo>/.spec-kit/worktrees/<spec>/<T###>/`,
+a snapshot of the main tree: `mark.py land` runs its proofs there and
+merges the tree's delta into the main tree — working tree only, the
+index untouched. It refuses while the main tree holds an uncommitted
+change made there since the cut that this spec's landings did not
+merge — work its proofs never ran on. A delta the main tree will not
+take clean is refused
+with the conflicting paths named: the task stays claimed and its
+worktree stays until you settle the tree by hand and land again, or
+`release` — which discards the worktree with the work. The payload's
+digest file and the fix round's note are the two writes that stay in
+the main tree's spec dir, where `land` reads them.
 
 ### Preflight (before the first wave)
 
@@ -96,7 +133,7 @@ because the tests they name do not exist. A NO-GO is the user's to
 settle (start the engine, export the variables the docset names)
 before any developer is spawned; when the environment cannot be
 supplied, the owner's recorded ruling is the way to proceed —
-`- Proof: TC-### — <ruling>` in the delivery block (D-047).
+`- Proof: TC-### — <ruling>` in the delivery block.
 
 ### Implementation — per-task frontier waves
 
@@ -106,25 +143,33 @@ at the fix cap. The engine picks the wave, not you: each emit
 writes payloads for the runnable tasks, in task-id order, whose
 `Touches:` files overlap no wave-mate's and no `(in-progress)`
 task's, and prints `deferred: T### (shares <path> with T###)` for
-the rest. A task with no parseable `Touches:` runs alone. Per round:
+the rest. A task with no parseable `Touches:` runs alone. Claims are
+checked against every spec's live claims in the repo: a task
+whose `Touches:` overlap a task another spec still holds —
+`(in-progress)`, or in a fix round — is deferred with `shares <path>
+with <spec>/T###` —
+printed by the emit, and enforced again by `claim`, which claims the
+rest of the wave and drops that task. Per round:
 
 1. Run the `mark.py claim --wave` line the emit prints — it claims
    exactly the emitted payloads' tasks (`(in-progress)` + claim stamp)
    or refuses a wave the frontier has outgrown.
 2. Spawn exactly the emitted payloads in ONE message — one developer
    each; deferred and chained tasks come up on a later emit.
-   **`Mode: fast`** (tiny only, D-066): spawn nothing — implement
+   **`Mode: fast`** (tiny only): spawn nothing — implement
    each payload yourself in task-id order, following its developer
    brief (digest file included); steps 3–4 are unchanged.
-3. Collect digests. A reported deviation → append the D-### to
-   tech-spec.md immediately (append-only; reconcile sibling docs
-   quoting the old value in the same pass). A TYPED deviation names
-   its route (D-043): `scope:<paths>` → widen that task's `Touches:`
+3. Collect digests. Validate each against its schema before reading
+   anything from it (protocol/shared-protocol.md); a malformed digest
+   goes back to the same developer. A reported deviation → append the
+   D-### to tech-spec.md immediately (append-only; reconcile sibling
+   docs quoting the old value in the same pass). A TYPED deviation names
+   its route: `scope:<paths>` → widen that task's `Touches:`
    under the D-### and re-emit it (no fix round — the work was never
    wrong); `spec-defect:<why>` → `mark.py release` and route to
-   `/spec-design` (no fix round, no higher tier — a retry of a wrong
-   task fails again); `other:` → the D-### ruling alone, as before. A
-   digest claiming a TC
+   `/spec-design` (no fix round, no stronger model — a retry of a
+   wrong task fails again); `other:` → the D-### ruling alone, as
+   before. A digest claiming a TC
    is wrong → re-brief the tester afterward, never edit test.md now. A
    digest `note` (an acceptance command red in a file outside the
    task's `Touches:`) is the owning task's failure, never the
@@ -154,45 +199,13 @@ A fix round opens only on failed implementation, a red acceptance
 command or proof that ran, or an auditor BLOCK — never on a call
 that did not answer or a refusal by policy.
 
-### Task markers — written only through `mark.py` / `tick.py`
-
-You are the sole status writer; developers return digests and never
-touch task.md. Every transition is one `scripts/mark.py` verb — never
-a hand edit — which checks the current marker, takes the spec's
-`.task.lock`, and refuses anything else:
-
-| Entry reads | Event | The mark.py verb |
-|-------------|-------|------------------|
-| `- [ ] T###` (pending) | its payload's wave is claimed | `mark.py claim <spec> --wave <wave-dir> [--run-id ID]` — writes `(in-progress)` + the claim stamp sub-line `  - claimed <UTC ISO> — run <id>` on exactly the wave's `implementer-T###.md` tasks |
-| `(in-progress)` | digest `implemented` or `already-satisfied`, and `audit.py proofs <spec> --run --task T###` is green | `mark.py land <spec> T###` — writes `(implemented)` in place of the claim, the stamp gone |
-| `(in-progress) (fix n/5)` | the round landed and verified | `mark.py land <spec> T### --resolution "<text>"` — writes `(implemented) (fixed n/5)`, the round's close sub-line `fixed <n> — <resolution> — <proof>` appended |
-| `(in-progress)` | digest `blocked:why` | `mark.py release <spec> T### --reason "<text>"` — claim and stamp cleared; rule (D-###) and re-spawn, or route to `/spec-design` — no fix round. A typed deviation names the route (D-043): `scope:<paths>` → widen `Touches:` under the ruling and re-emit; `spec-defect:<why>` → `/spec-design` |
-| `(in-progress)` or `(implemented)` | it came back wrong | `mark.py fail <spec> T### --evidence <file> --digest "<line>"` — writes `(fix n/5)` (in place of the claim, or beside `(implemented)`) plus the round's open sub-line `fix <n> — <digest>`, evidence verbatim into `notes/T###.md` |
-| `(implemented)` | delivery pass green and the user's yes | `- [x]` + proof note, by `tick.py` (it also strips the stamp) |
-| any open entry | dropped by ruling | `mark.py drop <spec> T### --decision D-###` — refuses a D-### tech-spec.md does not define, and refuses outright at `Tier: tiny` |
-
-The claim stamp names when the task was claimed and by which run —
-resume reads its age and run id; land, release and tick remove it. A
-claim with no stamp (hand-written, older docset) stays valid; a stamp
-with no claim is a check.py finding.
-
-`(fix n/5)` is an OPEN round: while it stands the task is runnable
-again whatever else the entry says — `(implemented) (fix 1/5)` is
-not landed, and the tick-commit gate stays shut. `(fixed n/5)` keeps
-the count once the round lands.
-
-At `Tier: tiny` the task list sits inside the frozen spec.md: the
-markers above — their round sub-lines included — move freely, but
-dropping, adding, or rewording a task breaks the freeze — route it
-to `/spec-design` for re-approval.
-
-### Fix rounds (cap 5 per task)
+### Fix rounds (at most 4 per task)
 
 Only failed implementation opens a round: your re-run of the task's
 acceptance commands is red, a delivery-pass proof failure traces to
 it, or the auditor BLOCKs its change. `blocked:why` is not a
-failure and consumes no round — and neither is a typed deviation
-(D-043): `scope:` re-emits on widened `Touches:`, `spec-defect:`
+failure and consumes no round — and neither is a typed deviation:
+`scope:` re-emits on widened `Touches:`, `spec-defect:`
 routes to `/spec-design`; a fix round would only re-fail them. To open round n (n = the times this
 task has come back wrong), run
 `mark.py fail <spec> T### --evidence <file> --digest "<line>"` —
@@ -212,63 +225,26 @@ the evidence file, so:
    evidence either way. The developer may append what it tried to
    the same note: its one exception to "never touch specs/".
 
-Rounds 1–3 run at the same capability tier. Round 3 failing
-suspects the plan: repair the area's tech/tasks docs through
-`/spec-design` before round 4, which goes to a fresh developer one
-tier up. Round 4 failing writes `(fix 5/5)` with its
-`fix 5 — <digest>` sub-line, the cap — the engine never re-spawns it.
-The cap is a consequential stop (`contracts/delivery-pass.md` §
-Consequential stops): adjudicate with the user, each option carrying
-its consequence — what the owner will have to do later because of it:
-
-- **wrong** — the task does the wrong thing as planned: park it with
-  a D-###; the behavior does not land in this delivery, and the owner
-  re-plans it at `/spec-design` before it can come back.
-- **isolated** — the failure stays inside the task's own area: defer
-  the task; the rest of the plan delivers now and the owner brings
-  the task back as a follow-up.
-- **load-bearing** — tasks downstream depend on it: `/spec-design`
-  re-plans; nothing commits until the owner approves the new plan and
-  the run re-enters this skill.
-
-The recommendation is only ever the evidence's: when the engine's
-same-failure-signature evidence is present (D-044 — the same failing
-command three rounds running suspects the plan), the ask names
-**load-bearing**, re-plan, and that as the reason; otherwise it reads
-`No recommendation: <why this is the owner's call>`.
-
-**Same-signature (D-044)**: each round's evidence names its failing
-command; when the SAME command fails 3 consecutive rounds, `mark.py
-fail` says so and the task's line carries a `[watch: …]` suffix from
-the second repeat on — a repeated signature means another round, or a
-stronger tier, re-runs the same failing command. Treat it as the
-round-3 plan suspicion the moment it fires: repair the docs or
-adjudicate; don't spend round 4's stronger tier on it. At the cap
-this evidence is the recommendation rule above: the ask names
-**load-bearing**, re-plan.
-
-### Resume (a session killed mid-run)
-
-Run the same command. A wave that died leaves `(in-progress)` claims
-with no developer behind them: `--run` stops `AWAITING ORCHESTRATOR:
-execute` when nothing else can run, and every emit and `--explain
-execute` flag each claimed task as a possible orphan — with the claim
-stamp's age and its run id (`claimed 3h ago by run r-7f3a`), and
-`--run-id <your run>` narrowing the orphan flags to OTHER runs'
-claims. Settle each one before spawning anything that shares its
-files. Step 0 reads each claimed task's digest column
-(`digest on file: …`): an `implemented` digest → `mark.py land` (it
-re-runs the proofs); a `blocked:` digest → `mark.py release` and rule;
-no digest → read the diff as below:
-
-1. Read `git status` and `git diff -- <the task's Touches files>`
-   to see what the dead developer left.
-2. Re-run the task's acceptance commands. Green, and the diff is the
-   task → `mark.py land <spec> T### --digest "<the developer's digest
-   line>"`. Otherwise `mark.py release <spec> T### --reason "orphan:
-   <what the diff shows>"`: the next emit re-spawns it, and its
-   partial edits stay in the tree for that developer to continue —
-   never reset the tree to clean up.
+Four rounds spawn, the fifth failure stops. Rounds 1–3 run on the
+brief's model. A task failing on the same command in consecutive
+rounds is the earlier signal — its line prints `[watch: same failing
+command …]` from the second one, and the third prints
+`same-signature:` from `mark.py fail` — and the same-signature rule
+applies from there, not only at the cap: read it then in
+`contracts/execution.md` § Fix rounds. Round 3 failing suspects the
+plan: repair the area's tech/tasks docs through `/spec-design` before
+round 4 — the last round that spawns — which goes to a fresh developer
+one model step up; its payload's `Model:` line says so.
+Honor that line by harness: (i) a spawn-time model override on the
+registered `spec-developer` type where the harness's spawn call allows
+it; (ii) otherwise a general-purpose agent on the stronger model,
+given the payload — the brief is embedded for exactly this case.
+Where the harness offers no stronger model — or `Mode: fast` has you
+implementing inline — say so in your run output instead of silently
+taking the round on the same model. Round 4 failing writes `(fix 5/5)`
+with its `fix 5 — <digest>` sub-line: the stop marker — the engine
+never re-spawns it. The cap's adjudication, the marker table and resume:
+`contracts/execution.md` — read it when you reach them.
 
 ### The delivery pass (once, all-or-nothing)
 
@@ -285,7 +261,7 @@ lifecycle verbs below are its steps, never separate gates:
 
 1. **Proofs** — `scripts/audit.py proofs <spec-dir> --run`, fresh. A
    PENDING proof (its named tests do not exist) fails the pass. An
-   ENV-BLOCKED proof (D-047) — the environment it needs is missing —
+   ENV-BLOCKED proof — the environment it needs is missing —
    is not a pass and not a failure, and the pass stays red while it
    stands unruled: supply what is missing, or the owner rules it with
    a `- Proof: TC-### — <ruling>` line in the delivery block (a FAIL
@@ -293,8 +269,8 @@ lifecycle verbs below are its steps, never separate gates:
    gate 1 is itself a live proofs run: read failures from `proofs`, take
    the verdict from `dod`, and run neither again until code changed.
 2. **Regression gate** — `audit.py regression`: NONE is never a pass.
-   A red repo check is charged to the change only when the base passes
-   (D-048): that check re-runs against the approved base in a detached
+   A red repo check is charged to the change only when the base passes:
+   that check re-runs against the approved base in a detached
    temporary worktree and reads FAIL (charged), PREEXISTING (the base
    fails the same way — listed, not charged, red until ruled), or
    UNKNOWN (the base could not be checked). A
@@ -347,7 +323,8 @@ Pick the form by harness — the brief must reach an agent once:
   installs and synced agent defs register `spec-developer` and
   `spec-auditor`): add `--native-agents` and spawn each payload as
   its named type. The brief is already that agent's system prompt,
-  so the payload carries the inputs and protocol only.
+  so the payload carries the inputs and protocol only — except a
+  round-4 fix payload, which embeds the brief (§ Fix rounds).
 - **No registered agents**: the default. The payload embeds the
   brief body; spawn it on a general-purpose agent, never on the
   native type.

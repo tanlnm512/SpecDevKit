@@ -11,7 +11,7 @@ description: >-
   (spec-design); never authors spec.md or executes.
 metadata:
   owner: platform-core
-  version: "0.1.2"
+  version: "0.2.0"
 ---
 
 # spec-define — intake: raw idea → validated intent.md
@@ -73,8 +73,9 @@ directly by the session.
 The analyst records facts (Baseline, § Constraints) and candidate gaps
 (§ Questions, as NEEDS CLARIFICATION markers) in intent.md and returns
 a digest counting the open markers — evidence, never recommendations.
-intent.md and the grill stay yours: the analyst asks the user nothing
-and closes no question.
+Validate it against its schema before reading it
+(protocol/shared-protocol.md). intent.md and the grill stay yours: the
+analyst asks the user nothing and closes no question.
 
 ### 3 — Grill the frontier
 

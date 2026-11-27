@@ -5,9 +5,11 @@ Real temp git repos, not mocks: the oracle's contract is repo state in,
 JSON out. Error paths must fail loudly (exit 1 + status error), never
 silently proceed."""
 
+import atexit
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,6 +36,15 @@ def err(args):
     d = json.loads(r.stdout)
     assert d["status"] == "error", f"expected status error: {d}"
     return d["error"]
+
+
+def refused(args):
+    r = run(args)
+    assert r.returncode == 1, f"expected exit 1, got {r.returncode}: {r.stdout}{r.stderr}"
+    d = json.loads(r.stdout)
+    assert d["status"] == "error", f"expected status error: {d}"
+    assert not {"tracked", "reply"} & set(d), f"a refusal carries nothing to read: {d}"
+    return d
 
 
 def git(repo, *args):
@@ -74,11 +85,14 @@ class ScopeTests(unittest.TestCase):
             d = ok(["scope", "--target", "diff", "--repo", str(repo)])
             self.assertEqual(d["base"], "HEAD")
             self.assertEqual(d["files"], ["app.py"])
+            run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
             ask = ok(["ask", "--kind", "review", "--ctx", json.dumps(
-                {"base": d["base"], "files_n": 1, "lines": 1, "over_cap": False,
+                {"base": d["base"], "run_dir": run_dir, "files_n": 1, "lines": 1, "over_cap": False,
                  "lens": {"label": "correctness", "focus": "f."}, "gate_line": "ok"})])["ask"]
-            self.assertIn("`git diff HEAD`", ask)
-            self.assertNotIn("`git diff `", ask)
+            # the base the ask is rendered against decides what the reader reads
+            diff = Path(run_dir) / "reader-files" / "diff.patch"
+            self.assertIn(f"`{diff}`", ask)
+            self.assertIn("+y = 2\n", diff.read_text(encoding="utf-8"))
 
     def test_untracked_cache_and_binary_files_stay_out_of_scope(self):
         holder, repo = make_repo()
@@ -389,10 +403,13 @@ FINDINGS_MD = """# Code review — HEAD (2 files, ~10 added lines)
 - evidence: `cursor.execute("... " + uid)`
 """
 
+# a saved report goes in declared as one
+SAVED = ["findings-parse", "--saved-report", "--text"]
+
 
 class FindingsParseTests(unittest.TestCase):
     def test_markdown_report_parses_ids_statuses_and_fixes(self):
-        d = ok(["findings-parse", "--text", FINDINGS_MD])
+        d = ok([*SAVED, FINDINGS_MD])
         tracked = d["tracked"]
         self.assertEqual(len(tracked), 2)  # the fixed one is dropped
         self.assertEqual(tracked[0]["finding"]["id"], "F-1")  # high sorts first
@@ -403,7 +420,7 @@ class FindingsParseTests(unittest.TestCase):
 
     def test_legacy_heading_mints_carried_ids(self):
         legacy = "### [MEDIUM · verified · quality] bad name\n- where: `a.py:1`\n- evidence: x\n"
-        d = ok(["findings-parse", "--text", legacy])
+        d = ok([*SAVED, legacy])
         self.assertEqual(d["tracked"][0]["finding"]["id"], "carried-1")
 
     def test_json_payload_normalizes_and_drops_fixed(self):
@@ -412,20 +429,63 @@ class FindingsParseTests(unittest.TestCase):
             {"id": "F-8", "where": "b.py:1", "what": "y", "severity": "low",
              "fixStatus": "fixed"},
         ])
-        d = ok(["findings-parse", "--text", payload])
+        d = ok([*SAVED, payload])
         self.assertEqual(len(d["tracked"]), 1)
         self.assertEqual(d["tracked"][0]["finding"]["id"], "F-9")
         self.assertEqual(d["tracked"][0]["finding"]["severity"], "high")
         # no recorded confirmation is never promoted to verified
         self.assertEqual(d["tracked"][0]["finding"]["confirmation"]["status"], "unconfirmed")
 
+    def test_a_reply_is_parsed_only_after_its_tools_report_checks_out(self):
+        # every reply opens with its tools report: handed over with its
+        # role, the report is checked against the brief before a finding
+        # is read, and one that holds parses exactly as the bare payload
+        payload = json.dumps([{"id": "F-9", "where": "a.py:1", "what": "x",
+                               "severity": "high"}])
+        parse = ["findings-parse", "--role", "correctness", "--text"]
+        bare = ok([*SAVED, payload])
+        for lead in ("tools: Read, Grep, Glob\n", "> tools: read, grep, glob\n",
+                     "Tools: `Read`, `Grep`, `Glob`.\n"):
+            with self.subTest(lead=lead):
+                self.assertEqual(ok([*parse, lead + payload]), bare)
+        self.assertEqual(ok([*parse, "tools: Read, Grep, Glob\n" + FINDINGS_MD]),
+                         ok([*SAVED, FINDINGS_MD]))
+        for lead, reported, missing in (("tools: Read\n", ["Read"], ["Grep", "Glob"]),
+                                        ("tools: \n", [], ["Read", "Grep", "Glob"]),
+                                        ("", [], ["Read", "Grep", "Glob"])):
+            with self.subTest(lead=lead):
+                d = refused([*parse, lead + FINDINGS_MD])
+                self.assertEqual((d["role"], d["reported"], d["missing"]),
+                                 ("correctness", reported, missing))
+                for named in ("correctness", *missing):
+                    self.assertIn(named, d["error"])
+
+    def test_a_reply_handed_over_without_its_role_is_refused(self):
+        # declared a saved report, a reply that opens with a tools report is
+        # still a reply: nothing is read until its role is named
+        d = refused(["findings-parse", "--saved-report", "--text",
+                     "tools: Read, Grep, Glob\n" + FINDINGS_MD])
+        self.assertEqual(d["stage"], "handshake")
+        self.assertIn("--role", d["error"])
+        self.assertNotIn("--saved-report", d["error"])
+
+    def test_an_undeclared_payload_is_refused_naming_both_kinds(self):
+        # a reply with no tools line and no --role is the omission the gate exists to stop
+        for text in (FINDINGS_MD, json.dumps([{"id": "F-9", "where": "a.py:1", "what": "x"}])):
+            with self.subTest(shape=text.lstrip()[:1]):
+                d = refused(["findings-parse", "--text", text])
+                self.assertEqual(d["stage"], "handshake")
+                self.assertNotIn("tracked", d)
+                for flag in ("--role", "--saved-report"):
+                    self.assertIn(flag, d["error"])
+
     def test_garbage_fails_loudly(self):
-        msg = err(["findings-parse", "--text", "neither json nor a report"])
+        msg = err([*SAVED, "neither json nor a report"])
         self.assertIn("neither valid JSON nor a parseable review report", msg)
 
     def test_all_fixed_payload_fails_loudly(self):
         payload = json.dumps([{"where": "a.py:1", "what": "x", "fixStatus": "fixed"}])
-        msg = err(["findings-parse", "--text", payload])
+        msg = err([*SAVED, payload])
         self.assertIn("no actionable findings", msg)
 
 
@@ -475,7 +535,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("no repo checks detected — no mechanical floor", md)
         self.assertIn("## Findings (3 · 1 confirmed · 2 unconfirmed (1 self-checked)", md)
         self.assertIn("### [F-3 · MEDIUM · unconfirmed (self-checked) · general]", md)
-        reparsed = ok(["findings-parse", "--text", md])["tracked"]
+        reparsed = ok([*SAVED, md])["tracked"]
         self.assertEqual([t["finding"]["confirmation"]["status"] for t in reparsed],
                          ["verified", "unconfirmed", "unconfirmed"])
 
@@ -657,7 +717,7 @@ class ReportTests(unittest.TestCase):
                                                         "conclusion": "human"})])["markdown"])
         # a withdrawn finding does not come back on a fix_from carry (JSON or
         # markdown carrier); what is carried restarts pending by design (D-005)
-        carried = ok(["findings-parse", "--text", json.dumps(
+        carried = ok([*SAVED, json.dumps(
             {"findings": [{"id": "F-1", "where": "a.py:1", "what": "w", "fixStatus": "rejected-valid"},
                           {"id": "F-2", "where": "b.py:1", "what": "x", "fixStatus": "rejected-invalid"},
                           {"id": "F-3", "where": "c.py:1", "what": "y", "fixStatus": "out-of-scope"}]})])["tracked"]
@@ -667,7 +727,7 @@ class ReportTests(unittest.TestCase):
                  json.dumps({**base, "gate_green": True,
                              "tracked": [tracked("F-1", "rejected-valid"), tracked("F-2", "out-of-scope")],
                              "conclusion": "human"})])["markdown"]
-        reparsed = ok(["findings-parse", "--text", md])["tracked"]
+        reparsed = ok([*SAVED, md])["tracked"]
         self.assertEqual([t["finding"]["id"] for t in reparsed], ["F-2"])
         # the verify ask teaches the ruling, the fixer ask the channel
         self.assertIn("rejected-valid", ok(["ask", "--kind", "verify", "--ctx",
@@ -693,28 +753,41 @@ class ReportTests(unittest.TestCase):
         self.assertIn("unknown fix status 'skipped'", msg)
 
 
+def make_run():
+    holder, repo = make_repo()
+    (repo / "app.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
+    return holder, repo, run_dir
+
+
+RUN_HOLDER, _, RUN_DIR = make_run()
+atexit.register(RUN_HOLDER.cleanup)
+
 ASK_CASES = [
-    ("scout", {"base": "HEAD", "project": False, "files": ["src/a.py", "src/b.py"]}),
+    ("scout", {"base": "HEAD", "project": False, "files": ["src/a.py", "src/b.py"], "run_dir": RUN_DIR}),
     ("scout", {"base": "HEAD", "project": True, "files": [f"m{i}.py" for i in range(45)],
-               "repo_abs": "/tmp/repo"}),
-    ("review", {"base": "HEAD~1", "files_n": 3, "lines": 120, "over_cap": False,
+               "repo_abs": "/tmp/repo", "run_dir": RUN_DIR}),
+    ("review", {"base": "HEAD", "files_n": 3, "lines": 120, "over_cap": False,
+                "run_dir": RUN_DIR,
                 "gate_line": "The repo's own checks all passed",
                 "lens": {"focus": "logic errors."},
                 "intent": "add caching", "scout_map": {"modules": [{"name": "m", "path": "src/m.py", "role": "r"}],
                                                         "conventions": ["c1"], "riskAreas": ["ra1"]}}),
     ("review-project", {"base": "HEAD", "files": ["a.py"], "candidates": 9, "part": 2, "parts": 3,
                         "gate_line": "checks passed", "lens": {"focus": "security."},
-                        "repo_abs": "/tmp/repo"}),
+                        "repo_abs": "/tmp/repo", "run_dir": RUN_DIR}),
     ("triage", {"base": "HEAD", "lens_label": "correctness", "intent": "fix bug",
                 "findings": [{"where": "a.py:1", "what": "x", "evidence": "q", "severity": "high"}]}),
     ("triage-project", {"lens_label": "quality", "findings": []}),
     ("cross-lens", {"base": "HEAD", "kept": [{"where": "a.py:1", "what": "x", "evidence": "q",
                                               "severity": "low", "lens": "quality"}]}),
-    ("confirm", {"base": "HEAD", "finding": {"where": "a.py:2", "what": "y", "evidence": "e",
-                                             "severity": "medium", "lens": "security", "impact": "i"}}),
+    ("confirm", {"base": "HEAD", "run_dir": RUN_DIR,
+                 "finding": {"where": "a.py:2", "what": "y", "evidence": "e",
+                             "severity": "medium", "lens": "security", "impact": "i"}}),
     ("confirm-project", {"finding": {"where": "a.py:2", "what": "y", "evidence": "e", "severity": "low"}}),
-    ("final", {"base": "HEAD", "gate_line": "checks passed", "summary": [{"id": "F-1"}],
-               "intent": "x", "scout_map": None}),
+    ("final", {"base": "HEAD", "run_dir": RUN_DIR, "gate_line": "checks passed",
+               "summary": [{"id": "F-1"}], "intent": "x", "scout_map": None}),
     ("final-project", {"gate_line": "checks passed", "summary": [], "files": [f"f{i}.py" for i in range(12)],
                        "repo_abs": None}),
     ("fixer", {"base": "HEAD", "round": 1, "project": False, "intent": "fix",
@@ -727,10 +800,11 @@ ASK_CASES = [
     ("verify", {"base": "HEAD", "project": False, "notes": "reordered guards",
                 "tracked": {"finding": {"id": "F-1", "where": "a.py:1", "what": "x",
                                         "severity": "high", "lens": "correctness"}}}),
-    ("fix-review", {"base": "HEAD", "gate_green": True, "paths": ["a.py", "b.py"]}),
-    ("fix-review", {"base": "HEAD", "gate_green": False, "paths": ["a.py"], "repo_abs": "/tmp/r"}),
-    ("loop-final", {"base": "HEAD", "rounds_used": 2, "gate_green": False, "changed_paths": ["a.py"],
-                    "project": False,
+    ("fix-review", {"base": "HEAD", "run_dir": RUN_DIR, "gate_green": True, "paths": ["a.py", "b.py"]}),
+    ("fix-review", {"base": "HEAD", "gate_green": False, "paths": ["a.py"], "repo_abs": "/tmp/r",
+                    "run_dir": RUN_DIR}),
+    ("loop-final", {"base": "HEAD", "run_dir": RUN_DIR, "rounds_used": 2, "gate_green": False,
+                    "changed_paths": ["a.py"], "project": False,
                     "tracked": [{"finding": {"id": "F-1", "where": "a.py:1", "what": "x", "evidence": "e",
                                              "severity": "high", "lens": "correctness",
                                              "confirmation": {"status": "verified", "note": ""}},
@@ -755,11 +829,36 @@ class AskRenderingTests(unittest.TestCase):
             {"batch": [{"kind": k, "ctx": c} for k, c in ASK_CASES[:4]]})])
         self.assertEqual(batch["asks"], [self._oracle(k, c) for k, c in ASK_CASES[:4]])
 
+    def test_every_ask_opens_with_the_tools_ask(self):
+        # the capability handshake (D-029): the first line of every ask is
+        # the report request, once — the rule itself sits in the protocol
+        ask_line = ("The first line of your reply is `tools: <the tools you "
+                    "actually hold, comma-separated>`.")
+        for kind, ctx in ASK_CASES:
+            with self.subTest(kind=kind, project=ctx.get("project")):
+                ask = self._oracle(kind, ctx)
+                self.assertEqual(ask.splitlines()[0], ask_line)
+                self.assertEqual(ask.count(ask_line), 1)
+                self.assertTrue(ask[len(ask_line) + 1:].rstrip(), ask)
+        asks = ok(["ask", "--kind", "batch", "--ctx", json.dumps(
+            {"batch": [{"kind": k, "ctx": c} for k, c in ASK_CASES[:4]]})])["asks"]
+        self.assertEqual([ask.splitlines()[0] for ask in asks],
+                         [ask_line] * len(asks))
+
     def test_review_ask_carries_untracked_files_and_severity_ladder(self):
         ask = self._oracle("review", {**ASK_CASES[2][1], "untracked": ["src/new.py"]})
-        self.assertIn("untracked files, which `git diff` does not show", ask)
-        self.assertIn("- src/new.py", ask)
+        self.assertIn("untracked files, which the diff file does not show", ask)
+        self.assertIn(f"- {Path(RUN_DIR).parents[2]}/src/new.py", ask)
         self.assertIn("high = data loss, crash, wrong result, or security compromise", ask)
+
+    def test_no_reader_ask_names_a_git_command(self):
+        # every ask but the fixer's is run by a type that holds no shell
+        for kind, ctx in ASK_CASES:
+            if kind != "fixer":
+                with self.subTest(kind=kind):
+                    self.assertNotRegex(self._oracle(kind, ctx), GIT_COMMAND)
+        fixer = next(c for k, c in ASK_CASES if k == "fixer" and c.get("repo_abs"))
+        self.assertIn("Run any git command as `git -C /tmp/r ...`", self._oracle("fixer", fixer))
 
     def test_systems_carry_the_three_lenses(self):
         d = ok(["systems"])
@@ -769,6 +868,300 @@ class AskRenderingTests(unittest.TestCase):
 
     def test_unknown_ask_kind_fails_loudly(self):
         err(["ask", "--kind", "nope", "--ctx", "{}"])
+
+
+GIT_COMMAND = re.compile(r"`git |git -C|\bgit (?:diff|ls-files|status|log|show)\b")
+
+
+class ReaderFileTests(unittest.TestCase):
+    """A panel reader holds no shell (D-028): the oracle writes what the
+    reader used a git command for into the run folder and the ask names
+    the file — it exists and holds the change; what the oracle cannot
+    produce is a named absence in the ask, never a crash; an ask with no
+    run folder to write into is an error, never a bare ask."""
+
+    def setUp(self):
+        holder, repo = make_repo()
+        self.addCleanup(holder.cleanup)
+        (repo / "lib.py").write_text("z = 3\n", encoding="utf-8")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-qm", "lib")
+        (repo / "app.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+        git(repo, "add", "-A")
+        self.repo = repo
+        self.run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
+        self.ctx = {"base": "HEAD", "run_dir": self.run_dir}
+
+    def named_files(self, ask):
+        folder = re.escape(self.run_dir) + "/reader-files/"
+        return [Path(name) for name in re.findall(r"`(" + folder + r"[^`]+)`", ask)]
+
+    def test_reader_asks_name_a_run_folder_file_that_holds_the_change(self):
+        tracked = {"finding": {"id": "F-1", "where": "app.py:1", "what": "x", "evidence": "e",
+                               "severity": "high", "lens": "correctness",
+                               "confirmation": {"status": "verified", "note": ""}},
+                   "fix": "fixed", "fixNote": "n"}
+        cases = [
+            ("scout", {"project": False, "files": ["app.py"]}, 1,
+             ("# target files (1)\napp.py\n", "# tracked files in the repository (2)\napp.py\nlib.py\n")),
+            ("review", {"files_n": 1, "lines": 1, "over_cap": False, "lens": {"focus": "f."},
+                        "gate_line": "ok"}, 1, ("+y = 2\n",)),
+            ("review-project", {"files": ["app.py", "lib.py"], "part": 1, "parts": 2, "candidates": 2,
+                                "lens": {"focus": "f."}, "gate_line": "ok"}, 1, ("app.py\nlib.py\n",)),
+            ("confirm", {"finding": {"where": "app.py:2", "what": "y", "evidence": "e", "severity": "low"}},
+             1, ("+y = 2\n",)),
+            ("final", {"gate_line": "checks passed", "summary": [{"id": "F-1"}]}, 1, ("+y = 2\n",)),
+            ("fix-review", {"gate_green": True, "paths": ["app.py", "lib.py"]}, 2, ("+y = 2\n",)),
+            ("loop-final", {"rounds_used": 1, "gate_green": True, "changed_paths": ["app.py"],
+                            "project": False, "tracked": [tracked]}, 1, ("+y = 2\n",)),
+        ]
+        for kind, extra, count, literals in cases:
+            with self.subTest(kind=kind):
+                d = ok(["ask", "--kind", kind, "--ctx", json.dumps({**self.ctx, **extra})])
+                self.assertEqual(sorted(d), ["ask", "status"])
+                named = self.named_files(d["ask"])
+                self.assertEqual(len(named), count, d["ask"])
+                for path in named:
+                    self.assertTrue(path.is_file(), path)
+                    self.assertTrue(str(path.resolve()).startswith(self.run_dir + "/reader-files/"), path)
+                texts = [path.read_text(encoding="utf-8") for path in named]
+                self.assertTrue(any(all(lit in text for lit in literals) for text in texts), literals)
+
+    def test_confirm_ask_rules_on_what_the_hunk_shows(self):
+        finding = {"where": "lib.py:1", "what": "y", "evidence": "e", "severity": "low"}
+        # a path the change does not touch: an empty hunk, and the finding predates the change
+        ask = ok(["ask", "--kind", "confirm", "--ctx", json.dumps({**self.ctx, "finding": finding})])["ask"]
+        (hunk,) = self.named_files(ask)
+        self.assertEqual(hunk.read_text(encoding="utf-8"), "")
+        self.assertIn("is EMPTY", ask)
+        self.assertIn("answer unconfirmed", ask)
+        # an untracked path is new code in its entirety — no hunk is named for it
+        ask = ok(["ask", "--kind", "confirm", "--ctx", json.dumps(
+            {**self.ctx, "untracked": ["new.py"], "finding": {**finding, "where": "new.py:1"}})])["ask"]
+        self.assertEqual(self.named_files(ask), [])
+        self.assertIn("`new.py` is an untracked file", ask)
+
+    def test_a_diff_that_cannot_be_produced_is_a_named_absence_never_a_crash(self):
+        shutil.rmtree(self.repo / ".git")
+        cases = [
+            ("review", {"files_n": 1, "lines": 1, "lens": {"focus": "f."}, "gate_line": "ok"},
+             "diff file ABSENT"),
+            ("confirm", {"finding": {"where": "app.py:2", "what": "y", "evidence": "e", "severity": "low"}},
+             "Hunk file: ABSENT"),
+        ]
+        for kind, extra, absent in cases:
+            with self.subTest(kind=kind):
+                r = run(["ask", "--kind", kind, "--ctx", json.dumps({**self.ctx, **extra})])
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                d = json.loads(r.stdout)
+                self.assertEqual(d["status"], "ok")
+                self.assertIn(absent, d["ask"])
+                self.assertIn("not run: <why>", d["ask"])
+                self.assertNotIn("`" + self.run_dir + "/reader-files/", d["ask"])
+        folder = Path(self.run_dir) / "reader-files"
+        self.assertEqual([f.name for f in folder.iterdir()] if folder.is_dir() else [], [])
+
+    def test_a_reader_ask_with_no_run_folder_is_an_error_never_a_bare_ask(self):
+        ctx = {"base": "HEAD", "files_n": 1, "lines": 1, "lens": {"focus": "f."}, "gate_line": "ok"}
+        for run_dir in (None, str(self.repo / "nope")):
+            with self.subTest(run_dir=run_dir):
+                r = run(["ask", "--kind", "review", "--ctx", json.dumps({**ctx, "run_dir": run_dir})])
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                d = json.loads(r.stdout)
+                self.assertEqual((d["status"], d["stage"]), ("error", "ask"))
+                self.assertIn("run_dir", d["error"])
+        self.assertFalse((self.repo / "nope").exists())
+        # a wave carrying one bare reader ctx is refused whole, naming it
+        r = run(["ask", "--kind", "batch", "--ctx", json.dumps({"batch": [
+            {"kind": "triage", "ctx": {"lens_label": "correctness", "findings": []}},
+            {"kind": "confirm", "ctx": {"finding": {"where": "app.py:1"}}}]})])
+        d = json.loads(r.stdout)
+        self.assertEqual((d["status"], d.get("kind")), ("error", "confirm"))
+
+
+AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
+JUDGE_BRIEFS = {"confirm": "spec-review-confirmer.md", "verify": "spec-review-verifier.md"}
+JUDGE_ASKS = ("confirm", "confirm-project", "verify")
+# Every brief that reads and never writes: files only — the fixer is the panel's one author.
+READER_BRIEFS = ("spec-review-scout.md", "spec-review-correctness.md", "spec-review-security.md",
+                 "spec-review-quality.md", "spec-review-confirmer.md", "spec-review-verifier.md")
+
+
+class JudgeBriefTests(unittest.TestCase):
+    """The confirm and verify stages take their system prompt from a brief
+    (D-027): `systems` returns each brief's frontmatter-stripped body
+    byte-verbatim and holds no second copy of it, an unreadable brief is
+    an error — never a fallback — the asks keep their shape, and every
+    brief that reads grants files only (D-028)."""
+
+    def test_systems_carry_each_brief_body_byte_verbatim(self):
+        d = ok(["systems"])
+        oracle = SCRIPT.read_text(encoding="utf-8")
+        for stage, brief in JUDGE_BRIEFS.items():
+            with self.subTest(stage=stage):
+                body = (AGENTS_DIR / brief).read_bytes().decode("utf-8").split("\n---\n", 1)[1]
+                self.assertEqual(d[stage], body)
+                self.assertTrue(body.startswith("\n# "), "frontmatter not stripped")
+                # the kit's one honesty sentence is every system's, not a copy
+                for line in map(str.strip, body.splitlines()):
+                    if len(line) > 40 and line not in d["honesty"]:
+                        self.assertNotIn(line, oracle, "a second copy in the oracle")
+
+    def test_systems_keep_the_inline_roles(self):
+        d = ok(["systems"])
+        self.assertEqual(sorted(d), ["confirm", "fix_review", "fixer", "general", "honesty",
+                                     "lenses", "scout", "status", "triage", "verify"])
+        for key in ("triage", "fix_review"):
+            self.assertTrue(d[key].startswith("You are the "), key)
+
+    def test_judge_asks_keep_their_shape(self):
+        for kind, ctx in ASK_CASES:
+            if kind in JUDGE_ASKS:
+                with self.subTest(kind=kind):
+                    d = ok(["ask", "--kind", kind, "--ctx", json.dumps(ctx)])
+                    self.assertEqual(sorted(d), ["ask", "status"])
+                    self.assertTrue(d["ask"])
+
+    def test_reader_briefs_grant_files_only(self):
+        head = {}
+        for brief in READER_BRIEFS:
+            with self.subTest(brief=brief):
+                head[brief] = (AGENTS_DIR / brief).read_text(encoding="utf-8").split("\n---\n", 1)[0]
+                self.assertTrue(head[brief].startswith("---\n"))
+                self.assertRegex(head[brief], r"(?m)^name: " + re.escape(brief[:-3]) + r"$")
+                self.assertRegex(head[brief], r"(?m)^description:")
+                self.assertRegex(head[brief], r"(?m)^model: inherit$")
+                self.assertRegex(head[brief], r"(?m)^tools: Read, Grep, Glob$")
+                for tool in ("Bash", "Write", "Edit"):
+                    self.assertRegex(head[brief], r"(?m)^  - " + tool + r"$")
+        # the list is closed: no other spec-review brief exists to hold a shell
+        shipped = sorted(p.name for p in AGENTS_DIR.glob("spec-review-*.md"))
+        self.assertEqual(shipped, sorted(READER_BRIEFS + ("spec-review-fixer.md",)))
+        fixer = (AGENTS_DIR / "spec-review-fixer.md").read_text(encoding="utf-8").split("\n---\n", 1)[0]
+        self.assertRegex(fixer, r"(?m)^tools: Read, Grep, Glob, Bash, Write, Edit$")
+
+    def test_unreadable_brief_is_an_error_never_an_inline_fallback(self):
+        skill = SCRIPT.parent.parent
+        holder = tempfile.TemporaryDirectory(prefix="oracle-skill-")
+        with holder:
+            copy = Path(holder.name)
+            shutil.copytree(skill / "scripts", copy / "scripts",
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            shutil.copytree(AGENTS_DIR, copy / "agents")
+            for stage, brief in JUDGE_BRIEFS.items():
+                target = copy / "agents" / brief
+                intact = target.read_bytes()
+                for damage in ("missing", "no-frontmatter", "not-utf8"):
+                    with self.subTest(brief=brief, damage=damage):
+                        if damage == "missing":
+                            target.unlink()
+                        elif damage == "no-frontmatter":
+                            target.write_text("no frontmatter here\n", encoding="utf-8")
+                        else:
+                            target.write_bytes(b"\xff\xfe\x00bad")
+                        r = subprocess.run([sys.executable, str(copy / "scripts" / SCRIPT.name),
+                                            "systems"], capture_output=True, text=True)
+                        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                        d = json.loads(r.stdout)
+                        self.assertEqual(d["status"], "error")
+                        self.assertEqual(d["stage"], "systems")
+                        self.assertIn(f"agents/{brief}", d["error"])
+                        self.assertNotIn(stage, d)
+                        target.write_bytes(intact)
+
+
+# Each role's required set is its own brief's `tools:` line: files only
+# for every reader, the shell and a file writer for the panel's one author.
+READER_TOOLS = ("Read", "Grep", "Glob")
+ROLE_TOOLS = {role: READER_TOOLS for role in
+              ("scout", "correctness", "security", "quality", "confirmer", "verifier")}
+ROLE_TOOLS["fixer"] = ("Read", "Grep", "Glob", "Bash", "Write", "Edit")
+SCOUT_MAP = '{"modules": [], "conventions": [], "riskAreas": []}\n'
+
+
+class HandshakeTests(unittest.TestCase):
+    """The capability handshake: a reply is read only after the tools
+    report it opens with holds every tool on its role's brief line — a
+    short one is a failed call that hands back nothing to read and
+    advances no stage."""
+
+    def refused(self, role, lead):
+        d = refused(["handshake", "--role", role, "--text", lead + SCOUT_MAP])
+        self.assertEqual((d["stage"], d["role"]), ("handshake", role))
+        for named in (role, *d["missing"]):
+            self.assertIn(named, d["error"])
+        return d
+
+    def test_a_full_report_returns_the_reply_after_its_line(self):
+        lead = "> tools: read, grep, glob\n"
+        self.assertEqual(ok(["handshake", "--role", "scout", "--text", lead + SCOUT_MAP]),
+                         {"status": "ok", "tools": ["read", "grep", "glob"], "reply": SCOUT_MAP})
+
+    def test_every_brief_tool_is_required_and_nothing_more(self):
+        for role, tools in ROLE_TOOLS.items():
+            with self.subTest(role=role):
+                ok(["handshake", "--role", role, "--text", f"tools: {', '.join(tools)}\n" + SCOUT_MAP])
+            for short in tools:
+                with self.subTest(role=role, without=short):
+                    rest = [t for t in tools if t != short]
+                    self.assertEqual(self.refused(role, "tools: " + ", ".join(rest) + "\n")["missing"],
+                                     [short])
+
+    def test_a_dialect_name_for_a_required_tool_meets_it(self):
+        for names in ("Read, Grep, Glob, Execute, Create, Edit",
+                      "read, grep, glob, execute, applypatch, edit"):
+            with self.subTest(names=names):
+                ok(["handshake", "--role", "fixer", "--text", f"tools: {names}\n" + SCOUT_MAP])
+        self.assertEqual(self.refused("fixer", "tools: Read, Grep, Glob, Edit\n")["missing"],
+                         ["Bash", "Write"])
+
+    def test_an_unknown_role_is_refused_naming_the_briefs(self):
+        d = refused(["handshake", "--role", "triage", "--text", "tools: Read\n" + SCOUT_MAP])
+        self.assertEqual(d["stage"], "handshake")
+        for role in ROLE_TOOLS:
+            self.assertIn(role, d["error"])
+
+    def test_the_brief_is_the_table(self):
+        skill = SCRIPT.parent.parent
+        with tempfile.TemporaryDirectory(prefix="oracle-skill-") as holder:
+            copy = Path(holder)
+            shutil.copytree(skill / "scripts", copy / "scripts",
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            shutil.copytree(AGENTS_DIR, copy / "agents")
+            call = [sys.executable, str(copy / "scripts" / SCRIPT.name),
+                    "handshake", "--role", "scout", "--text"]
+
+            def reply(lead):
+                r = subprocess.run([*call, lead + SCOUT_MAP], capture_output=True, text=True)
+                self.assertTrue(r.stdout.startswith('{"status":'), r.stdout + r.stderr)
+                return r
+
+            brief = copy / "agents" / "spec-review-scout.md"
+            text = brief.read_text(encoding="utf-8")
+            brief.write_text(text.replace("tools: Read, Grep, Glob", "tools: Read, WebFetch"),
+                             encoding="utf-8")
+            # a changed line moves the handshake with it
+            self.assertEqual(json.loads(reply("tools: Read, Grep, Glob\n").stdout)["missing"],
+                             ["WebFetch"])
+            self.assertEqual(reply("tools: Read, WebFetch\n").returncode, 0)
+            # a brief with no line refuses the check — it never requires nothing
+            brief.write_text(text.replace("tools: Read, Grep, Glob\n", ""), encoding="utf-8")
+            r = reply("tools: Read, Grep, Glob\n")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("agents/spec-review-scout.md", json.loads(r.stdout)["error"])
+
+    def test_a_refused_reply_advances_no_stage(self):
+        holder, repo = make_repo()
+        with holder:
+            run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
+            ok(["run-save", "--run-dir", run_dir, "--stage", "scope", "--data", "{}"])
+            before = sorted(p.name for p in Path(run_dir).iterdir())
+            self.refused("fixer", "tools: Read\n")
+            refused(["findings-parse", "--role", "correctness", "--text",
+                     "tools: Grep\n" + FINDINGS_MD])
+            self.assertEqual(sorted(p.name for p in Path(run_dir).iterdir()), before)
+            resumed = ok(["run-resume", "--run-dir", run_dir])
+            self.assertEqual((resumed["completed"], resumed["next"]), (["scope"], "scout"))
 
 
 class RunFolderTests(unittest.TestCase):

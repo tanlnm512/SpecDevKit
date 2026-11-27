@@ -15,8 +15,12 @@ kit-shaped ones. The cases pin:
     refusal and gate outcomes;
   - the lifecycle command surface and its bare-name claims;
   - the wave is file-disjoint, an orphaned claim is named, an open fix
-    round re-opens a landed task with its evidence, and a tiny-tier
-    Status flip without the freeze stays refused.
+    round re-opens a landed task with its evidence (round 4's payload
+    alone carrying its model step), and a tiny-tier Status flip without
+    the freeze stays refused, and so does an agent-forged approval: a
+    self-authored review and a hand-written record with no signature
+    never open execute — only the owner's signed `freeze.py --approve`
+    does.
 
 Fixtures are mutated copies of examples/mini-spec (never the original)
 plus the repo it cites, and a from-scratch hand-authored docset. Every
@@ -24,10 +28,8 @@ CLI run gets its own telemetry dir so assertions read only that run's
 events.
 """
 
-import contextlib
 import hashlib
 import importlib.util
-import io
 import json
 import os
 import re
@@ -50,6 +52,12 @@ _freeze_spec = importlib.util.spec_from_file_location(
     "freeze", SCRIPTS / "freeze.py")
 freeze = importlib.util.module_from_spec(_freeze_spec)
 _freeze_spec.loader.exec_module(freeze)
+_retro_spec = importlib.util.spec_from_file_location(
+    "retro", SCRIPTS / "retro.py")
+retro = importlib.util.module_from_spec(_retro_spec)
+_retro_spec.loader.exec_module(retro)
+
+import _approval  # noqa: E402
 
 # One command per skill (D-033): the router is this package's single
 # command; the lifecycle verbs ride it as arguments.
@@ -82,17 +90,17 @@ def copy_fixture(tmp: Path, name: str = "demo") -> Path:
 
 
 def record_approval(spec_dir: Path) -> None:
-    """The approve gate's two records as spec-design leaves them: the
-    contract review carrying the docset fingerprint, then the freeze."""
+    """The approve gate's two records: the contract review carrying the
+    docset fingerprint, then the owner's signed freeze."""
     approvals = spec_dir / "approvals"
     approvals.mkdir(exist_ok=True)
     write(approvals / "review.md",
           "# Contract review\n\nDocset fingerprint: "
           f"{freeze.docset_fingerprint(spec_dir)}\n\n"
+          "tools: Read, Grep, Glob\n"
           "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n")
-    with contextlib.redirect_stdout(io.StringIO()):
-        rc = freeze.record(spec_dir, spec_dir.parent.parent)
-    assert rc == 0, "freeze.py --record refused the fixture"
+    _approval.approve(spec_dir, review=str(approvals / "review.md"),
+                      force=True)
 
 
 def set_status(spec_dir: Path, word: str) -> None:
@@ -540,6 +548,52 @@ Black-box verification traced to requirements.
 """
 
 
+class Gate010ForgedApprovalTests(unittest.TestCase):
+    """An approval only a human can grant: a record any write-capable
+    agent can author — the review, the fingerprint, the digest line, the
+    manifest, a flipped Status — is refused at the execute gate like a
+    draft. Only the owner's signed `freeze.py --approve` opens it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = Path(tempfile.mkdtemp(prefix="gate010-"))
+        cls.spec_dir = copy_fixture(cls._tmp)
+        cls.tel = cls._tmp / "tel"
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_a_forged_approval_is_refused_and_a_signed_one_admitted(self):
+        spec_dir = self.spec_dir
+        approvals = spec_dir / "approvals"
+        approvals.mkdir()
+        write(approvals / "review.md",
+              "# Contract review\n\nDocset fingerprint: "
+              f"{freeze.docset_fingerprint(spec_dir)}\n\n"
+              "tools: Read, Grep, Glob\n"
+              "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n")
+        review = freeze.fold_review(
+            (approvals / "review.md").read_text(encoding="utf-8"))
+        write(approvals / "approval.md", freeze.render(spec_dir, "-", (), review))
+        spec = spec_dir / "spec.md"
+        write(spec, spec.read_text(encoding="utf-8").replace(
+            "**Status**: draft", "**Status**: approved"))
+
+        forged = run_graph(spec_dir, "--run", "--span", "execute",
+                           tel=self.tel)
+        self.assertEqual(forged.returncode, 4, forged.stdout + forged.stderr)
+        self.assertIn("span entry refused", forged.stdout)
+        self.assertEqual(refusal_gates(forged.stdout), ["approve", "verify"])
+        self.assertFalse((spec_dir / "spawns").exists())
+
+        _approval.approve(spec_dir, force=True, review=str(approvals / "review.md"))
+        signed = run_graph(spec_dir, "--run", "--span", "execute",
+                           tel=self.tel)
+        self.assertNotIn("span entry refused", signed.stdout)
+        self.assertNotEqual(signed.returncode, 4, signed.stdout + signed.stderr)
+
+
 def hand_docset(tmp: Path, status: str = "approved") -> Path:
     """A complete docset authored from scratch: same contract shapes as
     the kit's templates, different prose throughout. Written directly —
@@ -675,7 +729,8 @@ A one-file spec still needs an approval that is more than a word.
 class Gate006WaveAndFixRoundTests(unittest.TestCase):
     """What the execute wave may spawn: tasks that share no file, never
     a claimed task, and a landed task again once a fix round opens on
-    it — with the round's evidence in the payload."""
+    it — with the round's evidence in the payload, and on round 4 the
+    model step (the `Model:` line, the emit line, the native form)."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="gate006-"))
@@ -745,6 +800,89 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
         r = self.emit(spec_dir)
         self.assertNotIn("evidence missing", r.stdout)
         self.assertIn(evidence, payload.read_text(encoding="utf-8"))
+        # one round, nothing to compare it against: no rule yet
+        self.assertNotIn("Same-signature rule", payload.read_text(
+            encoding="utf-8"))
+
+        # the model step rides the payload on round 4 alone — in its
+        # header block, named on the emit line too; under --native-agents
+        # that one payload keeps the brief and states both spawn routes
+        model_line = ("- Model: this round runs one model step above the "
+                      "developer brief's model — fix round 4, the last "
+                      "round that spawns, after rounds 1–3 came back wrong "
+                      "at that model: four rounds spawn, the fifth failure "
+                      "stops")
+        brief_heading = "# Developer agent (implement lens)"
+        for marker, stepped in (("(fix 4/5)", True), ("(fix 3/5)", False)):
+            p = spec_dir / "task.md"
+            write(p, re.sub(r"\(fix \d/5\)", marker,
+                            p.read_text(encoding="utf-8")))
+            for extra in ((), ("--native-agents",)):
+                with self.subTest(marker=marker, native=bool(extra)):
+                    r = self.emit(spec_dir, *extra)
+                    self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                    text = payload.read_text(encoding="utf-8")
+                    # the default form always embeds the brief; the
+                    # native form embeds it on the model-step round alone
+                    self.assertEqual(brief_heading in text,
+                                     stepped or not extra)
+                    self.assertEqual(model_line in text, stepped)
+                    self.assertEqual("\n- Model: " in text, stepped)
+                    emitted = next(ln for ln in r.stdout.splitlines()
+                                   if "   payload: " in ln
+                                   and "implementer-T001.md" in ln)
+                    self.assertEqual(
+                        "— fix round 4: runs one model step above the "
+                        "developer brief's model" in emitted, stepped)
+                    if not stepped:
+                        continue
+                    header = text.split("## Input payload", 1)[0]
+                    self.assertIn("- skill_dir: ", header)
+                    self.assertIn(model_line, header)
+                    self.assertIn("- Rounds: four rounds spawn, the fifth "
+                                  "failure stops — this is round 4", text)
+                    if extra:
+                        self.assertIn("agent type `spec-developer`", text)
+                        self.assertIn("spawn-time model override", text)
+                        self.assertIn("general-purpose agent on the "
+                                      "stronger model", text)
+                        # one brief reaching the agent once, protocol aside
+                        self.assertEqual(
+                            text.count("Long foreground tasks\n"), 1)
+
+    def test_from_the_second_round_the_payload_points_at_the_signature_rule(
+            self):
+        spec_dir = self.approved(
+            (T1, T1.replace("[P]", "[P] (implemented) (fix 2/5)")))
+        (spec_dir / "notes").mkdir()
+        note = spec_dir / "notes" / "T001.md"
+        payload = spec_dir / "spawns" / "wave-4" / "implementer-T001.md"
+        rule = ("- Same-signature rule: when the newest `## Fix round` "
+                "section's `$ <command>` line is the same command as the "
+                "round before it, another round re-runs it — the plan, not "
+                "the model, is the suspect (`contracts/execution.md` § Fix "
+                "rounds)")
+
+        # two different failing commands: the rule, and no verdict
+        write(note, "## Fix round 1\n$ pytest -k multiply\nE   one\n"
+                    "## Fix round 2\n$ go test ./...\nFAIL: two\n")
+        self.emit(spec_dir)
+        text = payload.read_text(encoding="utf-8")
+        self.assertIn("- Fix round 2 — failure evidence and prior attempts "
+                      f"({note}, verbatim):", text)
+        self.assertIn("- Rounds: four rounds spawn, the fifth failure stops "
+                      "— this is round 2", text)
+        self.assertEqual(text.count(rule), 1)
+        self.assertNotIn("This task is there", text)
+
+        # one command twice: the payload says so, naming the command
+        write(note, "## Fix round 1\n$ pytest -k multiply\nE   one\n"
+                    "## Fix round 2\n$ pytest -k multiply\nE   two\n")
+        self.emit(spec_dir)
+        self.assertIn(rule + ". This task is there: `$ pytest -k multiply` "
+                      "failed the last 2 round(s) — suspect the plan, not "
+                      "the model, before spending this round",
+                      payload.read_text(encoding="utf-8"))
 
     def test_tick_refuses_a_task_whose_fix_round_is_open(self):
         spec_dir = self.approved(
@@ -767,6 +905,8 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
         self.assertIn(brief_heading, embedded)
         # a rule the brief already carries is not repeated by the protocol
         self.assertEqual(embedded.count("Long foreground tasks\n"), 1)
+        # a first run names no model: only round 4's payload does
+        self.assertNotIn("- Model:", embedded)
 
         r = self.emit(spec_dir, "--native-agents")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -789,8 +929,7 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
         spec_dir.mkdir(parents=True)
         write(spec_dir / "spec.md", TINY_SPEC.replace(
             "**Effort**: standard\n", "**Effort**: standard\n**Mode**: fast\n"))
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(freeze.record(spec_dir, self._tmp), 0)
+        _approval.approve(spec_dir, self._tmp)
         r = self.emit(spec_dir)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(spawn_files(spec_dir), ["implementer-T001.md"])
@@ -806,8 +945,7 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
         self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
         self.assertIn("approve", refusal_gates(r.stdout))
 
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(freeze.record(spec_dir, self._tmp), 0)
+        _approval.approve(spec_dir, self._tmp)
         r = self.emit(spec_dir)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         payload = next((spec_dir / "spawns").glob("*/implementer-T001.md"))
@@ -909,6 +1047,37 @@ class Gate008DigestFileTests(unittest.TestCase):
         self.assertTrue(graph.digest_capable({"briefs": ["architect.md"]}))
 
 
+def write_headless_runner(tmp: Path, blocked: bool) -> str:
+    """The headless 'developer': read the payload it was handed,
+    write its digest file (blocked or implemented), and leave a
+    marker file proving it ran. Its TCs are deterministic one-liners,
+    so the scoped proofs land green once the digest is in."""
+    if blocked:
+        body = ("digest = (f'digest: task {tid} · status blocked: "
+                "cannot reach the module · files 0 · commit-line "
+                "none · deviation none · note none')\n")
+    else:
+        body = ("(spec_dir.parent / f'.built-{tid}').write_text('ok')\n"
+                "digest = (f'digest: task {tid} · status implemented "
+                "· files 1 · commit-line feat: T### · deviation "
+                "none · note none')\n")
+    path = tmp / f"runner{'-blocked' if blocked else ''}.py"
+    write(path, 'import re, sys\n'
+          'from pathlib import Path\n'
+          'prompt = Path(sys.argv[1]).read_text(encoding="utf-8")\n'
+          'spec_dir = Path(re.search(r"- spec_dir: (.+)", prompt)'
+          '.group(1).strip())\n'
+          'm = re.search(r"implementer-(T\\d{3})", prompt)\n'
+          'tid = m.group(1) if m else "T000"\n'
+          'wave = re.search(r"wave (\\d+)", prompt)\n'
+          'digests = spec_dir / "digests" / f"wave-{wave.group(1) if wave else 1}"\n'
+          'digests.mkdir(parents=True, exist_ok=True)\n'
+          + body +
+          '(digests / f"implementer-{tid}.md")'
+          '.write_text("tools: Read, Grep, Glob, Bash, Write, Edit\\n" + digest + "\\n")\n')
+    return f"{sys.executable} {path} {{prompt_file}}"
+
+
 class Gate009HeadlessExecuteTests(unittest.TestCase):
     """The headless lift (D-041): where mark.py ships beside graph.py, a
     custom --runner drives execute waves end to end — mark.py claims,
@@ -927,33 +1096,7 @@ class Gate009HeadlessExecuteTests(unittest.TestCase):
         self.runner = self._write_runner(blocked=False)
 
     def _write_runner(self, blocked: bool) -> str:
-        """The headless 'developer': read the payload it was handed,
-        write its digest file (blocked or implemented), and leave a
-        marker file proving it ran. Its TCs are deterministic one-liners,
-        so the scoped proofs land green once the digest is in."""
-        if blocked:
-            body = ("digest = (f'digest: task {tid} · status blocked: "
-                    "cannot reach the module · files 0 · commit-line "
-                    "none · deviation none · note none')\n")
-        else:
-            body = ("(spec_dir.parent / f'.built-{tid}').write_text('ok')\n"
-                    "digest = (f'digest: task {tid} · status implemented "
-                    "· files 1 · commit-line feat: T### · deviation "
-                    "none · note none')\n")
-        path = self._tmp / f"runner{'-blocked' if blocked else ''}.py"
-        write(path, 'import re, sys\n'
-              'from pathlib import Path\n'
-              'prompt = Path(sys.argv[1]).read_text(encoding="utf-8")\n'
-              'spec_dir = Path(re.search(r"- spec_dir: (.+)", prompt)'
-              '.group(1).strip())\n'
-              'm = re.search(r"implementer-(T\\d{3})", prompt)\n'
-              'tid = m.group(1) if m else "T000"\n'
-              'digests = spec_dir / "digests" / "wave-1"\n'
-              'digests.mkdir(parents=True, exist_ok=True)\n'
-              + body +
-              '(digests / f"implementer-{tid}.md")'
-              '.write_text(digest + "\\n")\n')
-        return f"{sys.executable} {path} {{prompt_file}}"
+        return write_headless_runner(self._tmp, blocked)
 
     def test_headless_run_lands_both_tasks_and_parks_at_tick_commit(self):
         r = run_graph(self.spec, "--span", "execute", "--run",
@@ -998,6 +1141,68 @@ class Gate009HeadlessExecuteTests(unittest.TestCase):
         t = (self.spec / "task.md").read_text(encoding="utf-8")
         self.assertIn("(in-progress)", t)
 
+    def test_the_round_that_steps_the_model_needs_a_runner_naming_it(self):
+        # fix round 4 is the round that runs one model step above the
+        # developer brief's model: a runner that cannot name the model
+        # would spend it on the same one, so nothing is claimed
+        spec = hand_docset(self._tmp / "fix4", "approved")
+        edit_tasks(spec, ("- [ ] T001 implement",
+                          "- [ ] T001 (fix 4/5) implement"))
+        runner = self._write_runner(blocked=False)
+        r = run_graph(spec, "--span", "execute", "--run",
+                      "--runner", runner, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("AWAITING ORCHESTRATOR: execute: the --runner template "
+                      "names no {model} — T001 is at fix round 4", r.stdout)
+        self.assertIn("held: T001 — fix round 4/5 open", r.stdout)
+        self.assertNotIn("(in-progress)", (spec / "task.md").read_text(
+            encoding="utf-8"))
+        ledger = spec / "runs" / "ledger.jsonl"
+        self.assertNotIn('"claim"', ledger.read_text(encoding="utf-8"))
+        self.assertFalse((spec.parent / ".built-T001").exists())
+
+        # with {model} the runner is handed the step to resolve: the
+        # brief's model, one step up — the round is no longer silent
+        stepping = hand_docset(self._tmp / "stepping", "approved")
+        edit_tasks(stepping, ("- [ ] T001 implement",
+                              "- [ ] T001 (fix 4/5) implement"))
+        models = self._tmp / "models.txt"
+        r = run_graph(stepping, "--span", "execute", "--run", "--runner",
+                      f"echo '{{model}}' >> {models} && {runner}",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(models.read_text(encoding="utf-8").split(),
+                         ["sonnet+1"], r.stdout + r.stderr)
+
+        # every other round takes the brief's own model
+        first = hand_docset(self._tmp / "first", "approved")
+        models.unlink()
+        r = run_graph(first, "--span", "execute", "--run", "--runner",
+                      f"echo '{{model}}' >> {models} && {runner}",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+        self.assertEqual(models.read_text(encoding="utf-8").split(),
+                         ["sonnet", "sonnet"], r.stdout + r.stderr)
+
+    def test_a_fix_round_lands_from_a_headless_wave(self):
+        # nobody is there to write a --resolution: the landing closes the
+        # round citing the digest file it validated
+        spec = hand_docset(self._tmp / "fix2", "approved")
+        edit_tasks(spec, ("- [ ] T001 implement",
+                          "- [ ] T001 (fix 2/5) implement\n"
+                          "  - fix 2 \u2014 E   AssertionError: shout('hi') "
+                          "== 'hi'"))
+        r = run_graph(spec, "--span", "execute", "--run",
+                      "--runner", self._write_runner(blocked=False),
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented) (round 2 closed)", r.stdout)
+        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+        tasks = (spec / "task.md").read_text(encoding="utf-8")
+        self.assertIn("(implemented) (fixed 2/5)", tasks)
+        self.assertIn("\u2014 headless round 2: digest digests/", tasks)
+
     def test_a_package_without_mark_py_still_refuses(self):
         # the lift is scoped to packages that ship mark.py: a package
         # with the same graph.py but no scripts/mark.py keeps the D-038
@@ -1008,7 +1213,7 @@ class Gate009HeadlessExecuteTests(unittest.TestCase):
         (pkg / "agents").mkdir()
         (pkg / "protocol").mkdir()
         shutil.copy(SCRIPTS / "graph.py", pkg / "scripts" / "graph.py")
-        for name in ("check.py", "specstate.py", "freeze.py",
+        for name in ("check.py", "specstate.py", "digests.py", "freeze.py",
                      "telemetry.py", "contract.py", "index.py"):
             shutil.copy(SCRIPTS / name, pkg / "scripts" / name)
         shutil.copy(SKILL / "agents" / "developer.md",
@@ -1056,6 +1261,250 @@ class Gate005LifecycleCommandSurfaceTests(unittest.TestCase):
         # exactly one claimant per bare name: the old monolith must not ship
         self.assertFalse((SKILL.parent / "spec-to-prod").exists(),
                          "the retired monolith must not ship")
+
+
+HAND_DIGEST = ("tools: Read, Grep, Glob, Bash, Write, Edit\n"
+               "digest: task T001 · status implemented · files 1 · "
+               "commit-line feat: T001 · deviation none · note none\n")
+HAND_REPORTED = "Bash, Edit, Glob, Grep, Read, Write"
+
+
+def facts(row: dict) -> dict:
+    """A ledger row without its timestamp and chain field — the literal
+    a test compares."""
+    return {k: v for k, v in row.items() if k not in ("ts", "prev")}
+
+
+def provenance_section(text: str) -> str:
+    """retro.md's provenance section: from its heading to the next one."""
+    return text.split("## Provenance (run ledger — kept at archive)\n\n",
+                      1)[1].split("\n## ", 1)[0].rstrip("\n")
+
+
+class Gate011RunLedgerTests(unittest.TestCase):
+    """The run ledger (D-055): specs/<name>/runs/ledger.jsonl, one row
+    per orchestrator event. Every emitted payload is a `wave` row with
+    the request's facts (role, lens, payload sha, docset fingerprint,
+    the brief's model, the --harness name); a --run opens and closes
+    the ledger with its stop reason; the headless wave's claims,
+    digests and landings join the same rows. Every graph.py invocation
+    that touches the spec sweeps digests/ first: a valid digest file
+    gains the one provenance line a ledger row vouches for; a malformed
+    one, or one no `wave` or `claim` row records, is left as it is and
+    named."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="gate011-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.tel = self._tmp / "tel"
+        self.spec = hand_docset(self._tmp / "specs" / "a", "approved")
+        self.ledger = self.spec / "runs" / "ledger.jsonl"
+
+    def rows(self) -> list[dict]:
+        if not self.ledger.is_file():
+            return []
+        return [json.loads(ln) for ln in
+                self.ledger.read_text(encoding="utf-8").splitlines()]
+
+    def digest_at(self, spec: Path, wave: int, text: str) -> Path:
+        path = spec / "digests" / f"wave-{wave}" / "implementer-T001.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write(path, text)
+        return path
+
+    def test_emit_writes_one_wave_row_per_payload_with_the_requests_facts(self):
+        fingerprint = freeze.docset_fingerprint(self.spec)
+        r = run_graph(self.spec, "--span", "execute", "--emit-spawns",
+                      "--run-id", "r-1a2b", "--harness", "zcode",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # the printed claim command carries the harness on to the claims
+        self.assertIn(f"--run-id r-1a2b --harness zcode", r.stdout)
+        rows = self.rows()
+        # T002 depends on T001, so the wave holds one payload; the hand
+        # docset's waves all sit at 4 (authoring done, nothing ticked)
+        self.assertEqual([row["event"] for row in rows], ["wave"])
+        payload = self.spec / "spawns" / "wave-4" / "implementer-T001.md"
+        self.assertEqual(facts(rows[0]), {
+            "skill": "spec-build", "event": "wave", "run": "r-1a2b",
+            "wave": 4, "node": "execute", "role": "implementer",
+            "lens": "build", "stem": "implementer-T001",
+            "payload": hashlib.sha256(payload.read_bytes()).hexdigest()[:12],
+            "input": fingerprint, "model": "sonnet", "harness": "zcode"})
+
+    def test_a_run_opens_and_closes_the_ledger_with_its_stop_reason(self):
+        r = run_graph(self.spec, "--span", "execute", "--run",
+                      "--run-id", "r-7q", "--harness", "zcode",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        rows = self.rows()
+        self.assertEqual([row["event"] for row in rows],
+                         ["run_start", "wave", "run_end"])
+        self.assertEqual(facts(rows[0]), {
+            "skill": "spec-build", "event": "run_start", "run": "r-7q",
+            "harness": "zcode"})
+        self.assertEqual(facts(rows[-1]), {
+            "skill": "spec-build", "event": "run_end", "run": "r-7q",
+            "harness": "zcode", "outcome": "wave_emitted"})
+
+        # a landed docset parks at the human gate: the row names it
+        landed = hand_docset(self._tmp / "specs" / "b", "approved")
+        land_hand_tasks(landed)
+        r = run_graph(landed, "--run", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        end = json.loads((landed / "runs" / "ledger.jsonl").read_text(
+            encoding="utf-8").splitlines()[-1])
+        self.assertEqual(facts(end), {
+            "skill": "spec-build", "event": "run_end", "harness": "unknown",
+            "node": "tick-commit", "outcome": "gate_pause"})
+
+        # --harness belongs to the two executor modes only
+        r = run_graph(self.spec, "--harness", "zcode", tel=self.tel)
+        self.assertEqual(r.returncode, 2)
+
+    def test_a_headless_run_leaves_the_whole_story_in_the_ledger(self):
+        runner = write_headless_runner(self._tmp, blocked=False)
+        r = run_graph(self.spec, "--span", "execute", "--run",
+                      "--runner", runner, "--parallel", "2",
+                      "--run-id", "r-head", "--harness", "zcode",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        rows = self.rows()
+        # T002 follows T001: one wave lands T001, the next lands T002 (the
+        # same wave number — nothing is ticked) — each task's claim,
+        # digest and land join its own wave row
+        self.assertEqual([row["event"] for row in rows], [
+            "run_start", "wave", "claim", "digest", "land", "wave",
+            "claim", "digest", "land", "run_end"])
+        self.assertEqual(facts(rows[-1]), {
+            "skill": "spec-build", "event": "run_end", "run": "r-head",
+            "node": "tick-commit", "harness": "zcode",
+            "outcome": "gate_pause"})
+        for tid in ("T001", "T002"):
+            own = [row for row in rows if row.get("task") == tid]
+            self.assertEqual([row["event"] for row in own],
+                             ["claim", "digest", "land"])
+            claim, digest, land = own
+            wave = next(row for row in rows if row["event"] == "wave"
+                        and row["stem"] == f"implementer-{tid}")
+            self.assertEqual(wave["wave"], 4)
+            self.assertEqual(claim["payload"], wave["payload"])
+            for row in (claim, digest):
+                self.assertEqual(
+                    (row["run"], row["payload"], row["model"],
+                     row["harness"]),
+                    ("r-head", wave["payload"], "sonnet", "zcode"))
+            self.assertEqual(
+                (land["digest"], land["outcome"], land["run"]),
+                (digest["digest"], "implemented", "r-head"))
+            text = (self.spec / "digests" / "wave-4"
+                    / f"implementer-{tid}.md").read_text(encoding="utf-8")
+            self.assertEqual(text.count("provenance:"), 1)
+            self.assertEqual(text.splitlines()[-1], (
+                f"provenance: run r-head · role implementer · lens build · "
+                f"model sonnet · harness zcode · payload {wave['payload']} · "
+                f"input {wave['input']} · recorded {digest['ts']} · "
+                f"tools-reported {HAND_REPORTED}"))
+
+        section = provenance_section(
+            retro.retro(self.spec, "handbuilt", self.spec.parent))
+        self.assertEqual(section.splitlines()[-1],
+                         "Ledger: 2 digest(s) recorded.")
+        for tid in ("T001", "T002"):
+            wave = next(row for row in rows if row["event"] == "wave"
+                        and row["stem"] == f"implementer-{tid}")
+            digest = next(row for row in rows if row["event"] == "digest"
+                          and row.get("task") == tid)
+            self.assertIn(
+                f"| {tid} | 4 | r-head | implementer | build | sonnet "
+                f"| zcode | {wave['payload']} | {wave['input']} | "
+                f"{digest['digest']} | implemented |", section)
+
+    def test_a_hand_written_digest_is_swept_before_every_read(self):
+        # each mode that touches the spec sweeps first: a hand-written
+        # file no ledger row records is refused — named on stderr, once
+        # per content, given no provenance line. The sweep ran; it
+        # vouches nothing for a digest nobody's emit or claim asked for
+        modes = ([], ["--state-json"], ["--explain", "execute"],
+                 ["--emit-spawns"], ["--run"])
+        path = self.digest_at(self.spec, 7, HAND_DIGEST)
+        refusal = (f"digest: unverified at {path} — it carries no "
+                   "`provenance:` line and no ledger row records its "
+                   "digest — nothing vouches its content — fix and run "
+                   "again: re-spawn the same payload to rewrite its "
+                   "digest file\n")
+        for argv in modes:
+            with self.subTest(argv=argv):
+                r = run_graph(self.spec, *argv, tel=self.tel)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn(refusal, r.stderr)
+        self.assertNotIn("provenance:", path.read_text(encoding="utf-8"))
+        rows = [row for row in self.rows()
+                if row["event"] == "digest_malformed"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["wave"], rows[0]["outcome"]),
+                         (7, "unverified"))
+        self.assertEqual(facts(rows[0]), {
+            "skill": "spec-build", "event": "digest_malformed", "wave": 7,
+            "task": "T001", "role": "implementer",
+            "stem": "implementer-T001", "harness": "unknown",
+            "digest": hashlib.sha256(HAND_DIGEST.encode())
+            .hexdigest()[:12], "outcome": "unverified"})
+
+        # a pure read and a refusal at the gate touch nothing
+        idle = self.digest_at(self.spec, 3, HAND_DIGEST)
+        r = run_graph(self.spec, "--launch-check", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(idle.read_text(encoding="utf-8"), HAND_DIGEST)
+        draft = copy_fixture(self._tmp, "draft")
+        refused = self.digest_at(draft, 1, HAND_DIGEST)
+        r = run_graph(draft, "--span", "execute", "--emit-spawns",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
+        self.assertEqual(refused.read_text(encoding="utf-8"), HAND_DIGEST)
+        self.assertFalse((draft / "runs").exists())
+
+    def test_the_sweep_leaves_a_malformed_file_untouched_and_names_it(self):
+        broken = "digest: task T001 · status implemented · files 2 · note none\n"
+        path = self.digest_at(self.spec, 2, broken)
+        for _ in range(2):
+            r = run_graph(self.spec, tel=self.tel)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(r.stderr, (
+                f"digest: malformed at {path} — `commit-line` missing — fix "
+                "and run again: re-spawn the same payload to rewrite its "
+                "digest file\n"))
+        self.assertEqual(path.read_text(encoding="utf-8"), broken)
+        rows = self.rows()
+        self.assertEqual([(row["event"], row["outcome"]) for row in rows],
+                         [("digest_malformed", "malformed")])
+        self.assertEqual(facts(rows[0]), {
+            "skill": "spec-build", "event": "digest_malformed", "wave": 2,
+            "task": "T001", "role": "implementer", "stem": "implementer-T001",
+            "harness": "unknown",
+            "digest": hashlib.sha256(broken.encode()).hexdigest()[:12],
+            "outcome": "malformed"})
+
+    def test_retro_folds_the_rows_and_counts_the_malformed(self):
+        empty = hand_docset(self._tmp / "specs" / "empty", "approved")
+        section = provenance_section(
+            retro.retro(empty, "handbuilt", empty.parent))
+        self.assertEqual(section, "None recorded.")
+        lone = hand_docset(self._tmp / "specs" / "lone", "approved")
+        (lone / "runs").mkdir()
+        write(lone / "runs" / "ledger.jsonl", json.dumps({
+            "ts": "2026-11-26T10:00:00.000000+00:00", "skill": "spec-build",
+            "event": "digest_malformed", "wave": 3, "task": "T001",
+            "role": "implementer", "stem": "implementer-T001",
+            "harness": "unknown", "digest": "0f1e2d3c4b5a",
+            "outcome": "malformed"}) + "\n")
+        section = provenance_section(
+            retro.retro(lone, "handbuilt", lone.parent))
+        self.assertEqual(section.splitlines()[:3], [
+            "| Task / stem | Wave | Run | Role | Lens | Model | Harness | "
+            "Payload | Input | Digest | Outcome |",
+            "|" + "---|" * 12,
+            "Ledger: 0 digest(s) recorded, 1 malformed."])
 
 
 if __name__ == "__main__":

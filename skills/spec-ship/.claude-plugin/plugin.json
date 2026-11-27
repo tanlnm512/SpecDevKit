@@ -1,7 +1,7 @@
 {
   "name": "spec-ship",
-  "version": "0.1.1",
-  "description": "Takes a delivered spec from its commit to a merged pull request \u2014 the suite's integration phase.",
+  "version": "0.2.0",
+  "description": "Takes a delivered spec from its commit to a merged pull request \u2014 pushes the branch, drafts the PR, reads CI, and drafts the replies to review comments.",
   "author": {
     "name": "Stanley",
     "email": "minhtan512@gmail.com"

@@ -1,22 +1,19 @@
 ---
 name: spec-discover
 description: >-
-  Five-stage idea discovery and pressure-testing — the pre-spec front
-  door of the suite, for when WHETHER to build it or WHICH version is
-  still open. One clarifying question, a fresh three-lens panel
-  (Visionary, Cynic, Minimalist), a trade-off matrix, socratic
-  refinement until the user picks or blends a direction, then a
-  durable idea brief at brainstorms/<name>.md, ready to
-  feed /spec-define. Use when the user says "brainstorm", "I have an
-  idea and I'm not sure whether / which version to build", "help me explore / validate / pressure-test this idea or
-  feature", "help me decide what to build", "before we spec this" —
-  any ask where the direction is undecided, even without the word
+  Idea discovery and pressure-testing — for when WHETHER to build
+  it or WHICH version is still open — ends in an idea brief ready
+  for /spec-define. Use when the user says "brainstorm", "I have
+  an idea and I'm not sure whether / which version to build",
+  "help me explore / validate / pressure-test this idea or
+  feature", "help me decide what to build", "before we spec this"
+  — any ask where the direction is undecided, even without the word
   "brainstorm". Not for a settled direction that needs its
   requirements pinned down ("clarify this idea", "/spec-define
   <name>" — that is spec-define).
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.2.0"
 ---
 
 # spec-discover — five-stage idea pressure-testing (before the spec exists)
@@ -226,8 +223,9 @@ Where the harness registers `spec-panelist`, that agent type
 is the spawn and its brief is already loaded. Without registered
 agents, the generic spawn's payload leads with the `agents/panelist.md`
 body (frontmatter stripped, byte-verbatim). The digest comes back
-in the grammar `contracts/run.md` pins, and decisions come from
-digest fields, never from prose.
+in the grammar `contracts/run.md` pins — validated against it before
+a field is read — and decisions come from digest fields, never from
+prose.
 
 Stages 1, 3, 4 and 5 are ALWAYS the session's: a spawned job has no
 user-turn primitive, and a stop is not a question. A lens section or

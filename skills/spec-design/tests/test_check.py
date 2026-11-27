@@ -26,6 +26,8 @@ _spec = importlib.util.spec_from_file_location("check", SKILL / "scripts" / "che
 check = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check)
 
+import _approval  # noqa: E402
+
 
 def run_check(*argv):
     """Run check.main() with argv/out captured; return (exit_code, output)."""
@@ -143,6 +145,7 @@ class EvidenceIntegrityTests(unittest.TestCase):
         if text is None:
             text = (f"Docset fingerprint: "
                     f"{check.freeze.docset_fingerprint(spec)}\n\n"
+                    "tools: Read, Grep, Glob\n"
                     "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n")
         payload.write_text(text, encoding="utf-8")
         return str(payload)
@@ -153,15 +156,23 @@ class EvidenceIntegrityTests(unittest.TestCase):
         (spec / "approvals" / "review.md").write_text(
             "# Contract review\n\nDocset fingerprint: "
             f"{check.freeze.docset_fingerprint(spec)}\n\n"
+            "tools: Read, Grep, Glob\n"
             "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
             encoding="utf-8")
 
     def record_freeze(self, spec, review=None, force=False):
-        with contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(io.StringIO()) as err:
-            code = check.freeze.record(spec, Path.cwd(), force=force,
-                                       review=review)
-        return code, err.getvalue()
+        """`freeze.py --approve` as the owner runs it, on a terminal and a
+        machine whose approver list names the key; (exit code, what it
+        printed)."""
+        _approval.machine_list()
+        argv = [str(SKILL / "scripts" / "freeze.py"), str(spec), "--approve",
+                "--key", str(_approval.signing_key()),
+                "--repo", str(spec.parents[1])]
+        if review:
+            argv += ["--review", review]
+        if force:
+            argv += ["--force"]
+        return _approval.run_freeze(argv)
 
     def test_approved_status_without_a_freeze_fails(self):
         # a hand-flipped Status is not an approval, whatever task.md's
@@ -178,7 +189,7 @@ class EvidenceIntegrityTests(unittest.TestCase):
         self.assertIn("contract review not recorded", err)
         self.assertFalse((spec / "approvals" / "approval.md").exists())
 
-        # the old two-file flow still records until migrate folds it away
+        # the old grammar's sidecar still backs a bare --approve
         self.legacy_review(spec)
         self.assertEqual(self.record_freeze(spec)[0], 0)
 
@@ -198,13 +209,22 @@ class EvidenceIntegrityTests(unittest.TestCase):
         spec = self.approved_copy()
         fingerprint = check.freeze.docset_fingerprint(spec)
         blocked = (
-            f"Docset fingerprint: {fingerprint}\n\ndigest: BLOCK 1 · WARN 0 "
+            f"Docset fingerprint: {fingerprint}\n\ntools: Read, Grep, Glob\n"
+            "digest: BLOCK 1 · WARN 0 "
             "· NIT 0 · worst untestable FR\n"
             '1. BLOCK · spec.md · "shall be fast" · name a bound\n')
         refused = (
             # the fingerprint alone proves no auditor ever ran
             (f"{fingerprint}\n", "no auditor digest"),
             (blocked, "BLOCK 1 but 0 ruling line(s)"),
+        )
+        # the auditor line is read through its schema (D-074): a missing
+        # key or a bad kind is a fix-and-run-again refusal, named
+        malformed = (
+            ("digest: BLOCK 1 · WARN 0 · worst untestable FR\n",
+             "malformed auditor digest"),
+            ("digest: BLOCK one · WARN 0 · NIT 0 · worst none\n",
+             "`BLOCK` expects a count"),
         )
         for text, why in refused:
             with self.subTest(why):
@@ -213,10 +233,72 @@ class EvidenceIntegrityTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn(why, err)
                 self.assertFalse((spec / "approvals" / "approval.md").exists())
+        for line, why in malformed:
+            with self.subTest(line):
+                payload = self.record_review(
+                    spec, f"Docset fingerprint: {fingerprint}\n\n{line}")
+                code, err = self.record_freeze(spec, payload)
+                self.assertEqual(code, 1)
+                self.assertIn(why, err)
+                self.assertIn("fix and run again", err)
+                self.assertFalse((spec / "approvals" / "approval.md").exists())
+        self.assertIn("`NIT` missing", check.freeze.review_shape_problem(
+            malformed[0][0]))
+        # a signed record is frozen: its line is read for the count it
+        # carries, never re-validated into a mid-execution refusal
+        self.assertIsNone(check.freeze.review_shape_problem(
+            "Docset fingerprint: 0123abcd4567\n\n" + malformed[0][0]
+            + 'ruling: 1 — user: "the bound comes later"\n',
+            strict=False))
+        self.assertIn("malformed auditor digest",
+                      check.freeze.review_shape_problem(
+                          "digest: no count at all\n", strict=False))
         payload = self.record_review(
             spec, blocked + 'ruling: 1 — user: "ship it, the bound comes '
             'later"\n')
         self.assertEqual(self.record_freeze(spec, payload)[0], 0)
+
+    def test_freeze_refuses_a_review_whose_auditor_line_lacks_read(self):
+        # D-076: the live payload opens with the auditor's `tools:` line.
+        # Without Read the review is a failed spawn — refused, never a
+        # fix round — and the current review's line is the last one
+        # above the last digest. The signed record folds the digest line
+        # alone and still verifies.
+        spec = self.approved_copy()
+        fingerprint = check.freeze.docset_fingerprint(spec)
+        head = f"Docset fingerprint: {fingerprint}\n\n"
+        first = "digest: BLOCK 1 · WARN 0 · NIT 0 · worst none\n" \
+                'ruling: 1 — user: "the bound comes later"\n'
+        current = "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n"
+        # (payload, the report the refusal names, or None when it passes)
+        for text, reported in (
+                (head + "tools: Grep, Glob\n" + current, "Glob, Grep"),
+                (head + current, "none"),
+                (head + "tools: Read\n" + first + "tools: Glob\n" + current,
+                 "Glob"),
+                (head + "tools: read, grep\n" + current, None),
+                (head + "tools: Glob\n" + first + "tools: READ\n" + current,
+                 None)):
+            with self.subTest(reported=reported, reviews=text.count("digest:")):
+                payload = self.record_review(spec, text)
+                code, err = self.record_freeze(spec, payload, force=True)
+                if reported is None:
+                    self.assertEqual(code, 0, err)
+                    continue
+                self.assertEqual(code, 1)
+                self.assertIn("capability handshake failed: auditor reported "
+                              f"tools `{reported}` — the auditor role requires "
+                              "`Read` — spawn again on a type or harness that "
+                              "holds `Read`; a failed spawn, not a fix round",
+                              err)
+                self.assertFalse((spec / "approvals" / "approval.md").exists())
+        record = (spec / "approvals" / "approval.md").read_text(
+            encoding="utf-8")
+        folded = record.split("## Contract review", 1)[1].split(
+            "## Freeze", 1)[0]
+        self.assertNotIn("tools:", folded)
+        self.assertIsNone(check.freeze.review_shape_problem(folded,
+                                                            strict=False))
 
     def test_a_delivered_docset_survives_a_rewritten_approval_anchor(self):
         # a squash-merge or rebase replaces the Approved-at commit; once
@@ -235,19 +317,31 @@ class EvidenceIntegrityTests(unittest.TestCase):
         git("commit", "-qm", "base")
         head = git("rev-parse", "--short", "HEAD")
         payload = self.record_review(spec)
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(check.freeze.record(spec, root, review=payload), 0)
+        self.assertEqual(self.record_freeze(spec, payload)[0], 0)
         approval = spec / "approvals" / "approval.md"
         approval.write_text(
             approval.read_text(encoding="utf-8").replace(head, "0123abc"),
             encoding="utf-8")
+        # a record approved before signatures existed: no .sig beside it
+        (spec / "approvals" / "approval.md.sig").unlink()
         lost = "Approved-at commit '0123abc' not found"
-        self.assertIn(lost, run_check(str(spec), "--repo", str(root))[1])
+        unsigned = "approval freeze: no signature"
+        code, out = run_check(str(spec), "--repo", str(root))
+        self.assertEqual(code, 1, out)
+        self.assertIn(lost, out)
+        self.assertIn(unsigned, out)
         task = spec / "task.md"
         task.write_text(
             f"**Delivered**: commit @ {head}\n"
             + task.read_text(encoding="utf-8"), encoding="utf-8")
         self.assertNotIn(lost, run_check(str(spec), "--repo", str(root))[1])
+        # the delivered line alone is not an approval: the legacy record
+        # counts only once the remote default branch carries it
+        self.assertIn("no signature", check.freeze.verify(spec, root)[0])
+        git("add", "-A")
+        git("commit", "-qm", "legacy delivery")
+        _approval.publish(root)
+        self.assertEqual(check.freeze.verify(spec, root), [])
 
     def test_coverage_gaps_only_warn_once_the_contract_is_frozen(self):
         # a docset approved before a coverage rule existed must not go
@@ -258,42 +352,405 @@ class EvidenceIntegrityTests(unittest.TestCase):
             "### Rollout")[0], encoding="utf-8")
         payload = self.record_review(spec)
         self.assertEqual(self.record_freeze(spec, payload)[0], 0)
-        code, out = run_check(str(spec), "--repo", str(Path.cwd()))
+        code, out = run_check(str(spec), "--repo", str(spec.parents[1]))
         self.assertEqual(code, 0, out)
         self.assertIn("WARN  structure: plan.md has no `### Rollout`", out)
 
-    def test_record_by_names_each_approver(self):
+    def test_record_refuses_and_an_unsigned_record_is_not_an_approval(self):
+        # nothing here signs, so the row needs no ssh-keygen
+        spec = self.approved_copy()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(check.freeze.main([str(spec), "--record"]), 1)
+        self.assertIn("`freeze.py <spec-dir> --approve`", err.getvalue())
+        self.assertFalse((spec / "approvals" / "approval.md").exists())
+
+        # the forge: a self-authored review, a record the renderer
+        # would write, a flipped Status — and no signature
+        payload = Path(self.record_review(spec))
+        lines = check.freeze.fold_review(
+            payload.read_text(encoding="utf-8"))
+        (spec / "approvals").mkdir(exist_ok=True)
+        (spec / "approvals" / "approval.md").write_text(
+            check.freeze.render(spec, "-", (), lines), encoding="utf-8")
+        root = spec.parents[1]
+        problems = check.freeze.verify(spec, root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("no signature", problems[0])
+        self.assertIn("`freeze.py <spec-dir> --approve --force`", problems[0])
+        code, out = run_check(str(spec), "--repo", str(root))
+        self.assertEqual(code, 1, out)
+        self.assertIn("evidence: approval freeze: no signature", out)
+        self.assertIn("--approve --force", out)
+
+    def test_approve_names_the_signing_principal(self):
         spec = self.approved_copy()
         payload = self.record_review(spec)
-        with contextlib.redirect_stdout(io.StringIO()):
-            code = check.freeze.main([
-                str(spec), "--record", "--review", payload,
-                "--by", "Ana Lim", "--by", "Raj P",
-                "--repo", str(Path.cwd())])
-        self.assertEqual(code, 0)
+        root = spec.parents[1]
+        code, shown = self.record_freeze(spec, payload)
+        self.assertEqual(code, 0, shown)
+        principal = _approval.machine_list().read_text(
+            encoding="utf-8").split()[0]
         record = (spec / "approvals" / "approval.md").read_text(
             encoding="utf-8")
-        self.assertIn("**Approved-by**: Ana Lim\n**Approved-by**: Raj P\n",
-                      record)
-        self.assertEqual(check.freeze.verify(spec, Path.cwd()), [])
-        # --by signs an approval; it is not a verify option
-        self.assertIsNone(check.freeze.parse_args(
-            [str(spec), "--verify", "--by", "Ana Lim"]))
+        self.assertIn(f"**Approved-by**: {principal}\n", record)
+        self.assertEqual(check.freeze.verify(spec, root), [])
+        # --by is gone and a key signs: neither is a verify option
+        for argv in ([str(spec), "--approve", "--by", "Ana Lim"],
+                     [str(spec), "--verify", "--key", "id_ed25519"],
+                     [str(spec), "--verify", "--review", payload]):
+            self.assertIsNone(check.freeze.parse_args(argv))
 
     def test_approved_freeze_detects_contract_mutation(self):
         spec = self.approved_copy()
         payload = self.record_review(spec)
         self.assertEqual(self.record_freeze(spec, payload)[0], 0)
-        self.assertEqual(self.record_freeze(spec, payload)[0], 1)
-        code, out = run_check(str(spec), "--repo", str(Path.cwd()))
+        refused = self.record_freeze(spec, payload)
+        self.assertEqual(refused[0], 1)
+        self.assertIn("--force", refused[1])
+        repo = str(spec.parents[1])
+        code, out = run_check(str(spec), "--repo", repo)
         self.assertEqual(code, 0, out)
 
         test = spec / "test.md"
         test.write_text(test.read_text(encoding="utf-8") + "\nmutated\n",
                        encoding="utf-8")
-        code, out = run_check(str(spec), "--repo", str(Path.cwd()))
-        self.assertEqual(code, 1)
+        code, out = run_check(str(spec), "--repo", repo)
+        self.assertEqual(code, 1, out)
         self.assertIn("test.md changed after approval", out)
+
+
+class ApprovalSignatureTests(unittest.TestCase):
+    """What --verify refuses on a record and what still passes; every
+    row starts from a real --approve."""
+
+    SHADOW = "specs/mini-spec/specs/.approvers"
+    REFUSED = (
+        ("unsigned", "_unlink_signature",
+         "no signature", "`freeze.py <spec-dir> --approve --force`"),
+        ("unsigned with a Delivered line only", "_delivered_line_only",
+         "no signature"),
+        # the forge: a local commit carries the record, the remote does not
+        ("unsigned, delivered, committed locally only", "_delivered_unsigned",
+         "no signature"),
+        ("a changed byte", "_append_byte",
+         "signature does not verify", "--approve --force"),
+        ("a signer outside the approver list", "_list_another_key",
+         "signature does not verify"),
+        ("no approver list on the machine", "_no_machine_list",
+         "no approver list", "~/.config/spec-dev-kit/approvers",
+         "ssh-keygen -y -f ~/.ssh/id_ed25519"),
+        ("a nested approver list", "_nested_list", SHADOW),
+    )
+    ACCEPTED = (
+        ("as signed", None),
+        ("a CRLF copy", "_crlf"),
+        ("unsigned, delivered, carried by the remote default branch",
+         "_delivered_pushed"),
+    )
+
+    def setUp(self):
+        spec = fixture_copy()
+        self.addCleanup(shutil.rmtree, spec.parents[1], ignore_errors=True)
+        self.spec, self.root = spec, spec.parents[1]
+        self.payload = spec / "approvals" / "review.md"
+        self.payload.parent.mkdir(exist_ok=True)
+        self.record = spec / "approvals" / "approval.md"
+        self.sig = spec / "approvals" / "approval.md.sig"
+        self.home = _approval.HOME
+
+    def _review(self):
+        """The contract review payload `--review` folds into the record."""
+        self.payload.write_text(
+            f"Docset fingerprint: {check.freeze.docset_fingerprint(self.spec)}"
+            "\n\ntools: Read, Grep, Glob\n"
+            "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
+            encoding="utf-8")
+
+    def _approve(self):
+        self._review()
+        _approval.approve(self.spec, self.root, review=str(self.payload),
+                          force=True)
+
+    def approve_argv(self):
+        return [str(SKILL / "scripts" / "freeze.py"), str(self.spec),
+                "--approve", "--review", str(self.payload),
+                "--repo", str(self.root),
+                "--key", str(_approval.signing_key())]
+
+    def verify(self):
+        """verify() as this row's machine sees it."""
+        with unittest.mock.patch.dict(os.environ,
+                                      {"HOME": str(self.home), "CI": ""}):
+            return check.freeze.verify(self.spec, self.root)
+
+    def git(self, *args):
+        return subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=kit",
+             "-c", "user.email=kit@example.com", *args],
+            check=True, capture_output=True, text=True).stdout.strip()
+
+    def _unlink_signature(self):
+        self.sig.unlink()
+
+    def _append_byte(self):
+        self.record.write_bytes(self.record.read_bytes() + b"x")
+
+    def _machine_list(self, home, principal, key):
+        """A machine whose approver list names `key` as `principal`."""
+        self.home = home
+        path = home / ".config" / "spec-dev-kit" / "approvers"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            f"{principal} "
+            + key.with_name(key.name + ".pub").read_text(
+                encoding="utf-8").strip() + "\n", encoding="utf-8")
+
+    def _list_another_key(self):
+        other = self.root / "other-key"
+        subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(other)],
+            check=True, capture_output=True)
+        self._machine_list(self.root / "other-home", "someone", other)
+
+    def _no_machine_list(self):
+        # a workspace copy stands where every reader used to look
+        self.home = self.root / "bare-home"
+        (self.root / "specs" / ".approvers").write_text(
+            _approval.machine_list().read_text(encoding="utf-8"),
+            encoding="utf-8")
+
+    def _nested_list(self):
+        # a list of the agent's own, where the root CODEOWNERS rule
+        # does not reach
+        agent = self.root / "agent-key"
+        subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(agent)],
+            check=True, capture_output=True)
+        shadow = self.root / self.SHADOW
+        shadow.parent.mkdir()
+        shadow.write_text("agent " + agent.with_name("agent-key.pub").read_text(
+            encoding="utf-8").strip() + "\n", encoding="utf-8")
+
+    def _crlf(self):
+        self.record.write_bytes(
+            self.record.read_bytes().replace(b"\n", b"\r\n"))
+
+    def _deliver_line(self):
+        task = self.spec / "task.md"
+        task.write_text("**Delivered**: commit @ -\n"
+                        + task.read_text(encoding="utf-8"),
+                        encoding="utf-8")
+
+    def _delivered_line_only(self):
+        # a delivered line and an unsigned record, nothing committed —
+        # the exemption must not open on a line anyone can add
+        self._unlink_signature()
+        self._deliver_line()
+
+    def _delivered_unsigned(self):
+        self._unlink_signature()
+        self._deliver_line()
+        self.git("init", "-q")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "forged delivery")
+
+    def _delivered_pushed(self):
+        self._delivered_unsigned()
+        _approval.publish(self.root)
+
+    def test_refused_rows_name_the_remedy(self):
+        for name, mutate, *fragments in self.REFUSED:
+            with self.subTest(name):
+                self.home = _approval.HOME
+                self._approve()
+                getattr(self, mutate)()
+                problems = self.verify()
+                self.assertTrue(problems, "verified")
+                for fragment in fragments:
+                    self.assertIn(fragment, problems[0])
+
+    def test_accepted_rows_verify(self):
+        for name, mutate in self.ACCEPTED:
+            with self.subTest(name):
+                self._approve()
+                if mutate:
+                    getattr(self, mutate)()
+                self.assertEqual(self.verify(), [])
+
+    def test_a_local_ref_named_like_the_remote_proves_nothing(self):
+        # the forge: a changed docset, its record rewritten unsigned, a
+        # local commit — and a tag answering to the remote's short name,
+        # which git resolves ahead of the remote-tracking ref
+        self._approve()
+        self._deliver_line()
+        self.git("init", "-q")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "delivery")
+        _approval.publish(self.root)
+        plan = self.spec / "plan.md"
+        plan.write_text(plan.read_text(encoding="utf-8") + "\nforged\n",
+                        encoding="utf-8")
+        self._unlink_signature()
+        self.record.write_text(check.freeze.render(
+            self.spec, "-", ("kit-owner",),
+            check.freeze.fold_review(self.payload.read_text(encoding="utf-8"))),
+            encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "forged")
+        self.git("tag", "origin/main", "HEAD")
+        problems = self.verify()
+        self.assertTrue(problems, "verified on a local tag")
+        self.assertIn("no signature", problems[0])
+
+    def test_an_archived_docset_verifies_against_the_machine_list(self):
+        self._approve()
+        archive = self.root / "specs" / "archive"
+        archive.mkdir()
+        moved = archive / "2026-01-01-mini-spec"
+        self.spec.rename(moved)
+        self.assertEqual(check.freeze.verify(moved, moved.parent.parent), [])
+
+    def test_a_key_listed_only_in_a_nested_list_signs_nothing(self):
+        self._review()
+        self._nested_list()
+        argv = [str(SKILL / "scripts" / "freeze.py"), str(self.spec),
+                "--approve", "--review", str(self.payload),
+                "--repo", str(self.root),
+                "--key", str(self.root / "agent-key")]
+        code, shown = _approval.run_freeze(argv)
+        self.assertEqual(code, 1, shown)
+        self.assertIn(self.SHADOW, shown)
+        self.assertFalse(self.record.exists())
+
+    def test_no_machine_list_refuses_to_sign(self):
+        self._approve()
+        self._no_machine_list()
+        self.assertTrue(self.verify(), "verified on a workspace list alone")
+        # this is the LOCAL refusal: CI="" holds the resolver off the
+        # remote-default-branch path this test does not set up
+        code, shown = _approval.run_freeze(
+            [*self.approve_argv(), "--force"],
+            env={"HOME": str(self.home), "CI": ""})
+        self.assertEqual(code, 1, shown)
+        self.assertIn("no approver list", shown)
+
+    def test_the_probed_machine_list_is_the_documented_path(self):
+        parts = check.freeze.MACHINE_APPROVERS.parts
+        self.assertEqual(
+            parts,
+            (".config", "spec-dev-kit", "approvers"),
+            "freeze probes a path the shipped instructions do not name")
+        for line in (check.freeze.NO_LIST, check.freeze.NO_REMOTE,
+                     check.freeze.LIST_LOCATION):
+            self.assertIn("~/.config/spec-dev-kit/approvers", line)
+        self.assertEqual(
+            Path("~/.config/spec-dev-kit/approvers").expanduser(),
+            Path.home() / check.freeze.MACHINE_APPROVERS,
+            "the documented path and the probed path differ")
+
+    def test_ci_verifies_against_the_list_on_the_remote_default_branch(self):
+        self._approve()
+        signers = self.root / "specs" / ".approvers"
+        signers.write_text(_approval.machine_list().read_text(
+            encoding="utf-8"), encoding="utf-8")
+        self.git("init", "-q")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "the approver list")
+        _approval.publish(self.root)
+        # a CI checkout holds the list in git alone, and has no machine list
+        signers.unlink()
+        self.home = self.root / "ci-home"
+        other = self.root / "ci-other-key"
+        subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(other)],
+            check=True, capture_output=True)
+
+        def push(message):
+            self.git("add", "-A")
+            self.git("commit", "-qm", message)
+            self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+
+        def another_approvers_list():
+            signers.write_text(
+                "someone " + other.with_name("ci-other-key.pub").read_text(
+                    encoding="utf-8").strip() + "\n", encoding="utf-8")
+            push("another approver")
+
+        def no_approvers_list():
+            signers.unlink()
+            push("the list is gone")
+
+        def no_remote_default_branch():
+            # the bare remote still carries everything: nothing is fetched
+            self.git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+            self.git("update-ref", "-d", "refs/remotes/origin/main")
+
+        rows = (
+            (None, ()),
+            (another_approvers_list, ("signature does not verify",)),
+            (no_approvers_list, ("no approver list on origin/main",)),
+            (no_remote_default_branch, ("no remote default branch",)),
+        )
+        with unittest.mock.patch.dict(os.environ,
+                                      {"HOME": str(self.home), "CI": "true"}):
+            for step, expected in rows:
+                with self.subTest(expected=expected):
+                    if step:
+                        step()
+                    problems = check.freeze.verify(self.spec, self.root)
+                    self.assertEqual(problems == [], not expected, problems)
+                    for fragment in expected:
+                        self.assertIn(fragment, problems[0])
+
+    def test_approve_runs_only_on_the_owners_terminal(self):
+        self._review()
+        _approval.machine_list()
+        argv = self.approve_argv()
+        fingerprint = check.freeze.docset_fingerprint(self.spec)
+        phrase = f"approve mini-spec {fingerprint}"
+        # no controlling terminal: neither a pipe nor the phrase on stdin
+        # stands in for the owner
+        piped = subprocess.run(
+            [sys.executable, *argv], input=phrase + "\n", capture_output=True,
+            text=True, timeout=120, start_new_session=True)
+        self.assertEqual((piped.returncode, self.record.exists()),
+                         (1, False), piped.stdout + piped.stderr)
+        self.assertIn("own terminal", piped.stderr)
+        for answer in (f"y\n", phrase[:-1] + "\n", "\n", "\x04"):
+            with self.subTest(answer=answer):
+                code, shown = _approval.run_freeze(argv, answer=answer)
+                self.assertEqual(code, 1, shown)
+                self.assertFalse(self.record.exists())
+                self.assertIn(f"mini-spec {fingerprint}", shown)
+        code, _ = _approval.run_freeze(argv)
+        self.assertEqual((code, self.record.exists(), self.sig.exists()),
+                         (0, True, True))
+
+    def test_a_passphrase_protected_key_still_prompts_after_the_confirmation(self):
+        # the confirmation reads one line and no more: ssh-keygen's own
+        # prompt must still reach the owner
+        locked = self.root / "locked-key"
+        subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "open sesame",
+             "-f", str(locked)], check=True, capture_output=True)
+        self._machine_list(self.root / "locked-home", _approval.PRINCIPAL,
+                           locked)
+        self._review()
+        code, shown = _approval.run_freeze(
+            [str(SKILL / "scripts" / "freeze.py"), str(self.spec), "--approve",
+             "--review", str(self.payload), "--force",
+             "--repo", str(self.root), "--key", str(locked)],
+            env={"HOME": str(self.home)}, passphrase="open sesame")
+        self.assertEqual(code, 0, shown)
+        self.assertIn("Enter passphrase", shown)
+        self.assertEqual(self.verify(), [])
+
+    def test_ssh_keygen_absent_is_refused_by_name(self):
+        self._approve()
+        with unittest.mock.patch.object(check.freeze.shutil, "which",
+                                        return_value=None):
+            problem = check.freeze.verify(self.spec, self.root)[0]
+        self.assertIn("ssh-keygen not found", problem)
 
 
 class QualityRequirementTests(unittest.TestCase):
@@ -856,7 +1313,6 @@ NEW_HEADER = "| Phase | Total | Done |\n|---|---|---|"
 SKIP_LINE = "not applicable — no open questions at Stage 0"
 ELEMENTS = (
     "research.md present",
-    "the unfolded approval record",
     "notes/delivery.md present",
     "a two-column burndown header",
     "full-tier tech-spec.md without the `## Questions & options` section",
@@ -876,7 +1332,8 @@ class MigrationDetectorTests(unittest.TestCase):
                 "- Q1 — where does the multiply sign live?")
         (spec / "approvals").mkdir()
         (spec / "approvals" / "review.md").write_text(
-            "# Contract review\n\ndigest: BLOCK 0 · WARN 0 · NIT 0 · "
+            "# Contract review\n\ntools: Read, Grep, Glob\n"
+            "digest: BLOCK 0 · WARN 0 · NIT 0 · "
             "worst none\n", encoding="utf-8")
         (spec / "notes").mkdir()
         (spec / "notes" / "delivery.md").write_text(

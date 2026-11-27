@@ -15,11 +15,16 @@ told about.
 
 ## spec-build developer
 
-- **Fix rounds: at most 5 per task.** Only failed implementation opens
+- **Fix rounds: at most 4 per task.** Only failed implementation opens
   a round; `blocked:why` and a typed deviation (`scope:`, `spec-defect:`)
-  never do. Rounds 1–3 run at your capability tier; round 4 goes to a
-  fresh developer one tier up; the 5th round is the cap — the engine
-  never re-spawns past it.
+  never do. Rounds 1–3 run on your brief's model; round 4 goes to a
+  fresh developer one model step up (its payload's `Model:` line says
+  so). Four rounds spawn, the fifth failure stops: round 4 failing
+  writes `(fix 5/5)` — the stop marker, never a fifth round — and the
+  user adjudicates. From round 2 on, the evidence may show the same
+  failing command as the round before: the same-signature rule reads
+  that as the plan, not the model, being the suspect
+  (`<skill_dir>/contracts/execution.md` § Fix rounds holds it).
 - **Self-check reruns: 2.** When an acceptance command you ran is red,
   you may fix and re-run it up to 2 times in-session before reporting;
   after that, report the red command as it stands — never hide it,

@@ -5,6 +5,15 @@ resident skill of the SpecDevKit repo: the pre-spec front door —
 five rigid stages from a raw idea to a durable design
 specification that feeds spec-to-prod's `/spec` intake.
 
+## 0.2.0 — 2026-11-27
+
+The digest contract tightens: the tools report is read from the
+reply's first line alone (blank lines and one opening fence aside), a
+reported name holds no ` · `, and a line's last key absorbs nothing.
+
+Migration: a panelist reply that opens with anything but its `tools:`
+line now fails the capability handshake like one that carries no
+report; re-spawn the panelist.
 ## 0.1.1 — 2026-11-13
 
 - **D-010 — payload by path**: stage-2 spawns pass the `<skill_dir>`

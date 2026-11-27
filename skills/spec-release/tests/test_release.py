@@ -19,6 +19,9 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _approval  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RELEASE = REPO_ROOT / "skills" / "spec-release" / "scripts" / "release.py"
 CHECK = REPO_ROOT / "skills" / "spec-design" / "scripts" / "check.py"
@@ -424,12 +427,12 @@ def add_specs(repo: Path, specs: dict) -> None:
         (approvals / "review.md").write_text(
             "# Contract review\n\nDocset fingerprint: "
             f"{freeze.docset_fingerprint(repo / 'specs' / name)}\n\n"
+            "tools: Read, Grep, Glob\n"
             "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
             encoding="utf-8")
-        r = subprocess.run([sys.executable, str(FREEZE),
-                            str(repo / "specs" / name), "--record"],
-                           capture_output=True, text=True, cwd=repo)
-        assert r.returncode == 0, f"freeze --record: {r.stdout}{r.stderr}"
+        _approval.approve(repo / "specs" / name, repo=repo,
+                          review=str(approvals / "review.md"),
+                          scripts=FREEZE.parent)
     index = repo / "specs" / "INDEX.md"
     if index.is_file():
         index.write_text(index.read_text(encoding="utf-8") + "".join(lines),

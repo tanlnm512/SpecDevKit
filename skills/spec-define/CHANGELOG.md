@@ -5,6 +5,15 @@ door of the split spec suite (spec-to-prod-split): repo scouting +
 requirement grilling to a validated `specs/<name>/intent.md`, hard
 stop — the docset is spec-shape's, execution spec-execute's.
 
+## 0.2.0 — 2026-11-27
+
+The digest contract tightens: the tools report is read from the
+reply's first line alone (blank lines and one opening fence aside), a
+reported name holds no ` · `, and a line's last key absorbs nothing.
+
+Migration: an intent reply that opens with anything but its `tools:`
+line — a greeting, a heading — now fails the capability handshake like
+one that carries no report; re-spawn the analyst.
 ## 0.1.2 — 2026-11-17
 
 - The grill's failure-pattern table asks who may invoke a privileged

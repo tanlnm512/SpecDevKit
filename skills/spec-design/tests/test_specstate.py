@@ -5,12 +5,18 @@ output and write nothing, and every parser gets a representative case plus
 its None/missing/empty edge.
 """
 
+import contextlib
+import hashlib
 import importlib.util
+import io
+import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -738,10 +744,312 @@ class ModuleShapeTests(unittest.TestCase):
         mods = set(re.findall(r"^(?:from|import)\s+([a-zA-Z_][\w.]*)", source, re.M))
         roots = {m.split(".")[0] for m in mods}
         self.assertTrue(roots)
+        # digests is the sibling schema module in scripts/, itself
+        # stdlib-only — not a package
         self.assertLessEqual(roots, {
-            "__future__", "contextlib", "datetime", "os", "pathlib", "re",
-            "subprocess", "sys", "time", "typing",
+            "__future__", "contextlib", "datetime", "hashlib", "json", "os",
+            "pathlib", "re", "subprocess", "sys", "tempfile", "time",
+            "typing", "digests",
         }, f"non-stdlib import found: {roots}")
+
+
+class ClaimRegistryTests(unittest.TestCase):
+    """The registry primitives the verbs and the engine share (D-078):
+    one key per claimed task, liveness read from the docs, and a damaged
+    file refused — never read as empty."""
+
+    TASKS = ("# Tasks\n\n## Phase 1\n"
+             "- [ ] T001 [P] first\n  - Touches:\n    - `src/a.py`\n"
+             "- [ ] T002 [P] second\n  - Touches:\n    - `src/b.py`\n")
+    ROW = {"run": "r-1", "at": "2026-11-25T10:00:00Z", "paths": ["src/a.py"]}
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="claims-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.specs = self._tmp / "specs"
+        self.alpha, self.beta = self.specs / "alpha", self.specs / "beta"
+        for d in (self.alpha, self.beta):
+            d.mkdir(parents=True)
+            write(d, "task.md", self.TASKS)
+        self.path = self.specs / ".claims" / "registry.json"
+        self.lock = self.specs / ".claims.lock"
+
+    def claim_by_hand(self, spec_dir: Path, task_id: str) -> None:
+        p = spec_dir / "task.md"
+        write(spec_dir, "task.md", p.read_text(encoding="utf-8").replace(
+            f"- [ ] {task_id}", f"- [ ] {task_id} (in-progress)", 1))
+
+    def test_key_and_root_follow_the_specs_tree(self):
+        self.assertEqual(specstate.claim_key(self.alpha, "T001"),
+                         "alpha/T001")
+        self.assertEqual(specstate.claims_registry_path(self.alpha),
+                         self.path)
+        archived = self.specs / "archive" / "2026-01-01-alpha"
+        self.assertEqual(specstate.claims_root(archived), self.specs)
+        self.assertEqual(specstate.claim_key(archived, "T001"),
+                         "archive/2026-01-01-alpha/T001")
+
+    def test_no_registry_reads_empty_and_takes_no_lock(self):
+        self.assertEqual(specstate.claims_read(self.alpha), {})
+        self.assertEqual(specstate.claims_held(self.beta), {})
+        self.assertFalse(self.path.parent.exists())
+        self.assertFalse(self.lock.exists())
+        self.assertTrue(specstate.claims_forget(self.alpha, ["T001"]))
+
+    def test_held_is_the_live_claims_of_other_specs_only(self):
+        self.claim_by_hand(self.alpha, "T001")
+        self.claim_by_hand(self.beta, "T002")
+        rows = {"alpha/T001": self.ROW, "alpha/T002": self.ROW,
+                "beta/T002": self.ROW}
+        with specstate.claims_lock(self.alpha):
+            specstate.claims_write(self.alpha, rows)
+        self.assertEqual(specstate.claims_held(self.beta),
+                         {"alpha/T001": ["src/a.py"]})
+        self.assertEqual(specstate.claims_held(self.alpha),
+                         {"beta/T002": ["src/a.py"]})
+        self.assertEqual(sorted(p.name for p in self.path.parent.iterdir()),
+                         [".gitignore", "registry.json"])
+        self.assertFalse(self.lock.exists())
+
+    def test_live_reads_the_status_holder_of_each_spec(self):
+        rows = {"alpha/T001": self.ROW, "gone/T001": self.ROW}
+        self.claim_by_hand(self.alpha, "T001")
+        self.assertEqual(sorted(specstate.claims_live(self.beta, rows)),
+                         ["alpha/T001"])
+        (self.alpha / "task.md").unlink()
+        self.assertEqual(specstate.claims_live(self.beta, rows), {})
+
+    def test_write_round_trips_and_is_self_ignored(self):
+        with specstate.claims_lock(self.alpha):
+            specstate.claims_write(self.alpha, {"alpha/T001": self.ROW})
+            self.assertEqual(specstate.claims_read(self.alpha),
+                             {"alpha/T001": self.ROW})
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")),
+                         {"alpha/T001": self.ROW})
+        self.assertEqual(
+            (self.path.parent / ".gitignore").read_text(encoding="utf-8"),
+            "*\n")
+        self.assertFalse(self.path.with_name("registry.json.tmp").exists())
+
+    def test_forget_drops_only_the_named_tasks_rows(self):
+        rows = {"alpha/T001": self.ROW, "alpha/T002": self.ROW,
+                "beta/T001": self.ROW}
+        with specstate.claims_lock(self.alpha):
+            specstate.claims_write(self.alpha, rows)
+        self.assertTrue(specstate.claims_forget(self.alpha, ["T001"]))
+        self.assertEqual(sorted(specstate.claims_read(self.alpha)),
+                         ["alpha/T002", "beta/T001"])
+        self.assertFalse(self.lock.exists())
+
+    def test_a_damaged_registry_is_refused_never_read_as_empty(self):
+        d = self.path.parent
+        d.mkdir(parents=True)
+        for damage in ("", "{not json", "[]", '{"alpha/T001": "claimed"}',
+                       '{"alpha/T001": {"run": "r-1"}}',
+                       '{"alpha-T001": %s}' % json.dumps(self.ROW)):
+            with self.subTest(damage=damage):
+                write(d, "registry.json", damage)
+                with specstate.claims_lock(self.alpha):
+                    with self.assertRaises(specstate.ClaimsRegistryError) as cm:
+                        specstate.claims_read(self.alpha)
+                self.assertIn(str(self.path), str(cm.exception))
+                self.assertIn("remove or repair it", str(cm.exception))
+                with self.assertRaises(specstate.ClaimsRegistryError):
+                    specstate.claims_held(self.beta)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertFalse(specstate.claims_forget(self.alpha,
+                                                             ["T001"]))
+                self.assertIn("claim registry not updated", err.getvalue())
+                self.assertEqual(self.path.read_text(encoding="utf-8"),
+                                 damage)
+
+    def test_a_busy_registry_lock_is_a_task_lock_busy(self):
+        self.assertTrue(issubclass(specstate.ClaimsLockBusy,
+                                   specstate.TaskLockBusy))
+        with specstate.claims_lock(self.alpha):
+            with self.assertRaises(specstate.ClaimsLockBusy) as cm:
+                with specstate.claims_lock(self.alpha, timeout=0.2):
+                    pass
+        self.assertIn(str(self.lock), str(cm.exception))
+        self.assertFalse(self.lock.exists())
+
+    def test_a_stale_registry_lock_is_broken(self):
+        self.specs.mkdir(parents=True, exist_ok=True)
+        write(self.specs, ".claims.lock", "12345 2026-11-13T10:00:00")
+        old = time.time() - 120
+        os.utime(self.lock, (old, old))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with specstate.claims_lock(self.beta):
+                pass
+        self.assertIn("broke stale claims lock", err.getvalue())
+        self.assertFalse(self.lock.exists())
+
+
+
+def chain_hash(row: dict) -> str:
+    """The hash a ledger row chains from, computed here from the
+    definition — sha256-12 of the row's sorted-key JSON without the
+    chain fields — never with the code under test."""
+    payload = {k: row[k] for k in sorted(row) if k not in ("prev", "chain")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True)
+                          .encode("utf-8")).hexdigest()[:12]
+
+
+class LedgerChainTests(unittest.TestCase):
+    """The ledger's tamper evidence (spec-build D-055): each row carries
+    `prev`, the content hash of the row before it, so a row appended by
+    hand carries no `prev` and an edited row's successor no longer
+    matches. The chain detects, it cannot prevent."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="specstate-chain-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.spec = self._tmp / "specs" / "demo"
+        self.spec.mkdir(parents=True)
+        self.ledger = self.spec / "runs" / "ledger.jsonl"
+
+    def row(self, n: int) -> dict:
+        return {"ts": f"2026-11-13T10:0{n}:00+00:00", "skill": "spec-design",
+                "event": "wave", "wave": n, "stem": "tech", "role": "tech"}
+
+    def test_an_appended_row_is_named(self):
+        specstate.ledger_append(self.spec, self.row(1))
+        specstate.ledger_append(self.spec, self.row(2))
+        with self.ledger.open("a", encoding="utf-8") as f:
+            appended = dict(self.row(3))
+            f.write(json.dumps(appended) + "\n")
+        problems = specstate.ledger_chain_problems(self.spec)
+        self.assertEqual(problems, [
+            "line 3: appended without its `prev` — the row is not "
+            "chained to the row before it"])
+
+    def test_an_edited_row_is_named(self):
+        for n in (1, 2, 3):
+            specstate.ledger_append(self.spec, self.row(n))
+        lines = self.ledger.read_text(encoding="utf-8").splitlines()
+        edited = dict(json.loads(lines[1]), wave=9)
+        lines[1] = json.dumps(edited)
+        self.ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertEqual(specstate.ledger_chain_problems(self.spec), [
+            "line 3: its `prev` does not match the row before it — the "
+            "row was edited after it was written"])
+
+    def test_a_pre_chain_ledger_reads_fine(self):
+        rows = [dict(self.row(1)), dict(self.row(2))]
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.ledger.write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        self.assertEqual(specstate.ledger_chain_problems(self.spec), [])
+        self.assertEqual(specstate.ledger_rows(self.spec),
+                         [{**r, "prev": None} for r in rows])
+
+    def test_a_chained_append_names_its_row(self):
+        specstate.ledger_append(self.spec, self.row(1))
+        rows = specstate.ledger_rows(self.spec)
+        self.assertEqual(rows[0]["prev"], None)
+        specstate.ledger_append(self.spec, self.row(2))
+        rows = specstate.ledger_rows(self.spec)
+        self.assertEqual(rows[1]["prev"], chain_hash(
+            {k: v for k, v in rows[0].items() if k != "prev"}))
+        self.assertEqual(specstate.ledger_chain_problems(self.spec), [])
+
+
+TECH_DIGEST = ("tools: Read, Grep, Glob, Bash, Write, Edit\n"
+               "digest: statuses 0 DONE / 0 PARTIAL / 3 TODO · approach "
+               "one event bus · rejected direct calls · blast radius "
+               "graph.py\n")
+GREEN_DIGEST = ("tools: Read, Write, Bash\n"
+                "digest: task T001 · status implemented · files 2 · "
+                "commit-line feat(x): shout · deviation none · note none\n")
+
+
+class DigestVouchTests(unittest.TestCase):
+    """A digest file is vouched only where the run ledger records the
+    request — the `wave` row of its wave and stem, or the `claim` row
+    that claimed the task there. Nothing vouching, the file is
+    `unverified`: the sweep gives it no provenance line, records it
+    once, and — with no vouched digest beside it — its refusal holds
+    the node. The latest digest is the one the ledger names, never the
+    highest wave directory."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="specstate-vouch-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.spec = self._tmp / "specs" / "demo"
+        self.spec.mkdir(parents=True)
+
+    def digest(self, wave: int, name: str, text: str) -> Path:
+        path = self.spec / "digests" / f"wave-{wave}" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_digest_no_row_records_is_unverified(self):
+        path = self.digest(1, "tech.md", TECH_DIGEST)
+        seen = specstate.refused_digests(self.spec, ["tech"])
+        self.assertEqual(seen["tech"]["state"], "unverified")
+        self.assertEqual(seen["tech"]["path"], str(path))
+        self.assertIn("no ledger row records its digest",
+                      seen["tech"]["problems"][0])
+        seen_lines = specstate.sweep_digests(self.spec, "spec-design")
+        self.assertEqual(seen_lines[0]["state"], "unverified")
+        self.assertNotIn("provenance:", path.read_text(encoding="utf-8"))
+        rows = specstate.ledger_rows(self.spec)
+        self.assertEqual((rows[-1]["event"], rows[-1]["outcome"]),
+                         ("digest_malformed", "unverified"))
+        # once per content: a second sweep appends nothing
+        specstate.sweep_digests(self.spec, "spec-design")
+        self.assertEqual(len(specstate.ledger_rows(self.spec)), 1)
+
+    def test_a_claim_row_vouches_its_tasks_digest(self):
+        specstate.ledger_event(self.spec, specstate.ledger_row(
+            "spec-design", "claim", wave=2, task="T001", role="implementer",
+            stem="implementer-T001"))
+        self.digest(2, "implementer-T001.md", GREEN_DIGEST)
+        found = specstate.digests_on_file(self.spec)["T001"]
+        self.assertEqual((found["state"], found["wave"]), ("valid", 2))
+
+    def test_a_vouched_line_over_a_refused_body_is_malformed_not_a_crash(self):
+        # a digest the previous kit vouched (its line was appended when
+        # the old grammar accepted the body), read after a grammar
+        # tightening: the line still verifies, the body no longer
+        # parses — a malformed sighting, never a reader crash
+        old_grammar = GREEN_DIGEST.replace(
+            "note none\n", "note none · extra\n")
+        path = self.digest(2, "implementer-T001.md", old_grammar)
+        row = specstate.ledger_row(
+            "spec-design", "digest", wave=2, stem="implementer-T001",
+            role="implementer", digest="0" * 12)
+        line = specstate.provenance_line(row)
+        path.write_text(old_grammar + line + "\n", encoding="utf-8")
+        row["digest"] = specstate.digest_sha(
+            path.read_text(encoding="utf-8"))
+        specstate.ledger_event(self.spec, row)
+        self.assertEqual(
+            specstate.digests_on_file(self.spec)["T001"]["state"],
+            "malformed")
+        seen_lines = specstate.sweep_digests(self.spec, "spec-design")
+        self.assertTrue(seen_lines)
+        self.assertIn("malformed", seen_lines[0]["state"])
+
+    def test_the_ledger_names_the_latest_not_the_highest_wave(self):
+        specstate.ledger_event(self.spec, specstate.ledger_row(
+            "spec-design", "wave", wave=2, stem="implementer-T001",
+            role="implementer"))
+        named = self.digest(2, "implementer-T001.md", GREEN_DIGEST)
+        stray = self.digest(3, "implementer-T001.md", GREEN_DIGEST)
+        found = specstate.digests_on_file(self.spec)["T001"]
+        self.assertEqual((found["state"], found["path"], found["wave"]),
+                         ("valid", str(named), 2))
+        # the stray file no row records gains no provenance line
+        specstate.sweep_digests(self.spec, "spec-design")
+        self.assertNotIn("provenance:", stray.read_text(encoding="utf-8"))
+        # with the named file gone, the stray is all there is — and it
+        # holds
+        named.unlink()
+        held = specstate.digests_on_file(self.spec)["T001"]
+        self.assertEqual((held["state"], held["path"], held["wave"]),
+                         ("unverified", str(stray), 3))
 
 
 if __name__ == "__main__":

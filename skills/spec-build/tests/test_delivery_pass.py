@@ -21,6 +21,8 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 import audit  # noqa: E402
 
+import _approval  # noqa: E402
+
 CALC = '''import sys
 
 
@@ -61,6 +63,11 @@ class DeliveryPassTests(unittest.TestCase):
     def tiny_spec(self, name: str = "tiny-delivered-demo") -> Path:
         spec = self.root / "specs" / name
         shutil.copytree(TINY, spec)
+        # the example's legacy record is unsigned: it counts as history
+        # only once the remote default branch carries it
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "spec")
+        _approval.publish(self.root)
         return spec
 
     def test_dod_proves_counts_and_scopes_a_tiny_spec(self):

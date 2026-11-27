@@ -13,7 +13,7 @@ description: >-
   (spec-build).
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.2.0"
 ---
 
 # spec-review — gated, confirmed code review (with optional fix loop)
@@ -72,10 +72,7 @@ One `target` picks what the panel reviews; `contracts/panel.md`
   `base`, else the remote's default); uncommitted work is included
   and noted in the report.
 - **pr** — a GitHub pull request (`pr`: number, URL, or
-  `owner/repo#N`, resolved with the gh CLI). The panel reads the
-  working tree: on a clean tree the review checks the head out itself
-  (announced); on a dirty tree it refuses rather than hide
-  uncommitted work.
+  `owner/repo#N`, resolved with the gh CLI).
 - **project** — the codebase as it stands; in a multi-repo workspace
   pass `repo`: the sub-repo directory, resolved to its absolute
   toplevel before anything runs (see panel.md § Targets for the
@@ -104,17 +101,7 @@ hygiene (`source: builtin`): `bash -n` on changed `*.sh`, a
 secret-shape scan of the change (hits name `path:line` and the
 pattern, never the token), and an informational row listing changed
 dependency-manifest lines — name every new dependency in the report.
-In pr mode the PR's CI checks join as `source: ci` rows when `gh` is
-available, and each red row is triaged first (D-023): a `code` class
-— a project step failed — is a gate finding, never a silent pass; a
-red row classed `infrastructure` (a cancelled or never-started run,
-or the runner's own setup/wrap-up step failed) or `unknown` (no step
-data behind the status) does not fail the gate and does not stop the
-reviewers — it stands in the report's gate section with its class,
-reason, and rerun command, and the recommendation floors at `human`
-while it stands. The class reads the run's steps (`gh run view
---json jobs`), never how fast the job failed and never log text. It
-prints a JSON array — one `{name, source, status, exit_code, tail}`
+It prints a JSON array — one `{name, source, status, exit_code, tail}`
 per check, `status` pass/fail/timed_out (each repo check is killed
 after `GATE_CHECK_TIMEOUT`, default 600 s).
 
@@ -146,13 +133,13 @@ the reviewer asks and final assessment as context, never as evidence
 (confirmers never see it, so a scout error cannot rubber-stamp a
 finding). A scout that fails degrades to the raw target (named under
 `notCovered`); `fix_from` runs skip the step. Canonical: panel.md
-§ Preflight; the brief is `agents/review-scout.md`.
+§ Preflight; the brief is `agents/spec-review-scout.md`.
 
 ### Stage 2 — specialist review with triage and confirmation
 
-Review the change — `git diff <base>` plus the untracked files scope
-lists, read in full — through separate lenses, in parallel where you
-can:
+Review the change — the diff file the oracle writes into the run
+folder, plus the untracked files scope lists, read in full —
+through separate lenses, in parallel where you can:
 
 - **correctness** — logic errors, edge cases, error handling,
   concurrency, caller/callee contracts;
@@ -165,8 +152,9 @@ can:
   tests that cannot fail.
 
 Each lens is an agent brief carrying its full checklist —
-`agents/review-correctness.md`, `-security.md`, `-quality.md` — over the
-shared `protocol/panel-protocol.md`. With subagent dispatch, spawn one
+`agents/spec-review-correctness.md`, `spec-review-security.md`,
+`spec-review-quality.md` — over the shared
+`protocol/panel-protocol.md`. With subagent dispatch, spawn one
 brief per lens rather than simulating a lens yourself; without it,
 cover the lenses inline from the briefs' rubric sections, never from
 memory. `mode` (§ Run sequence) picks between one general reviewer and
@@ -198,7 +186,11 @@ never silently dropped. Confirmation run inline — no subagent
 dispatch, or `mode fast` — is not independent: mark each such finding
 `confirmation.self_checked: true` so the report labels it
 `unconfirmed (self-checked)`; a session never labels its own check
-`verified`.
+`verified`. The confirmer is a brief of its own
+(`agents/spec-review-confirmer.md`), as the fix verifier is
+(`agents/spec-review-verifier.md`, stage 4) — each brief's body is its
+stage's system prompt (`contracts/run-sequence.md` § Who runs each
+role).
 
 ### Stage 3 — synthesis
 
@@ -212,7 +204,7 @@ commands) and what was not. A change over the split bounds (panel.md
 
 When the user asked to fix as well, run bounded rounds (default 2):
 
-1. An **author/fixer** (`agents/review-fixer.md`) fixes the
+1. An **author/fixer** (`agents/spec-review-fixer.md`) fixes the
    confirmed findings in the working tree: repo rules first, minimal,
    repo style, NEVER commits, never weakens a test to make a finding
    go away (pin corrected behavior instead). That brief carries the
@@ -223,7 +215,7 @@ When the user asked to fix as well, run bounded rounds (default 2):
    `unfixed` / `worse` — a fix that weakens a test is `worse`. A
    fixer **skip is ruled on, not counted**: `rejected-valid` (the
    reason holds — the finding is withdrawn) or `rejected-invalid`
-   (the finding stands); an unruled skip stands (D-022).
+   (the finding stands); an unruled skip stands.
 3. A fixer **out-of-scope** item (the sound fix needs paths or
    behavior this change must not touch) burns no round: it leaves the
    loop and is surfaced in the report as the user's widening call.
@@ -241,28 +233,20 @@ findings JSON (schema: `templates/fix-from-findings.json`) — plus
 the recommendation.
 
 End with a **recommendation**: `merge` (everything fixed, gate green,
-nothing new, and no standing infrastructure-or-unknown CI row —
-D-023), `fix-first` (ordinary findings remain), or `human`
+nothing new, and no standing infrastructure-or-unknown CI row),
+`fix-first` (ordinary findings remain), or `human`
 (judgment calls, unconfirmed residue, or a standing CI row whose
 rerun is the user's call). The oracle derives the floor
 from the report's own state and rejects a claim below it — escalating
-on judgment is always allowed (D-021, `gates/recommendation.md`).
+on judgment is always allowed (`gates/recommendation.md`).
 When the verdict is `human`, or a spent fix loop leaves findings
-unresolved, the report also carries the **stop ask** (`stopAsk`,
-D-024): what stopped, why it matters (a risk level and its reason),
-the options with their consequences, a recommendation only where a
-criterion in `gates/recommendation.md` picks one — otherwise `No
-recommendation: why this is the owner's call` — and what the answer
-covers. Put it to the user through the harness's structured question
-tool where one exists (the options as choices, a recommended one
-first and marked), otherwise print it — and stop: an unanswered ask
-is not an answer (spec-define D-018). A merge-derivable report, an
-ordinary fix-first with rounds left, and every review-only run carry
-no stop ask. Never re-run the fix loop to "make progress": another
-round is an option only when something changed since the last attempt,
-and the report names what (`changed_since`).
-Fixes stay uncommitted — the commit decision and message are the
-user's.
+unresolved, the report also carries the **stop ask** (`stopAsk`):
+its content and the runs that carry one — `gates/recommendation.md`
+§ Consequential stops. Put it to the user through the harness's
+structured question tool where one exists (the options as choices, a
+recommended one first and marked), otherwise print it — and stop: an
+unanswered ask is not an answer. Fixes stay uncommitted — the commit
+decision and message are the user's.
 
 ## Run sequence (driving the oracle)
 
@@ -277,19 +261,26 @@ the final ask → `O report --kind review`; when fixing, per round
 `O fix-snapshot` → fixer → `O fix-check` → `O gate` → verify →
 fix-review, then `O report --kind fix`. `O run-save --run-dir D
 --stage <stage> --data @F.json` after EVERY stage — the stage names
-are the oracle's `STAGES` tuple. A failed call is not a round: a
-fixer, reviewer or verifier spawn that returned nothing usable opens
-no fix round and changes no finding's status — re-run the same stage,
-three tries, then stop and tell the owner (`contracts/run-sequence.md`
-§ A failed call is not a round).
+are the oracle's `STAGES` tuple. A failed call is not a round:
+re-run the same stage, three tries, then stop and tell the owner
+(`contracts/run-sequence.md` § A failed call is not a round).
+
+**The tools report.** Every spawned reply opens with `tools: <the
+tools the role actually holds>`. Before anything else in a reply is
+read, hand it to `O handshake --role <role> --file <reply>`; a
+reviewer's goes to `O findings-parse --role <role>`. `--role` names the
+brief the spawn ran on, and the oracle requires every tool on that
+brief's `tools:` line — Read, Grep and Glob for a reader, Bash, Write
+and Edit too for the fixer. A short or missing report is a failed
+call: the oracle refuses, naming the role and the tools, and the same
+stage runs again on a type or harness that holds them — never a
+finding, never a round. `findings-parse` takes no payload undeclared:
+the `fix_from` input goes in as `O findings-parse --saved-report`. A
+lens covered inline is the session's own reading: nothing is handed
+over, so there is no report to check.
 
 **Resume** — a crash restarts nothing: `O run-resume --run-dir D`
-re-fingerprints the target; changed → refused (new run, or `fix_from`
-from the saved report), unchanged → `{completed, next, data}` and the
-run continues at `next`, `run-save`-ing from there. The saved stage
-data returns to YOU (the orchestrator), never into an `ask` — rebuild
-every ask through `O ask` exactly as a fresh run does, so a resumed
-confirmer still never sees the scout map or the stated intent.
+(`contracts/run-sequence.md` § Resume).
 
 **Mode** — `auto` (default) is `fast` when scope's `fast_mode_default`
 holds (≤ 400 added lines, ≤ 5 files), else `full`: three lenses, each
@@ -301,7 +292,8 @@ kept finding confirmed independently. `fast` findings are self-checked.
   (`commands/spec-review.md`) routes review/fix/gate/plan asks into
   this skill; the session executes the stages as written, and the
   shared review oracle (`scripts/review_orchestrator.py`) resolves
-  targets, runs the gate plan, parses findings and assembles the report
+  targets, runs the gate plan, checks every reply's tools report,
+  parses findings and assembles the report
   (args: `base`, `target`, `pr`, `intent`, `fix_from`, `paths`, `mode`,
   `fix_rounds`). A repo's own project-scoped copy, tuned to its CI set,
   wins there.
@@ -314,12 +306,12 @@ kept finding confirmed independently. `fast` findings are self-checked.
 Findings carry `path:line`, evidence, severity, lens, and a
 verified/unconfirmed status (or, after a fix round, a fix verdict:
 `fixed`/`unfixed`/`worse`, a skip ruling `rejected-valid`/
-`rejected-invalid`, or `out-of-scope` — D-022). Triage drops are
+`rejected-invalid`, or `out-of-scope`). Triage drops are
 listed with reasons — "dropped at triage"
 means judged out of scope, not missed. A `human` verdict — or a spent
 fix loop with findings left — renders the stop ask in the markdown
 under `## Recommendation` and as `stopAsk` in the report result: work
-from its options, not from a re-run (D-024). `notCovered` distinguishes
+from its options, not from a re-run. `notCovered` distinguishes
 "found nothing" from "looked nowhere": read it before trusting a
 clean report. Field semantics: panel.md § Findings and § The report.
 

@@ -10,7 +10,7 @@ description: >-
   idea or red intent (spec-define); not once approved (spec-build).
 metadata:
   owner: platform-core
-  version: "0.1.2"
+  version: "0.2.0"
 ---
 
 # spec-design — gated authoring: validated intent → approved docset
@@ -35,12 +35,12 @@ ready/done conditions and why it sits where it sits.
 | `research-gate` | gate | spec.md done — *SKIPPED at Tier: tiny* | the research record is resolved — tech-spec.md `## Questions & options` holds real content (→ ran) or the skip marker (→ skipped); a pre-migration research.md reads the same until migration — *not required at Tier: tiny* |
 | `research` | agent | the research gate is resolved `run` — *SKIPPED at Tier: tiny* | the research record holds real, non-marker content (the tech-spec section; a pre-migration docset: research.md) — *not required at Tier: tiny* |
 | `intent` | agent | intent.md present and unfilled, or `check.py --intent-only` fails (absent → SKIPPED: legacy path) | intent.md filled AND `check.py <spec-dir> --intent-only` exits 0 — or, once spec.md is filled, fails on its baseline alone (lost or stale: an intake-time gate) |
-| `tech` | agent | spec done AND research resolved (either form) — *SKIPPED at Tier: tiny* | tech-spec.md filled AND `check.py <spec-dir> --code-state-only` exits 0 — *not required at Tier: tiny* |
-| `plan` | agent | spec + tech done — *SKIPPED at Tier: tiny* | plan.md exists, non-empty, filled — *not required at Tier: tiny* |
-| `qa` | agent | spec done (reads spec.md only — blind to tech/plan, parallel-safe) — *SKIPPED at Tier: tiny* | test.md exists, non-empty, filled — *not required at Tier: tiny* |
-| `tasks` | agent | plan + tech + qa done — *SKIPPED at Tier: tiny* | task.md exists, non-empty, filled — *not required at Tier: tiny* |
+| `tech` | agent | spec done AND research resolved (either form) — *SKIPPED at Tier: tiny* | tech-spec.md filled AND `check.py <spec-dir> --code-state-only` exits 0 — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
+| `plan` | agent | spec + tech done — *SKIPPED at Tier: tiny* | plan.md exists, non-empty, filled — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
+| `qa` | agent | spec done (reads spec.md only — blind to tech/plan, parallel-safe) — *SKIPPED at Tier: tiny* | test.md exists, non-empty, filled — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
+| `tasks` | agent | plan + tech + qa done — *SKIPPED at Tier: tiny* | task.md exists, non-empty, filled — counts only while its spawn's digest on file is not refused — *not required at Tier: tiny* |
 | `verify` | mechanical | tech, plan, qa, tasks all done | `check.py <spec-dir>` exits 0 |
-| `approve` | human | verify done (HUMAN gate) | spec.md Status: approved (or later) AND the approval freeze recorded (`approvals/approval.md`, at every tier) |
+| `approve` | human | verify done (HUMAN gate) | spec.md Status: approved (or later) AND its signed approval record verifying (`approvals/approval.md` + `approval.md.sig`, at every tier) |
 | `execute` | mechanical | approved | every task entry implemented (no fix round open), ticked [x], or struck ~~ |
 | `tick-commit` | human | execute done (HUMAN gate: the delivery summary, the user's yes, then the tick and the delivery) | durable task-tick evidence (every task ticked/struck, every tick with its proof note) plus the delivery record — `Delivered: commit @ <sha>` (or the explicit non-git skip) in task.md with the three delivery-block lines under it: `Docs impact`, `Rollback`, `Behavior preserved` |
 | `archive` | terminal | tick-commit done AND spec Status: done | dir moved to specs/archive/<date>-<name>/, INDEX repointed |
@@ -115,6 +115,10 @@ intent.md") and the run stops there. One path, three steps:
 python3 <skill_dir>/scripts/graph.py specs/<name> --run --span shape
 ```
 
+Pass `--harness <your harness name>` with `--run` and `--emit-spawns`:
+the spec's run ledger (`specs/<name>/runs/ledger.jsonl`) records
+it beside every payload it writes, and it survives archive.
+
 The frontier is the only scheduler. Loop: run → spawn the printed
 payloads in ONE message (each payload line names its agent type) →
 re-run, until the span drains. Typical waves:
@@ -125,7 +129,10 @@ re-run, until the span drains. Typical waves:
   repo's first spec; self-check `check.py --code-state-only`), then
   designs from that evidence. Intake's facts are leads, not citations.
 - **qa** (tester) — test.md from spec.md alone, beside tech and plan;
-  the tester never reads tech-spec.md, plan.md, or task.md.
+  the tester never reads tech-spec.md, plan.md, or task.md — a rule
+  the registered approval guard also denies to every reading tool, by
+  Read, Grep, Glob or a shell command naming them, where the harness
+  names the caller (best effort).
 - **plan** (architect · plan lens) — milestones from the spec and the
   tech design.
 - **tasks** (architect · tasks lens) — task.md once test.md is final:
@@ -212,8 +219,17 @@ constitution step's `constitution.md` by `--repair constitution`):
    and follow it"; otherwise emit without the flag (the payload embeds
    the brief) and spawn a generic agent told to read it. Agents write
    their artifact to disk and return only a digest.
-3. A gap in a digest → re-brief the owner; never edit the content of
-   another agent's file (the verify-node format fixes above are the
+3. Validate every returned digest against its schema before reading
+   it (protocol/shared-protocol.md) — a malformed one goes back to the
+   same agent. Every payload opens with the `tools:` ask: a
+   reply or digest file whose report lacks a tool its role requires —
+   a file writer, Read for the auditor — is a failed spawn, refused
+   and never a fix round; spawn again on a type or harness that holds
+   it. A refused digest file also holds its node — not done, so the
+   wave after it is not emitted and `--run` stops `AWAITING
+   ORCHESTRATOR` — until the same payload is re-spawned; the approval
+   ends the hold. A gap in a digest → re-brief the owner; never edit the
+   content of another agent's file (the verify-node format fixes above
    only exception). You are the sole spawner, status writer, and
    re-briefer.
 
@@ -266,7 +282,8 @@ With verify green:
 3. **Record** — the auditor writes nothing, and the approve record
    keeps one writer, freeze.py: save the review payload it will fold
    in, in this order: the emitted payload's `Docset fingerprint:
-   <hash>` line; the auditor's digest verbatim, first line
+   <hash>` line; the auditor's `tools: <the tools it holds>` line,
+   then its digest verbatim, first line
    `digest: BLOCK <n> · WARN <n> · NIT <n> · worst …`, then its
    findings; then one line per BLOCK that digest counts —
    `ruling: <finding #> — repaired`, or `ruling: <finding #> —` the
@@ -275,26 +292,41 @@ With verify green:
 4. **Present** the digest — review findings and rulings, approach,
    phase/task counts, burndown, check.py WARN lines, every D-### so
    far — and wait.
-5. **On the explicit yes** — `scripts/freeze.py <spec-dir> --record
-   --review <review payload>`. When anyone beyond the session user
-   signs off, ask who approves and add `--by "<name>"` per approver:
-   each becomes an `**Approved-by**` line in the record. The freeze
-   validates the payload and writes the whole approve record — the
+5. **On the explicit yes** — hand the approve step to the user: print
+   `scripts/freeze.py <spec-dir> --approve --review <review payload>`
+   for them to run in their own terminal, and wait — never run it
+   yourself. An approval is a signature: `--approve` validates the
+   payload, prints the record, then asks the terminal to type
+   `approve <name> <fingerprint>` exactly — with no controlling
+   terminal, or any other line, it exits 1 having written nothing —
+   and signs the record with an SSH key listed in the approver list,
+   the machine list `~/.config/spec-dev-kit/approvers` (one
+   `<principal> <key-type> <key-blob>` line per approver — create it
+   before a machine's first approval; in CI the list is read from the
+   remote default branch, and a workspace `specs/.approvers` is never
+   an authority). It writes the whole approve record — the
    `## Contract review` section and the `## Freeze` manifest — into
-   `approvals/approval.md`; a full-tier record whose review section
-   is missing or invalid — no current fingerprint, no digest line,
-   or a BLOCK without its ruling line — is refused; a fingerprint
-   alone is not a review. Only on exit 0 set spec.md
-   `Status: approved`, then refresh its INDEX line (`scripts/index.py
-   <spec-dir>`). Re-approving a corrected spec is the same five
-   steps with `--record --force`.
+   `approvals/approval.md` beside its `approval.md.sig`; a full-tier
+   record whose review section is missing or invalid — no current
+   fingerprint, no digest line, or a BLOCK without its ruling line —
+   is refused; a fingerprint alone is not a review. When the user
+   returns, run `scripts/freeze.py <spec-dir> --verify`; only on `PASS`
+   set spec.md `Status: approved`, then refresh its INDEX line
+   (`scripts/index.py <spec-dir>`). Re-approving a corrected spec is
+   the same five steps with `--approve --force`. Recommend, once per
+   repo, a CODEOWNERS rule on `specs/.approvers` (what CI reads) and
+   `specs/**/approvals/`, and a passphrase or hardware key.
 
 A non-answer ends the turn — never adopt approval or progress the
-status yourself. A `Status: approved` with no freeze is not an
-approval: `check.py` fails it and `/spec-build` refuses it. At
-`Tier: tiny` the auditor reads the one-file contract and the record
-carries no review section. Next step: `/spec-build <name>`. No
-implementer is ever spawned from here.
+status yourself. A `Status: approved` with no signed freeze is not an
+approval: `check.py` fails it and `/spec-build` refuses it. Where the
+owner registered it, the generated approval guard denies the session
+those writes before they land, and denies any `freeze.py --approve`
+the session runs itself — a recommended tripwire (`tools/sync.sh`
+prints the registration line), not a second boundary. At `Tier: tiny`
+the auditor reads the one-file contract and the record carries no
+review section. Next step: `/spec-build <name>`. No implementer is
+ever spawned from here.
 
 ## Templates and scaffolding
 

@@ -17,10 +17,11 @@ derived them from the spec's open technical choices and wrote them
 into spec.md).
 
 **Method**:
-1. Search per the spine (WebSearch/WebFetch; paper-fetch /
-   semanticscholar skills or the arXiv/Semantic-Scholar APIs when
-   academic). Breadth first per question, then the 2–3 sources that
-   actually answer it.
+1. Search per the spine (WebSearch/WebFetch; for academic angles the
+   paper-fetch / semanticscholar skills when one is installed on this
+   harness and `Skill` is among your tools, else the arXiv and Semantic
+   Scholar APIs queried directly). Breadth first per question, then the
+   2–3 sources that actually answer it.
 2. Record each finding as: **source** (URL/DOI) · **publisher/source
    date when available** · **retrieval date** · **claim** (one
    sentence) · **relevance** (which question / FR/NFR it informs) ·
@@ -30,7 +31,7 @@ into spec.md).
    recommendation — that is the architect's job with your data.
 
 **Digest**: `digest: questions <n> answered / <n> open · options
-<per open choice: choice → candidates, one line>`
+<per open choice: choice → candidates — with ; between choices>`
 
 **Guardrails**: every claim carries a URL; ≤15 tool calls per
 question; diminishing returns → say so.
@@ -142,8 +143,10 @@ the user (positioning, hard nos).
 4. Apply the spine's design screens; a red flag you keep ships as a
    D-### with its why.
 5. Draw the architecture diagram as an inline mermaid block (the
-   deliverable); load the
-   `creating-mermaid-diagrams` skill only for exported image files.
+   deliverable); the `creating-mermaid-diagrams` skill — an optional
+   integration the kit does not ship — is loaded only for exported
+   image files, and only when installed on this harness with `Skill`
+   among your tools; without it deliver the inline block alone.
    Simple > pretty.
 6. Write § Interfaces & data: every API shape the change adds or
    alters (endpoints, signatures, CLI flags, events, file formats),

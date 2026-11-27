@@ -60,7 +60,7 @@ POINTERS = (
      ("§ Engineering rules", "developer.md", "tools/kit-rules.py")),
     (SEXEC / "agents" / "developer.md", ("§ Engineering rules", "they win")),
     (SCR / "SKILL.md",
-     ("§ Engineering rules", "review-fixer.md", "NEVER poll a")),
+     ("§ Engineering rules", "spec-review-fixer.md", "NEVER poll a")),
     (SBR / "SKILL.md",
      ("## Operator rules", "NEVER poll a", "§ Engineering rules")),
 )
@@ -72,7 +72,7 @@ def flat(text: str) -> str:
 
 class KitRulesParityTests(unittest.TestCase):
     CARRIERS = (SEXEC / "agents" / "developer.md",
-                SCR / "agents" / "review-fixer.md")
+                SCR / "agents" / "spec-review-fixer.md")
 
     def test_carriers_match_the_canonical_source(self):
         body = SOURCE.read_text(encoding="utf-8")
@@ -119,12 +119,19 @@ class BudgetsTruthTests(unittest.TestCase):
         graph = (SSHAPE / "scripts" / "graph.py").read_text(encoding="utf-8")
         m = re.search(r"^FIX_CAP = (\d+)", graph, re.M)
         self.assertIsNotNone(m, "FIX_CAP constant not found in graph.py")
+        fix_cap = int(m.group(1))
         stated = flat((SEXEC / "agents" / "developer.md")
                       .read_text(encoding="utf-8"))
-        self.assertIn(f"Fix rounds: at most {m.group(1)} per task", stated)
+        # the marker's denominator counts the stop marker itself: the
+        # rounds the engine re-spawns are one below it, and the marker at
+        # the denominator is the stop — never another round
+        self.assertIn(f"Fix rounds: at most {fix_cap - 1} per task", stated)
+        self.assertIn(f"`(fix {fix_cap}/{fix_cap})` — the stop marker",
+                      stated)
+        self.assertNotIn(f"Fix rounds: at most {fix_cap} per task", stated)
 
     def test_fixer_section_states_the_round_bound_and_default(self):
-        stated = flat((SCR / "agents" / "review-fixer.md")
+        stated = flat((SCR / "agents" / "spec-review-fixer.md")
                       .read_text(encoding="utf-8"))
         panel = flat((SCR / "contracts" / "panel.md")
                      .read_text(encoding="utf-8"))

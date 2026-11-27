@@ -229,4 +229,4 @@ carries the ticked spec.md, and C2 writes `Delivered: commit @
 the record — `scripts/tick.py <spec-dir> --redeliver <new-sha>` writes
 `Delivered: commit @ <new-sha> (was <old-sha>)`; commit that change.
 A rewrite before delivery is a re-approval instead
-(`freeze.py --record --force`).
+(`freeze.py --approve --force`).

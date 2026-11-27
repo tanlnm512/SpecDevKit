@@ -97,8 +97,9 @@ execute — D-037):
 3. **Recompute and repeat** until the graph completes (archive).
 
 Loop edges are first-class: the clarify loop (open `NEEDS CLARIFICATION`
-markers hold the spec), fix rounds capped at 5 per task (`(fix n/5)` open in
-task.md, `(fixed n/5)` once the round lands), re-briefs on gap digests, and converge (Code state staleness →
+markers hold the spec), fix rounds capped at 4 per task — four rounds
+spawn, the fifth failure stops (`(fix n/5)` open in
+task.md, `(fixed n/5)` once the round lands, `(fix 5/5)` the stop marker), re-briefs on gap digests, and converge (Code state staleness →
 delta re-ground → `audit.py converge` → appended tasks re-enter execute).
 
 **Human gates are never auto-satisfied** — by any script: clarify, the
@@ -109,10 +110,14 @@ the orchestrator's: `AWAITING ORCHESTRATOR`); the auto-trigger loop
 runs only the mechanical verify node (check.py) itself and hands agent
 waves to a configurable `--runner`.
 
-**The freeze is the approval** (D-050, D-051, D-052): a spec with
-`Status: approved` and no `approvals/approval.md` (`freeze.py
---record`) fails `check.py` and `/spec-build` refuses it, at both
-tiers. Full tier also needs `approvals/review.md` — the orchestrator's
+**The freeze is the approval** (D-050, D-051, D-052) — and since
+D-071 an approval is a signature: a spec with `Status: approved` and
+no signed `approvals/approval.md` (`freeze.py --approve`, which the
+owner runs in their own terminal, typing the confirmation it asks for,
+with an SSH key listed in the machine approver list
+`~/.config/spec-dev-kit/approvers` — in CI, in the list on the remote
+default branch) fails `check.py` and `/spec-build` refuses it, at
+both tiers. Full tier also needs `approvals/review.md` — the orchestrator's
 record of the contract review, bound to the docset fingerprint, so a
 repair after the review forces a re-review. A tiny spec's freeze
 covers its § Tasks list: status markers move, tasks and requirements
@@ -187,8 +192,8 @@ existed is re-approved once: from spec-design, `graph.py <spec-dir>
 --emit-spawns --repair approve`, spawn the auditor on the payload,
 write its findings digest, rulings, and the payload's `Docset
 fingerprint` line to `approvals/review.md`, then on the user's yes
-`freeze.py <spec-dir> --record` (a tiny spec needs only the
-`--record`). (2) `(fix n/5)` is an open round: a landed fix written
+`freeze.py <spec-dir> --approve` (a tiny spec needs only the
+`--approve`). (2) `(fix n/5)` is an open round: a landed fix written
 `(implemented) (fix n/5)` re-opens its task until the marker is
 rewritten `(fixed n/5)`. (3) Every plugin was renamed (skills after
 SDLC phases, agents after roles — spec-design D-054): marketplace users
@@ -202,8 +207,9 @@ it installed.
 `--fix-burndown`), `graph.py --state-json|--mermaid|--explain`,
 `audit.py scope|clean|converge|archived`, `freeze.py --verify`,
 `skill-dir.sh`. Everything else writes: `scaffold.sh`, `archive.sh`, `tick.py`, `check.py
---fix-burndown`, `freeze.py --record` (docsets); `sync.sh` (harness
-homes under `$HOME`); `plugin-manifest.py`,
+--fix-burndown`, `freeze.py --approve` (docsets — the owner's own terminal); `sync.sh`,
+`hooks.py` (harness homes under `$HOME` — the guard files, never a
+settings file); `plugin-manifest.py`,
 `omp-defs.py`, `agent-defs.py` (regenerate committed artifacts);
 `graph.py --run|--emit-spawns` (spawn agents, write payloads);
 `audit.py proofs --run` and `audit.py dod` execute the commands embedded
@@ -325,11 +331,28 @@ that copies out:
   `~/.factory/`, or `~/.config/kilo/` exists, `tools/agent-defs.py`
   regenerates the same roles as opencode subagents (a permission map
   derived from each brief's own `tools:`), as Factory droids (Task-tool
-  `subagent_type` targets; `model: inherit` always — cost tiers ride
+  `subagent_type` targets; `model: inherit` always — model steps ride
   the Task `complexity` argument, not the def), and as Kilo subagents
   (`mode: subagent` + the same derived permission map, `task` always
   denied — Kilo agents take no `tools:` frontmatter of their own).
   Absent homes are skipped loudly, never created.
+- **Approval guard (recommended, never registered)** — the same run
+  installs a generated PreToolUse guard: `spec-kit-guard.py` and
+  `REGISTER.md` under `~/.claude/spec-dev-kit/` and
+  `~/.zcode/spec-dev-kit/` (`tools/hooks.py`, the installed
+  `freeze.py` path baked in). It
+  denies sessions and spawned agents writes to `specs/**/approvals/**`,
+  `specs/.approvers` and the machine approver list
+  `~/.config/spec-dev-kit/approvers`, a `spec.md` edit that sets
+  `Status: approved` while `freeze.py --verify` fails, any shell call
+  that runs `freeze.py --approve` (the owner's own-terminal step), and
+  — where the harness names the caller — the tester's read of
+  `tech-spec.md`, `plan.md`, `task.md` by Read, Grep, Glob or a shell
+  command naming them. The kit never edits a harness settings file:
+  sync ends with one `recommended:` line per installed guard naming
+  the file to paste its `REGISTER.md` into. It is a tripwire; the
+  typed confirmation and the SSH signature are the boundary
+  (spec-design D-071, D-072, D-073).
 - **Droid and Kilo commands** — where `~/.factory/` or
   `~/.config/kilo/` exists, the same sync run installs the routers to
   `~/.factory/commands/` and `~/.config/kilo/command/` (gated on the
@@ -411,7 +434,7 @@ entries are `/skill:spec-define`, `/skill:spec-design`,
 | `resume <spec>` | the same continuation, worked manually per SKILL.md (orchestrator judgment at every step) |
 | `research` `tech` `plan` `qa` `tasks` `review` | single-agent runs of one node (repair/refresh; `check.py` after) |
 | `check <spec>` | `scripts/check.py specs/<spec>` and triage the output |
-| `freeze <spec>` | after an explicit user yes only: `scripts/freeze.py <spec> --record` writes the approval hash manifest |
+| `freeze <spec>` | after an explicit user yes only, in the owner's own terminal: `scripts/freeze.py <spec> --approve` signs and writes the approval hash manifest |
 | `converge <spec>` | re-ground (`--repair tech`), then `scripts/audit.py converge specs/<spec> --repo <path>` (`--repo` defaults to the spec dir's grandparent); append a task per NEW GAP/REGRESSED |
 | `implement <spec> [T###]` | the execute node: waves of developer agents; nothing commits until the plan-wide delivery pass proves every task |
 | `archive <spec>` | after `Status: done`: `scripts/archive.sh <spec>` moves the dir to `specs/archive/<date>-<name>/` and repoints INDEX |
@@ -419,7 +442,7 @@ entries are `/skill:spec-define`, `/skill:spec-design`,
 A typical pass: `scaffold` → author spec.md with the user → research
 gate → tech ∥ qa → plan → tasks → verify
 (`check.py` green) → pre-flight (baseline green) → contract review +
-`approvals/review.md` → user approval → `freeze.py --record` → execute
+`approvals/review.md` → user approval → `freeze.py --approve` → execute
 (developer waves) → delivery pass → ticks → C1 → C2 → `archive`.
 
 ### The engine — graph.py --run (one loop, every harness)
@@ -436,7 +459,7 @@ alternates the two —
 |---|---|---|
 | 1 | session — `/spec-define <name>`, then `/spec-design <name>` | intake grills the idea into a validated intent.md; spec-design drafts spec.md from it (clarify loop) and decides the research gate: `skip` → keep the not-applicable marker; `run` → replace research.md with the template and spawn the research analyst out-of-band |
 | 2 | engine — `graph.py --run --span shape` | tech ∥ qa → plan → tasks → verify, then **stops `AWAITING HUMAN: approve`** |
-| 3 | session | pre-flight (baseline green on the spec's branch), contract review recorded in `approvals/review.md` (full tier), present the docset, get the explicit yes → `freeze.py --record`, then `Status: approved` |
+| 3 | session | pre-flight (baseline green on the spec's branch), contract review recorded in `approvals/review.md` (full tier), present the docset, get the explicit yes → print `freeze.py --approve` for the owner's own terminal, run `freeze.py --verify` on their return, then `Status: approved` |
 | 4 | engine — rerun `--run --span execute` | execute waves hands-off: one developer per runnable task, one automatic re-brief round carrying the failure digest verbatim (D-020); **stops `AWAITING HUMAN: tick-commit`** |
 | 5 | session — `/spec-build test/audit/ship` | the delivery-pass steps: proofs + regression, review instruments, then tick + C1/C2 |
 
@@ -462,10 +485,10 @@ root:
 |---|---|
 | `scaffold.sh [--tier tiny\|full] <name> [root]` | create `specs/<name>/` (`tiny`: spec.md only, the default; `full`: the five contract templates), register in INDEX; refuses overwrite, requires kebab-case |
 | `check.py <spec-dir>` | the doc-set validator: 5 contract files, FR/NFR→T→TC traceability and TC ownership, parallel-touch overlap, burndown, status-bleed, citation reality, staleness, freeze integrity, constitution; `--code-state-only`, `--intent-only`, `--next-ids`, `--constitution`, `--fix-burndown`, `--checklist`, `--repo <path>` |
-| `freeze.py <spec-dir>` | approval freeze: `--record` writes the approved-doc hash manifest after explicit sign-off (existing manifests refuse overwrite; `--record --force` represents a fresh approval; `--by "<name>"` records each approver); `--verify` is read-only |
+| `freeze.py <spec-dir>` | approval freeze: `--approve` writes and signs the approved-doc hash manifest after explicit sign-off, on the owner's own terminal — it asks for `approve <name> <fingerprint>` to be typed, and signs with an SSH key listed in the approver list `~/.config/spec-dev-kit/approvers` (in CI, in the list on the remote default branch; a workspace `specs/.approvers` is never an authority) (existing manifests refuse overwrite; `--approve --force` represents a fresh approval; `approval.md.sig` carries the signature and `**Approved-by**` the signing principal); `--verify` is read-only and refuses an unsigned record that the remote default branch does not carry |
 | `index.py <spec-dir>` | render the spec's `specs/INDEX.md` line (status · type · tier · depends on) — the INDEX's only writer; `--all <specs-root>` renders every spec |
 | `audit.py <sub> <spec-dir>` | review instruments: `scope` (defaults to the approval-freeze SHA), `clean`, `proofs --run`, `mutate` (mutation testing over the changed files), `coverage` (line-coverage floor over the tasks' intended files), `dod`, `converge`; `archived` (no spec-dir) — every archived plan fully closed |
-| `graph.py <spec-dir>` | the workflow engine: frontier report, `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads; `--native-agents` names the registered agent type and omits the brief it already carries), `--run [--runner] [--dry-run] [--max-waves N]`, `--span intent\|shape\|execute\|full` |
+| `graph.py <spec-dir>` | the workflow engine: frontier report (naming a broken run-ledger row chain — every `mark.py` verb refuses to write while it stands — spec-design D-093, spec-build D-074), `--state-json`, `--mermaid`, `--explain <node>`, `--emit-spawns` (`--wave-dir <dir>` relocates payloads; `--native-agents` names the registered agent type and omits the brief it already carries — a round-4 fix payload keeps the brief and names its model step), `--run [--runner] [--dry-run] [--max-waves N]` (the `--runner` template takes `{prompt_file}`, `{role}`, `{spec_dir}`, `{skill_dir}` and `{model}`, substituted verbatim; `{model}` is the brief's model, written `<model>+1` on the fix round that runs a model step, for the runner to resolve — a template without `{model}` stops `AWAITING ORCHESTRATOR` before that round is claimed — spec-design D-087; a headless run lands an open fix round with a close line citing its digest — spec-build D-068; a digest no ledger row vouches for is `unverified` and holds its node, `land` refusing it — spec-design D-092, spec-build D-072), `--span intent\|shape\|execute\|full`, `--isolate worktree` (each implementer payload gets its own detached worktree under `<repo>/.spec-kit/worktrees/`, a snapshot of the main tree; `mark.py land` merges the delta back and refuses while the main tree holds an uncommitted change made since the cut that is neither committed since nor merged by one of this spec's landings, `mark.py release` discards it — spec-build D-058, D-070), `--run --budget-spawns N` / `--budget-minutes N` with `--run` (the run budgets: 30 spawns and 120 minutes by default, counted from the run ledger — spawns per run and per spec, minutes per run — a spent one parks `AWAITING HUMAN: run budget`, and a wave that would spend past a spawn budget parks before it is written; `mark.py claim` takes the same two flags, refuses on the same line, and refuses whole a wave that would spend past one — spec-build D-059, D-069, spec-design D-089) |
 | `tick.py` | the atomic task tick with its proof note (spec-build) |
 | `migrate.py grow <spec-dir>` | promote a tiny-tier docset to the full five-file contract, ids preserved (spec-build) |
 | `archive.sh <name> [root]` | move a `Status: done` spec to `specs/archive/<date>-<name>/`, repoint INDEX |
@@ -554,9 +577,10 @@ tools/
 ├── parity.py               # shared: regenerates the shared core from the spec-design master into every replica
 ├── omp-defs.py             # shared: Claude-style agents/*.md frontmatter → omp task-agent frontmatter
 ├── agent-defs.py           # shared: Claude-style agents/*.md frontmatter → opencode / droid / kilo / agy defs
+├── hooks.py                # shared: generates the approval guard (spec-kit-guard.py + REGISTER.md) per Claude-shaped harness; --check verifies an installed root
 ├── plugin-manifest.py      # shared: generates .claude-plugin/marketplace.json + per-skill plugin.json
 ├── kit-rules.py            # shared: injects rules/engineering-rules.md into the § Engineering rules carriers
-├── drift-check.py          # shared: release-validate generated surfaces against their canonical sources
+├── drift-check.py          # shared: release-validate generated surfaces against their canonical sources; SKILL.md descriptions against their length budget
 ├── evals.py                # shared: list/run/validate the skills' standing eval cases, record results, report coverage
 ├── ownership.py            # shared: ownership-plan primitives — classify destinations against the provenance ledger before sync writes
 └── tests/                  # suite for the shared tooling itself (bash tests/run.sh)

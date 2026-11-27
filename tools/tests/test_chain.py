@@ -77,12 +77,14 @@ class ChainTests(unittest.TestCase):
         (self.spec / "approvals").mkdir()
         (self.spec / "approvals" / "review.md").write_text(
             f"# Contract review\n\nDocset fingerprint: {fingerprint}\n\n"
+            "tools: Read, Grep, Glob\n"
             "digest: BLOCK 0 · WARN 0 · NIT 0 · worst none\n",
             encoding="utf-8")
-        frozen = subprocess.run(
-            [sys.executable, str(SHAPE / "scripts" / "freeze.py"),
-             str(self.spec), "--record"], capture_output=True, text=True)
-        self.assertEqual(frozen.returncode, 0, frozen.stderr)
+        sys.path.insert(0, str(SHAPE / "tests"))
+        import _approval
+        _approval.approve(
+            self.spec, review=str(self.spec / "approvals" / "review.md"),
+            scripts=SHAPE / "scripts")
         (self.spec / "spec.md").write_text(approved, encoding="utf-8")
         admitted = run_graph("spec-build", self.spec, "--run", "--span",
                              "execute")

@@ -129,7 +129,16 @@ voice, and the absolute path of `protocol/release-protocol.md`. Its
 digest (`section:`, `trace:`, `dropped:`, `watch:`) is the whole
 reply. The session shows the user the tightened section and every
 `dropped:` and `watch:` line, replaces the draft on the user's
-acceptance, and re-runs `notes --check`.
+acceptance, and re-runs `notes --check`. The digest is validated
+against its grammar before anything is read from it — `python3
+<skill_dir>/scripts/digests.py validate release-manager
+--require-tools`: exit 0 valid, exit 1 with the problems, exit 3
+when the reply's first line, its `tools:` report, lacks Read (the
+grammar ignores that line). A malformed digest is a
+fix-and-run-again refusal: hand the problems back to the same
+release-manager brief and re-spawn it; exit 3 is a failed spawn —
+spawn again on a type or harness that holds Read, no fix round; no
+section, trace, `dropped:` or `watch:` line is read from either.
 
 ## The record
 

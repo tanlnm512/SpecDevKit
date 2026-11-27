@@ -94,3 +94,21 @@ decision, or strike it when resolved outright.
     contract, or the criterion is right and the contract is not —
     undecided.
 
+18. **`audit.py block` drafts to `notes/delivery.md` while gate 11 and
+    the status holder want the block elsewhere.** At tiny tier the
+    tolerated zone is spec.md § Evidence (notes/delivery.md as an
+    unmentioned file breaks scope gate 6; above `## Evidence` breaks
+    the freeze); at full tier the block goes under a `**Delivered**:`
+    field the task.md template does not ship. `block` should draft
+    into the tier-correct holder; the E7/E8 runs each needed
+    trial-and-error to find it (2026-11-27).
+19. **The full-tier C2 never writes `spec.md` `**Status**: done`, but
+    `archive.sh` refuses without it** — the orchestrator must flip the
+    freeze-tolerated Status line and amend C2 (found live by eval E8).
+    Either C2 flips it or the archive gate reads the task.md record.
+20. **`archive.sh`'s messages misdiagnose two shape errors**: the
+    kebab-case guard rejects a `specs/`-prefixed name without saying
+    the prefix must be dropped, and the suggested commit path list
+    names `specs/INDEX.md`/`specs/context/decisions.md` even when they
+    do not exist (git then refuses the whole pathspec). E7/E8
+    (2026-11-27).

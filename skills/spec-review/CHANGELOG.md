@@ -5,6 +5,21 @@ Release history. The skill began life 2026-09-23 as the validated
 review: mechanical gate → specialist panel with triage and independent
 confirmation → synthesis), then became a portable sibling skill.
 
+## 0.2.0 — 2026-11-27
+
+The oracle checks the tools report in code: `O handshake --role
+<role>` validates a reply's report against its own brief's `tools:`
+line — every reader needs Read, Grep and Glob, the fixer adds Bash,
+Write and Edit (Create, ApplyPatch and Execute count) — and refuses a
+short report (exit 1, stage `handshake`) before anything is parsed,
+never as a finding or a round. `findings-parse` takes a declaration on
+every call: `--role <role>` for a reply, `--saved-report` for the
+`fix_from` input; neither, it refuses naming both.
+
+Migration: route every spawned reply through `handshake --role` (a
+reviewer's through `findings-parse --role`) before reading it. A
+project-scoped copy of this skill from before this change has no
+`handshake` subcommand and no `--saved-report`.
 ## 0.1.1 — 2026-11-13
 
 - SKILL.md § Run sequence is a summary; the command table, ask ctx

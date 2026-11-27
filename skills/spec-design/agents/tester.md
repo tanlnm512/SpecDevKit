@@ -50,12 +50,21 @@ directory (never guess it); `<skill_dir>/protocol/shared-protocol.md`
 4. Boundary cases per story: the empty input, the concurrent access, the
    huge corpus — whatever the AC's Given implies at its edges.
 5. **If the spec covers a web UI** and the `browser-use:web-gui-tester`
-   skill is installed, load it and draft the GUI-facing TCs as black-box
+   skill is installed on this harness and your own tools include
+   `Skill`, load it and draft the GUI-facing TCs as black-box
    walkthroughs in its terms (click/type/scroll → screenshot verification) —
    those cases become directly executable later. For agent-facing CLI/API
    surfaces, the `agent-native-design` skill's conventions tell you what
-   "observable" means to an agent consumer. Neither installed / not a UI?
-   Plain Given/When/Then stands.
+   "observable" means to an agent consumer. Both are optional
+   integrations the kit does not ship, and neither is a precondition:
+   with a web UI or agent-facing surface to cover and its skill not
+   loadable (not installed on this harness, or no `Skill` tool among
+   your own), take the fallback — derive the UI-test design from the
+   spec's stated flows and conventions (the stories, ACs, and interface
+   wording spec.md itself carries) and write those TCs as plain
+   Given/When/Then; the step is never skipped. Your digest's `UI tests`
+   field says which ran: `skill-guided`, `spec flows`, or `none` (no
+   such surface).
 6. For standing/guard requirements (e.g. "shall never require X"), write a
    standing regression TC that fails if X ever creeps into the default path.
 7. **Property-based TCs where the contract is a property** —
@@ -130,7 +139,7 @@ yours: the tasks lens runs after you.
 - Every AC, FR, and applicable NFR traced; every TC has an observable pass condition; the
   matrix is complete
 - test.md on disk; return the one-line digest contract —
-  `digest: TCs <n> · requirement coverage <n>/<total FRs+NFRs> · untestable <requirement ids or none>`
+  `digest: TCs <n> · requirement coverage <n>/<total FRs+NFRs> · untestable <requirement ids or none> · UI tests <skill-guided | spec flows | none>`
 
 ## Guardrails
 - **Never read tech-spec.md, plan.md, or task.md** — in a wave or a

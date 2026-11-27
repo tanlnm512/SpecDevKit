@@ -10,14 +10,16 @@ enforces it.
 |------|-----------|---------|
 | Built-in rows alone are never a green gate | SKILL.md § Stage 1 | machinery — `test_builtin_rows_alone_are_no_mechanical_floor` |
 | Red CI on a PR fails the gate | SKILL.md § Stage 1 | machinery — `test_pr_ci_checks_are_gate_rows_and_red_ci_fails_the_gate` |
-| Reviewers and the scout edit nothing and spawn nothing | agents/review-*.md | machinery — Write, Edit, Agent, Task are disallowed tools |
+| Reviewers and the scout edit nothing and spawn nothing | agents/spec-review-*.md | machinery — Write, Edit, Agent, Task are disallowed tools |
 | A fixer that moves HEAD or touches the stash aborts the loop; weakened tests are flagged | contracts/run-sequence.md | machinery — `test_fix_check_flags_test_weakening_and_aborts_on_moved_head` |
 | A self-checked finding is never labelled verified | SKILL.md § Stage 2 | machinery — the report renders `unconfirmed (self-checked)` (`test_report_header_counts_confirmation_and_names_missing_floor`) |
 | PR mode refuses a dirty tree | SKILL.md § Review targets | machinery — `review_orchestrator.py` stage error `pr-dirty`; no test pins it |
 | A red gate ends a fresh review | SKILL.md § Stage 1 | prose |
 | The confirmer is never the finding's author | SKILL.md § Run sequence | prose |
-| Reviewers never re-run the repo's suites | agents/review-*.md | prose — they hold Bash |
+| The fix verifier runs nothing | agents/spec-review-verifier.md | machinery — its brief's `tools:` line grants no Bash (`test_reader_briefs_grant_files_only`) |
+| Reviewers never re-run the repo's suites | agents/spec-review-*.md | machinery — no reader brief grants Bash (`test_reader_briefs_grant_files_only`), and no reader ask names a git command: the oracle hands the diff over as files (`test_no_reader_ask_names_a_git_command`) |
+| A reply is read only after its tools report holds every tool on its role's brief `tools:` line | SKILL.md § Run sequence; protocol/panel-protocol.md § Your reply opens with your tools | machinery — `O handshake` and `findings-parse --role` refuse a short or missing report, and `findings-parse` refuses a payload handed over with neither `--role` nor `--saved-report` (`test_every_brief_tool_is_required_and_nothing_more`, `test_a_reply_is_parsed_only_after_its_tools_report_checks_out`, `test_an_undeclared_payload_is_refused_naming_both_kinds`) |
 | Unconfirmed findings are labelled, never dropped | SKILL.md principle 7 | prose |
 | The session never commits | SKILL.md principle 6 | prose |
 
-Held by machinery: 6 of 11.
+Held by machinery: 9 of 13.

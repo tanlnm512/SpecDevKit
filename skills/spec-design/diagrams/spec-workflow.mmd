@@ -48,5 +48,5 @@ flowchart TD
     Spec -.->|judgment| Gate
     Gate -.->|run| Research
     Gate -.->|resolved either way| Tech
-    Exec -.->|fix rounds, cap 5 per task| Exec
+    Exec -.->|fix rounds: four spawn, the fifth failure stops| Exec
     Tech -.->|converge: Code state staleness<br/>→ delta re-ground → audit.py converge<br/>→ appended tasks| Tasks
