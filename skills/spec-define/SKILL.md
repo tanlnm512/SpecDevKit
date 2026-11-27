@@ -11,7 +11,7 @@ description: >-
   (spec-design); never authors spec.md or executes.
 metadata:
   owner: platform-core
-  version: "0.1.2"
+  version: "0.2.0"
 ---
 
 # spec-define — intake: raw idea → validated intent.md

@@ -13,7 +13,7 @@ description: >-
   <name>" — that is spec-define).
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.2.0"
 ---
 
 # spec-discover — five-stage idea pressure-testing (before the spec exists)

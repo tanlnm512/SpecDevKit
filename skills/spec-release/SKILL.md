@@ -12,7 +12,7 @@ description: >-
   deploys.
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.2.0"
 ---
 
 # spec-release — merged, delivered work → a tagged, published release

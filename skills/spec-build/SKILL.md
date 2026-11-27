@@ -10,7 +10,7 @@ description: >-
   diff, or delivery — not for general code review (spec-review).
 metadata:
   owner: platform-core
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # spec-build — execution: approved docset → delivered commit
@@ -145,8 +145,9 @@ writes payloads for the runnable tasks, in task-id order, whose
 task's, and prints `deferred: T### (shares <path> with T###)` for
 the rest. A task with no parseable `Touches:` runs alone. Claims are
 checked against every spec's live claims in the repo: a task
-whose `Touches:` overlap a task another spec still holds
-`(in-progress)` is deferred with `shares <path> with <spec>/T###` —
+whose `Touches:` overlap a task another spec still holds —
+`(in-progress)`, or in a fix round — is deferred with `shares <path>
+with <spec>/T###` —
 printed by the emit, and enforced again by `claim`, which claims the
 rest of the wave and drops that task. Per round:
 

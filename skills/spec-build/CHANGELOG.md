@@ -5,6 +5,41 @@ back half of the split spec suite (spec-to-prod-split): implementer
 waves over approved task.md frontiers through the tick-commit gate —
 authoring is spec-shape's, intake spec-intent's.
 
+## 0.3.0 — 2026-11-27
+
+The headless run lands fix rounds; the run budgets are ceilings; a task
+in a fix round holds its files against other specs; an isolated landing
+proves the tree it merges into; the run ledger chains its rows.
+
+- `mark.py land --resolution-from-digest` closes an open fix round
+  under a headless `--run --runner`, citing the digest it validated; a
+  hand-written `--resolution` holding an em dash or a line break is
+  refused (exit 2) instead of corrupting the round's close line.
+- The run budgets are ceilings: `claim` refuses a wave that would
+  spend past a spawn budget (nothing claimed, nothing written), and
+  `graph.py --run` parks `AWAITING HUMAN: run budget` before writing
+  that wave. Minutes are never refused mid-wave.
+- A task at `(fix n/5)` — the cap included — keeps its claim-registry
+  row until it lands or is dropped, so another spec cannot claim its
+  files mid-round.
+- Under `--isolate worktree`, `land` refuses (nothing written) while
+  the main tree holds a change made since the worktree was cut that no
+  landing of this spec merged; each landing records what it merged in
+  `.spec-kit/landed/<spec>.json`.
+- Every `mark.py` verb refuses to write while the run ledger's row
+  chain is broken (`prev` per row — the chain detects tampering, it
+  does not prevent it); `land` always refuses under a held
+  `.task.lock` (exit 5) instead of proceeding on an unswept digest
+  state; a digest nothing vouches for is refused as `unverified`.
+- The digest contract tightens with spec-design 0.2.0: the tools
+  report is the digest's first line, a reported name holds no ` · `,
+  audit counts match the findings listed.
+
+Migration: repair or truncate `specs/<name>/runs/ledger.jsonl` by hand
+where the report names a broken chain — no verb writes past it. Before
+landing an isolated task, move work into the task's worktree or commit
+or stash unrelated main-tree edits. Digest files from the previous
+release that the tightened grammar refuses are re-spawned, not forced.
 ## 0.2.0 — 2026-11-25
 
 - A proof the environment cannot run is ENV-BLOCKED, a fifth outcome

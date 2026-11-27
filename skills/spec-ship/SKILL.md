@@ -13,7 +13,7 @@ description: >-
   tagging a release (spec-release).
 metadata:
   owner: platform-core
-  version: "0.1.1"
+  version: "0.2.0"
 ---
 
 # spec-ship — integration: delivered commit → merged PR

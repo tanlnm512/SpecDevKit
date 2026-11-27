@@ -5,6 +5,47 @@ middle phase of the split spec suite (spec-to-prod-split): gated intake
 over a validated intent, the authoring waves to the approve handoff —
 execution is spec-execute's, intake spec-intent's.
 
+## 0.2.0 — 2026-11-27
+
+The approval trust root moves out of the workspace; the engine holds
+nodes on refused or unvouched digests; headless runs honor the model
+step and the run-budget ceiling; the run ledger chains its rows and
+the tester's blindness covers every reading tool.
+
+- Approver list: read from `~/.config/spec-dev-kit/approvers` — or, in
+  CI, from the remote default branch — never from the working tree;
+  any other `.approvers` under `specs/` refuses verify by name.
+  `--approve` is interactive: it confirms
+  `approve <name> <fingerprint>` on `/dev/tty` and writes nothing
+  without it; an unsigned record is history only when the
+  remote-tracking ref of the default branch carries it byte for byte.
+- A refused or unvouched digest holds its node (`AWAITING
+  ORCHESTRATOR`, exit 0) until the same payload re-spawns; an approved
+  spec is never held. The latest digest is the one the ledger names,
+  not the highest `wave-N/` directory.
+- `--run --runner` gains `{model}` — `<model>+1` on the model-step
+  round; a template without it stops before the round is spent.
+- The run budgets are ceilings: a wave that would spend past a spawn
+  budget parks `AWAITING HUMAN: run budget` before it is written.
+- Digests: the tools report is the reply's first line (blank lines and
+  one opening fence aside); a reported name holds no ` · `; a line's
+  last key absorbs nothing; the auditor's and integrator's counts must
+  match what the digest lists; the research lens joins open choices
+  with `;`.
+- Every run-ledger row chains to the row before it (`prev`); the
+  report names a broken chain. The tester is denied Grep, Glob and
+  shell commands naming the three blind files (guard P4).
+
+Migration: create `~/.config/spec-dev-kit/approvers` on every machine
+that approves or checks an approved spec — one
+`<principal> <key-type> <key-blob>` line per approver;
+`ssh-keygen -y -f ~/.ssh/id_ed25519` prints yours. Without it, and
+outside CI, `--approve` and `--verify` fail closed, and `--approve`
+must run in a real terminal. Delete every other `.approvers` under
+`specs/`, and re-paste the guard's REGISTER.md (the matcher gained
+`Grep|Glob`). Digest files the tightened grammar refuses are
+re-spawned; a `--runner` template needs `{model}` to run the
+model-step round.
 ## 0.1.2 — 2026-11-17
 
 - The approve review converges: a re-review is owed to BLOCK repairs

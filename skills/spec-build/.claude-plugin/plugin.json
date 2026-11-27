@@ -1,6 +1,6 @@
 {
   "name": "spec-build",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Builds an approved spec to a delivered commit \u2014 runs developer agents over its open tasks and proves the whole plan in one delivery pass; commits only on the user's yes.",
   "author": {
     "name": "Stanley",
