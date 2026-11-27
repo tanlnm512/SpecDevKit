@@ -265,6 +265,20 @@ are the oracle's `STAGES` tuple. A failed call is not a round:
 re-run the same stage, three tries, then stop and tell the owner
 (`contracts/run-sequence.md` § A failed call is not a round).
 
+**The tools report.** Every spawned reply opens with `tools: <the
+tools the role actually holds>`. Before anything else in a reply is
+read, hand it to `O handshake --role <role> --file <reply>`; a
+reviewer's goes to `O findings-parse --role <role>`. `--role` names the
+brief the spawn ran on, and the oracle requires every tool on that
+brief's `tools:` line — Read, Grep and Glob for a reader, Bash, Write
+and Edit too for the fixer. A short or missing report is a failed
+call: the oracle refuses, naming the role and the tools, and the same
+stage runs again on a type or harness that holds them — never a
+finding, never a round. `findings-parse` takes no payload undeclared:
+the `fix_from` input goes in as `O findings-parse --saved-report`. A
+lens covered inline is the session's own reading: nothing is handed
+over, so there is no report to check.
+
 **Resume** — a crash restarts nothing: `O run-resume --run-dir D`
 (`contracts/run-sequence.md` § Resume).
 
@@ -278,7 +292,8 @@ kept finding confirmed independently. `fast` findings are self-checked.
   (`commands/spec-review.md`) routes review/fix/gate/plan asks into
   this skill; the session executes the stages as written, and the
   shared review oracle (`scripts/review_orchestrator.py`) resolves
-  targets, runs the gate plan, parses findings and assembles the report
+  targets, runs the gate plan, checks every reply's tools report,
+  parses findings and assembles the report
   (args: `base`, `target`, `pr`, `intent`, `fix_from`, `paths`, `mode`,
   `fix_rounds`). A repo's own project-scoped copy, tuned to its CI set,
   wins there.

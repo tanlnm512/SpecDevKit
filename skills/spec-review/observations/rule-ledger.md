@@ -18,7 +18,8 @@ enforces it.
 | The confirmer is never the finding's author | SKILL.md § Run sequence | prose |
 | The fix verifier runs nothing | agents/spec-review-verifier.md | machinery — its brief's `tools:` line grants no Bash (`test_reader_briefs_grant_files_only`) |
 | Reviewers never re-run the repo's suites | agents/spec-review-*.md | machinery — no reader brief grants Bash (`test_reader_briefs_grant_files_only`), and no reader ask names a git command: the oracle hands the diff over as files (`test_no_reader_ask_names_a_git_command`) |
+| A reply is read only after its tools report holds every tool on its role's brief `tools:` line | SKILL.md § Run sequence; protocol/panel-protocol.md § Your reply opens with your tools | machinery — `O handshake` and `findings-parse --role` refuse a short or missing report, and `findings-parse` refuses a payload handed over with neither `--role` nor `--saved-report` (`test_every_brief_tool_is_required_and_nothing_more`, `test_a_reply_is_parsed_only_after_its_tools_report_checks_out`, `test_an_undeclared_payload_is_refused_naming_both_kinds`) |
 | Unconfirmed findings are labelled, never dropped | SKILL.md principle 7 | prose |
 | The session never commits | SKILL.md principle 6 | prose |
 
-Held by machinery: 8 of 12.
+Held by machinery: 9 of 13.

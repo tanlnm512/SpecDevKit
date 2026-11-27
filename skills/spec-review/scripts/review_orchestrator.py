@@ -21,10 +21,23 @@ Usage:
   review_orchestrator.py run-gc    [--repo DIR] [--keep N]
   review_orchestrator.py shard   --files-json LIST [--budget N] [--max-files N]
   review_orchestrator.py id-next --prefix P --used N
-  review_orchestrator.py findings-parse (--file PATH | --text STR)
+  review_orchestrator.py handshake --role ROLE (--file PATH | --text STR)
+  review_orchestrator.py findings-parse (--role ROLE | --saved-report)
+                                (--file PATH | --text STR)
   review_orchestrator.py report  --kind review|fix --data @FILE|STR
   review_orchestrator.py systems                        (confirm/verify = brief bodies from agents/)
   review_orchestrator.py ask     --kind KIND --ctx @FILE|JSON   (ctx {"batch": [...]} renders a wave)
+
+No reply is read before its capability handshake: every reply opens with
+`tools: <the tools it actually holds>`, and ROLE (a brief in agents/,
+without its spec-review- prefix) requires every tool on that brief's
+`tools:` line. `handshake` returns {tools, reply} — the reply past its
+tools line — and `findings-parse --role ROLE` runs the same gate ahead
+of the parse. `findings-parse --saved-report` reads the fix_from input,
+a saved report, which never opens with a tools report; handed neither,
+it refuses naming both. A short or missing report, a reply declared a
+saved report, or an undeclared payload is {"status": "error", "stage":
+"handshake"}: a failed call to run again, never a finding or a round.
 
 run-init / run-save / run-resume checkpoint a review run into
 <repo>/.spec-review/runs/<run-id>/ (D-020): run-init records the
@@ -781,9 +794,101 @@ def normalize_findings(items):
     return tracked
 
 
+# --- capability handshake -----------------------------------------------
+# A spawn that cannot see a tool still answers, and its answer reads like a
+# clean one: a reader with no file tool reports an empty diff. So nothing in
+# a reply is read before the tools report it opens with holds every tool on
+# its role's brief `tools:` line. The briefs are the table, read at call
+# time; this skill ships alone, so the names a kit def dialect maps a tool
+# to are carried here.
+
+BRIEF_PREFIX = "spec-review-"
+TOOLS_REPORT = re.compile(r"\A[ \t>*`-]*tools:(?P<report>[^\n]*)\n?", re.I)
+TOOL_ALIASES = {
+    "Write": ("Create", "ApplyPatch"),
+    "Bash": ("Execute",),
+}
+
+
+class ToolsRefused(Exception):
+    def __init__(self, error: str, **detail):
+        super().__init__(error)
+        self.detail = {"error": error, **detail}
+
+
+def _tool_names(value: str) -> list[str]:
+    names = []
+    for item in value.split(","):
+        name = item.strip().rstrip(".,").strip().strip("`").strip()
+        if name and name.casefold() not in {n.casefold() for n in names}:
+            names.append(name)
+    return names
+
+
+def _brief_tools(role: str) -> list[str]:
+    brief = SKILL_DIR / "agents" / f"{BRIEF_PREFIX}{role}.md"
+    try:
+        front = FRONTMATTER.match(brief.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        raise ToolsRefused(f"agents/{brief.name}: not UTF-8", role=role) from None
+    except OSError as e:
+        raise ToolsRefused(f"agents/{brief.name}: {e.strerror or e}", role=role) from None
+    line = next((l for l in front.group(0).splitlines() if l.startswith("tools:")), None) \
+        if front else None
+    if line is None:
+        raise ToolsRefused(f"agents/{brief.name}: no tools: line in its frontmatter", role=role)
+    return _tool_names(line[len("tools:"):])
+
+
+def _check_tools_report(role: str, text: str) -> tuple[list[str], str]:
+    roles = sorted(p.name[len(BRIEF_PREFIX):-3]
+                   for p in (SKILL_DIR / "agents").glob(f"{BRIEF_PREFIX}*.md"))
+    if role not in roles:
+        raise ToolsRefused(f"unknown role {role!r} — name the brief the spawn ran on, "
+                           f"without its {BRIEF_PREFIX} prefix: {', '.join(roles)}", role=role)
+    report = TOOLS_REPORT.match(text)
+    reported = _tool_names(report["report"]) if report else []
+    held = {n.casefold() for n in reported}
+    missing = [tool for tool in _brief_tools(role)
+               if not held & {n.casefold() for n in (tool, *TOOL_ALIASES.get(tool, ()))}]
+    if missing:
+        raise ToolsRefused(
+            f"capability handshake failed: the {role} role reported tools "
+            f"`{', '.join(reported) or 'none'}` — its brief requires `{', '.join(missing)}` — "
+            "a failed call, never a finding or a round: run the same stage again on a "
+            "type or harness that holds them",
+            role=role, reported=reported, missing=missing)
+    return reported, text[report.end():] if report else text
+
+
+def cmd_handshake(a):
+    try:
+        reported, reply = _check_tools_report(a.role, a.text if a.text is not None
+                                              else Path(a.file).read_text(encoding="utf-8"))
+    except ToolsRefused as e:
+        return stage_err("handshake", **e.detail)
+    return out(True, tools=reported, reply=reply)
+
+
 def cmd_findings_parse(a):
     text = a.text if a.text is not None else Path(a.file).read_text(encoding="utf-8")
-    text = TOOLS_REPORT.sub("", text, count=1)
+    try:
+        if a.role is not None:
+            _, text = _check_tools_report(a.role, text)
+        elif a.saved_report:
+            if TOOLS_REPORT.match(text):
+                raise ToolsRefused(
+                    "a saved report never opens with a tools report, so this is a role's "
+                    "reply — name the role with --role so the report is checked against its "
+                    "brief before a finding is read")
+        else:
+            raise ToolsRefused(
+                "findings-parse was handed a payload and told neither which it is: a role's "
+                "reply goes in with --role <role>, its tools report checked against its "
+                "brief before a finding is read, and a saved report — the fix_from input — "
+                "with --saved-report")
+    except ToolsRefused as e:
+        return stage_err("handshake", **e.detail)
     if re.match(r"^\s*[\[{]", text):
         try:
             parsed = json.loads(text)
@@ -1624,8 +1729,15 @@ def main(argv=None):
     i = sub.add_parser("id-next")
     i.add_argument("--prefix", required=True), i.add_argument("--used", type=int, required=True)
     i.set_defaults(fn=cmd_id_next)
+    h = sub.add_parser("handshake")
+    h.add_argument("--role", required=True)
+    source = h.add_mutually_exclusive_group(required=True)
+    source.add_argument("--file"), source.add_argument("--text")
+    h.set_defaults(fn=cmd_handshake)
     f = sub.add_parser("findings-parse")
     f.add_argument("--file"), f.add_argument("--text")
+    kind = f.add_mutually_exclusive_group()
+    kind.add_argument("--role"), kind.add_argument("--saved-report", action="store_true")
     f.set_defaults(fn=cmd_findings_parse)
     r = sub.add_parser("report")
     r.add_argument("--kind", required=True, choices=["review", "fix"])
@@ -1660,13 +1772,11 @@ def main(argv=None):
 HONESTY = (" If your instructions are impossible to satisfy, escalate and "
            "say so plainly rather than working around it.")
 
-# Every ask opens with this line (spec-review D-029): the rule itself lives
-# in protocol/panel-protocol.md and the judge briefs — the ask only asks
-# for the report. findings-parse skips it: a reply handed over whole is
-# read for its findings alone.
+# Every ask opens with this line: the rule itself lives in
+# protocol/panel-protocol.md and the judge briefs — the ask only asks for
+# the report, and the capability handshake reads it before the reply is.
 TOOLS_ASK = ("The first line of your reply is `tools: <the tools you actually hold, "
              "comma-separated>`.\n")
-TOOLS_REPORT = re.compile(r"\A[ \t>*`-]*tools:[^\n]*\n?", re.I)
 
 LENSES = [
     {

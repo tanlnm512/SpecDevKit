@@ -38,6 +38,15 @@ def err(args):
     return d["error"]
 
 
+def refused(args):
+    r = run(args)
+    assert r.returncode == 1, f"expected exit 1, got {r.returncode}: {r.stdout}{r.stderr}"
+    d = json.loads(r.stdout)
+    assert d["status"] == "error", f"expected status error: {d}"
+    assert not {"tracked", "reply"} & set(d), f"a refusal carries nothing to read: {d}"
+    return d
+
+
 def git(repo, *args):
     subprocess.run(["git", "-C", str(repo), *args], check=True,
                    capture_output=True, text=True)
@@ -394,10 +403,13 @@ FINDINGS_MD = """# Code review — HEAD (2 files, ~10 added lines)
 - evidence: `cursor.execute("... " + uid)`
 """
 
+# a saved report goes in declared as one
+SAVED = ["findings-parse", "--saved-report", "--text"]
+
 
 class FindingsParseTests(unittest.TestCase):
     def test_markdown_report_parses_ids_statuses_and_fixes(self):
-        d = ok(["findings-parse", "--text", FINDINGS_MD])
+        d = ok([*SAVED, FINDINGS_MD])
         tracked = d["tracked"]
         self.assertEqual(len(tracked), 2)  # the fixed one is dropped
         self.assertEqual(tracked[0]["finding"]["id"], "F-1")  # high sorts first
@@ -408,7 +420,7 @@ class FindingsParseTests(unittest.TestCase):
 
     def test_legacy_heading_mints_carried_ids(self):
         legacy = "### [MEDIUM · verified · quality] bad name\n- where: `a.py:1`\n- evidence: x\n"
-        d = ok(["findings-parse", "--text", legacy])
+        d = ok([*SAVED, legacy])
         self.assertEqual(d["tracked"][0]["finding"]["id"], "carried-1")
 
     def test_json_payload_normalizes_and_drops_fixed(self):
@@ -417,34 +429,63 @@ class FindingsParseTests(unittest.TestCase):
             {"id": "F-8", "where": "b.py:1", "what": "y", "severity": "low",
              "fixStatus": "fixed"},
         ])
-        d = ok(["findings-parse", "--text", payload])
+        d = ok([*SAVED, payload])
         self.assertEqual(len(d["tracked"]), 1)
         self.assertEqual(d["tracked"][0]["finding"]["id"], "F-9")
         self.assertEqual(d["tracked"][0]["finding"]["severity"], "high")
         # no recorded confirmation is never promoted to verified
         self.assertEqual(d["tracked"][0]["finding"]["confirmation"]["status"], "unconfirmed")
 
-    def test_a_leading_tools_report_is_never_a_finding(self):
-        # every reply opens with its tools report (D-029): handed over
-        # whole, it parses exactly as it does without that line
+    def test_a_reply_is_parsed_only_after_its_tools_report_checks_out(self):
+        # every reply opens with its tools report: handed over with its
+        # role, the report is checked against the brief before a finding
+        # is read, and one that holds parses exactly as the bare payload
         payload = json.dumps([{"id": "F-9", "where": "a.py:1", "what": "x",
                                "severity": "high"}])
-        bare = ok(["findings-parse", "--text", payload])
-        for lead in ("tools: Read, Grep, Glob\n", "> tools: read\n",
-                     "Tools: `Read`.\n"):
+        parse = ["findings-parse", "--role", "correctness", "--text"]
+        bare = ok([*SAVED, payload])
+        for lead in ("tools: Read, Grep, Glob\n", "> tools: read, grep, glob\n",
+                     "Tools: `Read`, `Grep`, `Glob`.\n"):
             with self.subTest(lead=lead):
-                self.assertEqual(ok(["findings-parse", "--text", lead + payload]), bare)
-        self.assertEqual(
-            ok(["findings-parse", "--text", "tools: Read\n" + FINDINGS_MD]),
-            ok(["findings-parse", "--text", FINDINGS_MD]))
+                self.assertEqual(ok([*parse, lead + payload]), bare)
+        self.assertEqual(ok([*parse, "tools: Read, Grep, Glob\n" + FINDINGS_MD]),
+                         ok([*SAVED, FINDINGS_MD]))
+        for lead, reported, missing in (("tools: Read\n", ["Read"], ["Grep", "Glob"]),
+                                        ("tools: \n", [], ["Read", "Grep", "Glob"]),
+                                        ("", [], ["Read", "Grep", "Glob"])):
+            with self.subTest(lead=lead):
+                d = refused([*parse, lead + FINDINGS_MD])
+                self.assertEqual((d["role"], d["reported"], d["missing"]),
+                                 ("correctness", reported, missing))
+                for named in ("correctness", *missing):
+                    self.assertIn(named, d["error"])
+
+    def test_a_reply_handed_over_without_its_role_is_refused(self):
+        # declared a saved report, a reply that opens with a tools report is
+        # still a reply: nothing is read until its role is named
+        d = refused(["findings-parse", "--saved-report", "--text",
+                     "tools: Read, Grep, Glob\n" + FINDINGS_MD])
+        self.assertEqual(d["stage"], "handshake")
+        self.assertIn("--role", d["error"])
+        self.assertNotIn("--saved-report", d["error"])
+
+    def test_an_undeclared_payload_is_refused_naming_both_kinds(self):
+        # a reply with no tools line and no --role is the omission the gate exists to stop
+        for text in (FINDINGS_MD, json.dumps([{"id": "F-9", "where": "a.py:1", "what": "x"}])):
+            with self.subTest(shape=text.lstrip()[:1]):
+                d = refused(["findings-parse", "--text", text])
+                self.assertEqual(d["stage"], "handshake")
+                self.assertNotIn("tracked", d)
+                for flag in ("--role", "--saved-report"):
+                    self.assertIn(flag, d["error"])
 
     def test_garbage_fails_loudly(self):
-        msg = err(["findings-parse", "--text", "neither json nor a report"])
+        msg = err([*SAVED, "neither json nor a report"])
         self.assertIn("neither valid JSON nor a parseable review report", msg)
 
     def test_all_fixed_payload_fails_loudly(self):
         payload = json.dumps([{"where": "a.py:1", "what": "x", "fixStatus": "fixed"}])
-        msg = err(["findings-parse", "--text", payload])
+        msg = err([*SAVED, payload])
         self.assertIn("no actionable findings", msg)
 
 
@@ -494,7 +535,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("no repo checks detected — no mechanical floor", md)
         self.assertIn("## Findings (3 · 1 confirmed · 2 unconfirmed (1 self-checked)", md)
         self.assertIn("### [F-3 · MEDIUM · unconfirmed (self-checked) · general]", md)
-        reparsed = ok(["findings-parse", "--text", md])["tracked"]
+        reparsed = ok([*SAVED, md])["tracked"]
         self.assertEqual([t["finding"]["confirmation"]["status"] for t in reparsed],
                          ["verified", "unconfirmed", "unconfirmed"])
 
@@ -676,7 +717,7 @@ class ReportTests(unittest.TestCase):
                                                         "conclusion": "human"})])["markdown"])
         # a withdrawn finding does not come back on a fix_from carry (JSON or
         # markdown carrier); what is carried restarts pending by design (D-005)
-        carried = ok(["findings-parse", "--text", json.dumps(
+        carried = ok([*SAVED, json.dumps(
             {"findings": [{"id": "F-1", "where": "a.py:1", "what": "w", "fixStatus": "rejected-valid"},
                           {"id": "F-2", "where": "b.py:1", "what": "x", "fixStatus": "rejected-invalid"},
                           {"id": "F-3", "where": "c.py:1", "what": "y", "fixStatus": "out-of-scope"}]})])["tracked"]
@@ -686,7 +727,7 @@ class ReportTests(unittest.TestCase):
                  json.dumps({**base, "gate_green": True,
                              "tracked": [tracked("F-1", "rejected-valid"), tracked("F-2", "out-of-scope")],
                              "conclusion": "human"})])["markdown"]
-        reparsed = ok(["findings-parse", "--text", md])["tracked"]
+        reparsed = ok([*SAVED, md])["tracked"]
         self.assertEqual([t["finding"]["id"] for t in reparsed], ["F-2"])
         # the verify ask teaches the ruling, the fixer ask the channel
         self.assertIn("rejected-valid", ok(["ask", "--kind", "verify", "--ctx",
@@ -1027,6 +1068,100 @@ class JudgeBriefTests(unittest.TestCase):
                         self.assertIn(f"agents/{brief}", d["error"])
                         self.assertNotIn(stage, d)
                         target.write_bytes(intact)
+
+
+# Each role's required set is its own brief's `tools:` line: files only
+# for every reader, the shell and a file writer for the panel's one author.
+READER_TOOLS = ("Read", "Grep", "Glob")
+ROLE_TOOLS = {role: READER_TOOLS for role in
+              ("scout", "correctness", "security", "quality", "confirmer", "verifier")}
+ROLE_TOOLS["fixer"] = ("Read", "Grep", "Glob", "Bash", "Write", "Edit")
+SCOUT_MAP = '{"modules": [], "conventions": [], "riskAreas": []}\n'
+
+
+class HandshakeTests(unittest.TestCase):
+    """The capability handshake: a reply is read only after the tools
+    report it opens with holds every tool on its role's brief line — a
+    short one is a failed call that hands back nothing to read and
+    advances no stage."""
+
+    def refused(self, role, lead):
+        d = refused(["handshake", "--role", role, "--text", lead + SCOUT_MAP])
+        self.assertEqual((d["stage"], d["role"]), ("handshake", role))
+        for named in (role, *d["missing"]):
+            self.assertIn(named, d["error"])
+        return d
+
+    def test_a_full_report_returns_the_reply_after_its_line(self):
+        lead = "> tools: read, grep, glob\n"
+        self.assertEqual(ok(["handshake", "--role", "scout", "--text", lead + SCOUT_MAP]),
+                         {"status": "ok", "tools": ["read", "grep", "glob"], "reply": SCOUT_MAP})
+
+    def test_every_brief_tool_is_required_and_nothing_more(self):
+        for role, tools in ROLE_TOOLS.items():
+            with self.subTest(role=role):
+                ok(["handshake", "--role", role, "--text", f"tools: {', '.join(tools)}\n" + SCOUT_MAP])
+            for short in tools:
+                with self.subTest(role=role, without=short):
+                    rest = [t for t in tools if t != short]
+                    self.assertEqual(self.refused(role, "tools: " + ", ".join(rest) + "\n")["missing"],
+                                     [short])
+
+    def test_a_dialect_name_for_a_required_tool_meets_it(self):
+        for names in ("Read, Grep, Glob, Execute, Create, Edit",
+                      "read, grep, glob, execute, applypatch, edit"):
+            with self.subTest(names=names):
+                ok(["handshake", "--role", "fixer", "--text", f"tools: {names}\n" + SCOUT_MAP])
+        self.assertEqual(self.refused("fixer", "tools: Read, Grep, Glob, Edit\n")["missing"],
+                         ["Bash", "Write"])
+
+    def test_an_unknown_role_is_refused_naming_the_briefs(self):
+        d = refused(["handshake", "--role", "triage", "--text", "tools: Read\n" + SCOUT_MAP])
+        self.assertEqual(d["stage"], "handshake")
+        for role in ROLE_TOOLS:
+            self.assertIn(role, d["error"])
+
+    def test_the_brief_is_the_table(self):
+        skill = SCRIPT.parent.parent
+        with tempfile.TemporaryDirectory(prefix="oracle-skill-") as holder:
+            copy = Path(holder)
+            shutil.copytree(skill / "scripts", copy / "scripts",
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            shutil.copytree(AGENTS_DIR, copy / "agents")
+            call = [sys.executable, str(copy / "scripts" / SCRIPT.name),
+                    "handshake", "--role", "scout", "--text"]
+
+            def reply(lead):
+                r = subprocess.run([*call, lead + SCOUT_MAP], capture_output=True, text=True)
+                self.assertTrue(r.stdout.startswith('{"status":'), r.stdout + r.stderr)
+                return r
+
+            brief = copy / "agents" / "spec-review-scout.md"
+            text = brief.read_text(encoding="utf-8")
+            brief.write_text(text.replace("tools: Read, Grep, Glob", "tools: Read, WebFetch"),
+                             encoding="utf-8")
+            # a changed line moves the handshake with it
+            self.assertEqual(json.loads(reply("tools: Read, Grep, Glob\n").stdout)["missing"],
+                             ["WebFetch"])
+            self.assertEqual(reply("tools: Read, WebFetch\n").returncode, 0)
+            # a brief with no line refuses the check — it never requires nothing
+            brief.write_text(text.replace("tools: Read, Grep, Glob\n", ""), encoding="utf-8")
+            r = reply("tools: Read, Grep, Glob\n")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("agents/spec-review-scout.md", json.loads(r.stdout)["error"])
+
+    def test_a_refused_reply_advances_no_stage(self):
+        holder, repo = make_repo()
+        with holder:
+            run_dir = ok(["run-init", "--target", "diff", "--repo", str(repo)])["run_dir"]
+            ok(["run-save", "--run-dir", run_dir, "--stage", "scope", "--data", "{}"])
+            before = sorted(p.name for p in Path(run_dir).iterdir())
+            self.refused("fixer", "tools: Read\n")
+            refused(["findings-parse", "--role", "correctness", "--text",
+                     "tools: Grep\n" + FINDINGS_MD])
+            self.assertEqual(sorted(p.name for p in Path(run_dir).iterdir()), before)
+            resumed = ok(["run-resume", "--run-dir", run_dir])
+            self.assertEqual((resumed["completed"], resumed["next"]), (["scope"], "scout"))
 
 
 class RunFolderTests(unittest.TestCase):

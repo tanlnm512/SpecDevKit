@@ -15,8 +15,9 @@ prints one JSON object; `status: error` stops the run, naming its
 | gate re-run | `O gate --base <merge_base or base> [--pr N]` (project: `--tree`) | the same `gate` object |
 | prompts | `O systems`, once | system text per role; `lenses[]`, `general` |
 | asks | `O ask --kind K --ctx @ctx.json` — `{"batch": [{kind, ctx}, …]}` renders a wave | one ask per spawn |
+| tools report | `O handshake --role R --file F` on every reply before anything else in it is read; a reviewer's reply: `O findings-parse --role R --file F` (R: § Who runs each role) | `{tools, reply}` — the reply past its tools line; `status: error` with stage `handshake` is a failed call (§ A failed call is not a round) |
 | ids | `O id-next --prefix <lens> --used N` | the id minted at confirmation |
-| fix_from | `O findings-parse --file F` | `tracked[]` |
+| fix_from | `O findings-parse --saved-report --file F` — the previous report's markdown or its findings JSON, declared a saved report; a payload handed over with neither `--role` nor `--saved-report` is refused | `tracked[]` |
 | fix guard | `O fix-snapshot` before each fixer turn; `O fix-check --head H --stash-count N --tree T` after it | error `fixer-moved-head` / `fixer-touched-stash` → abort the loop and report it; `test_hunks` → the verify and fix-review ctx |
 | report | `O report --kind review\|fix --data @report.json` | `markdown`, `reported_findings`, `backlog_offer`; kind fix also `derived_conclusion` (D-021: a `conclusion` below it is an error — re-run `report` with a claim at or above the floor) and `stopAsk` (D-024, null when nothing waits on judgment): put it to the user through the harness's structured question tool where one exists — the options as choices, a recommended one first and marked — otherwise print it, and stop: an unanswered ask is not an answer (spec-define D-018) |
 
@@ -43,13 +44,18 @@ never sees the scout map or the stated intent.
 
 **A failed call is not a round** — a fixer, reviewer or verifier
 spawn that returned nothing usable (a rate limit, a timeout, a lost
-session, a permission prompt nobody answered) opens no fix round and
-changes no finding's status; the orchestrator runs the same stage
-again, counts these retries against a bound of three per stage, and
-at the bound stops and tells the owner which stage, which error and
-how many times. A refusal by policy is final: report it, never work
+session, a permission prompt nobody answered), or whose reply the
+handshake refused (stage `handshake`: its tools report lacks a tool on
+the role's brief `tools:` line, or opens with none), opens no fix round
+and changes no finding's status; the orchestrator runs the same stage
+again, counts these retries against a bound of three per stage, and at
+the bound stops and tells the owner which stage, which error and how
+many times. A refusal by policy is final: report it, never work
 around it. A gate or ask that refuses because of what an agent
-produced is not final: fix what it names and run it again.
+produced is not final: fix what it names and run it again — and
+neither is a call refused for what the caller left out: a payload
+handed to `findings-parse` undeclared is declared and handed over
+again.
 
 Ask ctx keys (`gate_line` = the gate object's `note`):
 
@@ -102,17 +108,18 @@ parse). `conclusion` (fix runs) is checked against the derived floor
 above it the claim stands; absent it is filled with the floor.
 
 **Who runs each role** — a fresh spawn per ask, never the instance
-that wrote what it now judges:
+that wrote what it now judges. The last column is the `--role` every
+reply of that role is handed over with — the brief the spawn ran on:
 
-| Role | Agent type |
-|---|---|
-| Scout | `spec-review-scout` |
-| Lens reviewer | `spec-review-correctness` / `spec-review-security` / `spec-review-quality` (fast mode: one of them with the `general` lens) |
-| Fixer | `spec-review-fixer` — the only role allowed to write |
-| Triage editor, final assessor | `spec-review-quality` (read-only), with `systems.triage` ahead of the ask |
-| Confirmer | `spec-review-confirmer` — the brief `agents/spec-review-confirmer.md`, whose body `O systems` returns as `systems.confirm`, ahead of the ask |
-| Fix verifier | `spec-review-verifier` — the brief `agents/spec-review-verifier.md`, whose body `O systems` returns as `systems.verify`, ahead of the ask |
-| Fresh-eyes fix reviewer | a read-only lens type with `systems.fix_review` ahead of the ask |
+| Role | Agent type | `--role` |
+|---|---|---|
+| Scout | `spec-review-scout` | `scout` |
+| Lens reviewer | `spec-review-correctness` / `spec-review-security` / `spec-review-quality` (fast mode: one of them with the `general` lens) | the one spawned: `correctness`, `security` or `quality` |
+| Fixer | `spec-review-fixer` — the only role allowed to write | `fixer` |
+| Triage editor, final assessor | `spec-review-quality` (read-only), with `systems.triage` ahead of the ask | `quality` |
+| Confirmer | `spec-review-confirmer` — the brief `agents/spec-review-confirmer.md`, whose body `O systems` returns as `systems.confirm`, ahead of the ask | `confirmer` |
+| Fix verifier | `spec-review-verifier` — the brief `agents/spec-review-verifier.md`, whose body `O systems` returns as `systems.verify`, ahead of the ask | `verifier` |
+| Fresh-eyes fix reviewer | a read-only lens type with `systems.fix_review` ahead of the ask | the lens type spawned: `correctness`, `security` or `quality` |
 
 **Mode** — `auto` (default) is `fast` when scope's
 `fast_mode_default` holds (≤ 400 added lines and ≤ 5 files), else

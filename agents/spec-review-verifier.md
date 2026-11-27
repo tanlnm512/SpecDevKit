@@ -32,8 +32,9 @@ say so plainly rather than working around it.
 
 Your reply opens with one line: `tools: <the tools you actually hold,
 comma-separated>` — what you hold, never what you were told you hold; a
-tool you cannot see is absent. A line without Read is a failed spawn:
-the reply is refused whole, never a fix round.
+tool you cannot see is absent. The oracle checks that line against this
+brief's `tools:` line, every tool on it: a line short of one is a
+failed spawn — the reply is refused whole, never a fix round.
 
 **Shared rules**: read-only, like every panel reader —
 `protocol/panel-protocol.md` § Readers never edit and the honesty rule
