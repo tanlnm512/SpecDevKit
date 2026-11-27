@@ -63,7 +63,8 @@ the checker's pairing gate stays green; round 3 points at
 round 4 failing writes the stop marker `(fix 5/5)`, the cap: the
 user's adjudication. drop strikes the entry with its D-### ruling —
 refused for a D-### tech-spec.md does not define, and refused outright
-at Tier: tiny (a drop breaks the freeze — route it to /spec-design).
+at Tier: tiny (a drop breaks the freeze — route it to /spec-design) —
+and discards the task's isolated worktree, as release does.
 
 The claim stamp is a SUB-LINE, never an inline marker: specstate
 detects a claim by the `(in-progress)` substring and freeze.py's marker
@@ -129,8 +130,10 @@ committed, the index untouched), removes the worktree, and lands as
 usual. A delta the main tree will not take clean is refused with exit
 1, naming both trees and the conflicting paths: nothing is written, the
 worktree stays and the task stays claimed — settle by hand, then land
-again or release. release removes the worktree with the claim, so its
-work is discarded; fail keeps it, and the next round continues there.
+again or release. release and drop remove the worktree, so its work is
+discarded; fail keeps it, and the next round continues there. A
+worktree git will not remove never undoes a release or a drop: the
+warning names it and the by-hand command.
 
 Usage: mark.py <verb> …        (see the verb lines above)
 Exit:  0 = done · 1 = transition refused (current marker, wanted
@@ -705,10 +708,25 @@ def _merge_worktree(task_id: str, repo: Path, worktree: Path) -> int | None:
         print(f"worktree {worktree}: {done}; worktree removed")
     else:
         print(f"worktree {worktree}: {done}\n"
-              f"warning: the worktree was NOT removed — {left}; remove it "
-              f"by hand: git worktree remove --force {worktree}",
-              file=sys.stderr)
+              + _worktree_left_warning(worktree, left), file=sys.stderr)
     return None
+
+
+def _worktree_left_warning(worktree: Path, why: str) -> str:
+    return (f"warning: the worktree was NOT removed — {why}; remove it "
+            f"by hand: git worktree remove --force {worktree}")
+
+
+def _discard_worktree(spec_dir: Path, task_id: str) -> str | None:
+    """Remove the task's isolated worktree with the work in it — the
+    task is no longer claimed, so the work is not wanted. None once it
+    is gone; else why git could not, never silent."""
+    worktree = specstate.worktree_path(spec_dir.parent.parent,
+                                        spec_dir.name, task_id)
+    left = specstate.worktree_remove(spec_dir.parent.parent, worktree)
+    if left is not None:
+        print(_worktree_left_warning(worktree, left), file=sys.stderr)
+    return left
 
 
 def _digest_status(digest: str | None) -> str | None:
@@ -785,17 +803,13 @@ def release(spec_dir: Path, task_id: str, reason: str) -> int:
     if not worktree.is_dir():
         tail = ("the next emit re-spawns it, its partial edits stay in "
                 "the tree")
+    elif _discard_worktree(spec_dir, task_id) is None:
+        tail = (f"its worktree {worktree} is removed with the work in "
+                "it — the next emit re-spawns it in a fresh one")
     else:
-        left = specstate.worktree_remove(spec_dir.parent.parent, worktree)
-        if left is None:
-            tail = (f"its worktree {worktree} is removed with the work in "
-                    "it — the next emit re-spawns it in a fresh one")
-        else:
-            print(f"warning: the worktree was NOT removed — {left}",
-                  file=sys.stderr)
-            tail = (f"the next emit re-spawns it once the leftover worktree "
-                    f"is removed by hand (git worktree remove --force "
-                    f"{worktree})")
+        tail = (f"the next emit re-spawns it once the leftover worktree "
+                f"is removed by hand (git worktree remove --force "
+                f"{worktree})")
     print(f"released {task_id} — claim cleared ({category}); {tail}")
     _record("task_release", task=task_id, reason=category)
     return 0
@@ -996,8 +1010,18 @@ def drop(spec_dir: Path, task_id: str, decision: str) -> int:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
 
+    worktree = specstate.worktree_path(spec_dir.parent.parent,
+                                        spec_dir.name, task_id)
+    isolated = worktree.is_dir()
+    left = _discard_worktree(spec_dir, task_id) if isolated else None
+    tail = ""
+    if left is not None:
+        tail = (f"; its worktree {worktree} is NOT removed — git's reason "
+                "and the by-hand command are on stderr")
+    elif isolated:
+        tail = f"; its worktree {worktree} is removed with the work in it"
     print(f"dropped {task_id} ({decision}) — struck in {holder.name}, "
-          "the decision stays visible")
+          "the decision stays visible" + tail)
     _record("task_drop", task=task_id, decision=decision)
     return 0
 

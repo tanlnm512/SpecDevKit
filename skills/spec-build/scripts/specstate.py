@@ -960,6 +960,75 @@ def _append_provenance(path: Path, line: str) -> None:
         os.close(fd)
 
 
+class RefusedDigest(NamedTuple):
+    """What the orchestrator refuses a digest file for: the sighting's
+    `state`, the ledger outcome it is recorded under, the problems that
+    name it, and the tools the file reported."""
+
+    state: str
+    outcome: str
+    problems: list[str]
+    reported: set[str]
+
+
+def _refusal(path: Path, wave: int, rows: list[dict],
+             text: str) -> RefusedDigest | None:
+    """Why the orchestrator refuses the digest file at `path`, or None
+    for one it does not: no role's digest, valid with its tools, or
+    already carrying the line a ledger row vouches for. One definition
+    for the sweep, which records it, and the state reader, which only
+    names it."""
+    schema = digest_schema(path.stem)
+    if schema is None:
+        return None
+    role = schema[0]
+    if any(ln.startswith(PROVENANCE_KEY + ":") for ln in text.split("\n")):
+        unvouched = provenance_problems(text, rows, wave, path.stem)
+        if unvouched:
+            return RefusedDigest(DIGEST_MALFORMED, UNVERIFIED, unvouched,
+                                 set())
+        return None
+    request = next((row for row in reversed(rows)
+                    if row.get("event") == "wave"
+                    and row.get("wave") == wave
+                    and row.get("stem") == path.stem), {})
+    variant = digest_schema(path.stem, request.get("lens"))[1]
+    parsed = digests.parse(role, variant, text)
+    problems = digests.validate(role, variant, text) if parsed is None else []
+    named = DIGEST_FILE.match(path.name)
+    if not problems and role == "developer":
+        if named is None:
+            problems = ["its stem names no task — a developer digest "
+                        "file is implementer-T###.md"]
+        elif parsed["task"] != named.group(1):
+            problems = [f"it names task {parsed['task']}, "
+                        f"not {named.group(1)}"]
+    if problems:
+        return RefusedDigest(DIGEST_MALFORMED, DIGEST_MALFORMED, problems,
+                             set())
+    reported = digests.tools_report(text)
+    # the developer's report is mark.py land's to refuse: it names the
+    # task and its release, and no file lands past it
+    missing = () if role == "developer" else digests.tools_missing(
+        role, reported)
+    if missing:
+        return RefusedDigest(
+            CAPABILITY_MISSING, ", ".join(missing),
+            [digests.tools_refusal(role, reported, missing)], reported)
+    return None
+
+
+def digest_refusal_line(seen: dict) -> str:
+    """How a refused digest file is named, after `digest: ` — the
+    sweep's line and the run's stop share it."""
+    at = f" at {seen['path']}"
+    if seen["state"] == CAPABILITY_MISSING:
+        return (f"{seen['problems'][0]} —{at}: no provenance line is "
+                "written and nothing reads this digest")
+    return (f"malformed{at} — {'; '.join(seen['problems'])} — fix and run "
+            "again: re-spawn the same payload to rewrite its digest file")
+
+
 def _sweep_digest(path: Path, wave: int, rows: list[dict],
                   skill: str) -> tuple[dict | None, dict | None]:
     """(malformed sighting, appended row) for one digest file under
@@ -992,45 +1061,26 @@ def _sweep_digest(path: Path, wave: int, rows: list[dict],
                            for k in ("wave", "stem", "digest"))
                    for row in rows)
 
-    def malformed(problems: list[str],
-                  outcome: str) -> tuple[dict, dict | None]:
-        if not recorded("digest_malformed", outcome):
+    refusal = _refusal(path, wave, rows, text)
+    if refusal is not None:
+        seen = dict(state=refusal.state, wave=wave, path=str(path),
+                    problems=refusal.problems)
+        event = (CAPABILITY_MISSING if refusal.state == CAPABILITY_MISSING
+                 else "digest_malformed")
+        if not recorded(event, refusal.outcome):
             ledger_append(path.parents[2], ledger_row(
-                skill, "digest_malformed", outcome=outcome, **facts))
-        return dict(state=DIGEST_MALFORMED, wave=wave, path=str(path),
-                    problems=problems), None
-
+                skill, event, outcome=refusal.outcome, **facts,
+                **{TOOLS_FIELD: tools_reported(refusal.reported)}))
+        if refusal.state == CAPABILITY_MISSING:
+            print(f"digest: {digest_refusal_line(seen)}", file=sys.stderr)
+            return None, None
+        return seen, None
     if any(ln.startswith(PROVENANCE_KEY + ":") for ln in text.split("\n")):
-        unvouched = provenance_problems(text, rows, wave, path.stem)
-        if unvouched:
-            return malformed(unvouched, UNVERIFIED)
+        # vouched for: an earlier sweep appended the line
         return None, None
-    variant = digest_schema(path.stem, facts["lens"])[1]
-    parsed = digests.parse(role, variant, text)
-    problems = digests.validate(role, variant, text) if parsed is None else []
-    if not problems and role == "developer":
-        if facts["task"] is None:
-            problems = ["its stem names no task — a developer digest "
-                        "file is implementer-T###.md"]
-        elif parsed["task"] != facts["task"]:
-            problems = [f"it names task {parsed['task']}, "
-                        f"not {facts['task']}"]
-    if problems:
-        return malformed(problems, DIGEST_MALFORMED)
+    parsed = digests.parse(
+        role, digest_schema(path.stem, facts["lens"])[1], text)
     reported = digests.tools_report(text)
-    # the developer's report is mark.py land's to refuse: it names the
-    # task and its release, and no file lands past it
-    missing = () if role == "developer" else digests.tools_missing(
-        role, reported)
-    if missing:
-        if not recorded(CAPABILITY_MISSING, ", ".join(missing)):
-            ledger_append(path.parents[2], ledger_row(
-                skill, CAPABILITY_MISSING, outcome=", ".join(missing),
-                **facts, **{TOOLS_FIELD: tools_reported(reported)}))
-        print(f"digest: {digests.tools_refusal(role, reported, missing)} "
-              f"— at {path}: no provenance line is written and nothing "
-              "reads this digest", file=sys.stderr)
-        return None, None
     outcome = (parsed["status"].split(":", 1)[0].strip()
                if role == "developer" else None)
     row = ledger_row(skill, "digest", outcome=outcome, **facts,
@@ -1073,6 +1123,38 @@ def sweep_digests(spec_dir: Path | str, skill: str) -> list[dict]:
     except (TaskLockBusy, OSError) as exc:
         print(f"warning: provenance sweep stopped — {exc}", file=sys.stderr)
     return seen
+
+
+def refused_digests(spec_dir: Path | str, stems) -> dict[str, dict]:
+    """`{stem: sighting}` for each stem in `stems` whose newest digest
+    file under digests/wave-*/ — the one in the highest wave — the
+    orchestrator refuses: `state` is malformed or capability_missing,
+    beside `wave`, `path` and `problems`. A stem with no file, or whose
+    newest file is valid or vouched for, is absent. Pure read: the
+    refusal the sweep would name, without sweeping."""
+    base = Path(spec_dir) / DIGEST_DIR
+    if not base.is_dir():
+        return {}
+    newest: dict[str, tuple[int, Path]] = {}
+    for path in base.glob("wave-*/*.md"):
+        wave = WAVE_DIR_NAME.fullmatch(path.parent.name)
+        if not wave or path.stem not in stems:
+            continue
+        on_wave = int(wave.group(1))
+        if path.stem not in newest or on_wave > newest[path.stem][0]:
+            newest[path.stem] = (on_wave, path)
+    if not newest:
+        return {}
+    rows = ledger_rows(spec_dir)
+    found: dict[str, dict] = {}
+    for stem, (wave, path) in newest.items():
+        text = _read_doc_text(path)
+        refusal = _refusal(path, wave, rows, text) if text is not None \
+            else None
+        if refusal is not None:
+            found[stem] = dict(state=refusal.state, wave=wave,
+                               path=str(path), problems=refusal.problems)
+    return found
 
 
 def doc_baseline(text: str) -> tuple[str, str] | None:

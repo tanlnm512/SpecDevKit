@@ -1639,6 +1639,15 @@ class Exec002SpawnsDerivedOnlyTests(unittest.TestCase):
         self.assertIn("- fix 2 — TypeError: multiply() got an unexpected "
                       "keyword argument", payload)
         self.assertIn("failure evidence and prior attempts", payload)
+        # the payload states the rounds' arithmetic, and from the second
+        # round on points at the rule the round history is read with
+        self.assertIn("- Fix round 2 — failure evidence and prior attempts",
+                      payload)
+        self.assertIn("- Rounds: four rounds spawn, the fifth failure stops "
+                      "— this is round 2", payload)
+        self.assertIn("- Same-signature rule: when the newest `## Fix "
+                      "round` section's `$ <command>` line is the same "
+                      "command as the round before it", payload)
 
     def test_task_md_never_mentions_spawns(self):
         self.assertNotIn(
@@ -1743,7 +1752,8 @@ class Exec005GateHashInvarianceTests(unittest.TestCase):
 
 class Exec006RunnerTemplateTests(unittest.TestCase):
     """--runner placeholders are substituted verbatim with real
-    paths; no unsubstituted {...} token survives in the echoed lines."""
+    paths; no unsubstituted {...} token survives in the echoed lines.
+    {model} takes each payload's brief model."""
 
     @classmethod
     def setUpClass(cls):
@@ -1752,7 +1762,7 @@ class Exec006RunnerTemplateTests(unittest.TestCase):
         cls.r = run_cli(
             cls.spec_dir, "--run", "--dry-run", "--runner",
             "agentx spawn --prompt {prompt_file} --as {role} "
-            "--cwd {spec_dir} --skill {skill_dir}")
+            "--cwd {spec_dir} --skill {skill_dir} --model {model}")
 
     @classmethod
     def tearDownClass(cls):
@@ -1776,6 +1786,8 @@ class Exec006RunnerTemplateTests(unittest.TestCase):
             self.assertIn(str(self.spec_dir / "spawns" / "wave-1" / payload), ln)
             self.assertIn(f"--cwd {self.spec_dir}", ln)
             self.assertIn(f"--skill {SKILL}", ln)
+            # neither brief pins a model: the harness's own is inherited
+            self.assertTrue(ln.endswith("--model inherit"), ln)
 
 
 class Exec007MaxWavesTests(unittest.TestCase):
@@ -3178,6 +3190,143 @@ class RunLedgerTests(unittest.TestCase):
         self.assertEqual([row["event"] for row in self.rows()],
                          ["wave", "wave", "capability_missing",
                           "capability_missing"])
+
+        # the refused file holds its node once the artifact is on disk
+        write(self.spec_dir / "tech-spec.md", TECH_SPEC)
+        s = compute(self.spec_dir)
+        self.assertEqual(s["nodes"]["tech"]["state"], "blocked")
+        self.assertIn("capability handshake failed: architect reported "
+                      "tools `none`", s["nodes"]["tech"]["reason"])
+        self.assertEqual(s["nodes"]["plan"]["state"], "blocked")
+
+
+TECH_SPEC = ("# Tech spec: demo\n\n" + GROUNDED_BODY +
+             "## Approach\nA plain function in the arithmetic module "
+             "(FR-001).\n\n### D-001: plain function\nContext: small "
+             "module. Decision: plain function. Consequences: none.\n\n"
+             + SKIP_SECTION_BODY)
+TEST_SPEC = ("# Test cases: demo\n\n## TC-001 — multiply\n"
+             "- **Traces to**: FR-001\n"
+             "- **Pass condition**: `python3 -c 'print(42)'` exits 0\n")
+PLAN = ("# Plan: demo\n\n## Milestone 1: multiply lands\n"
+        "All FR-001 and FR-002 work lands here; checkpoint: pytest "
+        "green.\n\n## Parallelization map\n- planner area: "
+        "`repo/calc.py` disjoint from `repo/test_calc.py`\n")
+TASKS = ("# Tasks: demo\n\n## Burndown\n| Phase | Total | Done | Verified |\n"
+         "|-------|-------|------|----------|\n| 1     | 1     | 0    |"
+         "          |\n| **Σ** | 1     | 0    |          |\n\n"
+         "## Phase 1: multiply (FR-001)\n"
+         "- [ ] T001 implement multiply in `repo/calc.py` (FR-001)\n")
+QA_DIGEST = ("digest: TCs 1 · requirement coverage 1/2 · untestable none "
+             "· UI tests none\n")
+
+# The "agents" of a --run: each writes its artifact and its digest file
+# from a seed beside the spec dir, and leaves a marker that it ran.
+HOLD_RUNNER = """import re, shutil, sys
+from pathlib import Path
+
+role, spec_dir = sys.argv[1], Path(sys.argv[2])
+prompt = Path(sys.argv[3]).read_text(encoding="utf-8")
+wave = re.search(r"# Spawn payload .*? wave (\\d+)", prompt).group(1)
+seeds = spec_dir.parent.parent / "seeds"
+(seeds / f".ran-{role}").write_text(wave, encoding="utf-8")
+docs = {"tech": "tech-spec.md", "qa": "test.md", "planner": "plan.md"}
+shutil.copy(seeds / f"artifact-{role}.md", spec_dir / docs[role])
+digests = spec_dir / "digests" / f"wave-{wave}"
+digests.mkdir(parents=True, exist_ok=True)
+(digests / f"{role}.md").write_text(
+    "tools: Read, Grep, Glob, Bash, Write, Edit\\n"
+    + (seeds / f"digest-{role}.md").read_text(encoding="utf-8"),
+    encoding="utf-8")
+"""
+
+
+class RefusedDigestHoldTests(unittest.TestCase):
+    """A digest file the orchestrator refuses holds the node its spawn
+    answers: the artifact may be on disk, the node is neither done nor
+    runnable, so the wave after it is not emitted — by --run, by
+    --emit-spawns, or in the report's frontier. --run sweeps again
+    before every wave after the first, because digests land between
+    waves, and stops on the fix-and-run-again line. The approval is
+    where an authoring digest becomes history: an approved spec is
+    never held by one."""
+
+    def setUp(self):
+        self._tmp = Path(tempfile.mkdtemp(prefix="digest-hold-"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.spec_dir = grounding_fixture(self._tmp)
+        self.seeds = self._tmp / "seeds"
+        self.seeds.mkdir()
+        for name, text in (("artifact-tech", TECH_SPEC),
+                           ("artifact-qa", TEST_SPEC),
+                           ("artifact-planner", PLAN),
+                           ("digest-tech", PLAN_DIGEST),
+                           ("digest-qa", QA_DIGEST)):
+            write(self.seeds / f"{name}.md", text)
+        self.refused = self.spec_dir / "digests" / "wave-1" / "tech.md"
+
+    def rows(self) -> list[dict]:
+        return [json.loads(ln) for ln in (
+            self.spec_dir / "runs" / "ledger.jsonl").read_text(
+                encoding="utf-8").splitlines()]
+
+    def test_a_malformed_tech_digest_blocks_the_plan_wave(self):
+        runner = write(self._tmp / "runner.py", HOLD_RUNNER)
+        r = run_cli(self.spec_dir, "--run", "--runner",
+                    f"{sys.executable} {runner} {{role}} {{spec_dir}} "
+                    f"{{prompt_file}}")
+        # wave 1 (tech ∥ qa) ran; the plan wave never started
+        self.assertEqual(r.stdout.count("== wave"), 1, r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("AWAITING ORCHESTRATOR: a refused digest holds tech",
+                      r.stdout)
+        self.assertIn(f"   tech: digest: malformed at {self.refused} — ",
+                      r.stdout)
+        self.assertIn("fix and run again: re-spawn the same payload to "
+                      "rewrite its digest file", r.stdout)
+        self.assertFalse((self.spec_dir / "spawns" / "wave-2").exists())
+        self.assertFalse((self.seeds / ".ran-planner").exists())
+        self.assertEqual([row["event"] for row in self.rows()], [
+            "run_start", "wave", "wave", "digest", "digest_malformed",
+            "run_end"])
+        self.assertEqual(self.rows()[-1]["outcome"], "digest_refused")
+
+        # the same state for every other mode: tech is not done, so
+        # plan waits on it and nothing is emitted
+        r = run_cli(self.spec_dir, "--state-json")
+        n = json.loads(r.stdout)["nodes"]
+        self.assertEqual(n["tech"]["state"], "blocked")
+        self.assertIn(f"digest: malformed at {self.refused} — ",
+                      n["tech"]["reason"])
+        self.assertIn("fix and run again", n["tech"]["reason"])
+        self.assertEqual(n["plan"]["state"], "blocked")
+        self.assertIn("waiting on: tech", n["plan"]["reason"])
+        self.assertEqual(n["verify"]["state"], "blocked")
+        r = run_cli(self.spec_dir, "--emit-spawns")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([p.name for p in (
+            self.spec_dir / "spawns").rglob("*.md")], ["qa.md", "tech.md"])
+        r = run_cli(self.spec_dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"(?m)^  tech\s+blocked\s+its digest on "
+                                 r"file is refused — digest: malformed at")
+        self.assertIn("fix and run again", r.stdout)
+
+    def test_the_approval_ends_the_hold(self):
+        draft = copy_fixture(self._tmp / "draft", "draft")
+        (draft / "digests" / "wave-1").mkdir(parents=True)
+        write(draft / "digests" / "wave-1" / "tech.md", PLAN_DIGEST)
+        self.assertEqual(compute(draft)["nodes"]["tech"]["state"],
+                         "blocked")
+
+        # the same refused file beside an approved docset is history:
+        # the signed docset is the contract, not the author's report
+        approved = approved_fixture(self._tmp / "approved", "approved")
+        (approved / "digests" / "wave-1").mkdir(parents=True)
+        write(approved / "digests" / "wave-1" / "tech.md", PLAN_DIGEST)
+        s = compute(approved)
+        self.assertEqual(s["nodes"]["tech"]["state"], "done")
+        self.assertEqual(s["nodes"]["execute"]["state"], "READY")
 
 
 class PayloadHandshakeTests(unittest.TestCase):

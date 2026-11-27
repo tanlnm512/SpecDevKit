@@ -274,7 +274,8 @@ class RunBudgetTests(unittest.TestCase):
         with contextlib.redirect_stdout(said), \
                 contextlib.redirect_stderr(errors):
             rc = graph._headless_execute_wave(
-                self.spec, [(payload, "implementer", "execute")],
+                self.spec, [graph.WrittenPayload(payload, "implementer",
+                                                 "execute", "sonnet")],
                 f"{sys.executable} {runner}", 1, "r-aaaa",
                 budget_spawns=1)
         self.assertEqual(rc, graph.RUNNER_FAILED_EXIT)

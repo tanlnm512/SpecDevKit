@@ -74,7 +74,9 @@ Modes:
                  is deferred the same way — `shares <path> with
                  <spec>/T###` — and takes no wave-mate's place. A
                  fix-round payload carries notes/T###.md, the
-                 round's failure evidence, verbatim. The payload of the
+                 round's failure evidence, verbatim, then the rounds'
+                 arithmetic and — from the second round on — the
+                 same-signature rule. The payload of the
                  round that runs a model step above the developer brief's
                  model (round 4) also carries a `Model:` line in its
                  header, and the emit's payload line names the step.
@@ -126,12 +128,19 @@ Modes:
                  (check.py) directly; emit payloads for the ready agent
                  wave; invoke --runner per payload (default `print`: echo
                  the invocation, then stop after the one emitted wave —
-                 the orchestrator spawns it and re-runs); a runner that
-                 exits nonzero or raises
+                 the orchestrator spawns it and re-runs); a template's
+                 {model} takes the brief's model, and the same with `+1`
+                 on the fix round that runs a model step — a template
+                 without {model} stops that wave `AWAITING
+                 ORCHESTRATOR` before the round is claimed, exit 0; a
+                 runner that exits nonzero or raises
                  stops the loop with a role/node diagnostic and exit 3, so
                   no later wave starts; recompute and repeat until a gate,
                   workflow completion, --max-waves, or a wave that moved
-                  no doc state.
+                  no doc state. Before every wave after the first the
+                  digests are swept again — they land between waves —
+                  and a refused one stops the loop `AWAITING
+                  ORCHESTRATOR` on the fix-and-run-again line, exit 0.
   --span PHASE   with --run/--emit-spawns: bound the wave to one phase's
                  frontier — `intent` (the analyst node; spec/clarify
                  mechanics unchanged), `shape` (intent + the authoring wave
@@ -159,7 +168,11 @@ Modes:
                  the ledger vouches for; a malformed file is left as it
                  is and named, and so is one whose `tools:` report lacks
                  a tool its role requires (a failed spawn, not a fix
-                 round).
+                 round). Either holds the node its spawn answers —
+                 tech, plan, qa, tasks, the merged design's through
+                 tech: the node is neither done nor runnable, so the
+                 wave after it waits until the digest is re-spawned. A
+                 signed approval ends the hold.
   --isolate worktree
                  with --emit-spawns or --run: every implementer payload
                  of the wave works in its own detached git worktree at
@@ -167,7 +180,10 @@ Modes:
                  at a snapshot of the main working tree — landed,
                  still-uncommitted work included — and the payload's
                  `- repo:` line names that worktree as the developer's
-                 only working tree (spec-build D-058). The emit creates
+                 only working tree (spec-build D-058); the digest file
+                 and the fix round's note are its two exceptions, written
+                 in the main tree's spec dir where land reads them. The
+                 emit creates
                  a missing worktree, rebuilds one nothing was ever done
                  in from the current tree — a task re-emitted after a
                  deferral starts from everything landed since — keeps one
@@ -175,7 +191,8 @@ Modes:
                  and removes the worktrees of tasks no longer open.
                  mark.py land runs the proofs in the worktree and merges
                  its delta into the main tree, working tree only;
-                 mark.py release discards it. Outside a git repository
+                 mark.py release and drop discard it. Outside a git
+                 repository
                  the flag refuses with exit 2, nothing written; --dry-run
                  prints the plan and creates nothing.
   --budget-spawns N, --budget-minutes N
@@ -230,6 +247,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 # Shared parsers live in specstate.py beside this script; the invisible-char
 # strip and the code-span/comment/placeholder regexes are check.py's canonical
@@ -270,14 +288,16 @@ DOC_FILES = ["spec.md", "intent.md",
 FIX_CAP = 5
 
 # The one fix round that runs a model step above the developer brief's
-# model: the attempt after three came back wrong at that model. Its
-# payload is the only one that names a model — relative to the brief,
-# never a model id, since each harness resolves the step its own way.
+# model: the round after three came back wrong at that model — the
+# fourth, and the last that spawns. Its payload is the only one that
+# names a model — relative to the brief, never a model id, since each
+# harness resolves the step its own way.
 MODEL_STEP_ROUND = 4
 MODEL_STEP_LINE = (
     "- Model: this round runs one model step above the developer brief's "
-    f"model — fix round {MODEL_STEP_ROUND}, after rounds "
-    f"1–{MODEL_STEP_ROUND - 1} came back wrong at that model")
+    f"model — fix round {MODEL_STEP_ROUND}, the last round that spawns, "
+    f"after rounds 1–{MODEL_STEP_ROUND - 1} came back wrong at that "
+    "model: four rounds spawn, the fifth failure stops")
 
 # The note a --native-agents payload carries on that round, above the
 # brief it alone still embeds: a spawn that cannot override the
@@ -294,14 +314,20 @@ NATIVE_MODEL_STEP_NOTE = (
 # The header line an isolated implementer payload adds under its `- repo:`
 # line (spec-build D-058): the brief it embeds still describes a shared
 # tree, so the payload says which tree is the developer's and that the
-# brief's rule against moving a tree holds there too.
+# brief's rule against moving a tree holds there too. The worktree
+# carries a copy of the spec dir, and nothing reads a digest or a note
+# written in that copy: both belong in the main tree's.
 ISOLATED_WORKTREE_LINE = (
     "- isolated worktree: {path} is your ONLY working tree — create, edit "
     "and delete files there and nowhere else; the main tree ({repo}) is "
-    "not yours to touch. Your work reaches it only through `mark.py "
-    "land`, which merges this tree's delta; `mark.py release` discards "
-    "it. The brief's ban on stash/reset/checkout still binds — its HEAD "
-    "is a snapshot, not a commit of yours.")
+    "not yours to touch. Two exceptions, both under the main tree's spec "
+    "dir ({spec_dir}): your digest file (the `## Digest file` section's "
+    "path), and on a fix round the note `notes/T###.md` the brief lets "
+    "you append to — written there and never in this tree's copy of it, "
+    "where nothing reads them. Your work reaches the main tree only "
+    "through `mark.py land`, which merges this tree's delta; `mark.py "
+    "release` discards it. The brief's ban on stash/reset/checkout still "
+    "binds — its HEAD is a snapshot, not a commit of yours.")
 
 # Every payload's first instruction (spec-design D-076): the rule itself
 # lives in protocol/shared-protocol.md — this line only asks for the
@@ -323,6 +349,21 @@ SAME_FAILURE_WATCH = 2
 # Payload cap for a fix round's evidence note: the newest round is
 # appended last, so the tail is what the developer needs.
 FIX_NOTE_LINE_CAP = 200
+
+# The fix-round payload's closing lines: the rounds' arithmetic, then —
+# from the second round on, the first with a round to compare against —
+# the rule the round history is read with, said of this task once its
+# own last rounds repeat one command.
+ROUNDS_LINE = ("- Rounds: four rounds spawn, the fifth failure stops — this "
+               "is round {round}")
+SAME_SIGNATURE_RULE = (
+    "- Same-signature rule: when the newest `## Fix round` section's `$ "
+    "<command>` line is the same command as the round before it, another "
+    "round re-runs it — the plan, not the model, is the suspect "
+    "(`contracts/execution.md` § Fix rounds)")
+SAME_SIGNATURE_FACT = (
+    ". This task is there: `{command}` failed the last {run} round(s) — "
+    "suspect the plan, not the model, before spending this round")
 
 # Payload cap for the DELTA RE-GROUND file list: a mass refactor's delta
 # is the whole repo — the payload says so instead of listing thousands of
@@ -357,7 +398,8 @@ CONDITIONAL_EDGES = [
 # Loop edges: first-class, surfaced in the report and dotted in mermaid.
 LOOP_EDGES = [
     ("clarify", "spec", "clarify loop"),
-    ("execute", "execute", "fix-round cap 5"),
+    ("execute", "execute", "fix-round cap: four rounds spawn, the fifth "
+     "failure stops"),
     ("tech", "tasks", "converge staleness"),
 ]
 
@@ -386,6 +428,14 @@ AGENT_BRIEFS = {
     "qa": ("qa", "tester.md", "qa"),
     "tasks": ("task-breaker", "architect.md", "tasks"),
     "execute": ("implementer", "developer.md", "build"),
+}
+
+# The digest-file stems each authoring node's spawns answer with. The
+# newest file of a stem that the orchestrator refuses holds its node:
+# the artifact on disk is not witness enough for the wave after it.
+NODE_DIGEST_STEMS = {
+    "tech": ("tech", "designer"), "plan": ("planner",), "qa": ("qa",),
+    "tasks": ("task-breaker",),
 }
 
 # The research node never reaches the frontier (its gate is a judgment),
@@ -1351,8 +1401,10 @@ def fix_evidence_lines(spec_dir: Path,
     """The fix round's evidence: the entry's round sub-lines verbatim,
     then the notes/T###.md tail — the orchestrator records each round's
     digest beside the marker and its failing command and output in the
-    note, so a fresh developer gets what a continued one would remember."""
-    head = f"- Fix round {entry.fix_round}/{FIX_CAP}"
+    note, so a fresh developer gets what a continued one would remember
+    — then the rounds' arithmetic and, from the second round on, the
+    same-signature rule."""
+    head = f"- Fix round {entry.fix_round}"
     lines: list[str] = []
     rounds = round_sublines(entry)
     if rounds:
@@ -1374,6 +1426,13 @@ def fix_evidence_lines(spec_dir: Path,
     lines += [f"{head} — failure evidence and prior attempts ({note}, "
               f"{scope}):",
               _indent("\n".join(kept[-FIX_NOTE_LINE_CAP:]))]
+    lines.append(ROUNDS_LINE.format(round=entry.fix_round))
+    if entry.fix_round >= SAME_FAILURE_WATCH:
+        rule = SAME_SIGNATURE_RULE
+        sig, run = failure_run(spec_dir, entry.id)
+        if sig and run >= SAME_FAILURE_WATCH:
+            rule += SAME_SIGNATURE_FACT.format(command=sig, run=run)
+        lines.append(rule)
     return lines
 
 
@@ -1501,6 +1560,28 @@ def model_step(item: dict) -> bool:
     entry = item.get("entry")
     return (item["node"] == "execute" and entry is not None
             and entry.fix_round == MODEL_STEP_ROUND)
+
+
+# What `{model}` carries on the model-step round: the brief's model with
+# the step's suffix, since the kit names no model id and each harness
+# resolves the step its own way — the runner's to resolve.
+MODEL_STEP_SUFFIX = "+1"
+
+
+def payload_model(item: dict) -> str:
+    """What `{model}` takes for a payload: the brief's model, and on the
+    model-step round the same one step up."""
+    model = brief_model(item) or specstate.INHERIT_MODEL
+    return model + MODEL_STEP_SUFFIX if model_step(item) else model
+
+
+class WrittenPayload(NamedTuple):
+    """A payload file the emit wrote: its path, the spawn's role and
+    node, and what `{model}` takes for it."""
+    path: Path
+    role: str
+    node: str
+    model: str
 
 
 def write_review_diff(spec_dir: Path, repo: Path, target: Path) -> Path | None:
@@ -1647,7 +1728,7 @@ def build_payload(item: dict, spec_dir: Path, repo: Path, wave: int,
     header = [f"- spec_dir: {spec_dir}", f"- repo: {repo}"]
     if worktree is not None:
         header.append(ISOLATED_WORKTREE_LINE.format(
-            path=worktree, repo=main_tree))
+            path=worktree, repo=main_tree, spec_dir=spec_dir))
     header.append(f"- skill_dir: {SKILL_DIR}")
     if step_up:
         header.append(MODEL_STEP_LINE)
@@ -1805,8 +1886,8 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
                         harness: str = specstate.UNKNOWN_HARNESS,
                         isolate: bool = False,
                         plan_only: bool = False
-                        ) -> list[tuple[Path, str, str]]:
-    """Write the wave's payloads; returns (path, role, node) per file.
+                        ) -> list[WrittenPayload]:
+    """Write the wave's payloads; returns one WrittenPayload per file.
     `repair` names one agent node and emits that node's payload ALONE,
     whether or not it is in the frontier (--emit-spawns --repair NODE,
     the single-agent repair-run instrument — e.g. a stale-Baseline
@@ -1827,7 +1908,7 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     wave = wave_number(state)
     target = Path(wave_dir) if wave_dir else (
         spec_dir / "spawns" / f"wave-{wave}")
-    written: list[tuple[Path, str, str]] = []
+    written: list[WrittenPayload] = []
     rows: list[dict] = []
     try:
         fingerprint = freeze.docset_fingerprint(spec_dir)
@@ -1867,7 +1948,8 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
         target.mkdir(parents=True, exist_ok=True)
         path = target / item["filename"]
         path.write_text(text, encoding="utf-8")
-        written.append((path, item["role"], item["node"]))
+        written.append(WrittenPayload(path, item["role"], item["node"],
+                                      payload_model(item)))
         rows.append(specstate.ledger_row(
             SKILL_NAME, "wave", run=run_id, wave=wave, node=item["node"],
             role=item["role"],
@@ -1893,7 +1975,7 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
     if not repair and span_allows(span, "execute"):
         for line in execute_holds(state):
             print(line)
-    if any(node == "execute" for _, _, node in written):
+    if any(payload.node == "execute" for payload in written):
         claim = (f"python3 {SKILL_DIR / 'scripts' / 'mark.py'} claim "
                  f"{spec_dir} --wave {target}"
                  + (f" --run-id {run_id}" if run_id else "")
@@ -1914,13 +1996,35 @@ def write_wave_payloads(state: dict, spec_dir: Path, repo: Path,
 
 
 def substitute(template: str, prompt_file: Path, role: str,
-               spec_dir: Path, skill_dir: Path) -> str:
+               spec_dir: Path, skill_dir: Path, model: str) -> str:
     """Placeholders substituted verbatim — no shell quoting, no residual
-    braces ({prompt_file}/{role}/{spec_dir}/{skill_dir})."""
+    braces ({prompt_file}/{role}/{spec_dir}/{skill_dir}/{model})."""
     return (template.replace("{prompt_file}", str(prompt_file))
             .replace("{role}", role)
             .replace("{spec_dir}", str(spec_dir))
-            .replace("{skill_dir}", str(skill_dir)))
+            .replace("{skill_dir}", str(skill_dir))
+            .replace("{model}", model))
+
+
+def digest_holds(spec_dir: Path) -> dict[str, dict]:
+    """`{node: sighting}` for each authoring node whose newest refused
+    digest holds it; of a node's stems, the refusal from the highest
+    wave is the one that names it."""
+    refused = specstate.refused_digests(spec_dir, [
+        stem for stems in NODE_DIGEST_STEMS.values() for stem in stems])
+    return {
+        node: max((refused[stem] for stem in stems if stem in refused),
+                  key=lambda seen: seen["wave"])
+        for node, stems in NODE_DIGEST_STEMS.items()
+        if any(stem in refused for stem in stems)}
+
+
+def sweep(spec_dir: Path) -> None:
+    """The provenance sweep before state is read: each malformed file it
+    left in place is named."""
+    for seen in specstate.sweep_digests(spec_dir, SKILL_NAME):
+        print(f"digest: {specstate.digest_refusal_line(seen)}",
+              file=sys.stderr)
 
 
 def find_pause(state: dict) -> tuple[str, str] | None:
@@ -2144,7 +2248,7 @@ def span_stop(state: dict, span: str, waves_done: int) -> int:
     return rc, reason
 
 
-def _headless_execute_wave(spec_dir: Path, written: list[tuple[Path, str, str]],
+def _headless_execute_wave(spec_dir: Path, written: list[WrittenPayload],
                            runner: str, parallel: int,
                            run_id: str | None,
                            harness: str = specstate.UNKNOWN_HARNESS,
@@ -2163,9 +2267,9 @@ def _headless_execute_wave(spec_dir: Path, written: list[tuple[Path, str, str]],
     The run's two budgets ride the claim command, so the claim counts
     against what the loop counted."""
     mark = SKILL_DIR / "scripts" / "mark.py"
-    wave_dir = written[0][0].parent
-    ids = sorted({p.stem.replace("implementer-", "")
-                  for p, _, node in written if node == "execute"})
+    wave_dir = written[0].path.parent
+    ids = sorted({payload.path.stem.replace("implementer-", "")
+                  for payload in written if payload.node == "execute"})
     claim = [sys.executable, str(mark), "claim", str(spec_dir),
              "--wave", str(wave_dir)]
     if run_id:
@@ -2188,8 +2292,8 @@ def _headless_execute_wave(spec_dir: Path, written: list[tuple[Path, str, str]],
     m = re.search(r"^claimed \d+: (.*)$", r.stdout, re.M)
     if m:
         ids = sorted(filter(None, m.group(1).split(", ")))
-        written = [w for w in written if w[2] != "execute"
-                   or w[0].stem.replace("implementer-", "") in ids]
+        written = [payload for payload in written if payload.node != "execute"
+                   or payload.path.stem.replace("implementer-", "") in ids]
     if not ids or "nothing claimed" in r.stdout:
         return None
     this_run = run_id
@@ -2203,11 +2307,12 @@ def _headless_execute_wave(spec_dir: Path, written: list[tuple[Path, str, str]],
     while pending:
         batch, pending = pending[:parallel], pending[parallel:]
         procs = []
-        for path, role, node in batch:
-            invocation = substitute(runner, path, role, spec_dir, SKILL_DIR)
-            print(f"   runner: {role}: {invocation}")
+        for payload in batch:
+            invocation = substitute(runner, payload.path, payload.role,
+                                    spec_dir, SKILL_DIR, payload.model)
+            print(f"   runner: {payload.role}: {invocation}")
             procs.append((subprocess.Popen(invocation, shell=True),
-                          role, invocation))
+                          payload.role, invocation))
         for proc, role, invocation in procs:
             rc = proc.wait()
             print(f"   runner: {role}: {invocation} → exit {rc}")
@@ -2295,7 +2400,12 @@ def run_loop(spec_dir: Path, repo_override: str | None, runner: str,
     wave that would claim, the loop counts the spawns over this run
     and over the spec's whole ledger and the minutes over this run
     alone, and a spent one parks AWAITING HUMAN before the wave, exit
-    0, the `run_end` row saying `run_budget`."""
+    0, the `run_end` row saying `run_budget`. A digest the sweep
+    refuses holds its node; the loop stops before the wave after it,
+    exit 0, the `run_end` row saying `digest_refused`. A wave holding
+    the fix round that runs a model step needs a template with
+    `{model}`: without it the loop stops before anything is claimed,
+    exit 0, the row saying `model_step_refused`."""
     if run_id is None and runner != PRINT_RUNNER:
         import secrets
         run_id = f"r-{secrets.token_hex(2)}"
@@ -2320,8 +2430,26 @@ def _run_loop(spec_dir: Path, repo_override: str | None, runner: str,
     """The loop behind run_loop: its exit code, the stop reason the
     `run_end` row carries, and the gate it paused at (None elsewhere)."""
     waves_done = 0
+    swept = False
     while True:
+        # the invocation's own sweep ran before the loop; every later
+        # wave boundary sweeps again, since digests land between waves
+        if swept:
+            sweep(Path(spec_dir))
+        swept = True
         state = compute_state(spec_dir, repo_override, run_id)
+        held = [(name, state["nodes"][name]["digest"]) for name in NODES
+                if "digest" in state["nodes"][name]]
+        if held:
+            print("AWAITING ORCHESTRATOR: a refused digest holds "
+                  + ", ".join(name for name, _ in held)
+                  + " — the wave after it is not emitted:")
+            for name, seen in held:
+                print(f"   {name}: digest: "
+                      f"{specstate.digest_refusal_line(seen)}")
+            _record(SKILL_NAME, "gate_pause", node=held[0][0],
+                    wave=waves_done + 1)
+            return 0, "digest_refused", held[0][0]
         log_verify(state, repo_override)
         pause = find_pause(state)
         if pause and not (span == "intent" and pause[0] == "research-gate"):
@@ -2352,20 +2480,43 @@ def _run_loop(spec_dir: Path, repo_override: str | None, runner: str,
             rc, reason = span_stop(state, span, waves_done)
             return rc, reason, None
         repo = resolved_repo(Path(spec_dir), repo_override)
-        if runnable == ["execute"] and not frontier_payloads(
-                state, Path(spec_dir), repo, span=span):
+        payloads = (frontier_payloads(state, Path(spec_dir), repo, span=span)
+                    if "execute" in runnable else [])
+        if runnable == ["execute"] and not payloads:
             print_execute_held(state)
             _record(SKILL_NAME, "gate_pause", node="execute",
                     wave=waves_done + 1)
             return 0, "held", "execute"
-        if "execute" in runnable and any(
-                item["node"] == "execute" for item in frontier_payloads(
-                    state, Path(spec_dir), repo, span=span)):
+        if any(item["node"] == "execute" for item in payloads):
             stop = specstate.budget_stop(spec_dir, run_id, budget_spawns,
                                          budget_minutes)
             if stop:
                 print("\n".join(stop))
                 return 0, "run_budget", None
+        stepping = [item for item in payloads if model_step(item)]
+        if (stepping and runner != PRINT_RUNNER and not dry_run
+                and "{model}" not in runner):
+            tasks = {t["id"]: t for t in
+                     state["nodes"]["execute"].get("tasks") or ()}
+            print("AWAITING ORCHESTRATOR: execute: the --runner template "
+                  "names no {model} — "
+                  + ", ".join(item["entry"].id for item in stepping)
+                  + (" is" if len(stepping) == 1 else " are")
+                  + f" at fix round {MODEL_STEP_ROUND}, the round that runs "
+                  "one model step above the developer brief's model: run "
+                  "as is, it would spend the round on the same model. "
+                  "Nothing is claimed:")
+            for item in stepping:
+                task = tasks[item["entry"].id]
+                print(f"   held: {task['id']} — {task['reason']}")
+            print("   ways on: add {model} to the template — it takes the "
+                  "brief's model, and `"
+                  + payload_model(stepping[0]) + "` on this round, for the "
+                  "runner to resolve — or spawn the round yourself from "
+                  "the print runner's wave; then re-run")
+            _record(SKILL_NAME, "gate_pause", node="execute",
+                    wave=waves_done + 1)
+            return 0, "model_step_refused", "execute"
         wave = wave_number(state)
         print(f"== wave {wave} — frontier: "
               f"{', '.join(frontier if span == 'full' else runnable)}")
@@ -2377,8 +2528,8 @@ def _run_loop(spec_dir: Path, repo_override: str | None, runner: str,
         _record(SKILL_NAME, "wave", wave=wave,
                 roles=sorted(frontier if span == "full" else runnable),
                 payloads=len(written))
-        execute_nodes = [w for w in written if w[2] == "execute"]
-        if (runner != PRINT_RUNNER and not dry_run and execute_nodes):
+        if (runner != PRINT_RUNNER and not dry_run
+                and any(payload.node == "execute" for payload in written)):
             if not (SKILL_DIR / "scripts" / "mark.py").is_file():
                 print("execute payloads need the orchestrator to claim and "
                       "land tasks (spec-build § Task markers) — use the "
@@ -2397,32 +2548,35 @@ def _run_loop(spec_dir: Path, repo_override: str | None, runner: str,
             continue
         if not written:
             print("   no runnable payloads this wave — nothing to invoke")
-        for path, role, node in written:
+        for payload in written:
             if runner == PRINT_RUNNER:
-                print(f"   runner[print]: {role}: echo {path}  # "
-                      f"node={node} spec_dir={spec_dir} "
+                print(f"   runner[print]: {payload.role}: echo {payload.path}"
+                      f"  # node={payload.node} spec_dir={spec_dir} "
                       f"skill_dir={SKILL_DIR}")
                 continue
-            invocation = substitute(runner, path, role, spec_dir, SKILL_DIR)
+            invocation = substitute(runner, payload.path, payload.role,
+                                    Path(spec_dir), SKILL_DIR, payload.model)
             if dry_run:
-                print(f"   runner[dry-run]: {role}: {invocation}")
+                print(f"   runner[dry-run]: {payload.role}: {invocation}")
                 continue
             try:
                 r = subprocess.run(invocation, shell=True)
             except (OSError, subprocess.SubprocessError) as exc:
-                print(f"   runner: {role}: {invocation} → raised {exc!r}")
-                print(f"stopping: runner for role {role} (node {node}, "
-                      f"payload {path}) raised — no later wave starts")
+                print(f"   runner: {payload.role}: {invocation} → raised "
+                      f"{exc!r}")
+                print(f"stopping: runner for role {payload.role} (node "
+                      f"{payload.node}, payload {payload.path}) raised — no "
+                      "later wave starts")
                 return RUNNER_FAILED_EXIT, "runner_failed", None
-            print(f"   runner: {role}: {invocation} → exit {r.returncode}")
+            print(f"   runner: {payload.role}: {invocation} → exit {r.returncode}")
             if r.returncode != 0:
-                print(f"stopping: runner for role {role} (node {node}, "
-                      f"payload {path}) exited {r.returncode} — no later "
-                      "wave starts")
+                print(f"stopping: runner for role {payload.role} (node "
+                      f"{payload.node}, payload {payload.path}) exited "
+                      f"{r.returncode} — no later wave starts")
                 return RUNNER_FAILED_EXIT, "runner_failed", None
         waves_done += 1
         if (runner == PRINT_RUNNER and written and state.get("mode") == "fast"
-                and all(node == "execute" for _, _, node in written)):
+                and all(payload.node == "execute" for payload in written)):
             print("wave emitted — Mode: fast: implement these payloads "
                   "inline (no spawn), land each, then re-run")
         elif runner == PRINT_RUNNER and written:
@@ -2682,7 +2836,8 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
     def authored(node: str, filename: str, deps: list[str],
                  unmet_extra: list[str] | None = None) -> None:
         """Shared shape for the authoring nodes: blocked on unmet deps, READY
-        while the output is missing/unfilled, done once it is filled."""
+        while the output is missing/unfilled, done once it is filled —
+        unless a refused digest holds it."""
         unmet = entry_unmet + [d for d in deps
                                if nodes[d]["state"] not in (DONE, SKIPPED)]
         if unmet_extra:
@@ -2697,10 +2852,23 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
             nodes[node] = {"state": READY, "reason":
                            f"{filename} is still the unfilled template — "
                            f"rewrite it (residue: {unfilled_hits(docs[filename]) or 'none'})"}
+        elif node in holds:
+            seen = holds[node]
+            nodes[node] = {
+                "state": BLOCKED,
+                "reason": "its digest on file is refused — digest: "
+                          + specstate.digest_refusal_line(seen),
+                "digest": seen}
         else:
             nodes[node] = {"state": DONE,
                            "reason": f"{filename} present and filled"}
 
+    # A refused digest holds its node only while authoring is open: the
+    # signed docset is the contract past the approval, its authors'
+    # digests history.
+    signed = (spec_dir / "approvals" / "approval.md").exists()
+    holds = ({} if tier == "tiny" or (
+        status in APPROVED_AND_LATER and signed) else digest_holds(spec_dir))
     if tier == "tiny":
         for node, doc in (("plan", "plan.md"), ("tech", "tech-spec.md"),
                           ("qa", "test.md"), ("tasks", "task.md")):
@@ -2756,8 +2924,7 @@ def compute_state(spec_dir: Path, repo_override: str | None = None,
     # -- approve (HUMAN) ---------------------------------------------------
     # A Status word alone is not an approval: the freeze is the gate's
     # record, so a hand-flipped Status never opens execute.
-    unfrozen = (status in APPROVED_AND_LATER
-                and not (spec_dir / "approvals" / "approval.md").exists())
+    unfrozen = status in APPROVED_AND_LATER and not signed
     if unfrozen:
         nodes["approve"] = {"state": BLOCKED, "reason":
                             f"Status: {status} without the approval freeze "
@@ -3146,8 +3313,13 @@ def _main(argv: list[str] | None = None) -> int:
                         "recompute, repeat")
     p.add_argument("--runner", metavar="TEMPLATE",
                    help="command template for --run with {prompt_file}, "
-                        "{role}, {spec_dir}, {skill_dir} substituted "
-                        "verbatim (default: print — echo invocations)")
+                        "{role}, {spec_dir}, {skill_dir}, {model} "
+                        "substituted verbatim (default: print — echo "
+                        "invocations); {model} is the brief's model, and "
+                        "the same with +1 on the fix round that runs a "
+                        "model step — a template without {model} stops "
+                        "AWAITING ORCHESTRATOR before that round is "
+                        "claimed")
     p.add_argument("--dry-run", action="store_true",
                    help="with --run: print the full wave plan and execute "
                         "nothing (payload files are still written)")
@@ -3276,11 +3448,7 @@ def _main(argv: list[str] | None = None) -> int:
             return SPAN_REFUSED_EXIT
 
     if not args.launch_check:
-        for seen in specstate.sweep_digests(spec_dir, SKILL_NAME):
-            print(f"digest: malformed at {seen['path']} — "
-                  f"{'; '.join(seen['problems'])} — fix and run again: "
-                  "re-spawn the same payload to rewrite its digest file",
-                  file=sys.stderr)
+        sweep(spec_dir)
 
     if args.emit_spawns:
         return emit_spawns(spec_dir, args.repo, args.wave_dir, args.repair,

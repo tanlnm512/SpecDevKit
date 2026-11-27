@@ -84,7 +84,10 @@ tick-commit); the run parks there by design. A custom `--runner`
 DRIVES execute headlessly: per wave, `mark.py claim` → the
 runner runs the payloads (batched `--parallel N`) → `mark.py land` for
 each task whose digest reports implemented → the loop continues to the
-tick-commit gate and parks `AWAITING HUMAN`. Two run budgets bound it
+tick-commit gate and parks `AWAITING HUMAN`. A template's `{model}`
+takes the brief's model, and `<model>+1` on the fix round that runs a
+model step; a template without `{model}` stops `AWAITING ORCHESTRATOR`
+before that round is claimed. Two run budgets bound it
 — 30 spawns and 120 minutes by default; spawns count per run and per
 spec, minutes per run, with `--budget-spawns N` and `--budget-minutes
 N` to raise, lower or lift one with `0` — and a spent one parks
@@ -109,7 +112,9 @@ merges the tree's delta into the main tree — working tree only, the
 index untouched. A delta the main tree will not take clean is refused
 with the conflicting paths named: the task stays claimed and its
 worktree stays until you settle the tree by hand and land again, or
-`release` — which discards the worktree with the work.
+`release` — which discards the worktree with the work. The payload's
+digest file and the fix round's note are the two writes that stay in
+the main tree's spec dir, where `land` reads them.
 
 ### Preflight (before the first wave)
 

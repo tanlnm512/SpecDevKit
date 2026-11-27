@@ -800,13 +800,18 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
         r = self.emit(spec_dir)
         self.assertNotIn("evidence missing", r.stdout)
         self.assertIn(evidence, payload.read_text(encoding="utf-8"))
+        # one round, nothing to compare it against: no rule yet
+        self.assertNotIn("Same-signature rule", payload.read_text(
+            encoding="utf-8"))
 
         # the model step rides the payload on round 4 alone — in its
         # header block, named on the emit line too; under --native-agents
         # that one payload keeps the brief and states both spawn routes
         model_line = ("- Model: this round runs one model step above the "
-                      "developer brief's model — fix round 4, after rounds "
-                      "1–3 came back wrong at that model")
+                      "developer brief's model — fix round 4, the last "
+                      "round that spawns, after rounds 1–3 came back wrong "
+                      "at that model: four rounds spawn, the fifth failure "
+                      "stops")
         brief_heading = "# Developer agent (implement lens)"
         for marker, stepped in (("(fix 4/5)", True), ("(fix 3/5)", False)):
             p = spec_dir / "task.md"
@@ -834,6 +839,8 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
                     header = text.split("## Input payload", 1)[0]
                     self.assertIn("- skill_dir: ", header)
                     self.assertIn(model_line, header)
+                    self.assertIn("- Rounds: four rounds spawn, the fifth "
+                                  "failure stops — this is round 4", text)
                     if extra:
                         self.assertIn("agent type `spec-developer`", text)
                         self.assertIn("spawn-time model override", text)
@@ -842,6 +849,40 @@ class Gate006WaveAndFixRoundTests(unittest.TestCase):
                         # one brief reaching the agent once, protocol aside
                         self.assertEqual(
                             text.count("Long foreground tasks\n"), 1)
+
+    def test_from_the_second_round_the_payload_points_at_the_signature_rule(
+            self):
+        spec_dir = self.approved(
+            (T1, T1.replace("[P]", "[P] (implemented) (fix 2/5)")))
+        (spec_dir / "notes").mkdir()
+        note = spec_dir / "notes" / "T001.md"
+        payload = spec_dir / "spawns" / "wave-4" / "implementer-T001.md"
+        rule = ("- Same-signature rule: when the newest `## Fix round` "
+                "section's `$ <command>` line is the same command as the "
+                "round before it, another round re-runs it — the plan, not "
+                "the model, is the suspect (`contracts/execution.md` § Fix "
+                "rounds)")
+
+        # two different failing commands: the rule, and no verdict
+        write(note, "## Fix round 1\n$ pytest -k multiply\nE   one\n"
+                    "## Fix round 2\n$ go test ./...\nFAIL: two\n")
+        self.emit(spec_dir)
+        text = payload.read_text(encoding="utf-8")
+        self.assertIn("- Fix round 2 — failure evidence and prior attempts "
+                      f"({note}, verbatim):", text)
+        self.assertIn("- Rounds: four rounds spawn, the fifth failure stops "
+                      "— this is round 2", text)
+        self.assertEqual(text.count(rule), 1)
+        self.assertNotIn("This task is there", text)
+
+        # one command twice: the payload says so, naming the command
+        write(note, "## Fix round 1\n$ pytest -k multiply\nE   one\n"
+                    "## Fix round 2\n$ pytest -k multiply\nE   two\n")
+        self.emit(spec_dir)
+        self.assertIn(rule + ". This task is there: `$ pytest -k multiply` "
+                      "failed the last 2 round(s) — suspect the plan, not "
+                      "the model, before spending this round",
+                      payload.read_text(encoding="utf-8"))
 
     def test_tick_refuses_a_task_whose_fix_round_is_open(self):
         spec_dir = self.approved(
@@ -1099,6 +1140,50 @@ class Gate009HeadlessExecuteTests(unittest.TestCase):
         self.assertIn("stay CLAIMED", r.stdout)
         t = (self.spec / "task.md").read_text(encoding="utf-8")
         self.assertIn("(in-progress)", t)
+
+    def test_the_round_that_steps_the_model_needs_a_runner_naming_it(self):
+        # fix round 4 is the round that runs one model step above the
+        # developer brief's model: a runner that cannot name the model
+        # would spend it on the same one, so nothing is claimed
+        spec = hand_docset(self._tmp / "fix4", "approved")
+        edit_tasks(spec, ("- [ ] T001 implement",
+                          "- [ ] T001 (fix 4/5) implement"))
+        runner = self._write_runner(blocked=False)
+        r = run_graph(spec, "--span", "execute", "--run",
+                      "--runner", runner, tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("AWAITING ORCHESTRATOR: execute: the --runner template "
+                      "names no {model} — T001 is at fix round 4", r.stdout)
+        self.assertIn("held: T001 — fix round 4/5 open", r.stdout)
+        self.assertNotIn("(in-progress)", (spec / "task.md").read_text(
+            encoding="utf-8"))
+        ledger = spec / "runs" / "ledger.jsonl"
+        self.assertNotIn('"claim"', ledger.read_text(encoding="utf-8"))
+        self.assertFalse((spec.parent / ".built-T001").exists())
+
+        # with {model} the runner is handed the step to resolve: the
+        # brief's model, one step up — the round is no longer silent
+        stepping = hand_docset(self._tmp / "stepping", "approved")
+        edit_tasks(stepping, ("- [ ] T001 implement",
+                              "- [ ] T001 (fix 4/5) implement"))
+        models = self._tmp / "models.txt"
+        r = run_graph(stepping, "--span", "execute", "--run", "--runner",
+                      f"echo '{{model}}' >> {models} && {runner}",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(models.read_text(encoding="utf-8").split(),
+                         ["sonnet+1"], r.stdout + r.stderr)
+
+        # every other round takes the brief's own model
+        first = hand_docset(self._tmp / "first", "approved")
+        models.unlink()
+        r = run_graph(first, "--span", "execute", "--run", "--runner",
+                      f"echo '{{model}}' >> {models} && {runner}",
+                      tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("AWAITING HUMAN: tick-commit", r.stdout)
+        self.assertEqual(models.read_text(encoding="utf-8").split(),
+                         ["sonnet", "sonnet"], r.stdout + r.stderr)
 
     def test_a_package_without_mark_py_still_refuses(self):
         # the lift is scoped to packages that ship mark.py: a package

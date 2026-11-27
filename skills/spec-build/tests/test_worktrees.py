@@ -368,6 +368,62 @@ class IsolatedWorktreeTests(unittest.TestCase):
         self.assertFalse(self.worktree.exists())
         self.assertEqual(self.greet.read_text(encoding="utf-8"), LANDED)
 
+    def test_land_reads_the_digest_written_in_the_main_tree(self):
+        payload = self.claimed()
+        self.develop()
+        folder = self.spec / "digests" / payload.parent.name
+        folder.mkdir(parents=True)
+        digest = write(folder / "implementer-T001.md",
+                       "tools: Read, Grep, Glob, Bash, Write, Edit\n"
+                       "digest: task T001 · status implemented · files 2 · "
+                       "commit-line feat: T001 · deviation none · note "
+                       "none\n")
+
+        r = run(MARK, "land", self.spec, "T001", tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("landed T001 (implemented)", r.stdout)
+        # the file on disk was the evidence — not a --digest override —
+        # so the sweep's line is on it
+        self.assertEqual(digest.read_text(encoding="utf-8").count(
+            "provenance:"), 1)
+        self.assertFalse(self.worktree.exists())
+
+    def test_drop_discards_the_worktree_with_the_task(self):
+        self.claimed()
+        self.develop()
+
+        r = run(MARK, "drop", self.spec, "T001", "--decision", "D-001",
+                tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"dropped T001 (D-001) — struck in task.md, the "
+                      f"decision stays visible; its worktree {self.worktree} "
+                      "is removed with the work in it", r.stdout)
+        self.assertIn("~~T001~~ dropped", (self.spec / "task.md")
+                      .read_text(encoding="utf-8"))
+        self.assertFalse(self.worktree.exists())
+        self.assertEqual(git(self.repo, "worktree", "list", "--porcelain")
+                         .count("worktree "), 1)
+        self.assertNotIn("shout", self.greet.read_text(encoding="utf-8"))
+        self.assertFalse((self.repo / "src" / "shout.py").exists())
+
+    def test_a_worktree_git_will_not_remove_does_not_undo_the_drop(self):
+        self.claimed()
+        self.develop()
+        git(self.repo, "worktree", "lock", str(self.worktree))
+
+        r = run(MARK, "drop", self.spec, "T001", "--decision", "D-001",
+                tel=self.tel)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("~~T001~~ dropped", (self.spec / "task.md")
+                      .read_text(encoding="utf-8"))
+        self.assertIn(f"dropped T001 (D-001) — struck in task.md, the "
+                      "decision stays visible; its worktree "
+                      f"{self.worktree} is NOT removed", r.stdout)
+        self.assertIn(f"warning: the worktree was NOT removed — ", r.stderr)
+        self.assertIn(f"git worktree remove --force {self.worktree}",
+                      r.stderr)
+        self.assertTrue(self.worktree.is_dir())
+
     def test_a_headless_run_lands_every_task_from_its_worktree(self):
         runner = write(self._tmp / "runner.py", RUNNER)
 

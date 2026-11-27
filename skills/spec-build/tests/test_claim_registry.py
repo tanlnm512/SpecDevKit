@@ -458,7 +458,8 @@ class ClaimRegistryTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
             rc = graph._headless_execute_wave(
-                b, [(payloads[0], "implementer", "execute")],
+                b, [graph.WrittenPayload(payloads[0], "implementer",
+                                         "execute", "sonnet")],
                 f"{sys.executable} {runner}", 1, "r-head")
         self.assertIsNone(rc)
         self.assertFalse(ran.exists())

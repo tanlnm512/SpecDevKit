@@ -189,6 +189,12 @@ class IsolatedWorktreeTests(unittest.TestCase):
         self.assertIn(f"{self.t001} is your ONLY working tree", line)
         self.assertIn(f"the main tree ({self._tmp}) is not yours to touch",
                       line)
+        # the two writes the payload and the brief ask for in the main
+        # tree's spec dir are named as the line's exceptions
+        self.assertIn(f"under the main tree's spec dir ({self.spec}): your "
+                      "digest file", line)
+        self.assertIn("notes/T###.md", line)
+        self.assertIn("never in this tree's copy of it", line)
         self.assertIn("ban on stash/reset/checkout still binds", line)
         self.assertIn("`mark.py land`", line)
         self.assertIn("`mark.py release`", line)

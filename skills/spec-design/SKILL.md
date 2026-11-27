@@ -225,7 +225,10 @@ constitution step's `constitution.md` by `--repair constitution`):
    reply or digest file whose report lacks a tool its role requires —
    a file writer, Read for the auditor — is a failed spawn, refused
    and never a fix round; spawn again on a type or harness that holds
-   it. A gap in a digest → re-brief the owner; never edit the
+   it. A refused digest file also holds its node — not done, so the
+   wave after it is not emitted and `--run` stops `AWAITING
+   ORCHESTRATOR` — until the same payload is re-spawned; the approval
+   ends the hold. A gap in a digest → re-brief the owner; never edit the
    content of another agent's file (the verify-node format fixes above
    only exception). You are the sole spawner, status writer, and
    re-briefer.
